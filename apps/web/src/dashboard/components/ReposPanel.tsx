@@ -38,7 +38,7 @@ export function ReposPanel({
         </div>
         {actions}
       </div>
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the list itself handles the keys */}
+      {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events -- the list itself handles the keys */}
       <div
         className="min-h-0 flex-1 overflow-y-auto pb-3"
         data-testid="repos-panel__list"

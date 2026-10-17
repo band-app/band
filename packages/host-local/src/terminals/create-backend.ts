@@ -1,6 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
+
 import { createLogger } from "@band-app/logger";
+
 import { DaemonTerminalBackend } from "./daemon/daemon-backend";
 import { InProcessTerminalBackend } from "./in-process-backend";
 import type { TerminalBackend } from "./terminal-backend";

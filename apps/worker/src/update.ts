@@ -5,8 +5,10 @@
  */
 
 import { execFile } from "node:child_process";
+
 import { RpcError } from "@band-app/link";
 import { isStrictSemver } from "@band-app/shared/versions";
+
 import type { Registrar } from "./context.ts";
 import { RPC_INVALID_PARAMS, str } from "./rpc-util.ts";
 import { LAUNCHD_LABEL, SYSTEMD_UNIT } from "./service.ts";

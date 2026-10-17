@@ -2,6 +2,7 @@ import { agentIconFor } from "@band-app/shared/agent-icons";
 import { Bot } from "lucide-react-native";
 import type { ColorValue } from "react-native";
 import Svg, { Path } from "react-native-svg";
+
 import { colors } from "../theme";
 
 /**

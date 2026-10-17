@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { contrast, normalizeHex, parseHex } from "../src/lib/theme/color";
 import { type ColorTriple, derivedContrasts, deriveSurfaceVars } from "../src/lib/theme/derive";
 import {

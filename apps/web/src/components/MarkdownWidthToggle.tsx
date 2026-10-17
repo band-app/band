@@ -1,4 +1,5 @@
 import { FoldHorizontal, UnfoldHorizontal } from "lucide-react";
+
 import { useMarkdownPreviewWidth } from "../dashboard/lib/markdown-preview-width";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 

@@ -4,6 +4,7 @@
 // and `echo`, `add` and `write_note` give the tool filters something to allow and refuse.
 
 import { createHash } from "node:crypto";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -51,7 +52,11 @@ server.registerTool(
     annotations: { readOnlyHint: true },
   },
   async ({ name }) =>
-    text(createHash("sha256").update(process.env[name] ?? "").digest("hex")),
+    text(
+      createHash("sha256")
+        .update(process.env[name] ?? "")
+        .digest("hex"),
+    ),
 );
 
 await server.connect(new StdioServerTransport());

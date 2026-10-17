@@ -1,4 +1,5 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
+
 import { useWorktreeRoute } from "../lib/use-worktree-route";
 
 export const Route = createFileRoute("/worktree/$worktreeId")({

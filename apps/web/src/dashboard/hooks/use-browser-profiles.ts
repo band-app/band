@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import { useAdapter } from "../context";
 import { queryKeys } from "../query-client";
 import type { BrowserProfileInfo } from "../types";

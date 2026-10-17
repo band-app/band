@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react-native";
 import type { ColorValue } from "react-native";
+
 import { colors } from "../theme";
 
 /** The icon sizes the app uses, so one kind of mark has one size on every screen. */

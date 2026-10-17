@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+
 import { buildUrls, detect, previousTag, setVersion, ship } from "../scripts/release.mjs";
 
 function git(cwd: string, ...args: string[]) {

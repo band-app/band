@@ -11,6 +11,7 @@ import {
 import { homedir, platform as osPlatform } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+
 import { ConfigError, parseLabels } from "./config.ts";
 import { stopTerminalDaemons } from "./terminals.ts";
 

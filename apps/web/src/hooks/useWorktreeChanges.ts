@@ -1,11 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+
 import {
   type ChangeEntry,
   type ChangeSection,
   useDiffTarget,
   type WorktreeChanges,
 } from "@/dashboard";
+
 import { usePollInterval } from "../lib/poll-interval";
 import { trpc } from "../lib/trpc-client";
 

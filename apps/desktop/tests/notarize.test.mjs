@@ -46,7 +46,8 @@ function makeRunner({ submitResponse, logResponse, submitThrows } = {}) {
     calls.push({ cmd, args, opts });
     if (cmd === "xcrun" && args[0] === "notarytool" && args[1] === "submit") {
       if (submitThrows) throw submitThrows;
-      if (opts?.capture) return JSON.stringify(submitResponse ?? { id: "test-id", status: "Accepted" });
+      if (opts?.capture)
+        return JSON.stringify(submitResponse ?? { id: "test-id", status: "Accepted" });
       return undefined;
     }
     if (cmd === "xcrun" && args[0] === "notarytool" && args[1] === "log") {

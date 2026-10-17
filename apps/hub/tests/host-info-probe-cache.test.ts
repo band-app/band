@@ -3,7 +3,8 @@
 // every load) start no `gh` process. Real hub (production bundle, random port, auth on, temp
 // dirs only) with the fake `gh` (`fixtures/gh-stub.ts`) recording each invocation.
 
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+
 import { type GhStub, ghStub } from "./fixtures/gh-stub";
 import { seedSettings } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcQuery } from "./helpers/server";

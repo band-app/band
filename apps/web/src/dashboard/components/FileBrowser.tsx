@@ -37,6 +37,7 @@ import {
   useRef,
   useState,
 } from "react";
+
 import { writeClipboardText } from "../../lib/clipboard";
 import { useAdapter, useCapabilities } from "../context";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
@@ -1027,7 +1028,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   }, [selectedFile, worktreeId, fetchDir]);
 
   // Scroll to selected file after tree updates
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll after tree settles for new selection
+  // oxlint-disable-next-line react/exhaustive-deps -- scroll after tree settles for new selection
   useEffect(() => {
     if (selectedFile && selectedRef.current) {
       // Small delay so the DOM has settled after lazy-loaded children render
@@ -1294,8 +1295,8 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const canCopyOp = Boolean(adapter.copyWorktreePath);
   const canPaste = Boolean(
     clipboard &&
-      ((clipboard.op === "copy" && adapter.copyWorktreePath) ||
-        (clipboard.op === "cut" && adapter.renameWorktreePath)),
+    ((clipboard.op === "copy" && adapter.copyWorktreePath) ||
+      (clipboard.op === "cut" && adapter.renameWorktreePath)),
   );
 
   const cutPath = useCallback((path: string, kind: EntryKind) => {

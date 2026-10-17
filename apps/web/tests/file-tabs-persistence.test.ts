@@ -11,7 +11,8 @@
  * when tab shapes changed across builds.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import {
   type FileTab,
   initialUntitledCounter,

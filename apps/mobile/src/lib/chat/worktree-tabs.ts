@@ -11,6 +11,7 @@
 
 import type { CenterTab, CenterTabs } from "@band-app/client/center-tabs";
 import { keepHiddenTabs } from "@band-app/client/center-tabs";
+
 import { isAttention, isRunning } from "../status-state.ts";
 
 export interface PhoneTabs {

@@ -137,9 +137,7 @@
 /* A hidden browser pane that must keep painting (CDP screencast): laid out,
  * but never visible. See `data-band-browser-paint-retained` in globals.css. */
 .band-layout-panel:has([data-band-browser-paint-retained]) {
-  /* biome-ignore lint/complexity/noImportantStyles: must beat the inline display: none the group writes on a hidden panel. */
   display: block !important;
-  /* biome-ignore lint/complexity/noImportantStyles: a hidden pane must stay invisible while it paints. */
   visibility: hidden !important;
 }
 
@@ -217,7 +215,6 @@
 
 /* A <webview> guest swallows pointer events, which would stall a tab or sash
  * drag that crosses a browser pane. */
-/* biome-ignore lint/correctness/noUnknownTypeSelector: Electron's <webview> element */
 html[data-band-layout-dragging] webview {
   pointer-events: none;
 }

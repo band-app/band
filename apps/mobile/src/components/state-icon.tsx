@@ -1,5 +1,6 @@
 import { GitBranch, House } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
+
 import type { ShownState } from "../lib/status-state";
 import { colors, tones } from "../theme";
 

@@ -9,6 +9,7 @@ import {
 } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
 import { colors, tones } from "../../theme";
 import { Icon } from "../icon";
 
@@ -46,7 +47,7 @@ export function PlanCard({ plan }: { plan: PlanEntry[] }) {
       {collapsed
         ? null
         : plan.map((task, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: plan entries have no id; each update replaces the whole plan
+            // oxlint-disable-next-line react/no-array-index-key -- plan entries have no id; each update replaces the whole plan
             <View key={i} style={styles.entry} testID="chat__plan-entry">
               <View style={styles.mark}>
                 <Icon

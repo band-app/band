@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { moveRefusal, planOriginDrop } from "../src/dashboard/lib/sidebar-drop";
 import {
   buildOriginTree,

@@ -1,7 +1,9 @@
 import { constants as fsConstants, open } from "node:fs/promises";
 import { extname, isAbsolute } from "node:path";
+
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
+
 import { browserHostService, type EnsureViewEvent } from "../../services/browser-host-service";
 import { publicProcedure, t } from "../trpc";
 

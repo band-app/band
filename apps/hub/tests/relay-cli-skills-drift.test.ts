@@ -5,7 +5,9 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+
+import { describe, expect, it } from "vite-plus/test";
+
 import { REFUSED_CLI_COMMANDS, RELAY_CLI_COMMANDS } from "./helpers/relay-cli-commands";
 
 const SKILLS_DIR = join(import.meta.dirname, "..", "..", "cli", "skills");

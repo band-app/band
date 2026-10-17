@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { RpcError, type ServerSession } from "@band-app/link";
+
 import { RPC_PATH_DENIED } from "../src/rpc-util.ts";
 import {
   call,

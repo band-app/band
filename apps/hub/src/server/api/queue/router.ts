@@ -1,7 +1,9 @@
 import { realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
+
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
+
 import { hostRegistry } from "../../infra/host/registry";
 import {
   clearQueuedMessages,

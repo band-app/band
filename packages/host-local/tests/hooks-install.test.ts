@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+
 import { checkHooks, HOOKS_VERSION, installHooks, removeHooks } from "../src/agents/hooks-install";
 
 // Real files under a temp HOME. `~/.claude/settings.json` is the temp one, and a

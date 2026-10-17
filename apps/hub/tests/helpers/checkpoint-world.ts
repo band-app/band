@@ -15,8 +15,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import type { ChatEvent } from "@band-app/shared/chat-events";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+
 import { maxId, openStream, STUB_AGENT_PATH, TEST_TOKEN, turnEnded } from "./acp-chat";
 import { seedSettings, seedState } from "./seed-state";
 import {

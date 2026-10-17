@@ -11,6 +11,7 @@ import type { ElicitationValues } from "@band-app/client/elicitation";
 import type { TranscriptState } from "@band-app/client/transcript";
 import type { ChatEventFile, QueuedChatMessage, SessionState } from "@band-app/shared/chat-events";
 import { useCallback, useRef } from "react";
+
 import { queueSetPayload } from "../composer/queue";
 import { useHubSession } from "../hub-session";
 import type { ChatTranscript } from "./use-chat";

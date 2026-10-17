@@ -2,7 +2,8 @@ import {
   resolveFileIconName,
   resolveFolderIconName as resolveShared,
 } from "@band-app/shared/file-icon-name";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { FILE_ICON_MAPS } from "../../mobile/src/lib/files/file-icons.generated.ts";
 import { resolveFolderIconName, resolveIconName } from "../src/dashboard/lib/file-icon-resolve.ts";
 

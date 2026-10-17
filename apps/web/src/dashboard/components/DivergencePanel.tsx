@@ -9,6 +9,7 @@ import {
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+
 import { trpc } from "../../lib/trpc-client";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));

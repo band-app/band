@@ -16,6 +16,7 @@ import type { ToolEntry } from "@band-app/client/transcript";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import { ChevronRightIcon } from "lucide-react";
 import { memo, type ReactNode, useMemo } from "react";
+
 import { MessageResponse } from "./message";
 import { ToolInput, ToolOutput } from "./tool";
 
@@ -48,13 +49,13 @@ function Diff({
       <pre className="max-h-80 overflow-auto text-xs leading-5">
         {lines.map((line, i) =>
           line.kind === "gap" ? (
-            // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
+            // oxlint-disable-next-line react/no-array-index-key -- diff lines have no identity beyond position
             <div key={i} className="px-2 text-muted-foreground/60">
               ⋯ {line.skipped} unchanged {line.skipped === 1 ? "line" : "lines"}
             </div>
           ) : (
             <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
+              // oxlint-disable-next-line react/no-array-index-key -- diff lines have no identity beyond position
               key={i}
               className={cn(
                 "whitespace-pre px-2",
@@ -163,10 +164,10 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
       ))}
       {texts.map((text, i) =>
         prose ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+          // oxlint-disable-next-line react/no-array-index-key -- content blocks have no id
           <MessageResponse key={i}>{text}</MessageResponse>
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+          // oxlint-disable-next-line react/no-array-index-key -- content blocks have no id
           <ToolOutput key={i} output={text.slice(0, 20_000)} errorText={undefined} />
         ),
       )}

@@ -3,7 +3,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Radio, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
 import { useAdapter } from "@/dashboard";
+
 import { trpc } from "../../lib/trpc-client";
 
 type SubscriptionList = Awaited<ReturnType<typeof trpc.subscriptions.list.query>>;

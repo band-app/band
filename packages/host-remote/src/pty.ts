@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+
 import type {
   TerminalAttachment,
   TerminalBackend,
@@ -7,6 +8,7 @@ import type {
   TerminalSpawnRequest,
 } from "@band-app/host-api";
 import type { Channel } from "@band-app/link";
+
 import type { RemoteRpc } from "./rpc";
 
 /**

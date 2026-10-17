@@ -28,9 +28,12 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,

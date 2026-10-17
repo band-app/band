@@ -23,11 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 
-import {
-  collectNativeBinaries,
-  deepSignMac,
-  signFile,
-} from "../scripts/deep-sign-mac.mjs";
+import { collectNativeBinaries, deepSignMac, signFile } from "../scripts/deep-sign-mac.mjs";
 
 /**
  * Build a realistic Resources/web/ tree under `root` containing a mix of
@@ -148,12 +144,7 @@ describe("deepSignMac", () => {
           target,
         ]);
         assert.equal(verifyCalls[i].cmd, "codesign");
-        assert.deepEqual(verifyCalls[i].args, [
-          "--verify",
-          "--strict",
-          "--verbose=1",
-          target,
-        ]);
+        assert.deepEqual(verifyCalls[i].args, ["--verify", "--strict", "--verbose=1", target]);
       }
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -297,12 +288,7 @@ describe("signFile", () => {
 
       // Verify call.
       assert.equal(calls[1].cmd, "codesign");
-      assert.deepEqual(calls[1].args, [
-        "--verify",
-        "--strict",
-        "--verbose=1",
-        target,
-      ]);
+      assert.deepEqual(calls[1].args, ["--verify", "--strict", "--verbose=1", target]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

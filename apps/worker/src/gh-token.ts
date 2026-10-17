@@ -8,6 +8,7 @@
  */
 
 import { type GhTokenParams, type GhTokenReply, METHOD_GH_TOKEN } from "@band-app/link";
+
 import type { WorkerContext } from "./context.ts";
 
 const HUB_ANSWER_MS = 15_000;

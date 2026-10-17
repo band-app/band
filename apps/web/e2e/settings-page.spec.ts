@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, type Locator, test } from "@playwright/test";
+
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,

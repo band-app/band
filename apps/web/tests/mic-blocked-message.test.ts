@@ -3,7 +3,8 @@
  * page runs in. It is a pure function of the user agent, touch points and shell, so it is
  * called directly. The e2e `voice-dictation.spec.ts` shows the message in the composer.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { micBlockedMessageFor } from "../src/lib/voice-recorder";
 
 const IPHONE_CHROME =

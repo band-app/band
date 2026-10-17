@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+
 import type { SubscriptionEvent } from "./event";
 
 /** Headers a sender may use for its own delivery id, first match wins. */

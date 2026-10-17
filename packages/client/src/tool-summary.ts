@@ -9,6 +9,7 @@
  */
 
 import type { ToolCallContent, ToolKind } from "@agentclientprotocol/sdk";
+
 import type { Entry, ToolEntry } from "./transcript.ts";
 
 /** One item in an assistant message: an entry on its own, or a run of

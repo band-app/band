@@ -5,6 +5,7 @@
 
 import type * as acp from "@agentclientprotocol/sdk";
 import type { SessionState } from "@band-app/shared/chat-events";
+
 import type { ChatEventQueries, ChatEventRow } from "./log";
 
 /**

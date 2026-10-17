@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
+
 import { ENVIRONMENT_FILE, type Environment, repoRelative } from "./schema.ts";
 
 /**

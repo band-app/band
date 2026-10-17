@@ -7,7 +7,10 @@ import { dirname, join } from "node:path";
 
 if (process.platform !== "win32") {
   try {
-    const prebuilds = join(dirname(createRequire(import.meta.url).resolve("node-pty/package.json")), "prebuilds");
+    const prebuilds = join(
+      dirname(createRequire(import.meta.url).resolve("node-pty/package.json")),
+      "prebuilds",
+    );
     if (existsSync(prebuilds)) {
       for (const dir of readdirSync(prebuilds)) {
         const helper = join(prebuilds, dir, "spawn-helper");

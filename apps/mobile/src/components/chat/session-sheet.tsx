@@ -14,6 +14,7 @@ import {
   Text,
   View,
 } from "react-native";
+
 import { colors } from "../../theme";
 import { Icon } from "../icon";
 

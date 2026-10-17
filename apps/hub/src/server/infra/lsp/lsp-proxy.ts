@@ -1,7 +1,9 @@
 import type { IncomingMessage } from "node:http";
+
 import type { Duplex } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
+
 import { WorktreeQueries } from "../db/queries/worktrees";
 import { hostRegistry } from "../host/registry";
 

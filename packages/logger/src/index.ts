@@ -9,6 +9,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname } from "node:path";
+
 import pino from "pino";
 
 export type Logger = pino.Logger;

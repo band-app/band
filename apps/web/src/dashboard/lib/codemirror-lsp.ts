@@ -15,6 +15,7 @@ import {
   type Text,
 } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
+
 import { HubWebSocket, hubWsUrl } from "../../lib/hub-config";
 
 // ---------------------------------------------------------------------------

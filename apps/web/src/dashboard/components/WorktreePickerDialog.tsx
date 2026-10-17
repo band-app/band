@@ -13,6 +13,7 @@ import {
 } from "@band-app/ui";
 import { Home, Pin, PinOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import { useCapabilities } from "../context";
 import { usePinnedWorktrees } from "../hooks/use-pinned-worktrees";
 import { useRepos } from "../hooks/use-repos";

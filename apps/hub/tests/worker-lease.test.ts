@@ -4,7 +4,9 @@
 // processes (helpers/checkpoint-world.ts), whose lease is LEASE_MS.
 
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { git, LEASE_MS, startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 import { waitFor } from "./helpers/wait-for";
 

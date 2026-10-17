@@ -2,6 +2,7 @@ import type { sessionPickers } from "@band-app/client/session-pickers";
 import { ChevronDown, History } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
 import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { colors } from "../../theme";
 import { Icon } from "../icon";

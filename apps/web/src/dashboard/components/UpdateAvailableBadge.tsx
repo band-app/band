@@ -1,6 +1,7 @@
 import { Button } from "@band-app/ui";
 import { ArrowUpCircle } from "lucide-react";
 import { useState } from "react";
+
 import { useUpdateStatus } from "../hooks/use-update-status";
 import { UpdatePanelDialog } from "./UpdatePanelDialog";
 

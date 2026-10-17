@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
+
 import { installRendererErrorReporting } from "../src/lib/renderer-error-reporting";
 
 // Drives the installer with a plain event target and a recording sender: it is a

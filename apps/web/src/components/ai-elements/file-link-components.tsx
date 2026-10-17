@@ -8,6 +8,7 @@ import {
   type ExtraProps,
   type UrlTransform,
 } from "streamdown";
+
 import { openExternalUrl } from "../../lib/open-external-url";
 
 // ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ function dispatchOpenFile(filename: string, worktreeId: string | undefined) {
 // Rehype plugin — wrap inline code file paths in <a> links
 // ---------------------------------------------------------------------------
 
-// biome-ignore lint/suspicious/noExplicitAny: unified/hast plugin operates on untyped AST nodes
+// oxlint-disable-next-line typescript/no-explicit-any -- unified/hast plugin operates on untyped AST nodes
 type HastNode = any;
 
 /**
@@ -238,7 +239,7 @@ const SKIP_PARENTS = new Set([
   "tableCell",
 ]);
 
-// biome-ignore lint/suspicious/noExplicitAny: unified plugin operates on untyped AST nodes
+// oxlint-disable-next-line typescript/no-explicit-any -- unified plugin operates on untyped AST nodes
 type MdastNode = any;
 
 /**

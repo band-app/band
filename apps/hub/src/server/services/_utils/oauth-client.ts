@@ -8,6 +8,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
+
 import { VaultInputError } from "../../errors";
 
 const FETCH_TIMEOUT_MS = 10_000;

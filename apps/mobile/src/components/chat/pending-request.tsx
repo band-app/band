@@ -1,6 +1,7 @@
 import type { ElicitationValues } from "@band-app/client/elicitation";
 import * as Haptics from "expo-haptics";
 import { useEffect } from "react";
+
 import type { RequestEntry } from "../../lib/chat/pending-request";
 import { ElicitationCard } from "./elicitation-card";
 import { PermissionCard } from "./permission-card";
@@ -23,7 +24,7 @@ export function PendingRequest({
   ) => Promise<void>;
 }) {
   const id = entry.id;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new request id is the trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- a new request id is the trigger
   useEffect(() => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
   }, [id]);

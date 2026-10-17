@@ -1,6 +1,7 @@
 import type { SessionUsageSnapshot, UsageReader } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+
 import { RepoQueries } from "../db/queries/repos";
 import { SettingsQueries } from "../db/queries/settings";
 import { UsageEventQueries } from "../db/queries/usage-events";

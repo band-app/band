@@ -15,8 +15,11 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { type Browser, type BrowserContext, expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,

@@ -67,7 +67,7 @@ export function TaskListWidget({ plan, worktreeId }: { plan: PlanEntry[]; worktr
         <div className="border-t border-border/50 px-2.5 py-1">
           {taskList.map((task, i) => (
             <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: plan entries have no id; each update replaces the whole plan
+              // oxlint-disable-next-line react/no-array-index-key -- plan entries have no id; each update replaces the whole plan
               key={i}
               data-testid="task-list-widget__entry"
               className="flex items-center gap-1.5 py-0.5"

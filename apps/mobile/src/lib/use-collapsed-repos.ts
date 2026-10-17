@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import { COLLAPSED_REPOS_KEY, parseCollapsed, toggleCollapsed } from "./collapsed-repos";
 import { useHubSession } from "./hub-session";
 
@@ -8,7 +9,7 @@ export function useCollapsedRepos() {
   const [raw, setRaw] = useState<string | null>(() => clientState.getItem(COLLAPSED_REPOS_KEY));
 
   // The saved copy is read into memory once the session is ready, and another device may change it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clientStateReady re-reads the saved copy once it is loaded
+  // oxlint-disable-next-line react/exhaustive-deps -- clientStateReady re-reads the saved copy once it is loaded
   useEffect(() => {
     setRaw(clientState.getItem(COLLAPSED_REPOS_KEY));
     return clientState.subscribe((change) => {

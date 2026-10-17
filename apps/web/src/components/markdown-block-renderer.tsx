@@ -9,7 +9,9 @@
 
 import { createRoot } from "react-dom/client";
 import { Streamdown } from "streamdown";
+
 import type { RenderMarkdownBlock } from "@/dashboard";
+
 import { streamdownComponents, streamdownPlugins } from "./streamdown-components";
 
 export const renderMarkdownBlock: RenderMarkdownBlock = ({ source }, container) => {

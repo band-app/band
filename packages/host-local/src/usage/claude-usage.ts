@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
+
 import type { AccountUsage, UsageWindow } from "@band-app/host-api";
+
 import { failure, fetchJson, ok, percentOf, resetOf, titleCase, UsageHttpError } from "./common";
 
 const DEFAULT_URL = "https://api.anthropic.com/api/oauth/usage";

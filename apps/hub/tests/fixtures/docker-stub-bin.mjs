@@ -49,7 +49,8 @@ function flag(name) {
   return i === -1 ? undefined : args[i + 1];
 }
 function newImage(name, seed) {
-  state.images[name] = `sha256:${createHash("sha256").update(`${name}:${seed}:${randomUUID()}`).digest("hex")}`;
+  state.images[name] =
+    `sha256:${createHash("sha256").update(`${name}:${seed}:${randomUUID()}`).digest("hex")}`;
 }
 function read(path) {
   try {
@@ -91,7 +92,9 @@ switch (command) {
     const tag = flag("--tag");
     const file = flag("--file") ?? join(rest[rest.length - 1], "Dockerfile");
     if (read(file).includes("FAIL_BUILD")) {
-      fail(`#5 ERROR: process "/bin/sh -c false" did not complete successfully (FAIL_BUILD in ${file})`);
+      fail(
+        `#5 ERROR: process "/bin/sh -c false" did not complete successfully (FAIL_BUILD in ${file})`,
+      );
     }
     newImage(tag, read(file));
     process.stderr.write(`#1 [internal] load build definition from ${file}\n#2 DONE\n`);

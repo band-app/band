@@ -1,6 +1,7 @@
 /** Persistence for `worktree_checkpoints`: what the hub keeps of worktrees on static workers. */
 
 import { desc, eq, inArray, max } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { worktreeCheckpoints } from "../schema";
 

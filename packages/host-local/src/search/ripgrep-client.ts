@@ -38,6 +38,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
+
 import { rgPath } from "@vscode/ripgrep";
 
 export interface RipgrepOptions {

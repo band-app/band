@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+
 import { checkHub, type HubCheck } from "./hub-api";
 import type { HubList, SavedHub } from "./hub-store";
 import { exchangePairingCode, type PairingInput } from "./pairing";

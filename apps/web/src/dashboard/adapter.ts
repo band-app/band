@@ -1,5 +1,6 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
+
 import type {
   BrowserProfileInfo,
   CIStatus,

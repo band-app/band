@@ -7,7 +7,9 @@
  */
 
 import { tmpdir } from "node:os";
+
 import { execGh } from "@band-app/host-local/git/git-client";
+
 import { vaultService } from "../vault-service";
 
 const LOGIN_CHECK_TTL_MS = 60_000;

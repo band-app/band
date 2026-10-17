@@ -5,6 +5,7 @@
  */
 
 import { SearchService } from "@band-app/worktree-ops/search";
+
 import { worktreeService } from "./worktree-service";
 
 export { SearchService };

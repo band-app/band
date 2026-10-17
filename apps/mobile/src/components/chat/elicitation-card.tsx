@@ -22,6 +22,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+
 import { colors, tones, useScheme } from "../../theme";
 import { Icon } from "../icon";
 import { Button } from "../ui";

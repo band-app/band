@@ -1,4 +1,5 @@
 import { ChevronRight, Folder } from "lucide-react";
+
 import type { CollapseState } from "../hooks/use-collapse-state";
 import {
   type GroupBy,

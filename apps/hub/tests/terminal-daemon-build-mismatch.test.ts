@@ -9,7 +9,9 @@ import {
   statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,

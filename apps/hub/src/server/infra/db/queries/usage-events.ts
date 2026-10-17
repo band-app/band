@@ -1,5 +1,6 @@
 import { createLogger } from "@band-app/logger";
 import { and, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { usageEvents as usageEventsTable } from "../schema";
 import { SettingsQueries } from "./settings";

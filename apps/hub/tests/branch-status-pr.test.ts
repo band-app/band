@@ -13,8 +13,10 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import WebSocket from "ws";
+
 import { branchRepository, prNode, prUrl, workflowSuite } from "./fixtures/branch-status-data";
 import { type GhStub, ghStub } from "./fixtures/gh-stub";
 import { FAKE_REPO } from "./fixtures/github-review-data";

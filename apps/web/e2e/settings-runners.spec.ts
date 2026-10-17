@@ -7,7 +7,9 @@
 
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import {
   cleanupTmpHome,
   createTmpHome,

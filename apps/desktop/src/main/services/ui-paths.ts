@@ -11,6 +11,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+
 import type { WebPathOptions } from "./web-paths.js";
 
 /** The prerendered SPA shell; its presence marks a complete UI build. */

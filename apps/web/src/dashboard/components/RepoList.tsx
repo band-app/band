@@ -68,6 +68,7 @@ import {
   useRef,
   useState,
 } from "react";
+
 import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
 import {
@@ -138,8 +139,8 @@ import { NewWorktreeDialog } from "./NewWorktreeForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { ProvisioningWorktreeCard } from "./ProvisioningWorktreeCard";
 import { RepoAvatar } from "./RepoAvatar";
-import { DragRow, DropIndicatorContext } from "./SidebarDnd";
 import { useIsAdmin } from "./settings/DevicesSettings";
+import { DragRow, DropIndicatorContext } from "./SidebarDnd";
 import { markRecentActivation, WorktreeCard } from "./WorktreeCard";
 
 /**
@@ -409,7 +410,7 @@ function SortableRepo({
               opens the implicit worktree (the repo IS the worktree).
               Keyboard nav lives at the worktree-card level for git
               repos; for plain repos the same role moves up here. */}
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the RepoList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
+          {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events -- keyboard path is the container-level handler on the RepoList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
           <div
             className={headerClassName}
             data-testid={`repo-list__repo-header--${repo.name}`}

@@ -6,7 +6,8 @@
  */
 
 import { type ChatEvent, HISTORY_PAGE_MAX_ROWS } from "@band-app/shared/chat-events";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import {
   collectEvents,
   sendMessage,

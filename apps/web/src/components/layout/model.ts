@@ -56,7 +56,7 @@ class Emitter<T> {
 
 export type Direction = "left" | "right" | "above" | "below" | "within";
 export type PanelRenderer = "always" | "onlyWhenVisible";
-// biome-ignore lint/suspicious/noExplicitAny: panel params are caller-defined
+// oxlint-disable-next-line typescript/no-explicit-any -- panel params are caller-defined
 export type PanelParams = Record<string, any>;
 
 export interface PanelPosition {

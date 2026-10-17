@@ -5,6 +5,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { SettingsPage } from "./SettingsPage";
 
 export type ColorKey = "accent" | "background" | "foreground";

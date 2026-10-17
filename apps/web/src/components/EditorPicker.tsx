@@ -8,7 +8,9 @@ import {
 } from "@band-app/ui";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import { useSettingsQuery, useUpdateSettings } from "@/dashboard";
+
 // ---------------------------------------------------------------------------
 // App icon imports
 // ---------------------------------------------------------------------------
@@ -29,8 +31,8 @@ import warpIcon from "../assets/icons/app/warp.png";
 import webstormIcon from "../assets/icons/app/webstorm.svg";
 import windSurfIcon from "../assets/icons/app/windsurf.svg";
 import xcodeIcon from "../assets/icons/app/xcode.png";
-import zedIcon from "../assets/icons/app/zed.svg";
 import zedDarkIcon from "../assets/icons/app/zed-dark.svg";
+import zedIcon from "../assets/icons/app/zed.svg";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 

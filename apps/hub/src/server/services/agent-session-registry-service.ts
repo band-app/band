@@ -12,8 +12,10 @@
  */
 
 import { randomUUID } from "node:crypto";
+
 import { createLogger } from "@band-app/logger";
 import type { AgentMode, AgentSessionRecord } from "@band-app/shared/agent-sessions";
+
 import { AgentSessionQueries } from "../infra/db/queries/agent-sessions";
 import { subscribe } from "../infra/events/status-event-bus";
 import { emit } from "./watcher-service";

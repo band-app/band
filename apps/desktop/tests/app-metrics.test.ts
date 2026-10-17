@@ -8,6 +8,7 @@
 
 import { strict as assert } from "node:assert";
 import { before, describe, test } from "node:test";
+
 import type { ProcessMetric } from "electron";
 
 // `mapAppMetrics` is a deliberately-exported pure seam: `getAppMetrics()` in

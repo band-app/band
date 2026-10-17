@@ -1,14 +1,15 @@
-import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 // A worktree that git registered for a repo inside a worker root may live outside the roots
 // (another tool made it). The hub imports it with the repo, and a terminal opens there through the
 // hub API. A folder that is not a registered worktree stays refused. Real hub, real `band-worker`
 // binary, everything in temp dirs.
-
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { seedSettings } from "./helpers/seed-state";
 import {
   createTmpHome,

@@ -15,6 +15,7 @@ import {
   Text,
   View,
 } from "react-native";
+
 import { type Attachment, toWireFiles } from "../../lib/composer/attachments";
 import { useAttachmentPicker } from "../../lib/composer/use-attachment-picker";
 import { useConfigChoice } from "../../lib/composer/use-config-choice";

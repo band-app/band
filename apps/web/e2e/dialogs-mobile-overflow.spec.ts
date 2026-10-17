@@ -12,8 +12,10 @@
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, type TestInfo, test } from "@playwright/test";
+
 import { type RfbStub, startRfbStub } from "./fixtures/rfb-stub";
 import { gitInHome as git } from "./helpers/git";
 import {

@@ -11,7 +11,9 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { type McpStub, startMcpStub } from "../../hub/tests/fixtures/mcp-stub";
 import {
   cleanupTmpHome,

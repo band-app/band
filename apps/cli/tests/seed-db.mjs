@@ -13,21 +13,17 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const [bandDir, repoName, repoPath, defaultBranch, settingsJson] =
-  process.argv.slice(2);
+const [bandDir, repoName, repoPath, defaultBranch, settingsJson] = process.argv.slice(2);
 if (!bandDir || !repoName || !repoPath || !defaultBranch) {
   console.error(
-    "Usage: node seed-db.mjs <band_dir> <repo_name> <repo_path> <default_branch> [settings_json]"
+    "Usage: node seed-db.mjs <band_dir> <repo_name> <repo_path> <default_branch> [settings_json]",
   );
   process.exit(1);
 }
 
 mkdirSync(bandDir, { recursive: true });
 
-const migrationsDir = resolve(
-  import.meta.dirname,
-  "../../hub/src/server/infra/db/migrations"
-);
+const migrationsDir = resolve(import.meta.dirname, "../../hub/src/server/infra/db/migrations");
 
 const db = new DatabaseSync(join(bandDir, "band.db"));
 db.exec("PRAGMA journal_mode = WAL");
@@ -79,18 +75,22 @@ for (const folder of migrationFolders) {
   const hash = createHash("sha256").update(content).digest("hex");
   const appliedAt = new Date().toISOString();
   db.prepare(
-    'INSERT INTO "__drizzle_migrations" (hash, created_at, name, applied_at) VALUES (?, ?, ?, ?)'
+    'INSERT INTO "__drizzle_migrations" (hash, created_at, name, applied_at) VALUES (?, ?, ?, ?)',
   ).run(hash, folderMillis(folder), folder, appliedAt);
 }
 
 // Seed the test repo and its default worktree.
-db.prepare(
-  "INSERT INTO repos (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
-).run(repoName, repoPath, defaultBranch);
+db.prepare("INSERT INTO repos (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)").run(
+  repoName,
+  repoPath,
+  defaultBranch,
+);
 
-db.prepare(
-  "INSERT INTO worktrees (repo_name, branch, path) VALUES (?, ?, ?)"
-).run(repoName, defaultBranch, repoPath);
+db.prepare("INSERT INTO worktrees (repo_name, branch, path) VALUES (?, ?, ?)").run(
+  repoName,
+  defaultBranch,
+  repoPath,
+);
 
 db.close();
 

@@ -11,7 +11,9 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { renderCloudInit } from "../../../runners/_shared/cloud-init.mjs";
 import { type ContaboStub, startContaboStub } from "./fixtures/contabo-stub";
 import { type HetznerStub, startHetznerStub } from "./fixtures/hetzner-stub";

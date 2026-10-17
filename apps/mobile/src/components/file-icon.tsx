@@ -1,4 +1,5 @@
 import { SvgXml } from "react-native-svg";
+
 import { fileIconSvg, folderIconSvg } from "../lib/files/file-icon";
 
 /** The file-type icon the web shows for a file name, in material-icon-theme's colors. */

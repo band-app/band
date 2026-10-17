@@ -38,7 +38,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { findCliBinaryAt, noBinaryError } from "../src/server/services/cli-service";
 
 describe("findCliBinaryAt in packaged Electron layout", () => {

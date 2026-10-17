@@ -5,6 +5,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { SidebarGroupingPage } from "./SidebarGroupingPage";
 
 export type DropPosition = "top" | "middle" | "bottom";

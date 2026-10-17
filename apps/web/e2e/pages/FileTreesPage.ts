@@ -27,6 +27,7 @@
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
+
 import { FILE_VIEWER_ROOT_TESTID } from "./FileViewerPage";
 import type { WorktreePage } from "./WorktreePage";
 

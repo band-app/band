@@ -14,8 +14,10 @@
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import type { ResolvedDefaults } from "@band-app/shared/chat-events";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import { maxId, runTurn, seedAcpHome, startAcpServer, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 

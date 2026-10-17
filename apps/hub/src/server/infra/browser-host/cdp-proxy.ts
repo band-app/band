@@ -1,6 +1,8 @@
 import type { IncomingMessage } from "node:http";
+
 import { createLogger } from "@band-app/logger";
 import WebSocket, { type WebSocket as WsServerSocket } from "ws";
+
 import { lookupBrowser } from "./browser-lookup";
 import {
   DESKTOP_CDP_HOST,

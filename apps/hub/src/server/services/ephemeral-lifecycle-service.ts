@@ -38,6 +38,7 @@
 import { rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
+
 import type { Host } from "@band-app/host-api";
 import { buildSnapshot, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { RemoteRpc } from "@band-app/host-remote";
@@ -53,6 +54,7 @@ import {
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+
 import { HostRequestQueries } from "../infra/db/queries/host-requests";
 import { bandHome } from "../infra/db/queries/settings";
 import { WorktreeSleepQueries, type WorktreeSleepRow } from "../infra/db/queries/worktree-sleep";

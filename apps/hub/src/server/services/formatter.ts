@@ -1,8 +1,10 @@
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
+
 import type { HostFs } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { FormatFileResult } from "@band-app/shared/format-file-result";
 import prettier from "prettier";
+
 import { hostRegistry } from "../infra/host/registry";
 
 const log = createLogger("formatter");

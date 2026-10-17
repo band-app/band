@@ -23,7 +23,7 @@ import type {
   SessionState,
   SessionUpdate,
 } from "@band-app/shared/chat-events";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 /** Gives each payload a logged (positive, increasing) event id. */
 function logged(events: ChatEventPayload[], firstId = 1): ChatEvent[] {

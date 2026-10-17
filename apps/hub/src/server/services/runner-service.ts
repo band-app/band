@@ -39,8 +39,10 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+
 import { type Environment, parseEnvironment } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
+
 import type { HostRequestRow } from "../infra/db/queries/host-requests";
 import { RunnerMachineQueries, type RunnerMachineRow } from "../infra/db/queries/runner-machines";
 import {

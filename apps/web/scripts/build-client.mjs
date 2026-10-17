@@ -8,6 +8,7 @@
 // shell looks successful. Check for the file and fail the build instead.
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+
 import { createBuilder } from "vite";
 
 const shell = resolve(import.meta.dirname, "../dist/client/_shell.html");

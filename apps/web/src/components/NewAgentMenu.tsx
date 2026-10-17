@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@band-app/ui";
 import { Bot } from "lucide-react";
+
 import { AgentIcon, type CodingAgentDefinition, useSettingsQuery } from "@/dashboard";
 
 /**

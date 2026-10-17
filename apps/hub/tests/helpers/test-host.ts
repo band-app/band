@@ -30,7 +30,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
+
 import { toWorktreeId, type WorktreeId } from "@band-app/shared/worktree-id";
+
 import { waitFor } from "./wait-for";
 
 type TestHostMode = "local" | "remote-loopback";

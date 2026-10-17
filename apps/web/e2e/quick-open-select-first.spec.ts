@@ -30,8 +30,11 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,

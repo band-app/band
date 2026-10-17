@@ -1,8 +1,10 @@
 import type { WorktreeReview } from "@band-app/plugin-api";
 import type { ClientPluginHost } from "@band-app/plugin-api/client";
 import { useQuery } from "@tanstack/react-query";
+
 import { readAgentMode } from "@/dashboard/lib/agent-mode";
 import { queryClient } from "@/dashboard/query-client";
+
 import { AGENT_LAUNCHING_EVENT, OPEN_PANE_EVENT } from "../lib/agent-pane-events";
 import { markChatFresh, newChatId, newTerminalId } from "../lib/leaf-instance-ids";
 import { openExternalUrl } from "../lib/open-external-url";

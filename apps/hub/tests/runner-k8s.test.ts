@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+
+import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,7 @@ const calls = (): Call[] => JSON.parse(readFileSync(statePath, "utf8")).calls ??
 const created = () =>
   calls()
     .filter((c) => c.args.includes("create"))
+    // oxlint-disable-next-line typescript/no-explicit-any -- stricter than the old lint
     .map((c) => JSON.parse(c.stdin) as Record<string, any>);
 
 // kubectl is a script with a node shebang; the stub is run through a wrapper so the hook can exec it.
@@ -123,6 +125,7 @@ describe("k8s runner hook: spawn", () => {
     ]);
     const env = Object.fromEntries(
       container.env.map((e: { name: string }) => [e.name, e]),
+      // oxlint-disable-next-line typescript/no-explicit-any -- stricter than the old lint
     ) as Record<string, any>;
     expect(env.BAND_WORKER_ID.value).toBe("h-0123456789ab");
     expect(env.BAND_WORKER_IDLE_EXIT.value).toBe("90s");

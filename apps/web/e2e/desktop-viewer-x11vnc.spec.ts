@@ -13,7 +13,9 @@
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { removeStartedContainers, startX11Desktop, type X11Desktop } from "./fixtures/x11-desktop";
 import {
   cleanupTmpHome,

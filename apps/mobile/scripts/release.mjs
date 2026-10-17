@@ -21,12 +21,21 @@ import { fileURLToPath } from "node:url";
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Paths whose change since the previous release makes `auto` ship the app. */
-export const MOBILE_PATHS = ["apps/mobile/", "packages/client/", "packages/shared/", "pnpm-lock.yaml"];
+export const MOBILE_PATHS = [
+  "apps/mobile/",
+  "packages/client/",
+  "packages/shared/",
+  "pnpm-lock.yaml",
+];
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 
 function git(cwd, ...args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 /** The newest `v*` tag reachable from the parent of `tag`, or null when there is none. */
@@ -50,7 +59,9 @@ export function detect({ mode, tag, repo }) {
   if (!previous) return { ship: true, reason: `no release tag before ${tag}` };
   const changed = git(repo, "diff", "--name-only", `${previous}..${tag}`)
     .split("\n")
-    .filter((file) => MOBILE_PATHS.some((path) => (path.endsWith("/") ? file.startsWith(path) : file === path)));
+    .filter((file) =>
+      MOBILE_PATHS.some((path) => (path.endsWith("/") ? file.startsWith(path) : file === path)),
+    );
   if (changed.length === 0) {
     return { ship: false, reason: `no mobile changes between ${previous} and ${tag}` };
   }
@@ -102,14 +113,20 @@ export async function ship({ version, appDir = APP_DIR }) {
   setVersion(resolve(appDir, "app.json"), version);
   const common = ["--non-interactive", "--json"];
   const [ios, android] = await Promise.all([
-    runBuild(["build", "--platform", "ios", "--profile", "production", "--auto-submit", ...common], appDir),
+    runBuild(
+      ["build", "--platform", "ios", "--profile", "production", "--auto-submit", ...common],
+      appDir,
+    ),
     runBuild(["build", "--platform", "android", "--profile", "preview", ...common], appDir),
   ]);
   const line = (label, result) =>
     `${result.code === 0 ? "ok" : "FAILED"} ${label}: ${result.urls.join(" ") || "no run URL in the eas output"}`;
   return {
     ok: ios.code === 0 && android.code === 0,
-    lines: [line("iOS production build and TestFlight submit", ios), line("Android preview build", android)],
+    lines: [
+      line("iOS production build and TestFlight submit", ios),
+      line("Android preview build", android),
+    ],
     urls: [...ios.urls, ...android.urls],
   };
 }
@@ -132,7 +149,11 @@ async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === "detect") {
     const repo = resolve(APP_DIR, "../..");
-    const decision = detect({ mode: flag(args, "--mode") ?? "auto", tag: flag(args, "--tag") ?? "", repo });
+    const decision = detect({
+      mode: flag(args, "--mode") ?? "auto",
+      tag: flag(args, "--tag") ?? "",
+      repo,
+    });
     output("ship", String(decision.ship));
     summary(`### Mobile app\n\n${decision.ship ? "Shipping" : "Skipping"}: ${decision.reason}.`);
     return 0;
@@ -147,7 +168,9 @@ async function main() {
     output("urls", result.urls.join(" "));
     return result.ok ? 0 : 1;
   }
-  console.error("Usage: release.mjs detect --mode <auto|always|skip> --tag <vX.Y.Z> | ship --version <X.Y.Z>");
+  console.error(
+    "Usage: release.mjs detect --mode <auto|always|skip> --tag <vX.Y.Z> | ship --version <X.Y.Z>",
+  );
   return 2;
 }
 

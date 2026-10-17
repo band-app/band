@@ -1,4 +1,5 @@
 import type { AgentHookStatus } from "@band-app/coding-agent";
+
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { chatStatusSource, setWorktreeSourceStatus } from "./state";

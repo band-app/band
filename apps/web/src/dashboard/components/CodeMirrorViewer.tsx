@@ -1,6 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+
 import { useIsDark } from "../hooks/use-is-dark";
 import {
   baseViewerExtensions,

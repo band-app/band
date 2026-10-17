@@ -1,7 +1,9 @@
 import { getMentionContext } from "@band-app/client/composer";
 import { cn } from "@band-app/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import { getFileIcon } from "@/dashboard";
+
 import { trpc } from "../../lib/trpc-client";
 import { usePromptInputContext } from "./prompt-input";
 

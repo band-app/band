@@ -3,6 +3,7 @@
 // `BAND_GITHUB_URL` at request time. Shared by backend tests and e2e specs.
 
 import type { Server } from "node:http";
+
 import express, { type Request, type Response } from "express";
 
 export interface CapturedAvatarRequest {

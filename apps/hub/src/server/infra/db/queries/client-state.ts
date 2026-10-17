@@ -6,6 +6,7 @@
 
 import type { ClientStateEntry, ClientStateScope } from "@band-app/shared/client-state";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { clientState } from "../schema";
 

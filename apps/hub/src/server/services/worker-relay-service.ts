@@ -17,6 +17,7 @@ import {
   type ServerSession,
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+
 import { CHAT_ID_HEADER, TERMINAL_ID_HEADER, WORKTREE_ID_HEADER } from "../api/context";
 import { hostRegistry } from "../infra/host/registry";
 import { browserService } from "./browser-service";

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+
 import { useDashboardStore } from "@/dashboard";
 
 /** What opening a worktree's view does. */

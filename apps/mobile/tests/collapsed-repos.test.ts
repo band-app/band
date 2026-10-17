@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { parseCollapsed, toggleCollapsed } from "../src/lib/collapsed-repos.ts";
 
 describe("collapsed repos", () => {

@@ -28,7 +28,12 @@ export function appPath(configuration = "Release") {
  */
 export function buildForSimulator(configuration = "Release", env = {}) {
   if (!existsSync(join(APP_ROOT, "ios/Band.xcworkspace"))) {
-    run(join(APP_ROOT, "node_modules/.bin/expo"), ["prebuild", "--platform", "ios", "--no-install"]);
+    run(join(APP_ROOT, "node_modules/.bin/expo"), [
+      "prebuild",
+      "--platform",
+      "ios",
+      "--no-install",
+    ]);
     run("pod", ["install"], { cwd: join(APP_ROOT, "ios") });
   }
   const args = [

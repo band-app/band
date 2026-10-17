@@ -51,7 +51,9 @@ export function findGlyphs(dir = src) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const found = findGlyphs();
   if (found.length > 0) {
-    console.error("Emoji or symbol glyphs in apps/mobile/src. Use a lucide icon (components/icon.tsx):");
+    console.error(
+      "Emoji or symbol glyphs in apps/mobile/src. Use a lucide icon (components/icon.tsx):",
+    );
     for (const f of found) console.error(`  ${f}`);
     process.exit(1);
   }

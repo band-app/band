@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { relativeAge, sessionLabel, sessionRows } from "../src/lib/chat/session-history.ts";
 
 const NOW = 1_000_000_000_000;

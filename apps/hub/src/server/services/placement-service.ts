@@ -13,11 +13,13 @@
  */
 
 import { randomUUID } from "node:crypto";
+
 import { extractVersion, satisfies as inRange, rangeError } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
 import { onlyAvailableOnMessage } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
+
 import { RepoHostNotAllowedError } from "../errors";
 import { HostRequestQueries, type HostRequestRow } from "../infra/db/queries/host-requests";
 import { RepoQueries } from "../infra/db/queries/repos";
@@ -345,7 +347,8 @@ export class PlacementService {
       input: {
         wake,
         ...(typeof (earlier?.input as { hostRepoPath?: unknown })?.hostRepoPath === "string"
-          ? { hostRepoPath: (earlier?.input as { hostRepoPath: string }).hostRepoPath }
+          ? // oxlint-disable-next-line no-unsafe-optional-chaining -- stricter than the old lint
+            { hostRepoPath: (earlier?.input as { hostRepoPath: string }).hostRepoPath }
           : {}),
       },
       status: "pending",

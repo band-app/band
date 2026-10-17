@@ -1,4 +1,5 @@
 import { join } from "node:path";
+
 import {
   ENVIRONMENT_FILE,
   type EnvironmentScript,

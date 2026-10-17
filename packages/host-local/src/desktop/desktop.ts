@@ -1,7 +1,9 @@
 import { accessSync, constants } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { delimiter, join } from "node:path";
+
 import type { Duplex } from "@band-app/host-api";
+
 import { prependBinDirs } from "../process/path";
 
 /** The port x11vnc listens on, on loopback only. `BAND_DESKTOP_VNC_PORT` changes it. */

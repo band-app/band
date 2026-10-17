@@ -1,4 +1,5 @@
 import { safeStorage } from "electron";
+
 import type { SecretStore } from "./secret-store.js";
 
 /** Electron `safeStorage`: the key lives in the OS key store (the macOS Keychain). */

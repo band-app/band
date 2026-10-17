@@ -11,6 +11,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
+
 import { BrowserProfileExistsError, BrowserProfileNotFoundError } from "../errors";
 import {
   BrowserProfileQueries,

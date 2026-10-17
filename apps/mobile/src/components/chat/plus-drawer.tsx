@@ -12,6 +12,7 @@ import {
   Zap,
 } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
 import { colors } from "../../theme";
 import { BottomSheet } from "../bottom-sheet";
 import { Icon } from "../icon";

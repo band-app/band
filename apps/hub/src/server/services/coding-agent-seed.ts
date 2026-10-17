@@ -1,4 +1,5 @@
 import { createLogger } from "@band-app/logger";
+
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 
 const log = createLogger("coding-agent-seed");

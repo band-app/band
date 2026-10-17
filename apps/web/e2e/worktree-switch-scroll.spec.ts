@@ -26,7 +26,9 @@
  */
 
 import { expect, type Page, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import {
   cleanupTmpHome,
   createTmpHome,

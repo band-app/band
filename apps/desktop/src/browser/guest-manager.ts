@@ -35,6 +35,7 @@ import {
   WebContentsView,
   webContents,
 } from "electron";
+
 import { createLogger } from "../main/services/log.js";
 import { Events } from "../shared/ipc-channels.js";
 import type {

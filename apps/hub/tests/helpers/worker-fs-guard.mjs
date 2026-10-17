@@ -132,7 +132,15 @@ if (pathsFile && violationsFile) {
       });
     }
   };
-  for (const name of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]) {
+  for (const name of [
+    "spawn",
+    "spawnSync",
+    "execFile",
+    "execFileSync",
+    "exec",
+    "execSync",
+    "fork",
+  ]) {
     wrapSpawn(name);
   }
 

@@ -18,6 +18,7 @@ import {
 } from "@band-app/ui";
 import { FileInput } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { useAdapter, useCapabilities } from "../context";
 import { getFileIcon } from "../lib/file-icon";
 import { shouldBailAutoOpen } from "../lib/quick-open-bail";
@@ -505,7 +506,7 @@ export function QuickOpenDialog({
     [probeHit],
   );
   const ProbeFileIcon = getFileIcon(probeFileName);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstFile is unchanged) — it isn't read in the body
+  // oxlint-disable-next-line react/exhaustive-deps -- resultKey is an intentional trigger dependency (fires on any content change, incl. when firstFile is unchanged) — it isn't read in the body
   useEffect(() => {
     // For an absolute-path query the probed item is the primary (only)
     // result, so highlight it — otherwise Enter would do nothing.

@@ -7,6 +7,7 @@ import {
 } from "@band-app/chat-runtime/turns";
 import { createLogger } from "@band-app/logger";
 import type { ChatEvent } from "@band-app/shared/chat-events";
+
 import { WorktreeNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { hostRegistry } from "../infra/host/registry";

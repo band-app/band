@@ -9,6 +9,7 @@
  */
 
 import { join, resolve, sep } from "node:path";
+
 import {
   type CommandRun,
   gitRunner,
@@ -17,6 +18,7 @@ import {
   HostTimeoutError,
 } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+
 import { WorktreeNotFoundError, type WorktreeResolver } from "./resolver";
 
 const log = createLogger("diff-service");

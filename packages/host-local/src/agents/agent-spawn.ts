@@ -6,6 +6,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+
 import type { AcpLaunch, AgentStdio } from "@band-app/host-api";
 
 /**

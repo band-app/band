@@ -34,6 +34,7 @@ import { redo, undo } from "@codemirror/commands";
 import type { syntaxTree } from "@codemirror/language";
 import type { EditorState, Text } from "@codemirror/state";
 import { type EditorView, WidgetType } from "@codemirror/view";
+
 import {
   deleteEntry,
   insertEntry,

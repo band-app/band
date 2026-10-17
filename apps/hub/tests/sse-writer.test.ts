@@ -5,7 +5,7 @@
 
 import { openSseStream } from "@band-app/chat-runtime/sse-writer";
 import type { ChatEvent } from "@band-app/shared/chat-events";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 interface RecordedResponse {
   chunks: string[];

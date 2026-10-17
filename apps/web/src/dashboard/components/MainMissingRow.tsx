@@ -2,6 +2,7 @@ import { Button } from "@band-app/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { TriangleAlert } from "lucide-react";
 import { useState } from "react";
+
 import { trpc } from "../../lib/trpc-client";
 import { type HostInfoLite, hostLabel } from "../lib/sidebar-grouping";
 import type { RepoInfo } from "../types";

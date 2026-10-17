@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { WriteBatcher } from "../src/lib/terminal/write-batcher.ts";
 
 const bytes = (n: number, fill = 1) => new Uint8Array(n).fill(fill);

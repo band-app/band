@@ -9,7 +9,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type CapturedAvatarRequest, type GitHubStub, githubStub } from "./fixtures/github-stub";
 import { AVATAR_PNG } from "./fixtures/github-test-data";
 import { seedSettings, seedState } from "./helpers/seed-state";

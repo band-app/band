@@ -24,6 +24,7 @@ import {
 import { worktreeIdIsOnHost } from "@band-app/shared/worktree-id";
 import { TRPCClientError, type TRPCLink } from "@trpc/client";
 import { observable } from "@trpc/server/observable";
+
 import { invoke } from "./desktop-ipc";
 import { hubFetch } from "./hub-config";
 import { isDesktop } from "./is-desktop";

@@ -8,7 +8,9 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,

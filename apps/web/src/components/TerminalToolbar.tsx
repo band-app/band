@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useMemo } from "react";
+
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { readClipboardText, writeClipboardText } from "../lib/clipboard";
 import type { ArrowDirection } from "../lib/terminal-selection";

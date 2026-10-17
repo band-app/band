@@ -6,6 +6,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+
 import { ContinueGateError, WorktreeNotFoundError } from "../../errors";
 import { agentLaunchService, ChatNotInWorktreeError } from "../../services/agent-launch-service";
 import { agentSessionRegistry } from "../../services/agent-session-registry-service";

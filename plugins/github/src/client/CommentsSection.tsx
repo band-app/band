@@ -3,6 +3,7 @@ import { useClientPluginHost } from "@band-app/plugin-api/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band-app/ui";
 import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useState } from "react";
+
 import { PanelSection } from "./PanelSection";
 import { Avatar } from "./ReviewersSection";
 

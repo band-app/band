@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+
 import {
   METHOD_RELAY_HTTP,
   RELAY_MAX_BODY_BYTES,
@@ -9,6 +10,7 @@ import {
   type RelayHttpRequest,
   type RelayScopeParams,
 } from "@band-app/link";
+
 import { browserProfileDir, type Registrar, type WorkerContext } from "./context.ts";
 import { optStr, str } from "./rpc-util.ts";
 

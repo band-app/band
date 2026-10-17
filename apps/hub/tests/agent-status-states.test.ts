@@ -3,7 +3,8 @@
 // (`tests/fixtures/acp-stub-agent.mjs`), which can refuse, hit a limit, ask
 // for permission, leave background work running and start turns of its own.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import {
   openStream,
   runTurn,

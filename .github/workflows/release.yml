@@ -77,7 +77,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Cache pnpm store
         uses: actions/cache@v5
@@ -135,7 +135,8 @@ jobs:
       - name: Lint
         if: ${{ inputs.force_tests }}
         run: |
-          pnpm exec biome check .
+          pnpm exec vp lint
+          pnpm exec vp fmt --check
           pnpm knip
           pnpm jscpd
           cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
@@ -275,7 +276,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

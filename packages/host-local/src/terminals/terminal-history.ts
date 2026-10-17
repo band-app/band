@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
 import { createLogger } from "@band-app/logger";
 
 const log = createLogger("terminal-history");

@@ -12,6 +12,7 @@ import {
   type VoiceStatus,
   WORKER_TRANSCRIBE_TIMEOUT_MS,
 } from "@band-app/shared/speech-transcription";
+
 import { hostRegistry } from "../infra/host/registry";
 import { settingsService } from "./settings-service";
 import { vaultService } from "./vault-service";

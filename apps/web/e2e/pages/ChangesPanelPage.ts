@@ -21,6 +21,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FileViewerPage } from "./FileViewerPage";
 import { FindWidget } from "./FindWidget";

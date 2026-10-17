@@ -5,6 +5,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { ChatPanePage } from "../../e2e/pages/ChatPanePage";
 import { TerminalSurface } from "../../e2e/pages/TerminalSurface";
 

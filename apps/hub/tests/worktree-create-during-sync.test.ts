@@ -17,7 +17,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type GitRemoteStub, startGitRemoteStub } from "./fixtures/git-remote-stub";
 import { listWorktreeNames, readRepoDefaultBranch } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";

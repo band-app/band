@@ -49,19 +49,30 @@ function stop(label) {
 
 function start(label, plistFile) {
   const text = readFileSync(plistFile, "utf8");
-  const section = (key) => new RegExp(`<key>${key}</key>\\s*<(?:array|dict)>([\\s\\S]*?)</(?:array|dict)>`).exec(text)?.[1] ?? "";
-  const program = [...section("ProgramArguments").matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unxml(m[1]));
+  const section = (key) =>
+    new RegExp(`<key>${key}</key>\\s*<(?:array|dict)>([\\s\\S]*?)</(?:array|dict)>`).exec(
+      text,
+    )?.[1] ?? "";
+  const program = [...section("ProgramArguments").matchAll(/<string>([\s\S]*?)<\/string>/g)].map(
+    (m) => unxml(m[1]),
+  );
   const env = { HOME: process.env.HOME, PATH: process.env.PATH };
   // The scripted ACP agent a spec names reaches the worker too, as real launchd would not pass it:
   // a worker that owns its chats starts their agent itself.
   for (const [key, value] of Object.entries(process.env)) {
     if (key.startsWith("BAND_TEST_ACP_") && value !== undefined) env[key] = value;
   }
-  for (const m of section("EnvironmentVariables").matchAll(/<key>([\s\S]*?)<\/key>\s*<string>([\s\S]*?)<\/string>/g)) {
+  for (const m of section("EnvironmentVariables").matchAll(
+    /<key>([\s\S]*?)<\/key>\s*<string>([\s\S]*?)<\/string>/g,
+  )) {
     env[unxml(m[1])] = unxml(m[2]);
   }
   const log = openSync(join(dir, `${label}.log`), "a");
-  const child = spawn(program[0], program.slice(1), { env, detached: true, stdio: ["ignore", log, log] });
+  const child = spawn(program[0], program.slice(1), {
+    env,
+    detached: true,
+    stdio: ["ignore", log, log],
+  });
   child.unref();
   writeFileSync(join(dir, `${label}.pid`), String(child.pid));
   writeFileSync(join(dir, `${label}.plist`), plistFile);
@@ -70,7 +81,9 @@ function start(label, plistFile) {
 switch (command) {
   case "bootstrap": {
     const [, plistFile] = rest;
-    const label = /<key>Label<\/key>\s*<string>([^<]*)<\/string>/.exec(readFileSync(plistFile, "utf8"))?.[1];
+    const label = /<key>Label<\/key>\s*<string>([^<]*)<\/string>/.exec(
+      readFileSync(plistFile, "utf8"),
+    )?.[1];
     if (!label) process.exit(1);
     if (pidOf(label) !== null) {
       console.error("Bootstrap failed: 5: Input/output error");
@@ -87,7 +100,9 @@ switch (command) {
     break;
   case "kickstart": {
     const label = labelOf(rest.at(-1));
-    const plistFile = existsSync(join(dir, `${label}.plist`)) ? readFileSync(join(dir, `${label}.plist`), "utf8") : null;
+    const plistFile = existsSync(join(dir, `${label}.plist`))
+      ? readFileSync(join(dir, `${label}.plist`), "utf8")
+      : null;
     if (!plistFile) process.exit(113);
     // launchd starts the job again only once the killed process has exited.
     const old = pidOf(label);

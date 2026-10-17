@@ -22,6 +22,7 @@
  * otherwise.
  */
 import type { Terminal } from "@xterm/xterm";
+
 import {
   arrowSequence,
   hasWheelMouseTracking,

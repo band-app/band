@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+
 import { FrameLog } from "../../../components/chat/frame-log";
 import { FileIcon, FolderIcon } from "../../../components/file-icon";
 import { ViewHeader } from "../../../components/files/view-header";

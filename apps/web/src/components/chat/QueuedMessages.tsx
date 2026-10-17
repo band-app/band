@@ -21,6 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Clock, CornerDownLeft, FileIcon, ImageIcon, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
+
 import { MessageResponse } from "../ai-elements/message";
 
 export interface QueuedFilePart {
@@ -148,7 +149,7 @@ function QueuedMessage({
             aria-label="Edit queued message"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            // biome-ignore lint/a11y/noAutofocus: the user just asked to edit this message
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- the user just asked to edit this message
             autoFocus
             onFocus={(e) => e.currentTarget.setSelectionRange(draft.length, draft.length)}
             onKeyDown={(e) => {

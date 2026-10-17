@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
+
 import type { FsEntry, FsStat, Host, HostFs, HostGit, HostSearch } from "@band-app/host-api";
 import { TitlePoller } from "@band-app/host-local/terminals/title-poller";
 import { mapLinkError } from "@band-app/host-remote";
@@ -31,6 +32,7 @@ import {
   type TerminalSocketBackend,
 } from "@band-app/worktree-ops/terminal-socket";
 import { WebSocketServer } from "ws";
+
 import { handleChatRoute, isChatRoute } from "./chats/local-http.ts";
 import type { ChatOwner } from "./chats/owner.ts";
 import { hostDirs, type Registrar, type WorkerContext } from "./context.ts";
@@ -270,7 +272,7 @@ export class DirectListener {
 
     const release = this.ctx.activity.hold();
     try {
-      // biome-ignore lint/suspicious/noExplicitAny: `op` is one of the union of ops, and `input` passed its own schema.
+      // oxlint-disable-next-line typescript/no-explicit-any -- `op` is one of the union of ops, and `input` passed its own schema.
       const result = await (op.run as (ops: WorktreeOps, input: any) => Promise<unknown>)(
         this.opsFor(scope),
         input,

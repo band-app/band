@@ -17,6 +17,7 @@ import {
 import { chatTabLabel } from "@band-app/client/chat-tab-label";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+
 import { useHubSession } from "../hub-session";
 import { ageLabel, type ShownState, shownState } from "../status-state";
 import { getPending, pendingVersion, subscribePending } from "./pending-store";
@@ -227,7 +228,7 @@ export function useWorktreeTabs(worktreeId: string) {
     () => JSON.stringify(worktreeStatus?.tabStatuses ?? []),
     [worktreeStatus],
   );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new status is the trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- a new status is the trigger
   useEffect(() => {
     void refetchChats();
   }, [statusKey, refetchChats]);
@@ -247,7 +248,7 @@ export function useWorktreeTabs(worktreeId: string) {
       .map((a) => ({ id: a.id, label: a.label, type: a.type, isDefault: a.id === defaultId }));
   }, [settings.data]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingTick re-reads the pending store
+  // oxlint-disable-next-line react/exhaustive-deps -- pendingTick re-reads the pending store
   const tabs = useMemo((): ChatTab[] => {
     const byId = new Map((chats.data ?? []).map((c) => [c.id, c]));
     const defaultId = settings.data?.defaultCodingAgent ?? settings.data?.codingAgents?.[0]?.id;

@@ -2,6 +2,7 @@ import type { QueuedChatMessage } from "@band-app/shared/chat-events";
 import { ArrowDown, ArrowUp, Check, type LucideIcon, Pencil, Trash2, X } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+
 import { moveItem } from "../../lib/composer/queue";
 import { chatColors, colors, useScheme } from "../../theme";
 import { Icon } from "../icon";

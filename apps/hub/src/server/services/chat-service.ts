@@ -18,6 +18,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
+
 import {
   ChatQueries,
   type ChatRow,
@@ -61,7 +62,7 @@ const MAX_LABEL_VALUE_LENGTH = 256;
 /** Regex for valid label keys: alphanumerics, `_`, `:`, `-`; 1-64 chars.
  *
  * The hyphen sits at the end of the character class as a literal —
- * Biome's `noUselessEscapeInRegex` rule prohibits writing it as `\-`.
+ * The no-useless-escape lint rule prohibits writing it as `\-`.
  * Reordering the `_`, `:`, `-` triple would silently turn the class
  * into a range, so keep the hyphen last. */
 const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:-]{1,64}$/;

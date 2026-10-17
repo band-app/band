@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+
 import { buildTranscriptionForm, detectAudioType } from "../src/speech-transcription.ts";
 
 const bytes = (...parts: (number[] | string)[]) =>

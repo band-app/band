@@ -8,6 +8,7 @@
  */
 
 import { asc, eq } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { browserProfiles, repoBrowserProfiles } from "../schema";
 

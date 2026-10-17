@@ -10,7 +10,9 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { expect, type Page, test } from "@playwright/test";
+
 import {
   cleanupTmpHome,
   createTmpHome,

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { agentIconFor } from "@band-app/shared/agent-icons";
+
 import { fileIconSvg, folderIconSvg } from "../src/lib/files/file-icon.ts";
 import { FILE_ICON_MAPS, FILE_ICON_SVG } from "../src/lib/files/file-icons.generated.ts";
 

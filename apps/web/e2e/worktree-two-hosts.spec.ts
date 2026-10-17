@@ -22,7 +22,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { type GhStub, ghStub } from "../../hub/tests/fixtures/gh-stub";
 import {
   FAKE_REPO,

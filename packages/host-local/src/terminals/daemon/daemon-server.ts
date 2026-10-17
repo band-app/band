@@ -2,7 +2,9 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
+
 import { createLogger } from "@band-app/logger";
+
 import { preloadNodePty } from "../node-pty-loader";
 import { TerminalPool } from "../terminal-pool";
 import {

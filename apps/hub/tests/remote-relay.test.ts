@@ -19,9 +19,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { findCliBinary } from "@band-app/host-local/process/cli-binary";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { openStream, STUB_AGENT_PATH, TEST_TOKEN, trpc, turnEnded } from "./helpers/acp-chat";
 import { RELAY_CLI_COMMANDS } from "./helpers/relay-cli-commands";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -604,9 +606,8 @@ describe("what an agent may call, and which ids it may take", () => {
   });
 
   it("pins create and remove to the caller's host on /trpc and /mcp alike", async () => {
-    const { pinWorktreeHost, checkRelayRequest } = await import(
-      "../src/server/services/relay-scope"
-    );
+    const { pinWorktreeHost, checkRelayRequest } =
+      await import("../src/server/services/relay-scope");
     const post = (path: string, payload: unknown) => ({
       scope: { worktreeId: "proj-relay-a@h-w" },
       method: "POST",

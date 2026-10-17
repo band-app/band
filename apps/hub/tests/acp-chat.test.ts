@@ -10,7 +10,9 @@
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import {
   agentText,
   collectEvents,
@@ -722,16 +724,16 @@ describe("chat over ACP: sessions", () => {
 });
 
 describe("chat over ACP: auth", () => {
-  it.each([
-    "chat.answer",
-    "chat.answerElicitation",
-  ])("%s rejects a request without the band_token cookie", async (procedure) => {
-    const server = await boot();
-    const res = await fetch(`${server.url}/trpc/${procedure}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: "x", requestId: "y", optionId: null, action: "decline" }),
-    });
-    expect(res.status).toBe(401);
-  });
+  it.each(["chat.answer", "chat.answerElicitation"])(
+    "%s rejects a request without the band_token cookie",
+    async (procedure) => {
+      const server = await boot();
+      const res = await fetch(`${server.url}/trpc/${procedure}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: "x", requestId: "y", optionId: null, action: "decline" }),
+      });
+      expect(res.status).toBe(401);
+    },
+  );
 });

@@ -24,6 +24,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+
 import type * as acp from "@agentclientprotocol/sdk";
 import {
   type AcpAgentHandlers,
@@ -60,6 +61,7 @@ import type {
   ResolvedDefaults,
   SessionState,
 } from "@band-app/shared/chat-events";
+
 import { ChatEventQueries } from "../infra/db/queries/chat-events";
 import {
   bandHome,

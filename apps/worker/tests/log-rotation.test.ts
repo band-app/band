@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+
 import { RotatingFile } from "@band-app/logger";
 
 const dirs: string[] = [];

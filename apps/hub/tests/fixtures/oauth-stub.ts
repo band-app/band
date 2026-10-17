@@ -5,6 +5,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import type { Server } from "node:http";
+
 import express from "express";
 
 export interface OAuthStub {

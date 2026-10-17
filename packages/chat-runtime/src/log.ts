@@ -17,6 +17,7 @@
 import { HISTORY_PAGE_MAX_ROWS, type LoggedChatEvent } from "@band-app/shared/chat-events";
 import { and, asc, desc, eq, gt, inArray, lt, max, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+
 import { chatEvents } from "./log-schema";
 
 /** A drizzle database that has the `chat_events` table: the hub's, or an owning worker's. */

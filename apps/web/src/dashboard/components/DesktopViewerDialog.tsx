@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useRef } from "react";
+
 import { closeDesktopViewer, useDesktopViewerHost } from "../../lib/desktop-viewer";
 import { trpc } from "../../lib/trpc-client";
 import { DesktopViewer } from "./DesktopViewer";

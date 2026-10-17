@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
+
 import type { DashboardAdapter, PlatformCapabilities } from "./adapter";
 import { queryClient } from "./query-client";
 import { createDashboardStore } from "./stores/dashboard-store";

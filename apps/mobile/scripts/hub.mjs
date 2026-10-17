@@ -26,6 +26,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { SCENARIO } from "./seed.mjs";
 
 const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -194,7 +195,12 @@ async function restart() {
 /** The state without secrets, for printing. */
 function view(state) {
   if (!state) return { running: false };
-  return { url: state.url, home: state.home, running: Boolean(state.pid && alive(state.pid)), stateFile: STATE_FILE };
+  return {
+    url: state.url,
+    home: state.home,
+    running: Boolean(state.pid && alive(state.pid)),
+    stateFile: STATE_FILE,
+  };
 }
 
 /** Stops the hub and deletes its temp home and the state file. */

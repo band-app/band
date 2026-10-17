@@ -9,9 +9,10 @@ import {
 } from "@band-app/ui";
 import { Ellipsis, GitBranch, GitPullRequest, Loader, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
+
+import { ReviewStateBadge } from "./check-status";
 import { ChecksSection } from "./ChecksSection";
 import { CommentsSection } from "./CommentsSection";
-import { ReviewStateBadge } from "./check-status";
 import { MergeControl } from "./MergeControl";
 import { ReviewersSection } from "./ReviewersSection";
 

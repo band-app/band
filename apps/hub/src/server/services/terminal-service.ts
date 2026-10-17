@@ -13,6 +13,7 @@ import { TitlePoller } from "@band-app/host-local/terminals/title-poller";
 import { createLogger } from "@band-app/logger";
 import type { WorktreeTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
+
 import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
 import {
   addTerminalToLayout,

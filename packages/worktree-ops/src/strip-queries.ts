@@ -31,7 +31,7 @@
 export function stripTerminalQueries(data: string): string {
   return (
     data
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real ESC sequences in terminal output
+      // oxlint-disable-next-line no-control-regex -- intentional — matching real ESC sequences in terminal output
       .replace(/\x1b\[\??[0-9]*[nc]|\x1b\[>[0-9]*c|\x1b\[=[0-9]*c/g, "")
       // OSC 10/11/12 color queries/reports. The payload runs until the first
       // BEL or ST, so `[^\x07\x1b]*` stops at either terminator byte. The
@@ -43,7 +43,7 @@ export function stripTerminalQueries(data: string): string {
       // negated class stops at any ESC, the optional terminator only ever
       // consumes a real terminator or nothing; it never eats a following
       // escape sequence.
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real OSC sequences in terminal output
+      // oxlint-disable-next-line no-control-regex -- intentional — matching real OSC sequences in terminal output
       .replace(/\x1b\]1[012];[^\x07\x1b]*(?:\x07|\x1b\\)?/g, "")
   );
 }

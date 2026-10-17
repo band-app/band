@@ -15,6 +15,7 @@
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
+
 import * as acp from "@agentclientprotocol/sdk";
 import type { AcpLaunch, AgentStdio, HostAcp } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";

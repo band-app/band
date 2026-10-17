@@ -2,6 +2,7 @@ import { Square, SquareCheck } from "lucide-react-native";
 import { type ComponentProps, memo, type ReactNode, useMemo } from "react";
 import { Linking, ScrollView, StyleSheet, Text, type TextStyle, View } from "react-native";
 import { UITextView } from "react-native-uitextview";
+
 import {
   type Align,
   type Block,
@@ -26,7 +27,7 @@ export const Markdown = memo(function Markdown({ text, muted }: { text: string; 
   return (
     <View style={styles.stack}>
       {blocks.map((block, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: blocks have no identity beyond position, and a streamed message only grows at the end
+        // oxlint-disable-next-line react/no-array-index-key -- blocks have no identity beyond position, and a streamed message only grows at the end
         <BlockView key={i} block={block} muted={muted} />
       ))}
     </View>
@@ -58,7 +59,7 @@ function renderSpans(
     if (style.length === 0 && !onPress) return span.text;
     return (
       <Leaf
-        // biome-ignore lint/suspicious/noArrayIndexKey: spans have no identity beyond position
+        // oxlint-disable-next-line react/no-array-index-key -- spans have no identity beyond position
         key={i}
         style={style}
         onPress={onPress}
@@ -121,12 +122,12 @@ function ListView({
             <Text style={[styles.text, styles.marker]}>{ordered ? `${start + i}.` : "•"}</Text>
           );
         return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: list items have no identity beyond position
+          // oxlint-disable-next-line react/no-array-index-key -- list items have no identity beyond position
           <View key={i} style={styles.listItem}>
             <View style={styles.markerBox}>{marker}</View>
             <View style={styles.listBody}>
               {item.blocks.map((block, j) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: blocks have no identity beyond position
+                // oxlint-disable-next-line react/no-array-index-key -- blocks have no identity beyond position
                 <BlockView key={j} block={block} muted={muted} />
               ))}
             </View>
@@ -172,7 +173,7 @@ function TableView({
       <View style={styles.table}>
         <View style={[styles.row, styles.headRow]}>{header.map((h, c) => cell(h, c, true))}</View>
         {rows.map((row, r) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity beyond position
+          // oxlint-disable-next-line react/no-array-index-key -- rows have no identity beyond position
           <View key={r} style={styles.row}>
             {header.map((_, c) => cell(row[c], c, false))}
           </View>
@@ -210,7 +211,7 @@ function BlockView({ block, muted }: { block: Block; muted?: boolean }) {
       return (
         <View style={styles.quote}>
           {block.blocks.map((b, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: blocks have no identity beyond position
+            // oxlint-disable-next-line react/no-array-index-key -- blocks have no identity beyond position
             <BlockView key={i} block={b} muted />
           ))}
         </View>

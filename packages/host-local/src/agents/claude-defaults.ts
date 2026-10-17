@@ -28,6 +28,7 @@ import { execFile } from "node:child_process";
 import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
+
 import type { ClaudeCliArgs } from "@band-app/host-api";
 import type { ResolvedDefaults } from "@band-app/shared/chat-events";
 

@@ -28,6 +28,7 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Check, ChevronDown, GitBranch } from "lucide-react";
 import { useEffect, useState } from "react";
+
 import { useAdapter } from "@/dashboard";
 
 const BRANCH_LIMIT = 50;

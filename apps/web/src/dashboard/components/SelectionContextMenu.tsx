@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
+
 import { readClipboardText, writeClipboardText } from "../../lib/clipboard";
 import { formatShortcut, isMacPlatform } from "../lib/command-registry";
 import {

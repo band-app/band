@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { type ChangesLike, changeListItems, countChanges } from "../src/lib/files/changes.ts";
 import { splitRunsIntoLines, textLines } from "../src/lib/files/code-lines.ts";
 import { flattenTree } from "../src/lib/files/file-tree.ts";

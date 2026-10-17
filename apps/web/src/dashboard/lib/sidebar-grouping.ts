@@ -10,6 +10,7 @@ import {
   withoutPinned,
 } from "@band-app/shared/sidebar-tree";
 import { useSyncExternalStore } from "react";
+
 import type { RepoInfo } from "../types";
 
 // The ordering and nesting rules live in shared so the mobile list applies the same ones.

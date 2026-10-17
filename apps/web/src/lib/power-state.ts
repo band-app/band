@@ -11,6 +11,7 @@
  */
 
 import { useSyncExternalStore } from "react";
+
 import { getElectronBridge } from "./desktop-ipc";
 
 export interface PowerState {

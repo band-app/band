@@ -27,6 +27,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import type { BrowserWebview } from "../lib/browser-webview";
 import { trpc } from "../lib/trpc-client";
 import { type UseBrowserFindInPageReturn, useBrowserFindInPage } from "./useBrowserFindInPage";

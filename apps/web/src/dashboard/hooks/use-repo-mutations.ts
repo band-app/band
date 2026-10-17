@@ -1,5 +1,6 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+
 import type { DashboardAdapter } from "../adapter";
 import { useAdapter } from "../context";
 import { readAgentMode } from "../lib/agent-mode";

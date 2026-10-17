@@ -7,6 +7,7 @@
 
 import { createLogger } from "@band-app/logger";
 import type { DirectAccess } from "@band-app/shared/direct-access";
+
 import { WorktreeNotFoundError } from "../errors";
 import { LOCAL_HOST_ID } from "./local-host-policy";
 import {

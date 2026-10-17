@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { usageScanState as usageScanStateTable } from "../schema";
 

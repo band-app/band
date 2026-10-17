@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@band-app/ui";
 import { Trash2 } from "lucide-react";
+
 import {
   useBrowserProfiles,
   useRemoveBrowserProfile,

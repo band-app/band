@@ -2,7 +2,9 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
 import { getBatchedCIStatuses } from "../src/server/services/branch-status-poller.ts";
 
 // Exercises the CI-poll failure throttle in `getBatchedCIStatuses` through

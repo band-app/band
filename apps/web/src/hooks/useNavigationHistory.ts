@@ -1,6 +1,8 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import type { PlatformCapabilities } from "@/dashboard";
+
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 
 /**

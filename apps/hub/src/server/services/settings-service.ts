@@ -1,6 +1,8 @@
 import { join } from "node:path";
+
 import type { AgentMode } from "@band-app/shared/agent-sessions";
 import { z } from "zod";
+
 import {
   bandHome,
   type CodingAgentDefinition,

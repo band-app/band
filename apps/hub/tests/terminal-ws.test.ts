@@ -21,9 +21,11 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { createTRPCClient, createWSClient, httpBatchLink, wsLink } from "@trpc/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { WebSocket } from "ws";
+
 import type { AppRouter } from "../src/server/api/router";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -781,7 +783,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     // The snapshot is the *state*: the surviving text is there and the
     // alt-buffer switch is reconstructed…
     expect(text).toContain("FINALMARKER");
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching the real alt-buffer escape sequence
+    // oxlint-disable-next-line no-control-regex -- intentional — matching the real alt-buffer escape sequence
     expect(text).toMatch(/\x1b\[\?(?:47|1047|1049)h/);
     // …and the erased text is NOT — proof the frame is a serialized screen,
     // not the raw byte history (which contained TEMPMARKER before the erase).
@@ -974,7 +976,7 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     // The OSC 8 opener, the text (SGR styling may sit on either side of it),
     // then the closer.
     expect(text).toMatch(
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real OSC 8 and SGR sequences
+      // oxlint-disable-next-line no-control-regex -- intentional — matching real OSC 8 and SGR sequences
       /\x1b\]8;;https:\/\/example\.com\/band\x1b\\(?:\x1b\[[0-9;]*m)*LINKTEXT(?:\x1b\[[0-9;]*m)*\x1b\]8;;\x1b\\/,
     );
   }, 30_000);

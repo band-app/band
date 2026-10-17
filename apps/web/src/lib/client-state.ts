@@ -16,6 +16,7 @@ import {
   type ClientStateChange,
   ClientStateStore,
 } from "@band-app/client/client-state";
+
 import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
 import { isDesktop } from "./is-desktop";
 

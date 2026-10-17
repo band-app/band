@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { join, posix } from "node:path";
+
 import { resumeCliInvocation } from "@band-app/coding-agent";
 import {
   type CommandRun,
@@ -17,6 +18,7 @@ import { slugifyBranchName } from "@band-app/shared/branch-name";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
+
 import { BranchOnOtherHostError, WorktreeNotFoundError } from "../errors";
 import { PendingRemovalQueries } from "../infra/db/queries/pending-removals";
 import { RepoQueries, type WorktreeOrigin } from "../infra/db/queries/repos";
@@ -1393,7 +1395,7 @@ export class WorktreeService {
         throw new InvalidOriginError("A worktree cannot be its own parent.");
       }
       const seen = new Set<string>();
-      for (let id: string | undefined = input.origin; id && !seen.has(id); ) {
+      for (let id: string | undefined = input.origin; id && !seen.has(id);) {
         if (id === worktreeId) {
           throw new InvalidOriginError(
             "That worktree is a descendant of this one, so it cannot be its parent.",

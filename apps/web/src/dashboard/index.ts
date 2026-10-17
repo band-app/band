@@ -32,10 +32,7 @@ export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { ImagePreview } from "./components/ImagePreview";
-export {
-  AUTO_DETECT_LANGUAGE_ID,
-  LanguagePickerDialog,
-} from "./components/LanguagePickerDialog";
+export { AUTO_DETECT_LANGUAGE_ID, LanguagePickerDialog } from "./components/LanguagePickerDialog";
 export { NewWorktreeDialog } from "./components/NewWorktreeForm";
 export { PdfPreview } from "./components/PdfPreview";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
@@ -132,10 +129,7 @@ export {
   SUPPORTED_LANGUAGES,
   type SupportedLanguage,
 } from "./lib/language-map";
-export type {
-  RenderedBlockKind,
-  RenderMarkdownBlock,
-} from "./lib/markdown-live-preview";
+export type { RenderedBlockKind, RenderMarkdownBlock } from "./lib/markdown-live-preview";
 export { getRecentWorktreeOrder, recordWorktreeAccess } from "./lib/recent-worktrees";
 export {
   type AddToChatDetail,
@@ -154,10 +148,7 @@ export { queryClient, queryKeys } from "./query-client";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";
 export { createDashboardStore } from "./stores/dashboard-store";
 // Stores
-export {
-  useDashboardStore,
-  useRawDashboardStore,
-} from "./stores/index";
+export { useDashboardStore, useRawDashboardStore } from "./stores/index";
 export type {
   AgentInfo,
   AgentStatusType,

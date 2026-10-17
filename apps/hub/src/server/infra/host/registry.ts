@@ -1,5 +1,6 @@
 import type { Host, TerminalBackend } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
+
 import { RepoQueries } from "../db/queries/repos";
 import { WorktreeQueries } from "../db/queries/worktrees";
 

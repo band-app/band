@@ -16,7 +16,11 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultDirs = ["apps/web/src", "packages/ui/src", "plugins/github/src"];
-const skipPaths = [/(^|\/)apps\/web\/src\/lib\/theme\//, /\.(test|spec)\.tsx?$/, /routeTree\.gen\.ts$/];
+const skipPaths = [
+  /(^|\/)apps\/web\/src\/lib\/theme\//,
+  /\.(test|spec)\.tsx?$/,
+  /routeTree\.gen\.ts$/,
+];
 
 const COLORS =
   "red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone|white|black";
@@ -26,7 +30,8 @@ const paletteClass = new RegExp(
   `(?<![\\w-])(?:[a-z0-9-]+:)*-?(?:${UTILITIES})-(?:${COLORS})(?:-\\d{2,3})?(?![\\w-])`,
 );
 // 3 and 4 digit hex with no letter (#123, #617) is an issue number far more often than a color.
-const hexColor = /(?<![\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|(?=[0-9]*[a-fA-F])[0-9a-fA-F]{3,4})(?![\w-])/;
+const hexColor =
+  /(?<![\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|(?=[0-9]*[a-fA-F])[0-9a-fA-F]{3,4})(?![\w-])/;
 const colorFunction = /(?<![\w-])(?:rgba?|hsla?|oklch|oklab)\(\s*[\d.]/;
 
 const message =
@@ -50,7 +55,8 @@ function* walk(dir) {
   }
 }
 
-const isCommentLine = (line) => /^\s*(\/\/|\/\*|\*|\{\/\*)/.test(line) && !/^\s*\{\/\*.*\*\/\}.*</.test(line);
+const isCommentLine = (line) =>
+  /^\s*(\/\/|\/\*|\*|\{\/\*)/.test(line) && !/^\s*\{\/\*.*\*\/\}.*</.test(line);
 
 export function checkSource(text) {
   const lines = text.split("\n");
@@ -67,7 +73,10 @@ export function checkSource(text) {
   return hits;
 }
 
-const dirs = process.argv.length > 2 ? process.argv.slice(2).map((d) => resolve(d)) : defaultDirs.map((d) => join(root, d));
+const dirs =
+  process.argv.length > 2
+    ? process.argv.slice(2).map((d) => resolve(d))
+    : defaultDirs.map((d) => join(root, d));
 let failures = 0;
 for (const dir of dirs) {
   for (const file of walk(dir)) {

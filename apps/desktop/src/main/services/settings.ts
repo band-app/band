@@ -9,6 +9,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { bandHome } from "./log.js";
 
 const DEFAULT_WEB_SERVER_PORT = 3456;

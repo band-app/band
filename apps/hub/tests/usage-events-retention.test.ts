@@ -16,8 +16,10 @@
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { asc } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { closeDb, getDb } from "../src/server/infra/db/connection";
 import { SettingsQueries } from "../src/server/infra/db/queries/settings";
 import {

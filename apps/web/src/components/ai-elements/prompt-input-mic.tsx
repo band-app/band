@@ -3,6 +3,7 @@ import { cn } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Mic, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import { trpc } from "../../lib/trpc-client";
 import { transcribeClip } from "../../lib/voice-api";
 import {

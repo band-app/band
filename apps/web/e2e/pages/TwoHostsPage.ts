@@ -6,6 +6,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { DesktopViewerPage } from "./DesktopViewerPage";
 import { type GroupByMode, SidebarGroupingPage } from "./SidebarGroupingPage";
 import { WorktreePage } from "./WorktreePage";

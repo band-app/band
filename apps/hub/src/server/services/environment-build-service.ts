@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
+
 import {
   checkReferences,
   commitArgs,
@@ -21,6 +22,7 @@ import {
 } from "@band-app/environment";
 import type { Host } from "@band-app/host-api";
 import { TRPCError } from "@trpc/server";
+
 import {
   type EnvironmentBuildRow,
   environmentBuildQueries,

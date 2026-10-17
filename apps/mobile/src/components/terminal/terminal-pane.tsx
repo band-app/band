@@ -1,6 +1,7 @@
 import { TerminalClient, type TerminalSink } from "@band-app/client/terminal-client";
 import { memo, useEffect, useRef, useState } from "react";
 import { AppState, Keyboard, Linking, StyleSheet, View } from "react-native";
+
 import { type BandTerminalHandle, BandTerminalView } from "../../../modules/band-terminal";
 import { useHubSession } from "../../lib/hub-session";
 import { applyCtrl, type BarKey, barKeyBytes, scanCursorMode } from "../../lib/terminal/key-bar";

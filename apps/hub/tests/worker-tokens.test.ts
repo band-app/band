@@ -4,7 +4,9 @@
 // step 2.3, so that half is tested there through `/api/workers/connect`.
 
 import { rmSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { seedSettings } from "./helpers/seed-state";
 import {
   createTmpHome,

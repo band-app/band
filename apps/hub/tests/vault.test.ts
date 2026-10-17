@@ -5,7 +5,9 @@
 import { createDecipheriv } from "node:crypto";
 import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type OAuthStub, startOAuthStub } from "./fixtures/oauth-stub";
 import { seedSettings } from "./helpers/seed-state";
 import {

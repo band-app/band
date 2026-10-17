@@ -1,10 +1,12 @@
 import { Loader2 } from "lucide-react";
+
 import {
   AGENT_STATE_INFO,
   AgentStateDot,
   type TabAgentStatus,
   useDashboardStore,
 } from "@/dashboard";
+
 import { ownerOfTerminal } from "../lib/terminal-split-registry";
 
 export type TabAgentStatusKind = TabAgentStatus["status"];

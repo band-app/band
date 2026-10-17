@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { daemonPaths } from "@band-app/host-local/terminals/daemon/protocol";
 import type { Channel, ServerSession } from "@band-app/link";
+
 import { stopTerminalDaemons, terminalRunDir } from "../src/terminals.ts";
 import {
   call,

@@ -12,8 +12,11 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { startRecordingHubStub } from "./fixtures/recording-hub-stub";
 import { type StaticUiServer, startStaticUiServer } from "./fixtures/static-ui-server";
 import { acpStubEnv } from "./helpers/acp-stub";

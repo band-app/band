@@ -8,6 +8,7 @@ import {
 } from "@band-app/ui";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+
 import { trpc } from "../lib/trpc-client";
 
 type PrereqStep = "checking" | "missing" | "installing" | "error";

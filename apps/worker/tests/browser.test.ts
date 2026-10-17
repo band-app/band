@@ -4,8 +4,10 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { findChromium } from "@band-app/host-local/browser/chromium";
 import { decodeFrames, encodeFrame, type ServerSession } from "@band-app/link";
+
 import { call, cleanup, startHub, startWorker, type TestHub, type TestWorker } from "./helpers.ts";
 
 const chromium = findChromium();
@@ -92,101 +94,105 @@ function alive(pid: number): boolean {
   }
 }
 
-describe("browser over the link", {
-  skip: chromium ? false : "no Chromium on this machine",
-}, () => {
-  let hub: TestHub;
-  let w: TestWorker;
-  let site: Server;
-  let origin: string;
-  let cookieHits = 0;
+describe(
+  "browser over the link",
+  {
+    skip: chromium ? false : "no Chromium on this machine",
+  },
+  () => {
+    let hub: TestHub;
+    let w: TestWorker;
+    let site: Server;
+    let origin: string;
+    let cookieHits = 0;
 
-  before(async () => {
-    process.env.BAND_CHROMIUM_BIN = chromium;
-    site = createServer((req, res) => {
-      if (req.url === "/cookie") {
-        cookieHits++;
-        const expires = new Date(Date.now() + 3600_000).toUTCString();
-        res.writeHead(200, {
-          "content-type": "text/html",
-          "set-cookie": `band=persisted; Expires=${expires}; Path=/`,
-        });
-        res.end("<title>cookie set</title>");
-        return;
-      }
-      if (req.url === "/echo-cookie") {
+    before(async () => {
+      process.env.BAND_CHROMIUM_BIN = chromium;
+      site = createServer((req, res) => {
+        if (req.url === "/cookie") {
+          cookieHits++;
+          const expires = new Date(Date.now() + 3600_000).toUTCString();
+          res.writeHead(200, {
+            "content-type": "text/html",
+            "set-cookie": `band=persisted; Expires=${expires}; Path=/`,
+          });
+          res.end("<title>cookie set</title>");
+          return;
+        }
+        if (req.url === "/echo-cookie") {
+          res.writeHead(200, { "content-type": "text/html" });
+          res.end(`<title>cookie:${req.headers.cookie ?? "none"}</title>`);
+          return;
+        }
         res.writeHead(200, { "content-type": "text/html" });
-        res.end(`<title>cookie:${req.headers.cookie ?? "none"}</title>`);
-        return;
-      }
-      res.writeHead(200, { "content-type": "text/html" });
-      res.end("<title>served on the worker</title>");
+        res.end("<title>served on the worker</title>");
+      });
+      await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
+      origin = `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
+      hub = await startHub();
+      w = await startWorker(hub);
     });
-    await new Promise<void>((r) => site.listen(0, "127.0.0.1", r));
-    origin = `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
-    hub = await startHub();
-    w = await startWorker(hub);
-  });
 
-  after(async () => {
-    await call(w.session, "browser.close", { worktreeId: "wt-a" }).catch(() => undefined);
-    await call(w.session, "browser.close", { worktreeId: "wt-b" }).catch(() => undefined);
-    await w.worker.stop();
-    await hub.close();
-    site.closeAllConnections();
-    await new Promise<void>((r) => site.close(() => r()));
-    cleanup(w.root, w.stateDir);
-  });
+    after(async () => {
+      await call(w.session, "browser.close", { worktreeId: "wt-a" }).catch(() => undefined);
+      await call(w.session, "browser.close", { worktreeId: "wt-b" }).catch(() => undefined);
+      await w.worker.stop();
+      await hub.close();
+      site.closeAllConnections();
+      await new Promise<void>((r) => site.close(() => r()));
+      cleanup(w.root, w.stateDir);
+    });
 
-  it("reads the title of a page on the worker's localhost", async () => {
-    const info = await openBrowser(w.session, "wt-a");
-    assert.ok(info.pid > 0);
-    assert.ok(info.profileDir.startsWith(join(w.stateDir, "browser")));
-    assert.equal(await pageTitle(w.session, "wt-a", origin), "served on the worker");
-  });
+    it("reads the title of a page on the worker's localhost", async () => {
+      const info = await openBrowser(w.session, "wt-a");
+      assert.ok(info.pid > 0);
+      assert.ok(info.profileDir.startsWith(join(w.stateDir, "browser")));
+      assert.equal(await pageTitle(w.session, "wt-a", origin), "served on the worker");
+    });
 
-  it("keeps the DevTools port on loopback", async () => {
-    const info = await openBrowser(w.session, "wt-a");
-    const [port, path] = readFileSync(join(info.profileDir, "DevToolsActivePort"), "utf8").split(
-      "\n",
-    );
-    assert.equal(Number(port), info.port);
-    const version = await fetch(`http://127.0.0.1:${info.port}/json/version`);
-    assert.equal(version.status, 200);
-    assert.match(path ?? "", /^\/devtools\/browser\//);
-    // `--remote-debugging-address=127.0.0.1` binds loopback only: the listening socket is not on a wildcard address.
-    const flags = (await import("node:child_process"))
-      .execFileSync("ps", ["-o", "command=", "-p", String(info.pid)], { encoding: "utf8" })
-      .trim();
-    assert.match(flags, /--remote-debugging-address=127\.0\.0\.1/);
-    assert.match(flags, /--remote-debugging-port=0/);
-  });
+    it("keeps the DevTools port on loopback", async () => {
+      const info = await openBrowser(w.session, "wt-a");
+      const [port, path] = readFileSync(join(info.profileDir, "DevToolsActivePort"), "utf8").split(
+        "\n",
+      );
+      assert.equal(Number(port), info.port);
+      const version = await fetch(`http://127.0.0.1:${info.port}/json/version`);
+      assert.equal(version.status, 200);
+      assert.match(path ?? "", /^\/devtools\/browser\//);
+      // `--remote-debugging-address=127.0.0.1` binds loopback only: the listening socket is not on a wildcard address.
+      const flags = (await import("node:child_process"))
+        .execFileSync("ps", ["-o", "command=", "-p", String(info.pid)], { encoding: "utf8" })
+        .trim();
+      assert.match(flags, /--remote-debugging-address=127\.0\.0\.1/);
+      assert.match(flags, /--remote-debugging-port=0/);
+    });
 
-  it("keeps cookies across a close and reopen of the same worktree", async () => {
-    await openBrowser(w.session, "wt-b");
-    assert.equal(await pageTitle(w.session, "wt-b", `${origin}/cookie`), "cookie set");
-    await call(w.session, "browser.close", { worktreeId: "wt-b" });
-    const again = await openBrowser(w.session, "wt-b");
-    assert.ok(cookieHits >= 1);
-    assert.equal(
-      await pageTitle(w.session, "wt-b", `${origin}/echo-cookie`),
-      "cookie:band=persisted",
-    );
-    assert.ok(again.profileDir.endsWith("wt-b"));
-  });
+    it("keeps cookies across a close and reopen of the same worktree", async () => {
+      await openBrowser(w.session, "wt-b");
+      assert.equal(await pageTitle(w.session, "wt-b", `${origin}/cookie`), "cookie set");
+      await call(w.session, "browser.close", { worktreeId: "wt-b" });
+      const again = await openBrowser(w.session, "wt-b");
+      assert.ok(cookieHits >= 1);
+      assert.equal(
+        await pageTitle(w.session, "wt-b", `${origin}/echo-cookie`),
+        "cookie:band=persisted",
+      );
+      assert.ok(again.profileDir.endsWith("wt-b"));
+    });
 
-  it("gives another worktree its own profile", async () => {
-    const other = await openBrowser(w.session, "wt-a");
-    assert.equal(await pageTitle(w.session, "wt-a", `${origin}/echo-cookie`), "cookie:none");
-    assert.ok(other.profileDir.endsWith("wt-a"));
-  });
+    it("gives another worktree its own profile", async () => {
+      const other = await openBrowser(w.session, "wt-a");
+      assert.equal(await pageTitle(w.session, "wt-a", `${origin}/echo-cookie`), "cookie:none");
+      assert.ok(other.profileDir.endsWith("wt-a"));
+    });
 
-  it("kills Chromium when the worktree's browser is closed", async () => {
-    const info = await openBrowser(w.session, "wt-a");
-    assert.ok(alive(info.pid));
-    await call(w.session, "browser.close", { worktreeId: "wt-a" });
-    assert.equal(alive(info.pid), false);
-    await assert.rejects(call(w.session, "browser.connect", { worktreeId: "wt-a" }));
-    assert.ok(existsSync(info.profileDir), "the profile stays for the next open");
-  });
-});
+    it("kills Chromium when the worktree's browser is closed", async () => {
+      const info = await openBrowser(w.session, "wt-a");
+      assert.ok(alive(info.pid));
+      await call(w.session, "browser.close", { worktreeId: "wt-a" });
+      assert.equal(alive(info.pid), false);
+      await assert.rejects(call(w.session, "browser.connect", { worktreeId: "wt-a" }));
+      assert.ok(existsSync(info.profileDir), "the profile stays for the next open");
+    });
+  },
+);

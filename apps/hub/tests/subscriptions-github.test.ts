@@ -6,7 +6,9 @@
  */
 
 import { createHmac } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import { type GhInvocation, type GhStub, ghStub } from "./fixtures/gh-stub";
 import { startAcpServer, stubRequests, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";

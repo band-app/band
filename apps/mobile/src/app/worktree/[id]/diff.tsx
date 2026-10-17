@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { useMemo } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+
 import { FileIcon } from "../../../components/file-icon";
 import { CodeList, type CodeRow } from "../../../components/files/code-list";
 import { ViewHeader } from "../../../components/files/view-header";

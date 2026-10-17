@@ -4,6 +4,7 @@
  */
 
 import { posix } from "node:path";
+
 import type { Host } from "@band-app/host-api";
 
 /** Directory beside the worktrees, in the worker's first root, where the hub stages files. */

@@ -1,6 +1,8 @@
 import { isAbsolute, join, resolve, sep } from "node:path";
+
 import type { FsStat, HostFs } from "@band-app/host-api";
 import { formatFileLocation } from "@band-app/shared/file-location";
+
 import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";

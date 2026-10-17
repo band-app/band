@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { platform } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+
 import {
   LAUNCHD_LABEL,
   renderEnvFile,
@@ -180,30 +181,34 @@ describe("install-service", () => {
     assert.equal(run(home, bin, ["status"]).status, 4);
   });
 
-  it("rewrites the unit of an existing install with OOMPolicy=continue", {
-    skip: platform() !== "linux",
-  }, () => {
-    const home = tmpDir("band-service-oom-");
-    dirs.push(home);
-    const { bin, calls } = stubBin(home);
-    const unitFile = join(home, ".config", "systemd", "user", SYSTEMD_UNIT);
-    mkdirSync(join(unitFile, ".."), { recursive: true });
-    // A unit an older Band wrote, without the policy.
-    writeFileSync(unitFile, "[Unit]\nDescription=Band worker\n\n[Service]\nKillMode=process\n");
-    const args = ["install-service", "--hub", "https://hub.example.com", "--token", TOKEN];
-    for (let i = 0; i < 2; i++) {
-      const before = calls().length;
-      const install = run(home, bin, args);
-      assert.equal(install.status, 0, install.stderr);
-      const unit = readFileSync(unitFile, "utf8");
-      const service = unit.slice(unit.indexOf("[Service]"), unit.indexOf("[Install]"));
-      assert.match(service, /^OOMPolicy=continue$/m);
-      assert.equal(unit.match(/^OOMPolicy=continue$/gm)?.length, 1);
-      assert.equal(unit.match(/^KillMode=process$/gm)?.length, 1);
-      // systemd keeps the old unit until it reloads.
-      assert.ok(calls().slice(before).includes("systemctl --user daemon-reload"));
-    }
-  });
+  it(
+    "rewrites the unit of an existing install with OOMPolicy=continue",
+    {
+      skip: platform() !== "linux",
+    },
+    () => {
+      const home = tmpDir("band-service-oom-");
+      dirs.push(home);
+      const { bin, calls } = stubBin(home);
+      const unitFile = join(home, ".config", "systemd", "user", SYSTEMD_UNIT);
+      mkdirSync(join(unitFile, ".."), { recursive: true });
+      // A unit an older Band wrote, without the policy.
+      writeFileSync(unitFile, "[Unit]\nDescription=Band worker\n\n[Service]\nKillMode=process\n");
+      const args = ["install-service", "--hub", "https://hub.example.com", "--token", TOKEN];
+      for (let i = 0; i < 2; i++) {
+        const before = calls().length;
+        const install = run(home, bin, args);
+        assert.equal(install.status, 0, install.stderr);
+        const unit = readFileSync(unitFile, "utf8");
+        const service = unit.slice(unit.indexOf("[Service]"), unit.indexOf("[Install]"));
+        assert.match(service, /^OOMPolicy=continue$/m);
+        assert.equal(unit.match(/^OOMPolicy=continue$/gm)?.length, 1);
+        assert.equal(unit.match(/^KillMode=process$/gm)?.length, 1);
+        // systemd keeps the old unit until it reloads.
+        assert.ok(calls().slice(before).includes("systemctl --user daemon-reload"));
+      }
+    },
+  );
 
   it("refuses to install without a hub or token", () => {
     const home = tmpDir("band-service-");

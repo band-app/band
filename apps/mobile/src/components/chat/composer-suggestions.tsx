@@ -7,6 +7,7 @@ import {
 import { File, SquareSlash } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
 import { Icon } from "../icon";

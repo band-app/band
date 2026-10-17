@@ -164,7 +164,7 @@ export function DiffOverviewRuler({
   // Re-measure on scroll (slider position, and CodeMirror replaces estimated
   // line heights with measured ones as lines render) and whenever the
   // scroller or its content changes size.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `views` is read via ref; listed so a new diff or view mode re-measures
+  // oxlint-disable-next-line react/exhaustive-deps -- `views` is read via ref; listed so a new diff or view mode re-measures
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;

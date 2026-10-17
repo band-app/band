@@ -1,5 +1,6 @@
 import { formatReport, probeCapabilities } from "@band-app/host-local/process/capabilities";
 import { createLogger } from "@band-app/logger";
+
 import { ConfigError, parseConfig, usage } from "./config.ts";
 import {
   GIT_CREDENTIAL_SUBCOMMAND,

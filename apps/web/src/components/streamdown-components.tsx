@@ -3,6 +3,7 @@ import { createCodePlugin } from "@streamdown/code";
 import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { AnchorHTMLAttributes } from "react";
+
 import { openExternalUrl } from "../lib/open-external-url";
 import { BAND_SHIKI_THEMES } from "./shiki-band-theme";
 

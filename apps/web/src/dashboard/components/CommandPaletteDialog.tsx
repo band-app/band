@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@band-app/ui";
 import { useCallback } from "react";
+
 import { formatShortcut, type PaletteCommand } from "../lib/command-registry";
 
 interface CommandPaletteDialogProps {

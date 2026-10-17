@@ -8,8 +8,10 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+
+import { afterAll, afterEach, describe, expect, it } from "vite-plus/test";
 import WebSocket from "ws";
+
 import { seedSettings } from "./helpers/seed-state";
 import {
   createTmpHome,

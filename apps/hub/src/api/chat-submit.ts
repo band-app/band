@@ -12,8 +12,10 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { createLogger } from "@band-app/logger";
 import type { ContinuedFrom } from "@band-app/shared/continuation";
+
 import { ContinueGateError } from "../server/errors";
 import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
 import { saveWorktreeUploads } from "../server/services/_utils/upload-utils";

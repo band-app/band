@@ -14,6 +14,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderGit2, Server } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+
 import { crossOriginHub } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
@@ -268,7 +269,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
   // A long path scrolls inside the breadcrumbs; keep the current folder in view.
   const crumbsRef = useRef<HTMLElement>(null);
   const listedPath = data?.path;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the listed path changes
+  // oxlint-disable-next-line react/exhaustive-deps -- re-run when the listed path changes
   useEffect(() => {
     const el = crumbsRef.current;
     if (el) el.scrollLeft = el.scrollWidth;

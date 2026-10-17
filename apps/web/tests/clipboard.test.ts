@@ -7,7 +7,8 @@
  * `undefined`. The helper has to detect that and fall back to
  * `document.execCommand('copy')`.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
 import { readClipboardText, writeClipboardText } from "../src/lib/clipboard";
 
 const realClipboardDescriptor = Object.getOwnPropertyDescriptor(Navigator.prototype, "clipboard");

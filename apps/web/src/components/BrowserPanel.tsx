@@ -1,6 +1,8 @@
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+
 import { useBrowserProfiles, useInvalidateBrowserProfiles, useSettingsQuery } from "@/dashboard";
+
 import { BROWSER_LOAD_EVENT, type BrowserLoadDetail } from "../dashboard/lib/html-preview";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
@@ -433,7 +435,7 @@ export function BrowserPaneComponent({
   // should re-bind this effect.
   const urlPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  // oxlint-disable-next-line react/exhaustive-deps -- see above
   useEffect(() => {
     if (!isDesktop) return;
     let unlistenUrl: (() => void) | undefined;

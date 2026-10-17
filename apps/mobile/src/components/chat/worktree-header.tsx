@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import type { ChatTab } from "../../lib/chat/use-worktree-tabs";
 import { colors, tones } from "../../theme";
 import { BackGlyph, ChevronGlyph, DotsGlyph, Glass, GlassCircle } from "../glass";
