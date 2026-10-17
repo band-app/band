@@ -1,5 +1,5 @@
 # t7 (S3): a horizontal swipe on the transcript moves to the next or previous tab and the pill's
-# "N of M" follows; a drag from the left edge leaves the tab alone, for the system's back swipe. Runs after t1 to t6, so the tabs
+# "N of M" follows; a drag from the left edge goes back to the worktree list, the system's back swipe. Runs after t1 to t6, so the tabs
 # are the one t2 started, Parser v2, Docs and the chat t6 added from the "web".
 appId: app.getband.mobile
 name: t7 swipe between tabs
@@ -49,15 +49,15 @@ name: t7 swipe between tabs
       text: ".*2 of 4.*"
     timeout: 5000
 - takeScreenshot: t7-after-swipe-right
-# A drag that starts at the left edge is the system's back swipe, so it must not change the tab.
-# Maestro's synthetic drag does not trigger iOS's back gesture (not even on the Hubs screen, which
-# has no pager), so this checks only that the pager leaves the edge alone; the back swipe itself
-# is a manual check.
+# A drag that starts at the left edge is the system's back swipe, so it must leave the pager alone
+# and go back to the worktree list. (An older simulator ignored Maestro's synthetic drag here, which
+# is why this once asserted that the tab stayed put.)
 - swipe:
     start: 1%, 50%
     end: 70%, 50%
     duration: 400
-- assertVisible:
-    id: tabs__switcher
-    text: ".*2 of 4.*"
+- extendedWaitUntil:
+    visible:
+      id: home__screen
+    timeout: 5000
 - takeScreenshot: t7-edge-drag

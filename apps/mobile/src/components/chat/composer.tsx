@@ -185,6 +185,7 @@ export function Composer({
         worktreeId={worktreeId}
         onPick={(picked) => {
           setText(picked.text);
+          setSelection({ start: picked.text.length, end: picked.text.length });
           setHint(picked.hint);
         }}
       />
@@ -262,6 +263,8 @@ export function Composer({
             placeholderTextColor={colors.faint}
             style={[styles.input, expanded && styles.inputExpanded]}
             autoCapitalize="sentences"
+            autoCorrect={false}
+            spellCheck={false}
             testID="composer__input"
           />
           {expanded ? null : mic}

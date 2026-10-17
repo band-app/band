@@ -51,6 +51,10 @@ name: S4 changes and diffs
 - takeScreenshot: x4-diff-modified
 - tapOn:
     id: diff__back
+- extendedWaitUntil:
+    visible:
+      id: changes__screen
+    timeout: 10000
 # A deleted file.
 - tapOn:
     id: changes__row-unstaged-src/old.ts
@@ -63,6 +67,10 @@ name: S4 changes and diffs
 - takeScreenshot: x4-diff-deleted
 - tapOn:
     id: diff__back
+- extendedWaitUntil:
+    visible:
+      id: changes__screen
+    timeout: 10000
 # A renamed file (staged), paired with its old path.
 - tapOn:
     id: changes__row-staged-src/helpers.js
@@ -75,9 +83,22 @@ name: S4 changes and diffs
 - takeScreenshot: x4-diff-renamed
 - tapOn:
     id: diff__back
+- extendedWaitUntil:
+    visible:
+      id: changes__screen
+    timeout: 10000
 # An untracked file is all added lines.
 - tapOn:
     id: changes__row-untracked-notes.txt
+# The first tap right after the previous diff closes is sometimes swallowed in the simulator, so
+# tap once more when the diff did not open.
+- runFlow:
+    when:
+      notVisible:
+        id: diff__list
+    commands:
+      - tapOn:
+          id: changes__row-untracked-notes.txt
 - extendedWaitUntil:
     visible:
       id: diff__list
