@@ -43,6 +43,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "get_power_state",
   "keep_awake_get",
   "keep_awake_set",
+  "report_renderer_error",
   // Hub picker
   "hub_get_choice",
   "hub_set_choice",
