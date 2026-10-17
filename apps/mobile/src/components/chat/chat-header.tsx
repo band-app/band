@@ -1,8 +1,10 @@
 import type { sessionPickers } from "@band-app/client/session-pickers";
+import { ChevronDown, History } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { colors } from "../../theme";
+import { Icon } from "../icon";
 import { SessionHistorySheet } from "./session-history-sheet";
 import { SessionSheet } from "./session-sheet";
 
@@ -64,7 +66,7 @@ export function ChatHeader({
             style={styles.iconButton}
             testID="chat__history"
           >
-            <Text style={styles.label}>⏱</Text>
+            <Icon icon={History} />
           </Pressable>
           <SessionHistorySheet
             visible={historyOpen}
@@ -106,7 +108,7 @@ function Chip({
       <Text style={styles.label} numberOfLines={1}>
         {label}
       </Text>
-      <Text style={styles.caret}>▾</Text>
+      <Icon icon={ChevronDown} size="sm" color={colors.mutedForeground} />
     </Pressable>
   );
 }
@@ -132,5 +134,4 @@ const styles = StyleSheet.create({
     width: 36,
   },
   label: { color: colors.foreground, flexShrink: 1, fontSize: 14 },
-  caret: { color: colors.mutedForeground, fontSize: 11 },
 });

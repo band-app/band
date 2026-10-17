@@ -1,8 +1,10 @@
 import type { QueuedChatMessage } from "@band-app/shared/chat-events";
+import { ArrowDown, ArrowUp, Check, type LucideIcon, Pencil, Trash2, X } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { moveItem } from "../../lib/composer/queue";
 import { chatColors, colors, useScheme } from "../../theme";
+import { Icon } from "../icon";
 
 /**
  * Messages sent while the agent runs, listed above the composer as unsent bubbles. They go out
@@ -91,13 +93,13 @@ function QueuedMessage({
         <View style={styles.actions}>
           <Action
             label="Cancel"
-            glyph="✕"
+            icon={X}
             onPress={() => setEditing(false)}
             testID="queue__edit-cancel"
           />
           <Action
             label="Save"
-            glyph="✓"
+            icon={Check}
             onPress={save}
             disabled={!draft.trim()}
             testID="queue__edit-save"
@@ -122,24 +124,35 @@ function QueuedMessage({
         ) : null}
       </View>
       <View style={styles.actions}>
-        <Action label="Move up" glyph="↑" onPress={onUp} disabled={!canUp} testID="queue__up" />
+        <Action
+          label="Move up"
+          icon={ArrowUp}
+          onPress={onUp}
+          disabled={!canUp}
+          testID="queue__up"
+        />
         <Action
           label="Move down"
-          glyph="↓"
+          icon={ArrowDown}
           onPress={onDown}
           disabled={!canDown}
           testID="queue__down"
         />
         <Action
           label="Edit queued message"
-          glyph="✎"
+          icon={Pencil}
           onPress={() => {
             setDraft(message.text);
             setEditing(true);
           }}
           testID="queue__edit"
         />
-        <Action label="Delete queued message" glyph="🗑" onPress={onRemove} testID="queue__delete" />
+        <Action
+          label="Delete queued message"
+          icon={Trash2}
+          onPress={onRemove}
+          testID="queue__delete"
+        />
       </View>
     </View>
   );
@@ -147,13 +160,13 @@ function QueuedMessage({
 
 function Action({
   label,
-  glyph,
+  icon,
   onPress,
   disabled,
   testID,
 }: {
   label: string;
-  glyph: string;
+  icon: LucideIcon;
   onPress: () => void;
   disabled?: boolean;
   testID: string;
@@ -169,7 +182,7 @@ function Action({
       style={[styles.action, disabled && styles.disabled]}
       testID={testID}
     >
-      <Text style={styles.glyph}>{glyph}</Text>
+      <Icon icon={icon} color={colors.mutedForeground} />
     </Pressable>
   );
 }
@@ -194,7 +207,6 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: 4, justifyContent: "flex-end" },
   action: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
   disabled: { opacity: 0.3 },
-  glyph: { color: colors.mutedForeground, fontSize: 15 },
   editor: {
     backgroundColor: colors.muted,
     borderColor: colors.border,

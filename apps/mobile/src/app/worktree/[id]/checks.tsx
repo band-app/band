@@ -10,6 +10,16 @@ import {
 } from "@band-app/client/checks";
 import { FlashList } from "@shopify/flash-list";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  type LucideIcon,
+  Minus,
+  X,
+} from "lucide-react-native";
 import { memo, useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,6 +33,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BackGlyph, Glass, GlassCircle } from "../../../components/glass";
+import { Icon } from "../../../components/icon";
 import { Body, Centered } from "../../../components/ui";
 import { useWorktreeChecks } from "../../../lib/checks/use-checks";
 import { SessionGate } from "../../../lib/hub-session";
@@ -49,14 +60,13 @@ const STATE_TONE: Record<CheckState, string | typeof colors.mutedForeground> = {
   skipped: tones.neutral,
 };
 
-const STATE_GLYPH: Record<CheckState, string> = {
-  failure: "✕",
-  running: "↻",
-  pending: "◷",
-  cancelled: "⊘",
-  success: "✓",
-  neutral: "–",
-  skipped: "–",
+const STATE_ICON: Record<Exclude<CheckState, "running">, LucideIcon> = {
+  failure: X,
+  pending: Clock,
+  cancelled: Ban,
+  success: Check,
+  neutral: Minus,
+  skipped: Minus,
 };
 
 function CheckIcon({ state }: { state: CheckState }) {
@@ -69,7 +79,7 @@ function CheckIcon({ state }: { state: CheckState }) {
       {state === "running" ? (
         <ActivityIndicator size="small" color={tones.running} style={styles.iconSpinner} />
       ) : (
-        <Text style={[styles.iconGlyph, { color: STATE_TONE[state] }]}>{STATE_GLYPH[state]}</Text>
+        <Icon icon={STATE_ICON[state]} size="sm" color={STATE_TONE[state]} />
       )}
     </View>
   );
@@ -314,7 +324,7 @@ const CheckRow = memo(function CheckRow({
             {duration ? ` · ${duration}` : ""}
           </Text>
         </View>
-        <Text style={styles.chevron}>{open ? "⌃" : "⌄"}</Text>
+        <Icon icon={open ? ChevronUp : ChevronDown} color={colors.mutedForeground} />
       </Pressable>
       {open ? (
         <View style={styles.details} testID="checks__details">
@@ -430,7 +440,6 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, minWidth: 0 },
   rowName: { color: colors.foreground, fontSize: 16, fontWeight: "500" },
   rowMeta: { color: colors.mutedForeground, fontSize: 13 },
-  chevron: { color: colors.mutedForeground, fontSize: 16 },
   icon: {
     alignItems: "center",
     borderRadius: 11,
@@ -439,7 +448,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 22,
   },
-  iconGlyph: { fontSize: 12, fontWeight: "800" },
   iconSpinner: { transform: [{ scale: 0.6 }] },
   details: { gap: 6, paddingBottom: 12, paddingLeft: 34 },
   detail: { flexDirection: "row", gap: 10 },

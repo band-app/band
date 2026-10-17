@@ -1,3 +1,4 @@
+import { MessageSquarePlus, SquareTerminal } from "lucide-react-native";
 import { useRef, useState } from "react";
 import {
   ActionSheetIOS,
@@ -15,7 +16,7 @@ import {
 import type { AgentChoice, ChatTab } from "../../lib/chat/use-worktree-tabs";
 import { colors, tones } from "../../theme";
 import { AgentIcon } from "../agent-icon";
-import { PlusGlyph } from "../glass";
+import { Icon } from "../icon";
 import { StateIcon } from "../state-icon";
 
 export interface TabActions {
@@ -130,7 +131,7 @@ function TabRow({
         >
           <View style={styles.tabIcon}>
             {tab.kind === "term" ? (
-              <Text style={styles.tabGlyph}>{">_"}</Text>
+              <Icon icon={SquareTerminal} color={colors.mutedForeground} />
             ) : (
               <AgentIcon type={tab.agentType} size={18} color={colors.mutedForeground} />
             )}
@@ -233,7 +234,7 @@ export function TabSwitcher({
               style={styles.newChat}
               testID="tabs__new"
             >
-              <PlusGlyph size={14} />
+              <Icon icon={MessageSquarePlus} size="sm" />
               <Text style={styles.newChatText}>Chat</Text>
             </Pressable>
             <Pressable
@@ -243,7 +244,7 @@ export function TabSwitcher({
               style={styles.newChat}
               testID="tabs__new-terminal"
             >
-              <PlusGlyph size={14} />
+              <Icon icon={SquareTerminal} size="sm" />
               <Text style={styles.newChatText}>Terminal</Text>
             </Pressable>
           </View>
@@ -389,7 +390,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 34,
   },
-  tabGlyph: { color: colors.mutedForeground, fontSize: 16 },
   tx: { flex: 1, minWidth: 0 },
   txName: { color: colors.foreground, fontSize: 16, fontWeight: "500" },
   txSummary: { color: colors.mutedForeground, fontSize: 13 },

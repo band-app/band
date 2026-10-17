@@ -41,13 +41,10 @@ name: S4 a turn streamed while in the background arrives complete
     timeout: 30000
 - takeScreenshot: s4-complete
 - tapOn:
-    id: chat__message-menu
+    id: chat__message-copy
     below:
       text: "END of the stream."
-# The message menu opens the message actions; Copy puts the text on the clipboard, which the check
-# below compares with the hub's.
-- tapOn:
-    text: "Copy"
+# The copy button puts the text on the clipboard, which the check below compares with the hub's.
 - runScript:
     file: scripts/hub-control.js
     env:

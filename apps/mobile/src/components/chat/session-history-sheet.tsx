@@ -1,3 +1,4 @@
+import { Check, MessageSquare, Plus } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -11,6 +12,7 @@ import {
 import { type SessionSummary, sessionRows } from "../../lib/chat/session-history";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
+import { Icon } from "../icon";
 
 type Load =
   | { state: "loading" }
@@ -123,6 +125,7 @@ export function SessionHistorySheet({
               style={styles.row}
               testID="session-history__new"
             >
+              <Icon icon={Plus} />
               <Text style={styles.name}>New session</Text>
             </Pressable>
           </View>
@@ -164,6 +167,7 @@ export function SessionHistorySheet({
                   style={styles.row}
                   testID={`session-history__row-${row.sessionId}`}
                 >
+                  <Icon icon={MessageSquare} />
                   <View style={styles.rowText}>
                     <Text style={styles.name} numberOfLines={1}>
                       {row.label}
@@ -171,9 +175,9 @@ export function SessionHistorySheet({
                     {row.age ? <Text style={styles.muted}>{row.age}</Text> : null}
                   </View>
                   {row.current ? (
-                    <Text style={styles.check} testID="session-history__current">
-                      ✓
-                    </Text>
+                    <View testID="session-history__current">
+                      <Icon icon={Check} />
+                    </View>
                   ) : null}
                 </Pressable>
               ))}
@@ -208,6 +212,5 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, gap: 2 },
   name: { color: colors.foreground, fontSize: 16 },
   muted: { color: colors.mutedForeground, fontSize: 13 },
-  check: { color: colors.foreground, fontSize: 17 },
   status: { alignItems: "center", gap: 8, paddingVertical: 16, textAlign: "center" },
 });

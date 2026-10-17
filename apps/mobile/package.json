@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild --platform ios --no-install",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests",
-    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "lint": "node scripts/check-glyphs.mjs",
+    "test": "node scripts/check-glyphs.mjs && node --experimental-strip-types --test tests/*.test.ts",
     "build:ios-sim": "node scripts/build-ios-sim.mjs"
   },
   "dependencies": {
