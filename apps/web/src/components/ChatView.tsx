@@ -56,6 +56,7 @@ import {
   PromptInputActions,
   PromptInputAttach,
   PromptInputBody,
+  PromptInputNotice,
   PromptInputSubmit,
   PromptInputTextarea,
 } from "./ai-elements/prompt-input";
@@ -787,6 +788,7 @@ export function ChatView({
                 onStop={handleStop}
               />
             </PromptInputBody>
+            <PromptInputNotice />
             <PromptInputActions>
               {/* min-w-0 lets the picker labels truncate on a narrow screen
                   instead of pushing the settings out of the composer. */}
