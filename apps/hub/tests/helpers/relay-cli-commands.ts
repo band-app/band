@@ -71,6 +71,8 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "worktrees set-origin": "rewires the sidebar tree, which is a person's call, not an agent's",
   "worktrees checkpoints": "reads the hub's checkpoints, which a worker has no need to see",
   "hosts evacuate": "admin only, moves every worktree off a host",
+  "hosts trust": "no agent may change a host's trust level, whatever its own",
+  "hosts audit": "the audit log is for a person's admin token",
   "runners list": "reads the hub's runner settings, which name its scripts and machines",
   "runners log": "reads what the hub's runner scripts printed",
   "env validate": "admin only, reads a path on the hub's machine",

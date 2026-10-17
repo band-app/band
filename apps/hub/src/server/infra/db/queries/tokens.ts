@@ -210,6 +210,12 @@ export class TokenQueries {
     this.db().update(hosts).set({ info }).where(eq(hosts.id, id)).run();
   }
 
+  /** Stores a host's trust level. Returns false when there is no such host. */
+  setHostTrust(id: string, trust: NonNullable<HostRow["trust"]>): boolean {
+    const result = this.db().update(hosts).set({ trust }).where(eq(hosts.id, id)).run();
+    return Number(result.changes ?? 0) > 0;
+  }
+
   /** Sets a host's status and, when the worker was last heard from, its last-seen time. */
   setHostStatus(id: string, status: HostRow["status"], lastSeenAt?: number): void {
     this.db()

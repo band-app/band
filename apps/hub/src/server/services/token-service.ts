@@ -14,6 +14,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { CapabilityReport } from "@band-app/host-api";
 import type { AuthResult, Hello } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
+import { defaultHostTrust, type HostTrust } from "@band-app/shared/host-trust";
 import { SharedTokenRevokeError, TokenNotFoundError } from "../errors";
 import { SocketRegistry } from "../infra/auth/socket-registry";
 import {
@@ -91,6 +92,8 @@ export interface HostView {
   tools: Record<string, string>;
   /** False for the hub's own machine when `BAND_LOCAL_HOST=off`. */
   usable: boolean;
+  /** How far the host's agents reach through the relay (the stored level, else the default for the host). */
+  trust: HostTrust;
 }
 
 /** Why `removeHost` refused. */
@@ -370,6 +373,7 @@ export class TokenService {
     labels: string[] = [],
     ttlMs: number = DEFAULT_BOOTSTRAP_TTL_MS,
     fixedHostId?: string,
+    trust: HostTrust | null = null,
   ): { token: string; hostId: string; view: TokenView } {
     const ttl = Math.min(Math.max(ttlMs, 1000), MAX_BOOTSTRAP_TTL_MS);
     if (fixedHostId && this.queries.findHost(fixedHostId)) {
@@ -388,6 +392,7 @@ export class TokenService {
       lastSeenAt: null,
       info: null,
       version: null,
+      trust,
       createdAt: at,
     });
     const token = newToken("worker_bootstrap");
@@ -557,6 +562,9 @@ export class TokenService {
       home: typeof h.info?.home === "string" ? h.info.home : null,
       tools: stringMap(h.info?.tools),
       usable: h.id !== "local" || isLocalHostEnabled(),
+      trust:
+        h.trust ??
+        defaultHostTrust({ ephemeral: h.mode === "ephemeral" || h.info?.mode === "ephemeral" }),
     }));
   }
 

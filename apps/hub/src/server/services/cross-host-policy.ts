@@ -9,6 +9,7 @@
 import { isHostAllowed, onlyAvailableOnMessage } from "@band-app/shared/repo-hosts";
 import { RunnerMachineQueries } from "../infra/db/queries/runner-machines";
 import { allowedHostsOf, hostNamesOf } from "./_utils/repo-host-policy";
+import { hostTrustService } from "./host-trust-service";
 import { settingsService } from "./settings-service";
 import { tokenService } from "./token-service";
 
@@ -19,17 +20,28 @@ export function crossHostWorktreesEnabled(): boolean {
   return settingsService.get().agents?.crossHostWorktrees !== false;
 }
 
+/** Why agents on `callerHostId` may not create worktrees at all (a restricted host), or null. */
+export function restrictedHostRefusal(callerHostId: string): string | null {
+  if (hostTrustService.trustOf(callerHostId) !== "restricted") return null;
+  return "Agents on a restricted host cannot create worktrees. An admin can raise this host's trust level in Settings > Hosts.";
+}
+
 /**
  * A message saying why an agent on `callerHostId` cannot create a worktree of `repo` on
- * `targetHostId`, or null when it may. A target equal to the caller's host is always fine.
+ * `targetHostId`, or null when it may. A target equal to the caller's host is always fine for
+ * a standard or admin host. An admin host skips the setting, but no agent may target the hub's own machine;
+ * a restricted host may not create worktrees anywhere.
  */
 export function crossHostRefusal(
   repo: string,
   targetHostId: string,
   callerHostId: string,
 ): string | null {
+  const restricted = restrictedHostRefusal(callerHostId);
+  if (restricted !== null) return restricted;
   if (targetHostId === callerHostId) return null;
-  if (!crossHostWorktreesEnabled()) {
+  const admin = hostTrustService.trustOf(callerHostId) === "admin";
+  if (!admin && !crossHostWorktreesEnabled()) {
     return "Agents may not start worktrees on other hosts. An admin can turn this on in Settings > Agents.";
   }
   if (targetHostId === "local") {

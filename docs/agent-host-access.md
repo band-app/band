@@ -2,6 +2,20 @@
 
 An agent in a chat or terminal on a worker reaches the hub through the worker's relay. The relay limits what it may do (`apps/hub/src/server/services/relay-scope.ts`). This page covers the three things an agent may do beyond its own host, and how the hub keeps its admin token out of an agent's reach.
 
+## Trust levels
+
+Each host has a trust level that an admin person sets in Settings > Hosts (or `band hosts trust <host> <level>`, `hosts.setTrust`). The hub reads it on every relay call, so lowering it takes effect on the next call. A new static host is `standard`, and every host that existed before trust levels was made `standard` by the migration. A host started by a runner is `restricted`, and so is an ephemeral worker that nobody set a level for.
+
+| Level | Agents on that host may |
+| --- | --- |
+| `restricted` | Use their own worktrees only: chats, tasks, terminals, browsers, the queue and worktree-scoped subscriptions. No `worktrees.create` or `remove`, no `repos.*` writes, no cronjobs, and `hosts.forAgents` instead of `hosts.list`. A refusal names the level. |
+| `standard` | Everything this page describes below: the own-host rule, and `worktrees.create` on another host when the setting allows it. |
+| `admin` | Everything `standard` allows, on any host: list, send to and stop chats, tasks, terminals and browsers in worktrees on other hosts; `worktrees.create` and `remove` on any online static host (the setting does not apply; the repo's allowed hosts still do); cronjobs on worktrees of any host it may reach; `repos.*` writes; `settings.get` and `settings.update`; `hosts.list` with full detail and `repos.list` for every host. |
+
+Never available to an agent, whatever the level: `tokens.*`, the vault, `hosts.setTrust` and `hosts.audit`. `settings.update` from an admin host accepts only an allow-list of display and agent-behaviour keys (`agents`, `labels`, `notifications`, `defaultCodingAgent`, `theme` and a few more, `AGENT_SETTABLE_SETTINGS`). Credentials, agent commands, runners, CORS origins, the port and the tunnel need a person's token, and so do keys the list does not know. `settings.*` is refused over `/mcp`, `settings.get` over `/trpc` returns only those same keys (the full reply holds runner `env`, agent commands, CORS origins and the voice endpoint), and `repos.addFromWorker` with `addRoot` is refused at every level because widening a worker's roots needs a person's confirmation. No level reaches the hub's own machine (`local`): its chats, terminals, browsers, worktrees and cronjobs stay out of agent reach, because a shell there can read the hub's tokens and vault key. The relay token does not become a hub credential: the hub still answers a relay call as "an agent on host X", with the wider rules for an admin host. Every check of the own-host rule (`UNSCOPED_KEYS`, batching, chosen ids) stays in force at every level. The call that comes from a worktree must itself be on the caller's host.
+
+Cross-host calls an admin host makes, and its admin-only calls (`settings.update`, repo writes, cronjobs on other hosts), go in the audit log (`host_audit`, kept 90 days): time, calling host, chat, procedure and target host and worktree. Admins read it in Settings > Hosts (Cross-host activity) or with `band hosts audit`.
+
 ## Starting a worktree on another host
 
 `band worktrees create <repo> <branch> --host <host>` and the `worktrees_create` MCP tool (`hostId`) accept a host other than the one the agent runs on. Without a host, the worktree goes where the caller runs, as before. The hub accepts an explicit host when all of these hold, and refuses with the reason otherwise:

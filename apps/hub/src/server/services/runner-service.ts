@@ -572,7 +572,13 @@ export class RunnerService {
     const ttl = runner.timeoutSec * 1000 + 60_000;
     const issued = wake
       ? tokenService.issueWorkerBootstrapFor(wake.hostId, ttl)
-      : tokenService.issueWorkerBootstrap(`runner:${runner.id}`, labelList, ttl);
+      : tokenService.issueWorkerBootstrap(
+          `runner:${runner.id}`,
+          labelList,
+          ttl,
+          undefined,
+          "restricted",
+        );
     state.hostId = issued.hostId;
     state.reused = wake !== null;
     state.token = issued.token;

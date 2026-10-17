@@ -481,6 +481,23 @@ export class SettingsPage {
     });
   }
 
+  /** The trust level selector of a host row (admin tokens). Set in `HostsSettings.tsx`. */
+  hostTrustSelect(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-trust-select");
+  }
+
+  /** The trust level badge of a host row (tokens without the admin flag). */
+  hostTrustBadge(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-trust");
+  }
+
+  /** Picks a trust level for a host in its row. */
+  async chooseHostTrust(hostId: string, level: "restricted" | "standard" | "admin"): Promise<void> {
+    await test.step(`Set ${hostId} to ${level}`, async () => {
+      await this.hostTrustSelect(hostId).selectOption(level);
+    });
+  }
+
   /**
    * Every add-repo control inside the Settings dialog. Each add-repo trigger and form control the
    * app has carries "add-repo" in its testid (`repos-panel__add-repo`, `add-repo__*`). Settings > Repos has none.

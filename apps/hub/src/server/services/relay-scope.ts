@@ -10,6 +10,7 @@
 
 import path from "node:path";
 import type { RelayHttpRequest } from "@band-app/link";
+import type { HostTrust } from "@band-app/shared/host-trust";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 
 /**
@@ -82,8 +83,72 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "worktrees.remove",
 ]);
 
+/**
+ * What an agent on a `restricted` host may call: its own worktrees' chats, tasks, terminals,
+ * browsers, queue and subscriptions, and the lists it needs to find them. No worktree
+ * creation or removal, no repo writes, no cronjobs, and `hosts.forAgents` instead of `hosts.list`.
+ */
+export const RESTRICTED_PROCEDURES: ReadonlySet<string> = new Set(
+  [...RELAY_PROCEDURES].filter(
+    (p) =>
+      !(
+        p === "worktrees.create" ||
+        p === "worktrees.remove" ||
+        p === "hosts.list" ||
+        p.startsWith("cronjobs.") ||
+        (p.startsWith("repos.") && p !== "repos.list")
+      ),
+  ),
+);
+
+/** What an agent on an `admin` host may call besides `RELAY_PROCEDURES`. */
+export const ADMIN_EXTRA_PROCEDURES: ReadonlySet<string> = new Set([
+  "settings.get",
+  "settings.update",
+]);
+
+/**
+ * Never available to an agent, whatever its host's trust level: credentials, and the trust
+ * levels themselves (no host can raise its own or another's).
+ */
+const NEVER_FOR_AGENTS = (procedure: string): boolean =>
+  procedure.startsWith("tokens.") ||
+  procedure.startsWith("vault.") ||
+  procedure === "hosts.setTrust" ||
+  procedure === "hosts.audit";
+
+/**
+ * The settings an admin host may change, by allow-list. Everything else (credentials, agent
+ * commands, runners, CORS origins, the port, the tunnel, unknown keys) needs a person's token,
+ * because the hub applies them with its own authority.
+ */
+const AGENT_SETTABLE_SETTINGS = new Set([
+  "agents",
+  "labels",
+  "notifications",
+  "defaultCodingAgent",
+  "theme",
+  "translucentSidebar",
+  "enableLSP",
+  "enableFilePreviewTabs",
+  "useWebGLTerminalRenderer",
+  "usageRetentionDays",
+  "usagePollingEnabled",
+]);
+
+/** The id of the hub's own machine. */
+const HUB_HOST_ID = "local";
+
+const allowedFor = (trust: HostTrust): ReadonlySet<string> =>
+  trust === "restricted"
+    ? RESTRICTED_PROCEDURES
+    : trust === "admin"
+      ? new Set([...RELAY_PROCEDURES, ...ADMIN_EXTRA_PROCEDURES])
+      : RELAY_PROCEDURES;
+
 /** Calls whose body or answer the relay rewrites, which only works for a single, unbatched call. */
 const UNBATCHABLE = new Set([
+  "settings.get",
   "repos.list",
   "hosts.list",
   "worktrees.create",
@@ -106,7 +171,11 @@ function pinHost(input: unknown, workerId: string, keep: boolean): object {
  * names no host cannot land on the hub's machine. `statuses.notify` gets the worker's id the same
  * way, so a hook is matched to a worktree on the host it ran on.
  */
-export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
+export function pinWorktreeHost(
+  request: RelayHttpRequest,
+  workerId: string,
+  trust: HostTrust = "standard",
+): RelayHttpRequest {
   if (request.method !== "POST") return request;
   // Read the path as the check and the hub's HTTP server do, so `/trpc/worktrees%2Eremove` or
   // `/trpc/../trpc/worktrees.remove` cannot pass the check and skip the pin.
@@ -126,7 +195,9 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
   if (!parsed.ok || parsed.value === null || typeof parsed.value !== "object") return request;
   let value: unknown;
   if (isTrpc) {
-    const keep = call === "/trpc/worktrees.create";
+    // An admin host's remove names the host the worktree is on, as a create does.
+    const keep =
+      call === "/trpc/worktrees.create" || (trust === "admin" && call === "/trpc/worktrees.remove");
     value = pinHost(parsed.value, workerId, keep);
   } else {
     // The same tools through the MCP endpoint, as `tools/call` messages (one or a batch).
@@ -139,7 +210,9 @@ export function pinWorktreeHost(request: RelayHttpRequest, workerId: string): Re
       ) {
         return message;
       }
-      const keep = params.name === "band_worktrees_create";
+      const keep =
+        params.name === "band_worktrees_create" ||
+        (trust === "admin" && params.name === "band_worktrees_remove");
       return {
         ...message,
         params: { ...params, arguments: pinHost(params.arguments, workerId, keep) },
@@ -252,6 +325,21 @@ export function agentHostView(host: Record<string, unknown>): AgentHostView {
   };
 }
 
+/**
+ * A `settings.get` answer cut down to `AGENT_SETTABLE_SETTINGS`. The hub replays the call with its
+ * own token, so the full reply holds runner `env` (provider credentials), agent commands, CORS
+ * origins, pairing addresses and the voice endpoint, none of which an agent may read.
+ */
+export function redactSettingsReply(data: unknown): unknown {
+  if (data === null || typeof data !== "object") return data;
+  const result = (data as { result?: { data?: Record<string, unknown> } }).result;
+  if (!result?.data || typeof result.data !== "object") return data;
+  const kept = Object.fromEntries(
+    Object.entries(result.data).filter(([key]) => AGENT_SETTABLE_SETTINGS.has(key)),
+  );
+  return { ...data, result: { ...result, data: kept } };
+}
+
 /** Cuts a `hosts.list` answer down to `agentHostView` rows. A reply of another shape becomes empty. */
 export function redactHostsReply(data: unknown): unknown {
   if (data === null || typeof data !== "object") return data;
@@ -284,9 +372,30 @@ export interface ScopeLookups {
   crossHostRefusal(repo: string, hostId: string, callerHostId: string): string | null;
   /** Why an agent on `callerHostId` may not act on `repo`, or null when it may (or the repo does not exist). */
   repoHostRefusal(repo: string, callerHostId: string): string | null;
+  /** The trust level of a host, read on every call. Absent means `standard`. */
+  trustOf?(hostId: string): HostTrust;
 }
 
-export type RelayVerdict = { ok: true } | { ok: false; status: number; reason: string };
+/** One cross-host or admin-only call an admin host made, for the audit log. */
+export interface RelayAudit {
+  procedure: string;
+  targetHostId: string | null;
+  target: string | null;
+}
+
+export type RelayVerdict =
+  | { ok: true; audit?: RelayAudit[]; trust?: HostTrust }
+  | { ok: false; status: number; reason: string };
+
+/** Who is calling, and what the call needs to remember on the way through. */
+interface Ctx {
+  workerId: string;
+  trust: HostTrust;
+  lookups: ScopeLookups;
+  audit: RelayAudit[];
+  /** Set while checking a `tools/call` on `/mcp`, whose replies the relay does not rewrite. */
+  viaMcp?: boolean;
+}
 
 const deny = (status: number, reason: string): RelayVerdict => ({ ok: false, status, reason });
 
@@ -340,14 +449,18 @@ function collect(value: unknown, into: Named, workerId: string, depth = 0): void
   }
 }
 
-/** Checks that everything `input` names belongs to `workerId`'s host. */
+/**
+ * Checks that everything `input` names belongs to the caller's host. An admin host may name
+ * anything that exists, and the targets on other hosts come back in `crossHosts` for the audit log.
+ */
 function checkNamed(
   input: unknown,
-  workerId: string,
-  lookups: ScopeLookups,
+  ctx: Ctx,
 ): RelayVerdict & {
   named?: number;
+  crossHosts?: Array<{ hostId: string; target: string }>;
 } {
+  const { workerId, lookups } = ctx;
   const named: Named = {
     worktrees: [],
     chats: [],
@@ -359,26 +472,37 @@ function checkNamed(
   collect(input, named, workerId);
   const outside = deny(403, "That worktree is not on this host");
   if (named.unscoped) return deny(403, "That call names a target the relay cannot check");
+  const wide = ctx.trust === "admin";
+  const crossHosts: Array<{ hostId: string; target: string }> = [];
+  /** Whether a target on `hostId` may be used: this host always, any known host for an admin. */
+  const reach = (hostId: string | null, target: string): boolean => {
+    if (hostId === workerId) return true;
+    // The hub's own machine holds the hub's tokens and vault key, so no agent reaches it.
+    if (!wide || hostId === null || hostId === HUB_HOST_ID) return false;
+    crossHosts.push({ hostId, target });
+    return true;
+  };
   for (const id of named.worktrees) {
-    if (lookups.hostOfWorktree(id) !== workerId) return outside;
+    if (!reach(lookups.hostOfWorktree(id), id)) return outside;
   }
   for (const id of named.chats) {
     const worktree = lookups.worktreeOfChat(id);
-    if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
+    if (worktree === null || !reach(lookups.hostOfWorktree(worktree), worktree)) return outside;
   }
   for (const cwd of named.cwds) {
     const worktree = lookups.worktreeOfCwd(path.resolve(cwd), workerId);
     if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
   }
   for (const id of named.terminals) {
-    if (lookups.hostOfTerminal(id) !== workerId) return outside;
+    if (!reach(lookups.hostOfTerminal(id), id)) return outside;
   }
   for (const id of named.browsers) {
     const worktree = lookups.worktreeOfBrowser(id);
-    if (worktree === null || lookups.hostOfWorktree(worktree) !== workerId) return outside;
+    if (worktree === null || !reach(lookups.hostOfWorktree(worktree), worktree)) return outside;
   }
   return {
     ok: true,
+    crossHosts,
     named:
       named.worktrees.length +
       named.chats.length +
@@ -418,21 +542,34 @@ const REPO_BY_NAME_PROCEDURES = new Set([
  * Repo management from a worker. The one limit is a repo's allowed hosts: an agent may not act on a
  * repo limited to hosts that exclude its own, nor add a repo limited to hosts that exclude the host
  * the folder is on. These calls name a repo or a host, not a worktree, so they skip `checkNamed`.
+ * An admin host is not held to the first limit, and its writes go in the audit log.
  */
-function checkRepoCall(
-  procedure: string,
-  input: unknown,
-  workerId: string,
-  lookups: ScopeLookups,
-): RelayVerdict {
+function checkRepoCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
+  const { workerId, lookups } = ctx;
   const record = (input ?? {}) as Record<string, unknown>;
+  const admin = ctx.trust === "admin";
+  const hostArg = typeof record.hostId === "string" ? record.hostId : null;
+  const audited = (): RelayVerdict => {
+    if (admin && procedure !== "repos.inspectFolder" && procedure !== "repos.resolveRemote") {
+      ctx.audit.push({
+        procedure,
+        targetHostId: hostArg,
+        target: typeof record.name === "string" ? record.name : null,
+      });
+    }
+    return { ok: true };
+  };
   if (REPO_BY_NAME_PROCEDURES.has(procedure)) {
     if (typeof record.name !== "string") return deny(400, `${procedure} needs a repo name`);
+    if (admin) return audited();
     const refusal = lookups.repoHostRefusal(record.name, workerId);
     return refusal === null ? { ok: true } : deny(403, `${procedure}: ${refusal}`);
   }
   if (procedure === "repos.addFromWorker") {
-    const { hostId, name, allowedHostIds } = record;
+    const { hostId, name, allowedHostIds, addRoot } = record;
+    if (addRoot === true) {
+      return deny(403, `${procedure}: Adding a folder root needs a person's confirmation`);
+    }
     if (typeof hostId !== "string") return deny(400, `${procedure} needs a hostId`);
     if (Array.isArray(allowedHostIds) && !allowedHostIds.includes(hostId)) {
       return deny(
@@ -442,25 +579,63 @@ function checkRepoCall(
     }
     // An existing repo named by the call is checked here. One found by the folder's remote is
     // checked against the folder's host in the service (`assertHostAllowed`).
-    if (typeof name === "string") {
+    if (typeof name === "string" && !admin) {
       const refusal = lookups.repoHostRefusal(name, workerId);
       if (refusal !== null) return deny(403, `${procedure}: ${refusal}`);
     }
+  }
+  return audited();
+}
+
+/** `settings.update` from an admin host: everything except the credentials and programs the hub runs. */
+function checkSettingsCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
+  if (ctx.viaMcp) return deny(403, `${procedure} is not available over /mcp to agents`);
+  if (procedure === "settings.update") {
+    const record = (input ?? {}) as Record<string, unknown>;
+    const blocked = Object.keys(record).filter((key) => !AGENT_SETTABLE_SETTINGS.has(key));
+    if (blocked.length > 0) {
+      return deny(
+        403,
+        `${procedure}: ${blocked.join(", ")} can only be changed by a person's admin token`,
+      );
+    }
+    ctx.audit.push({ procedure, targetHostId: null, target: Object.keys(record).sort().join(",") });
+  }
+  return { ok: true };
+}
+
+/** The cronjobs of an admin host: any worktree on a host it may reach. Jobs on other hosts are audited. */
+function checkAdminCronjob(procedure: string, key: string, ctx: Ctx): RelayVerdict {
+  const host = ctx.lookups.hostOfWorktree(key);
+  if (host === null) return deny(404, `${procedure}: No such worktree`);
+  if (host === HUB_HOST_ID) {
+    return deny(403, `${procedure}: Agents cannot schedule work on the hub's own machine`);
+  }
+  if (host !== ctx.workerId) {
+    ctx.audit.push({ procedure, targetHostId: host, target: key });
   }
   return { ok: true };
 }
 
 /** One procedure call: allowed, and tied to this host by what it names (or by the token's scope). */
-function checkCall(
-  procedure: string,
-  input: unknown,
-  workerId: string,
-  lookups: ScopeLookups,
-): RelayVerdict {
-  if (!RELAY_PROCEDURES.has(procedure)) return deny(403, `${procedure} is not available to agents`);
-  if (procedure.startsWith("repos.") && procedure !== "repos.list") {
-    return checkRepoCall(procedure, input, workerId, lookups);
+function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
+  const { workerId, lookups, trust } = ctx;
+  if (NEVER_FOR_AGENTS(procedure)) {
+    return deny(403, `${procedure} is not available to agents, whatever their host's trust level`);
   }
+  if (!allowedFor(trust).has(procedure)) {
+    return deny(
+      403,
+      trust === "restricted" && RELAY_PROCEDURES.has(procedure)
+        ? `${procedure} is not available to agents on a restricted host`
+        : `${procedure} is not available to agents`,
+    );
+  }
+  if (procedure.startsWith("settings.")) return checkSettingsCall(procedure, input, ctx);
+  if (procedure.startsWith("repos.") && procedure !== "repos.list") {
+    return checkRepoCall(procedure, input, ctx);
+  }
+  const admin = trust === "admin";
   let named = input;
   if (CRONJOB_KEY_PROCEDURES.has(procedure)) {
     const { key, ...rest } = (input ?? {}) as Record<string, unknown>;
@@ -481,18 +656,24 @@ function checkCall(
     if (typeof key === "string" && key !== worktree) {
       return deny(403, `${procedure} names two different worktrees`);
     }
+    // An admin host may schedule on any worktree of a host it can reach, and the call is audited.
+    if (admin) return checkAdminCronjob(procedure, worktree, ctx);
   }
   if (procedure === "worktrees.create") {
     const { repo, branch, hostId, origin } = (input ?? {}) as Record<string, unknown>;
     if (typeof repo !== "string" || typeof branch !== "string") {
       return deny(400, `${procedure} needs a repo and a branch`);
     }
-    // An origin names a parent worktree, so it must be one on this host like any other target.
-    if (
-      origin !== undefined &&
-      (typeof origin !== "string" || lookups.hostOfWorktree(origin) !== workerId)
-    ) {
-      return deny(403, `${procedure}: The origin is not a worktree on this host`);
+    // An origin names a parent worktree, so it must be one on this host like any other target
+    // (any existing worktree for an admin host).
+    if (origin !== undefined) {
+      const originHost = typeof origin === "string" ? lookups.hostOfWorktree(origin) : null;
+      if (
+        originHost === null ||
+        (originHost !== workerId && (!admin || originHost === HUB_HOST_ID))
+      ) {
+        return deny(403, `${procedure}: The origin is not a worktree on this host`);
+      }
     }
     if (hostId !== undefined && hostId !== workerId) {
       if (typeof hostId !== "string") return deny(400, `${procedure}: hostId must be a string`);
@@ -505,13 +686,35 @@ function checkCall(
           `${procedure}: hostRepoPath and placement cannot be set for another host from a worker`,
         );
       }
+      if (admin) {
+        ctx.audit.push({ procedure, targetHostId: hostId, target: `${repo}:${branch}` });
+      }
     }
     return { ok: true };
   }
   if (procedure === "worktrees.remove") {
     const { hostId, ...rest } = (input ?? {}) as Record<string, unknown>;
     if (hostId !== undefined && hostId !== workerId) {
-      return deny(403, `${procedure}: A worktree on another host cannot be removed from a worker`);
+      if (!admin) {
+        return deny(
+          403,
+          `${procedure}: A worktree on another host cannot be removed from a worker`,
+        );
+      }
+      if (typeof hostId !== "string") return deny(400, `${procedure}: hostId must be a string`);
+      if (hostId === HUB_HOST_ID) {
+        return deny(403, `${procedure}: Agents cannot remove worktrees on the hub's own machine`);
+      }
+      // The worktree id of a name on another host carries that host's id.
+      const { repo, name } = rest;
+      if (typeof repo === "string" && typeof name === "string") {
+        const id = toWorktreeId(repo, name, hostId);
+        if (lookups.hostOfWorktree(id) !== hostId) {
+          return deny(404, `${procedure}: No such worktree on ${hostId}`);
+        }
+        ctx.audit.push({ procedure, targetHostId: hostId, target: id });
+        return { ok: true };
+      }
     }
     named = rest;
   }
@@ -519,15 +722,22 @@ function checkCall(
     const { id } = (input ?? {}) as { id?: unknown };
     if (typeof id !== "string") return deny(400, `${procedure} needs an id`);
     const owner = lookups.worktreeOfSubscription(id);
-    if (owner === null || lookups.hostOfWorktree(owner) !== workerId) {
+    const ownerHost = owner === null ? null : lookups.hostOfWorktree(owner);
+    if (ownerHost === null || (ownerHost !== workerId && (!admin || ownerHost === HUB_HOST_ID))) {
       return deny(403, `${procedure}: That subscription is not on this host`);
+    }
+    if (ownerHost !== workerId) {
+      ctx.audit.push({ procedure, targetHostId: ownerHost, target: owner });
     }
     return { ok: true };
   }
-  const verdict = checkNamed(named, workerId, lookups);
+  const verdict = checkNamed(named, ctx);
   if (!verdict.ok) return deny(verdict.status, `${procedure}: ${verdict.reason}`);
   if (verdict.named === 0 && !SCOPE_FROM_HEADERS.has(procedure)) {
     return deny(403, `${procedure} must name a worktree on this host`);
+  }
+  for (const c of verdict.crossHosts ?? []) {
+    ctx.audit.push({ procedure, targetHostId: c.hostId, target: c.target });
   }
   const chosen = checkChosenId(procedure, input, lookups);
   return chosen.ok ? chosen : deny(chosen.status, `${procedure}: ${chosen.reason}`);
@@ -541,12 +751,7 @@ function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
   }
 }
 
-function checkTrpc(
-  request: RelayHttpRequest,
-  url: URL,
-  workerId: string,
-  lookups: ScopeLookups,
-): RelayVerdict {
+function checkTrpc(request: RelayHttpRequest, url: URL, ctx: Ctx): RelayVerdict {
   const procedures = decodeURIComponent(url.pathname.slice("/trpc/".length))
     .split(",")
     .filter((p) => p !== "");
@@ -567,7 +772,7 @@ function checkTrpc(
     if (isBatch && UNBATCHABLE.has(procedure)) {
       return deny(400, `${procedure}: cannot be batched through the relay`);
     }
-    const verdict = checkCall(procedure, own, workerId, lookups);
+    const verdict = checkCall(procedure, own, ctx);
     if (!verdict.ok) return verdict;
   }
   return { ok: true };
@@ -577,11 +782,7 @@ function bodyText(body: string | undefined): string {
   return body ? Buffer.from(body, "base64").toString("utf8") : "";
 }
 
-function checkMcp(
-  request: RelayHttpRequest,
-  workerId: string,
-  lookups: ScopeLookups,
-): RelayVerdict {
+function checkMcp(request: RelayHttpRequest, ctx: Ctx): RelayVerdict {
   const text = bodyText(request.body);
   if (text === "") return { ok: true };
   const parsed = parseJson(text);
@@ -594,35 +795,59 @@ function checkMcp(
     const name = typeof params?.name === "string" ? params.name : "";
     if (!name.startsWith("band_")) return deny(403, "Unknown tool");
     const procedure = name.slice("band_".length).replace(/_/g, ".");
-    const verdict = checkCall(procedure, params?.arguments, workerId, lookups);
+    const verdict = checkCall(procedure, params?.arguments, { ...ctx, viaMcp: true });
     if (!verdict.ok) return verdict;
   }
   return { ok: true };
 }
 
-function checkChatRoute(
-  request: RelayHttpRequest,
-  chatId: string,
-  workerId: string,
-  lookups: ScopeLookups,
-): RelayVerdict {
+function checkChatRoute(request: RelayHttpRequest, chatId: string, ctx: Ctx): RelayVerdict {
   const body = request.method === "POST" ? parseJson(bodyText(request.body)) : null;
   if (body && !body.ok) return deny(400, "The body is not JSON");
-  const worktree = lookups.worktreeOfChat(chatId);
+  const worktree = ctx.lookups.worktreeOfChat(chatId);
   if (worktree === null) return deny(404, "No such chat");
-  return checkNamed({ chatId, ...(body?.ok ? { body: body.value } : {}) }, workerId, lookups);
+  const verdict = checkNamed({ chatId, ...(body?.ok ? { body: body.value } : {}) }, ctx);
+  if (!verdict.ok) return verdict;
+  for (const c of verdict.crossHosts ?? []) {
+    ctx.audit.push({
+      procedure: `${request.method} ${request.path.split("?")[0]}`,
+      targetHostId: c.hostId,
+      target: c.target,
+    });
+  }
+  return { ok: true };
 }
 
-/** Whether a call that came up a worker's link may go on to the hub. */
+/** The trust level of the caller's host, read now. A lookup that cannot say means `standard`. */
+export function trustFor(workerId: string, lookups: ScopeLookups): HostTrust {
+  return lookups.trustOf?.(workerId) ?? "standard";
+}
+
+/**
+ * Whether a call that came up a worker's link may go on to the hub. The level of the caller's host
+ * is read from `lookups` on every call. A refusal on a restricted host names that level. An allowed
+ * call returns the cross-host and admin-only steps it takes in `audit`.
+ */
 export function checkRelayRequest(
   request: RelayHttpRequest,
   workerId: string,
   lookups: ScopeLookups,
 ): RelayVerdict {
+  const trust = trustFor(workerId, lookups);
+  const verdict = checkRelay(request, { workerId, trust, lookups, audit: [] });
+  if (!verdict.ok && trust === "restricted") {
+    return { ...verdict, reason: `${verdict.reason} (this host's trust level is restricted)` };
+  }
+  // The level the check used goes with the verdict, so the relay shapes the call and the reply by it.
+  return verdict.ok ? { ...verdict, trust } : verdict;
+}
+
+function checkRelay(request: RelayHttpRequest, ctx: Ctx): RelayVerdict {
+  const { workerId, lookups } = ctx;
+  // The worktree the call comes from is always on the caller's own host, for every level.
   const scope = checkNamed(
     { worktreeId: request.scope.worktreeId, chatId: request.scope.chatId },
-    workerId,
-    lookups,
+    { ...ctx, trust: "standard" },
   );
   if (!scope.ok) return scope;
   if (lookups.hostOfWorktree(request.scope.worktreeId) !== workerId) {
@@ -636,26 +861,28 @@ export function checkRelayRequest(
     return deny(400, "Bad path");
   }
   const { pathname } = url;
+  let verdict: RelayVerdict;
   if (pathname === "/api/health" && request.method === "GET") return { ok: true };
-  if (pathname === "/mcp") return checkMcp(request, workerId, lookups);
+  if (pathname === "/mcp") verdict = checkMcp(request, ctx);
   // The MCP proxy checks its own per-session token, so the relay only has to
   // let the call through. The worktree was checked above.
-  if (MCP_PROXY_ROUTE.test(pathname)) return { ok: true };
-  if (request.path.startsWith("/mcp-proxy/")) return deny(403, "Not an MCP proxy route");
-  if (pathname.startsWith("/trpc/")) {
+  else if (MCP_PROXY_ROUTE.test(pathname)) return { ok: true };
+  else if (request.path.startsWith("/mcp-proxy/")) return deny(403, "Not an MCP proxy route");
+  else if (pathname.startsWith("/trpc/")) {
     try {
-      return checkTrpc(request, url, workerId, lookups);
+      verdict = checkTrpc(request, url, ctx);
+    } catch {
+      return deny(400, "Bad path");
+    }
+  } else {
+    const chat = CHAT_ROUTE.exec(pathname);
+    if (!chat) return deny(403, "That route is not available to agents");
+    try {
+      verdict = checkChatRoute(request, decodeURIComponent(chat[1]), ctx);
     } catch {
       return deny(400, "Bad path");
     }
   }
-  const chat = CHAT_ROUTE.exec(pathname);
-  if (chat) {
-    try {
-      return checkChatRoute(request, decodeURIComponent(chat[1]), workerId, lookups);
-    } catch {
-      return deny(400, "Bad path");
-    }
-  }
-  return deny(403, "That route is not available to agents");
+  if (!verdict.ok) return verdict;
+  return ctx.audit.length > 0 ? { ok: true, audit: ctx.audit } : { ok: true };
 }

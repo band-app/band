@@ -2432,6 +2432,36 @@ fn hosts_list_shows_the_local_host_and_new_workers() {
     assert!(!text.contains("(behind)"), "text: {text}");
 }
 
+#[test]
+fn hosts_trust_sets_the_level_and_audit_lists_the_log() {
+    let env = TestEnv::new();
+
+    let listed = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    assert_eq!(listed["hosts"][0]["trust"], "standard", "hosts: {listed}");
+
+    let set = env.band(&["hosts", "trust", "Local", "restricted"]);
+    assert!(set.status.success(), "stderr: {}", stderr(&set));
+    assert!(
+        stdout(&set).contains("restricted"),
+        "stdout: {}",
+        stdout(&set)
+    );
+
+    let text = stdout(&env.band(&["hosts", "list"]));
+    assert!(text.contains("TRUST"), "text: {text}");
+    assert!(text.contains("restricted"), "text: {text}");
+
+    let bad = env.band(&["hosts", "trust", "Local", "root"]);
+    assert!(!bad.status.success());
+
+    let audit = json_of(&env.band(&["hosts", "audit", "--output", "json"]));
+    assert_eq!(
+        audit["entries"].as_array().map(Vec::len),
+        Some(0),
+        "audit: {audit}"
+    );
+}
+
 // --- Env tests ---
 
 fn write_environment(repo: &Path, json: &str) {

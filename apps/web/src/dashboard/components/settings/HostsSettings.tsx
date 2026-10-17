@@ -56,11 +56,31 @@ function osOf(host: HostList[number]): string {
   return typeof info.arch === "string" ? `${info.os} ${info.arch}` : info.os;
 }
 
+const TRUST_LEVELS = ["restricted", "standard", "admin"] as const;
+type TrustLevel = (typeof TRUST_LEVELS)[number];
+
+const TRUST_LABEL: Record<TrustLevel, string> = {
+  restricted: "Restricted",
+  standard: "Standard",
+  admin: "Admin",
+};
+
+const TRUST_HINT: Record<TrustLevel, string> = {
+  restricted: "Agents on this host can only use their own worktrees.",
+  standard:
+    "Agents on this host work on their own host, and start worktrees elsewhere when Settings > Agents allows it.",
+  admin:
+    "Agents on this host can work on any host, change hub settings and manage repos and cronjobs. Tokens, the vault and trust levels stay out of reach.",
+};
+
 type HostList = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
 type TokenList = Awaited<ReturnType<typeof trpc.tokens.list.query>>["tokens"];
 type TokenView = TokenList[number];
 
+type AuditEntries = Awaited<ReturnType<typeof trpc.hosts.audit.query>>["entries"];
+
 const HOSTS_KEY = ["hosts.list"] as const;
+const AUDIT_KEY = ["hosts.audit"] as const;
 const TOKENS_KEY = ["tokens.list"] as const;
 
 interface IssuedWorker {
@@ -129,6 +149,11 @@ export function HostsSettings() {
   });
 
   const admin = useIsAdmin();
+  const audit = useQuery<AuditEntries>({
+    queryKey: AUDIT_KEY,
+    queryFn: async () => (await trpc.hosts.audit.query({ limit: 50 })).entries,
+    enabled: admin,
+  });
   const [evacuating, setEvacuating] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [hostName, setHostName] = useState("");
@@ -138,7 +163,8 @@ export function HostsSettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = () => Promise.all([refetchFresh(HOSTS_KEY), refetchFresh(TOKENS_KEY)]);
+  const refresh = () =>
+    Promise.all([refetchFresh(HOSTS_KEY), refetchFresh(TOKENS_KEY), refetchFresh(AUDIT_KEY)]);
 
   const issue = async () => {
     setBusy(true);
@@ -170,6 +196,16 @@ export function HostsSettings() {
     setError(null);
     try {
       await trpc.tokens.revoke.mutate({ tokenId: token.id });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+    await refresh();
+  };
+
+  const setTrust = async (host: HostList[number], trust: TrustLevel) => {
+    setError(null);
+    try {
+      await trpc.hosts.setTrust.mutate({ hostId: host.id, trust });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -256,6 +292,31 @@ export function HostsSettings() {
                 <span data-testid="settings__host-status" className="text-xs text-muted-foreground">
                   {host.status}
                 </span>
+                {host.id !== "local" &&
+                  (admin ? (
+                    <select
+                      aria-label={`Trust level of ${host.name}`}
+                      data-testid="settings__host-trust-select"
+                      title={TRUST_HINT[host.trust]}
+                      value={host.trust}
+                      onChange={(e) => void setTrust(host, e.target.value as TrustLevel)}
+                      className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+                    >
+                      {TRUST_LEVELS.map((level) => (
+                        <option key={level} value={level}>
+                          {TRUST_LABEL[level]}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      data-testid="settings__host-trust"
+                      title={TRUST_HINT[host.trust]}
+                      className="rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
+                    >
+                      {TRUST_LABEL[host.trust]}
+                    </span>
+                  ))}
                 {host.capabilities.includes("desktop") && host.status === "online" && (
                   <Button
                     type="button"
@@ -311,6 +372,40 @@ export function HostsSettings() {
             hosts={hosts.data ?? []}
           />
         ))}
+
+      {admin ? (
+        <SettingsRow
+          variant="stacked"
+          label="Cross-host activity"
+          description="What agents on admin hosts did across hosts or as an admin: the newest calls first."
+        >
+          {(audit.data ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground" data-testid="settings__audit-empty">
+              Nothing yet.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {(audit.data ?? []).map((entry) => (
+                <li
+                  key={entry.id}
+                  data-testid="settings__audit-entry"
+                  data-procedure={entry.procedure}
+                  className="px-3 py-2 text-xs"
+                >
+                  <span className="font-medium">{entry.procedure}</span>
+                  {" · from "}
+                  {entry.callerHostId}
+                  {entry.targetHostId ? ` to ${entry.targetHostId}` : ""}
+                  {entry.target ? ` (${entry.target})` : ""}
+                  {entry.chatId ? ` · chat ${entry.chatId}` : ""}
+                  {" · "}
+                  {formatTime(entry.at)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </SettingsRow>
+      ) : null}
 
       <SettingsRow
         variant="stacked"
