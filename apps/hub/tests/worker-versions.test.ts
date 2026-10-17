@@ -119,7 +119,13 @@ beforeAll(async () => {
   home = createTmpHome("band-worker-versions-");
   scratch.push(home);
   seedSettings(home, { tokenSecret: ADMIN });
-  server = await startServer({ tmpHome: home, env: { BAND_HUB_VERSION: HUB_VERSION } });
+  // No loopback worker: the one the remote-loopback CI job adds runs this checkout's version,
+  // which a hub told to report 0.50.0 correctly refuses.
+  server = await startServer({
+    tmpHome: home,
+    env: { BAND_HUB_VERSION: HUB_VERSION },
+    remoteHost: false,
+  });
 }, 120_000);
 
 afterAll(async () => {

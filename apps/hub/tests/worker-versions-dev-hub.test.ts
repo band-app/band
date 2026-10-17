@@ -46,7 +46,7 @@ beforeAll(async () => {
   home = createTmpHome("band-worker-versions-dev-");
   scratch.push(home);
   seedSettings(home, { tokenSecret: ADMIN });
-  server = await startServer({ tmpHome: home });
+  server = await startServer({ tmpHome: home, remoteHost: false });
 }, 120_000);
 
 afterAll(async () => {
