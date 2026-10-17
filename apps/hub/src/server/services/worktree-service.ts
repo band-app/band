@@ -88,6 +88,7 @@ import { emit } from "./watcher-service";
 // `worktreeService` from this file. Keep every `worktreeScriptService`
 // reference inside a function body; capturing it at module load would
 // silently get `undefined`.
+import { workerLeaseService } from "./worker-lease-service";
 import { worktreeScriptService } from "./worktree-script-service";
 
 /** How long {@link WorktreeService.remove} waits for a `teardown` command. */
@@ -1105,6 +1106,9 @@ export class WorktreeService {
     repo.worktrees = repo.worktrees.filter((wt) => wt !== gone);
     saveState(state);
     removal.commit();
+    // A removed superseded copy leaves its host's blocked list.
+    if (gone.supersededBy)
+      void workerLeaseService.pushBlockedPaths(gone.hostId ?? hostRegistry.local.id);
 
     try {
       // Older installs keep prompt files in `workspace-prompts`; the directory name is not renamed.

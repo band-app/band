@@ -50,6 +50,10 @@ interface Entry {
   inFlight: boolean;
   /** When the latest renewal ended without an answer (link lost, error or timeout). */
   lastFailAt: number;
+  /** The renewal loop that is running for this host, if any. */
+  running: Promise<void> | null;
+  /** A renewal was asked for while one was in flight: send one more, so the newest list wins. */
+  again: boolean;
 }
 
 export class WorkerLeaseService {
@@ -72,6 +76,8 @@ export class WorkerLeaseService {
       lastAttemptAt: old?.lastAttemptAt ?? 0,
       inFlight: false,
       lastFailAt: old?.lastFailAt ?? 0,
+      running: null,
+      again: false,
     });
   }
 
@@ -97,9 +103,37 @@ export class WorkerLeaseService {
     return this.repos.supersededPaths(hostId);
   }
 
-  private async renew(hostId: string): Promise<void> {
+  /**
+   * Sends the host's current blocked list now, outside the timer, after the hub changed which of
+   * its folders are superseded. It is the same renewal the timer sends (same `ttlMs`), so it never
+   * extends a lease the hub would not grant. Calls that arrive while one is in flight share one
+   * follow-up renewal. An offline host, or a worker with no `lease.renew`, is skipped.
+   */
+  pushBlockedPaths(hostId: string): Promise<void> {
+    return this.renew(hostId);
+  }
+
+  private renew(hostId: string): Promise<void> {
     const entry = this.entries.get(hostId);
-    if (!entry || entry.supported === false || !entry.session.attached) return;
+    if (!entry || entry.supported === false || !entry.session.attached) return Promise.resolve();
+    if (entry.running) {
+      entry.again = true;
+      return entry.running;
+    }
+    const run = (async () => {
+      do {
+        entry.again = false;
+        await this.renewOnce(hostId, entry);
+      } while (entry.again && entry.supported !== false && entry.session.attached);
+    })().finally(() => {
+      entry.running = null;
+      entry.again = false;
+    });
+    entry.running = run;
+    return run;
+  }
+
+  private async renewOnce(hostId: string, entry: Entry): Promise<void> {
     const params: LeaseRenewParams = { ttlMs: leaseMs(), blockedPaths: this.blockedPaths(hostId) };
     entry.lastAttemptAt = Date.now();
     entry.inFlight = true;
