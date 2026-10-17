@@ -34,11 +34,15 @@ name: S9 paste an image
 - launchApp:
     appId: com.apple.mobileslideshow
     clearState: false
-- tapOn:
-    point: "15%,25%"
-# The first tap opened the photo full screen; its share sheet has Copy Photo.
-- tapOn:
-    point: "13%,94%"
+# Photos may reopen on the grid or on the full-screen photo it showed last time.
+- runFlow:
+    when:
+      notVisible: "Share"
+    commands:
+      - tapOn:
+          point: "15%,25%"
+# The full-screen photo's share sheet has Copy Photo.
+- tapOn: "Share"
 - tapOn: "Copy Photo"
 - launchApp:
     appId: app.getband.mobile
@@ -62,9 +66,8 @@ name: S9 paste an image
     visible:
       id: composer__attachment
     timeout: 20000
-- assertVisible:
-    id: composer__input
-    text: "Follow up…"
+# The placeholder is not matchable by text, so "no text inserted" is proved by the exact prompt
+# the hub receives below.
 - takeScreenshot: m9-pasted
 - tapOn:
     id: composer__input
