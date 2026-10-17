@@ -1,5 +1,6 @@
 import type { Entry } from "@band-app/client/transcript";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
+import { MoreHorizontal } from "lucide-react-native";
 import { memo } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import type { ChatRow } from "../../lib/chat/rows";
@@ -122,6 +123,23 @@ function time(ms: number | undefined): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+/** The message's actions (Copy, when it was sent). Long-pressing the text selects it instead. */
+function MessageMenu({ rowKey }: { rowKey: string }) {
+  const { showActions } = useChat();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Message actions"
+      onPress={() => showActions(rowKey)}
+      hitSlop={10}
+      style={styles.menu}
+      testID="chat__message-menu"
+    >
+      <MoreHorizontal size={16} color={colors.mutedForeground} />
+    </Pressable>
+  );
+}
+
 function Body({ row }: { row: ChatRow }) {
   switch (row.kind) {
     case "user":
@@ -136,6 +154,7 @@ function Body({ row }: { row: ChatRow }) {
             ))}
             {row.message.text.trim() ? <Markdown text={row.message.text} /> : null}
           </View>
+          <MessageMenu rowKey={row.key} />
         </View>
       );
     case "part":
@@ -156,6 +175,7 @@ function Body({ row }: { row: ChatRow }) {
       return (
         <View style={styles.footer} testID="chat__turn-end">
           <Text style={styles.footerText}>{time(row.message.createdAt)}</Text>
+          <MessageMenu rowKey={row.key} />
         </View>
       );
     case "thinking":
@@ -189,21 +209,17 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
   return a.kind === "thinking";
 }
 
-/** One list row. A long press opens the message's actions: copy, and when it was sent. */
+/**
+ * One list row. The "…" button opens the message's actions (copy, and when it was sent). The row
+ * has no long press of its own, because the text view's long press selects a range and the row's
+ * would open the sheet on top of the selection.
+ */
 export const ChatRowView = memo(
   function ChatRowView({ row }: { row: ChatRow }) {
-    const { showActions } = useChat();
     return (
-      <Pressable
-        // Not one accessibility element: the row's text, links and buttons stay reachable.
-        accessible={false}
-        onLongPress={() => showActions(row.key)}
-        delayLongPress={350}
-        style={styles.row}
-        testID={`chat__row-${row.kind}`}
-      >
+      <View style={styles.row} testID={`chat__row-${row.kind}`}>
         <Body row={row} />
-      </Pressable>
+      </View>
     );
   },
   (prev, next) => sameRow(prev.row, next.row),
@@ -256,7 +272,8 @@ const styles = StyleSheet.create({
   },
   requestTitle: { color: tones.attention, fontSize: 15, fontWeight: "600" },
   notice: { color: colors.mutedForeground, fontSize: 15 },
-  footer: { paddingBottom: 6 },
+  footer: { alignItems: "center", flexDirection: "row", gap: 10, paddingBottom: 6 },
+  menu: { paddingHorizontal: 2, paddingVertical: 2 },
   footerText: { color: colors.mutedForeground, fontSize: 12 },
   thinking: { alignItems: "center", flexDirection: "row", gap: 8, paddingVertical: 4 },
 });

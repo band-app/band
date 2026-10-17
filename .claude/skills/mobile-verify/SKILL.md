@@ -119,8 +119,9 @@ Check each tool first and install only what is missing. All of it is user space 
 | `d3-delete-not-offered.yaml` | The default-branch worktree and a plain repo's folder have no Delete worktree option. |
 | `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link opens the file viewer on that file (here an error state, because `gamma` has no `src/parser.ts`) and Back returns. |
 | `c2-streaming.yaml` | A streamed turn shows each line as it arrives and the list stays at the bottom; scrolling up stops following and shows Jump to latest, which brings the list back. |
-| `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow long-presses the turn and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
-| `c5-copy.yaml` | A long press on a message copies its text (checked on the simulator's clipboard). |
+| `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow taps the message menu and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
+| `c5-copy.yaml` | The "..." button under a message opens its actions; Copy puts the message text on the simulator's clipboard. |
+| `c7-select.yaml` | A long press on message text selects a word with the system handles and no action sheet; dragging the end handle widens the range and Copy puts exactly that range on the clipboard. |
 | `c6-history.yaml` | Scrolling to the top of a 24-turn chat loads the 4 turns the hub didn't send on open, and the list keeps its place while they arrive. |
 | `m1-send.yaml` | A message typed on the phone (Return adds a line, only the button sends) reaches the agent, and the reply streams in. |
 | `m2-queue.yaml` | A message sent during a running turn joins the queue above the composer; one is moved up and another deleted; the kept one is delivered when the turn ends and the deleted one never reaches the agent. |
