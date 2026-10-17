@@ -182,6 +182,12 @@ function isNetworkError(err: unknown): boolean {
   return !data?.httpStatus;
 }
 
+/** The refusal an older hub gives for a key added after its release. */
+export function isUnknownKeyRefusal(err: unknown): boolean {
+  const e = err as { data?: { code?: string }; message?: string } | null;
+  return e?.data?.code === "BAD_REQUEST" && /^Not a client-state key:/.test(e.message ?? "");
+}
+
 export class ClientStateStore {
   readonly clientId: string;
   private device: DeviceType | null = null;
@@ -195,6 +201,8 @@ export class ClientStateStore {
   private readonly inflight = new Set<string>();
   /** Entries changed again while their push was in flight. */
   private readonly dirtyAgain = new Set<string>();
+  /** Keys a hub refused as unknown (a hub older than this app). Kept locally, never pushed again. */
+  private readonly unsupportedKeys = new Set<string>();
   private retryDelay = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly listeners = new Set<(change: ClientStateChange) => void>();
@@ -332,7 +340,7 @@ export class ClientStateStore {
     const { scope, key } = parseEntryId(id);
     const matched = matchKey(key);
     const part = this.partFor(key, scope);
-    if (!matched || !part) {
+    if (!matched || !part || this.unsupportedKeys.has(key)) {
       this.setPending(id, false);
       return;
     }
@@ -369,7 +377,12 @@ export class ClientStateStore {
       if (isNetworkError(err)) {
         this.scheduleRetry();
       } else {
-        console.warn("[client-state] server refused write for", key, err);
+        if (isUnknownKeyRefusal(err)) {
+          // An older hub does not know this key. The value stays in localStorage; stop pushing it.
+          this.unsupportedKeys.add(key);
+        } else {
+          console.warn("[client-state] server refused write for", key, err);
+        }
         delete this.getMeta().sent[id];
         this.setPending(id, false);
       }

@@ -1,5 +1,6 @@
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
+import { isOldHubGap, NEEDS_NEWER_HUB } from "../../lib/hub-version";
 import type { DashboardAdapter } from "../adapter";
 import type {
   CIStatus,
@@ -30,6 +31,7 @@ const MAX_NOTICES = 3;
  * failure reads as the server's message instead of "TRPCClientError: …".
  */
 export function describeError(err: unknown): string {
+  if (isOldHubGap(err)) return NEEDS_NEWER_HUB;
   const text = err instanceof Error ? err.message : String(err);
   return text.trim() || "Something went wrong.";
 }
