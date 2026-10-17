@@ -1,0 +1,35 @@
+# D3: the default-branch worktree and a plain repo's folder have no delete option.
+appId: app.getband.mobile
+name: D3 no delete for main or a plain folder
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: make-plain?name=notes
+- pressKey: home
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: home__repo-alpha
+    timeout: 20000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+- longPressOn:
+    id: home__worktree-alpha-main
+- assertVisible: Cancel
+- assertNotVisible: Delete worktree
+- takeScreenshot: d3-main
+- tapOn: Cancel
+- scrollUntilVisible:
+    element:
+      id: home__worktree-notes-main
+    timeout: 60000
+- longPressOn:
+    id: home__worktree-notes-main
+- assertVisible: Cancel
+- assertNotVisible: Delete worktree
+- takeScreenshot: d3-plain
+- tapOn: Cancel

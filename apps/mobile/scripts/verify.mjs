@@ -20,6 +20,9 @@ import {
   addSubscription,
   chatSubscriptions,
   fillWorktrees,
+  findWorktree,
+  makePlainRepo,
+  makeWorktree,
   receivedPrompts,
   seedHub,
   sessionState,
@@ -375,6 +378,21 @@ function startControlServer(hub, chats, udid, notes) {
         notes.push(`${wt}: slash commands from the hub: ${names.join(" ")}`);
         const want = url.searchParams.get("value");
         if (want && !want.split(",").every((n) => names.includes(n))) throw new Error(`hub commands ${names}, expected ${want}`);
+      } else if (url.pathname === "/make-worktree") {
+        await makeWorktree(hub, url.searchParams.get("repo") ?? "alpha", url.searchParams.get("branch") ?? "", url.searchParams.get("dirty") === "1");
+      } else if (url.pathname === "/make-plain") {
+        await makePlainRepo(hub, url.searchParams.get("name") ?? "plain");
+      } else if (url.pathname === "/expect-worktree") {
+        // present=1 fails unless repos.list holds the worktree, present=0 fails if it does;
+        // file=<name> also fails unless that file is still in the worktree's folder.
+        const repo = url.searchParams.get("repo") ?? "";
+        const name = url.searchParams.get("name") ?? "";
+        const want = url.searchParams.get("present") !== "0";
+        const found = await findWorktree(hub, repo, name);
+        notes.push(`${repo}/${name}: repos.list ${found ? "holds" : "does not hold"} it`);
+        if (Boolean(found) !== want) throw new Error(`${repo}/${name} ${found ? "is" : "is not"} in repos.list`);
+        const file = url.searchParams.get("file");
+        if (file && found && !existsSync(join(found.path, file))) throw new Error(`${file} is gone from ${found.path}`);
       } else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
       else if (url.pathname === "/sleep") {
         await new Promise((r) => setTimeout(r, Number(url.searchParams.get("ms") ?? 1000)));
