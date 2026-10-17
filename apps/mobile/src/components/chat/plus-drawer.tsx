@@ -5,9 +5,12 @@ import {
   ClipboardList,
   ClipboardPaste,
   File,
+  Hand,
   Image,
   type LucideIcon,
-  Shield,
+  PencilLine,
+  ShieldAlert,
+  Zap,
 } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
