@@ -1,0 +1,44 @@
+# S1: a long press on message text selects a range with the system handles, and Copy puts exactly
+# that range on the clipboard. The message menu (c5-copy.yaml) still copies the whole message.
+appId: app.getband.mobile
+name: S1 a range of a message's text can be selected and copied
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-main
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      text: "Plan for the parser fix"
+    direction: UP
+    speed: 15
+    timeout: 30000
+- assertVisible:
+    text: "The bug is in.*"
+# A long press on the first word selects it and shows the handles and the Copy callout, with no
+# action sheet on top.
+- longPressOn:
+    text: "The bug is in.*"
+    point: 8%, 25%
+- assertVisible:
+    text: "Copy"
+- takeScreenshot: s1-word-selected
+# Dragging the end handle into the middle of "src/parser.ts" widens the selection from the first
+# word to a part of the paragraph, and Copy copies exactly that part.
+- swipe:
+    start: 11%, 38%
+    end: 40%, 39%
+    duration: 800
+- takeScreenshot: s1-paragraph-selected
+- tapOn:
+    text: "Copy"
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: clipboard
+      VALUE: "The bug is in src/p"

@@ -1,5 +1,6 @@
-import { memo, type ReactNode, useMemo } from "react";
+import { type ComponentProps, memo, type ReactNode, useMemo } from "react";
 import { Linking, ScrollView, StyleSheet, Text, type TextStyle, View } from "react-native";
+import { UITextView } from "react-native-uitextview";
 import {
   type Align,
   type Block,
@@ -11,6 +12,11 @@ import {
 import { chatColors, colors, fonts } from "../../theme";
 import { useChat } from "./chat-context";
 import { CodeBlock } from "./code-block";
+
+/** Markdown text a person can select by range: a `UITextView` on iOS, plain `Text` elsewhere. */
+function SelectableText(props: ComponentProps<typeof UITextView>) {
+  return <UITextView selectable uiTextView {...props} />;
+}
 
 /** Agent or user markdown as native text. Parsed again only when the text changes. */
 export const Markdown = memo(function Markdown({ text, muted }: { text: string; muted?: boolean }) {
@@ -25,8 +31,11 @@ export const Markdown = memo(function Markdown({ text, muted }: { text: string; 
   );
 });
 
-function Spans({ spans }: { spans: readonly Span[] }) {
-  const { openFile } = useChat();
+/**
+ * A plain function, not a component: `UITextView` turns only its direct string children into
+ * native text, so the spans must be its children and not a wrapper element.
+ */
+function renderSpans(spans: readonly Span[], openFile: (path: string) => void) {
   return spans.map((span, i) => {
     const style: TextStyle[] = [];
     if (span.bold) style.push(styles.bold);
@@ -42,7 +51,7 @@ function Spans({ spans }: { spans: readonly Span[] }) {
         : () => void Linking.openURL(link.url).catch(() => {});
     if (style.length === 0 && !onPress) return span.text;
     return (
-      <Text
+      <SelectableText
         // biome-ignore lint/suspicious/noArrayIndexKey: spans have no identity beyond position
         key={i}
         style={style}
@@ -50,16 +59,15 @@ function Spans({ spans }: { spans: readonly Span[] }) {
         accessibilityRole={link ? "link" : undefined}
       >
         {span.text}
-      </Text>
+      </SelectableText>
     );
   });
 }
 
 function Paragraph({ spans, style }: { spans: readonly Span[]; style?: TextStyle | TextStyle[] }) {
+  const { openFile } = useChat();
   return (
-    <Text style={[styles.text, style]}>
-      <Spans spans={spans} />
-    </Text>
+    <SelectableText style={[styles.text, style]}>{renderSpans(spans, openFile)}</SelectableText>
   );
 }
 

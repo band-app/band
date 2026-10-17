@@ -82,7 +82,8 @@ name: S1 chat transcript renders the seeded history
     text: "Readers learn the radix is always ten"
 - takeScreenshot: s1-table-scrolled
 # A file path opens the file viewer on that file.
-# A link inside a paragraph is its own element on iOS, named by its text. Maestro counts text
+# A paragraph is one selectable text view, so a link inside it has no element of its own: tap
+# the link by its place in the paragraph (the wrapped "src/parser.ts:12"). Maestro counts text
 # clipped under the headers above the list as visible, so the scroll above can stop with the
 # heading and this link hidden there; a short swipe brings them into the middle of the list.
 - swipe:
@@ -90,7 +91,8 @@ name: S1 chat transcript renders the seeded history
     end: 50%, 70%
     duration: 600
 - tapOn:
-    text: "src/parser\\.ts:12"
+    text: "The bug is in.*"
+    point: 75%, 25%
 - extendedWaitUntil:
     visible:
       id: file__screen

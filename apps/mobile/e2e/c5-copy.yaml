@@ -1,6 +1,7 @@
-# A long press on a message opens its actions (web's message actions: Copy, and when it was sent).
+# The "..." button under a message opens its actions (web's message actions: Copy, and when it was sent).
+# A long press on the text selects a range instead, see c7-select.yaml.
 appId: app.getband.mobile
-name: S4 long press opens the message actions
+name: S4 the message menu opens the message actions
 ---
 - runFlow: subflows/pair-link.yaml
 - runFlow:
@@ -16,8 +17,10 @@ name: S4 long press opens the message actions
       text: "showcase: fix the parser radix"
     direction: UP
     timeout: 20000
-- longPressOn:
-    text: "showcase: fix the parser radix"
+- tapOn:
+    id: chat__message-menu
+    below:
+      text: "showcase: fix the parser radix"
 # The sheet shows when the message was sent, and Copy.
 - assertVisible:
     text: "Copy"
