@@ -258,6 +258,9 @@ export const SCENARIO = {
 };
 
 /** The worktree ids the flows use, as the hub names them. */
+export const SESSION_ONE_PROMPT = "first session: alpha";
+export const SESSION_TWO_PROMPT = "second session: beta";
+
 export const WORKTREES = {
   ALPHA_MAIN: "alpha-main",
   ALPHA_FEATURE: "alpha-feat-mobile",
@@ -275,6 +278,10 @@ export const WORKTREES = {
   GAMMA_ATTACH: "gamma-attach",
   GAMMA_SUGGEST: "gamma-suggest",
   GAMMA_SESSION: "gamma-session",
+  /** A chat that has had two agent sessions, for the Sessions sheet (m9). */
+  GAMMA_SESSIONS: "gamma-sessions",
+  /** An empty chat that never ran a session (m10). */
+  GAMMA_NO_SESSIONS: "gamma-no-sessions",
   GAMMA_KEYBOARD: "gamma-keyboard",
   /** Empty chats for the interaction flows: permission allow and reject, the form, the plan, the listening pill. */
   GAMMA_PERMIT_ALLOW: "gamma-permit-allow",
@@ -408,6 +415,13 @@ export async function seedHub(state) {
     pngFile("screenshot.png"),
   ]);
   await seedTurn(state, chats, WORKTREES.GAMMA_LONG, "long: check every module");
+  // Two sessions: a turn, then "new session" (no active session), then a turn that starts another.
+  await seedTurn(state, chats, WORKTREES.GAMMA_SESSIONS, SESSION_ONE_PROMPT);
+  await trpc(state, "chats.setActiveSession", {
+    worktreeId: WORKTREES.GAMMA_SESSIONS,
+    chatId: chats[WORKTREES.GAMMA_SESSIONS],
+  });
+  await seedTurn(state, chats, WORKTREES.GAMMA_SESSIONS, SESSION_TWO_PROMPT);
   for (let i = 1; i <= HISTORY_TURNS; i++) {
     const n = String(i).padStart(2, "0");
     await seedTurn(state, chats, WORKTREES.GAMMA_HISTORY, `turn ${n}: say done`);

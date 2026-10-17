@@ -2,17 +2,28 @@ import type { sessionPickers } from "@band-app/client/session-pickers";
 import { useCallback, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { colors } from "../../theme";
+import { SessionHistorySheet } from "./session-history-sheet";
 import { SessionSheet } from "./session-sheet";
 
 type Pickers = ReturnType<typeof sessionPickers>;
+
+/** What the History button needs to list and switch the chat's sessions. */
+export interface SessionsControl {
+  worktreeId: string;
+  chatId: string;
+  currentSessionId: string | undefined;
+  onSwitch: (sessionId: string | undefined, summary?: string) => Promise<void>;
+}
 
 /** The chat's model and mode as pills in the expanded composer. Tapping either opens the session sheet. */
 export function ChatHeader({
   pickers,
   setConfigOption,
+  sessions,
   onOpenChange,
 }: {
   pickers: Pickers;
+  sessions?: SessionsControl;
   setConfigOption: (configId: string, value: string) => Promise<void>;
   /** Tells the composer a sheet is open, so it stays expanded while the input loses focus. */
   onOpenChange?: (open: boolean) => void;
@@ -21,6 +32,14 @@ export function ChatHeader({
   const setOpen = useCallback(
     (next: boolean) => {
       setOpenState(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
+  const [historyOpen, setHistoryOpenState] = useState(false);
+  const setHistoryOpen = useCallback(
+    (next: boolean) => {
+      setHistoryOpenState(next);
       onOpenChange?.(next);
     },
     [onOpenChange],
@@ -45,7 +64,7 @@ export function ChatHeader({
 
   const model = pickers.models.find((m) => m.id === pickers.model)?.name ?? pickers.model;
   const mode = pickers.modes.find((m) => m.id === pickers.mode)?.name ?? pickers.mode;
-  if (!model && !mode) return null;
+  if (!model && !mode && !sessions) return null;
 
   return (
     <View style={styles.root} testID="chat__header">
@@ -54,6 +73,24 @@ export function ChatHeader({
       ) : null}
       {mode ? (
         <Chip label={mode} a11y="Mode" onPress={() => setOpen(true)} testID="chat__mode" />
+      ) : null}
+      {sessions ? (
+        <>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Session history"
+            onPress={() => setHistoryOpen(true)}
+            style={styles.iconButton}
+            testID="chat__history"
+          >
+            <Text style={styles.label}>⏱</Text>
+          </Pressable>
+          <SessionHistorySheet
+            visible={historyOpen}
+            onClose={() => setHistoryOpen(false)}
+            {...sessions}
+          />
+        </>
       ) : null}
       <SessionSheet
         visible={open}
@@ -104,6 +141,14 @@ const styles = StyleSheet.create({
     gap: 5,
     height: 36,
     paddingHorizontal: 12,
+  },
+  iconButton: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
   label: { color: colors.foreground, flexShrink: 1, fontSize: 14 },
   caret: { color: colors.mutedForeground, fontSize: 11 },

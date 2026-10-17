@@ -20,7 +20,7 @@ import { useDictation } from "../../lib/composer/use-dictation";
 import { useDraft } from "../../lib/composer/use-draft";
 import { colors, useScheme } from "../../theme";
 import { Glass, MicGlyph, PlusGlyph } from "../glass";
-import { ChatHeader } from "./chat-header";
+import { ChatHeader, type SessionsControl } from "./chat-header";
 import { ComposerSuggestions } from "./composer-suggestions";
 
 const MAX_ATTACHMENTS = 10;
@@ -38,9 +38,11 @@ export function Composer({
   skills,
   pickers,
   setConfigOption,
+  sessions,
   onSend,
   onStop,
 }: {
+  sessions?: SessionsControl;
   worktreeId: string;
   running: boolean;
   skills: SlashCommandSkill[];
@@ -276,6 +278,7 @@ export function Composer({
             <ChatHeader
               pickers={pickers}
               setConfigOption={setConfigOption}
+              sessions={sessions}
               onOpenChange={setSheetOpen}
             />
             <View style={styles.spacer} />

@@ -41,12 +41,15 @@ const keyOf = (row: ChatRow) => row.key;
  * the bottom the list follows new output; scrolling up stops that and shows "Jump to latest".
  * Older turns load when the user reaches the top, and the list keeps its place while they do.
  */
-export const ChatView = memo(function ChatView({
-  chatId,
-  worktreeId,
-  active = true,
-  chips = null,
-}: {
+export const ChatView = memo(function ChatView(props: ChatViewProps) {
+  // Switching session remounts the inner view, which drops the transcript and opens the stream
+  // again. The hub then replays the chat's new active session, as it does on open.
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration((n) => n + 1), []);
+  return <ChatViewInner key={generation} {...props} onReload={reload} />;
+});
+
+interface ChatViewProps {
   chatId: string;
   worktreeId: string;
   /** Chips shown above the composer, such as a link to the tab that needs the user. */
@@ -56,8 +59,16 @@ export const ChatView = memo(function ChatView({
    * has no composer, because the worktree's draft belongs to the shown chat's composer.
    */
   active?: boolean;
-}) {
-  const { hub } = useHubSession();
+}
+
+function ChatViewInner({
+  chatId,
+  worktreeId,
+  active = true,
+  chips = null,
+  onReload,
+}: ChatViewProps & { onReload: () => void }) {
+  const { hub, client } = useHubSession();
   const transcript = useChatTranscript(chatId);
   const { state, loaded, loadingOlder, loadOlder } = transcript;
   const actions = useChatActions(worktreeId, chatId, transcript);
@@ -75,6 +86,21 @@ export const ChatView = memo(function ChatView({
   const rows = useMemo(
     () => buildRows(state.messages, state.taskRunning),
     [state.messages, state.taskRunning],
+  );
+
+  // Same calls as the web: queued messages belong to the session they were queued against, then
+  // the active session is set. Like the web, a running turn is not asked about first.
+  const switchSession = useCallback(
+    async (sessionId: string | undefined, summary?: string) => {
+      await client.queue.clear.mutate({ worktreeId, chatId }).catch(() => {});
+      await client.chats.setActiveSession.mutate({ worktreeId, chatId, sessionId, summary });
+      onReload();
+    },
+    [client, worktreeId, chatId, onReload],
+  );
+  const sessions = useMemo(
+    () => ({ worktreeId, chatId, currentSessionId: state.sessionId, onSwitch: switchSession }),
+    [worktreeId, chatId, state.sessionId, switchSession],
   );
 
   const request = useMemo(() => pendingRequest(state.messages), [state.messages]);
@@ -249,6 +275,7 @@ export const ChatView = memo(function ChatView({
             skills={skills}
             pickers={pickers}
             setConfigOption={actions.setConfigOption}
+            sessions={sessions}
             onSend={actions.send}
             onStop={() => void actions.stop()}
           />
@@ -256,7 +283,7 @@ export const ChatView = memo(function ChatView({
       </Animated.View>
     </ChatProvider>
   );
-});
+}
 
 const styles = StyleSheet.create({
   keyboard: { flex: 1 },

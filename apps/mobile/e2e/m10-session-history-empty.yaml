@@ -1,0 +1,20 @@
+# S4: a chat that has had no session opens the sheet and it says so, with New session offered.
+appId: app.getband.mobile
+name: Session history on a chat with no sessions
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-no-sessions
+- tapOn:
+    id: composer__input
+- tapOn:
+    id: chat__history
+- extendedWaitUntil:
+    visible:
+      id: session-history__empty
+    timeout: 10000
+- assertVisible:
+    id: session-history__new
+- takeScreenshot: m10-empty

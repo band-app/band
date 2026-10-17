@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { expectRerun, finishBuild, startGhStub } from "./checks.mjs";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
 import {
+  acpRequests,
   addSubscription,
   chatSubscriptions,
   fillWorktrees,
@@ -364,6 +365,21 @@ function startControlServer(hub, chats, udid, notes) {
           if (!hit) throw new Error(`no prompt holding ${JSON.stringify(want)}${image ? " with an image part" : ""}; got ${JSON.stringify(receivedPrompts(hub))}`);
           notes.push(`agent received ${JSON.stringify(want)}: part types ${hit.types.join(", ")}`);
         }
+      } else if (url.pathname === "/expect-prompt-session") {
+        // The last prompt holding `value` went to the session of the seeded prompt `which=first`
+        // ("first session: alpha"), or to one of neither seeded session (`which=new`).
+        const prompts = acpRequests(hub).filter((r) => r.method === "session/prompt");
+        const textOf = (r) => (r.params?.prompt ?? []).map((p) => p.text ?? "").join("\n");
+        const sessionOf = (text) => prompts.find((r) => textOf(r).includes(text))?.params?.sessionId;
+        const first = sessionOf("first session: alpha");
+        const second = sessionOf("second session: beta");
+        const hit = prompts.filter((r) => textOf(r).includes(url.searchParams.get("value") ?? "")).at(-1);
+        if (!hit) throw new Error("the agent received no such prompt");
+        const got = hit.params.sessionId;
+        const which = url.searchParams.get("which");
+        if (which === "first" && got !== first) throw new Error(`prompt went to ${got}, not the first session ${first}`);
+        if (which === "new" && (got === first || got === second)) throw new Error(`prompt went to the old session ${got}`);
+        notes.push(`prompt went to session ${got} (${which})`);
       } else if (url.pathname === "/expect-model") {
         // `chats.sessionState` reports the model the user picked.
         const pickers = sessionPickers(await sessionState(hub, chats, wt));
