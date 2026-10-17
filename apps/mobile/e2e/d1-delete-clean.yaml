@@ -1,0 +1,47 @@
+# D1: a clean worktree is deleted from the long-press sheet after one confirmation.
+appId: app.getband.mobile
+name: D1 delete a clean worktree
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: make-worktree?repo=alpha&branch=del-clean
+- pressKey: home
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: home__repo-alpha
+    timeout: 20000
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-del-clean
+    timeout: 20000
+- longPressOn:
+    id: home__worktree-alpha-del-clean
+- assertVisible: Delete worktree
+- takeScreenshot: d1-sheet
+- tapOn: Delete worktree
+- assertVisible: "Delete del-clean?"
+- takeScreenshot: d1-confirm
+# Cancel keeps it.
+- tapOn: Cancel
+- assertVisible:
+    id: home__worktree-alpha-del-clean
+- longPressOn:
+    id: home__worktree-alpha-del-clean
+- tapOn: Delete worktree
+- tapOn: Delete
+- extendedWaitUntil:
+    notVisible:
+      id: home__worktree-alpha-del-clean
+    timeout: 20000
+- takeScreenshot: d1-gone
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-worktree?repo=alpha&name=del-clean&present=0
