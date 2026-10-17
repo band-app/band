@@ -3,7 +3,7 @@
 // stays in the vault. The stub server checks the multipart fields and the Bearer header.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { silentWav } from "@band-app/shared/speech-transcription";
@@ -26,6 +26,7 @@ const KEY = "sk-stub-secret-key-0123456789";
 const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
 
 const AUDIO = Buffer.from("fake webm audio bytes");
+const M4A = readFileSync(join(import.meta.dirname, "fixtures/dictation.m4a"));
 
 let home: string;
 let server: ServerHandle;
@@ -266,6 +267,19 @@ describe("the hub transcribes a clip", () => {
     expect(stub.requests[0]).toMatchObject({ fileName: "audio.m4a", fileType: "audio/mp4" });
   });
 
+  it("names an M4A clip from its bytes when the type is missing or wrong (S1)", async () => {
+    for (const mime of ["application/octet-stream", "audio/webm;codecs=opus"]) {
+      stub.requests.length = 0;
+      const answer = await transcribe({ body: M4A, mime });
+      expect(answer).toEqual({ status: 200, body: { text: "Fix the login bug" } });
+      expect(stub.requests[0]).toMatchObject({
+        fileName: "audio.m4a",
+        fileType: "audio/mp4",
+        fileSize: M4A.byteLength,
+      });
+    }
+  });
+
   it("refuses a clip over 25 MB and an empty one", async () => {
     stub.requests.length = 0;
     const big = await transcribe({ body: new Uint8Array(26 * 1024 * 1024) });
@@ -362,6 +376,17 @@ describe("running on a worker host (S3)", () => {
       fileName: "audio.webm",
       fileSize: AUDIO.byteLength,
       language: null,
+    });
+  });
+
+  it("names an M4A clip from its bytes through the worker (S2)", async () => {
+    stub.requests.length = 0;
+    const answer = await transcribe({ body: M4A, mime: "application/octet-stream" });
+    expect(answer.status).toBe(200);
+    expect(stub.requests[0]).toMatchObject({
+      fileName: "audio.m4a",
+      fileType: "audio/mp4",
+      fileSize: M4A.byteLength,
     });
   });
 

@@ -643,3 +643,27 @@ export async function waitFor(check, what, timeoutMs = 15_000) {
   }
   throw new Error(`timed out waiting for ${what}`);
 }
+
+/** Adds a worktree to a repo for the delete flows; `dirty` leaves an uncommitted file in it. */
+export async function makeWorktree(state, repo, branch, dirty) {
+  await trpc(state, "worktrees.create", { repo, branch });
+  if (!dirty) return;
+  const { repos } = await trpcQuery(state, "repos.list", {});
+  const wt = repos.find((r) => r.name === repo)?.worktrees.find((w) => w.name === branch);
+  if (!wt) throw new Error(`${repo}/${branch} is not in repos.list`);
+  writeFileSync(join(wt.path, "unsaved.txt"), "not committed\n");
+}
+
+/** Registers a plain (non-git) folder as the repo `name`. */
+export async function makePlainRepo(state, name) {
+  const dir = join(state.home, "repos", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "notes.txt"), "plain\n");
+  await trpc(state, "repos.add", { path: dir });
+}
+
+/** Whether `repos.list` holds the worktree, and the path it has, for the delete flows. */
+export async function findWorktree(state, repo, name) {
+  const { repos } = await trpcQuery(state, "repos.list", {});
+  return repos.find((r) => r.name === repo)?.worktrees.find((w) => w.name === name) ?? null;
+}

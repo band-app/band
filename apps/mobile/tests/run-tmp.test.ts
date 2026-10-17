@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { createRunTmp } from "../scripts/run-tmp.ts";
+import { createRunTmp, maestroTmpEnv, sweepStaleMaestroOutput } from "../scripts/run-tmp.ts";
 
 const helper = join(import.meta.dirname, "..", "scripts", "run-tmp.ts");
 
@@ -61,4 +69,40 @@ setInterval(() => {}, 1000);`;
       }
     });
   }
+});
+
+describe("maestro temp env", () => {
+  it("sets TMPDIR and the JVM property, keeping existing MAESTRO_OPTS", () => {
+    assert.deepEqual(maestroTmpEnv("/x", {}), {
+      TMPDIR: "/x",
+      MAESTRO_OPTS: "-Djava.io.tmpdir=/x",
+    });
+    assert.equal(
+      maestroTmpEnv("/x", { MAESTRO_OPTS: "-Xmx1g" }).MAESTRO_OPTS,
+      "-Xmx1g -Djava.io.tmpdir=/x",
+    );
+  });
+});
+
+describe("stale Maestro output sweep", () => {
+  it("removes old output folders and leaves fresh and unrelated ones", () => {
+    const base = mkdtempSync(join(tmpdir(), "run-tmp-test-"));
+    try {
+      const old = new Date(Date.now() - 3 * 3600 * 1000);
+      for (const name of ["maestro_xctestrunner_xcodebuild_output_old", "other_old"]) {
+        mkdirSync(join(base, name));
+        writeFileSync(join(base, name, "f"), "12345");
+        utimesSync(join(base, name), old, old);
+      }
+      mkdirSync(join(base, "maestro_xctestrunner_xcodebuild_output_fresh"));
+      const result = sweepStaleMaestroOutput(base);
+      assert.deepEqual(result, { removed: 1, bytes: 5 });
+      assert.deepEqual(readdirSync(base).sort(), [
+        "maestro_xctestrunner_xcodebuild_output_fresh",
+        "other_old",
+      ]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
 });
