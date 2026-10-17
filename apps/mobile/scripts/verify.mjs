@@ -36,6 +36,7 @@ import {
 } from "./seed.mjs";
 import { explorerChange } from "./seed-explorer.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
+import { createRunTmp, removeOnExit } from "./run-tmp.ts";
 import { hubIdFor } from "../src/lib/hub-store.ts";
 import { buildRows, copyText } from "../src/lib/chat/rows.ts";
 import { sessionPickers } from "@band-app/client/session-pickers";
@@ -429,7 +430,10 @@ function stamp() {
 }
 
 async function main() {
-  const env = toolEnv();
+  // Maestro's xcodebuild output (about 200 MB per flow) goes to TMPDIR, so give it a dir of this run's own.
+  const runTmp = createRunTmp();
+  removeOnExit(runTmp);
+  const env = { ...toolEnv(), TMPDIR: runTmp.dir };
   requireTool("xcrun", "Install Xcode and its command line tools.", env);
   requireTool("maestro", "See the one-time setup in .claude/skills/mobile-verify/SKILL.md.", env);
   requireTool("java", "brew install openjdk@17", env);
@@ -504,6 +508,7 @@ async function main() {
   const logSearched = log.lines >= 10;
   const leaks = [...(log.found ? ["the app's log"] : []), ...results.flatMap((r) => r.leakedFiles)];
   control.close();
+  runTmp.remove();
   await gh.stop();
   if (!keepHub) await cleanHub();
 
