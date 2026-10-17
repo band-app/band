@@ -2,6 +2,7 @@ import type { SlashCommandSkill } from "@band-app/client/composer";
 import type { sessionPickers } from "@band-app/client/session-pickers";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { insertAtSelection } from "@band-app/shared/dictation-text";
+import * as Clipboard from "expo-clipboard";
 import { useCallback, useRef, useState } from "react";
 import {
   ActionSheetIOS,
@@ -117,20 +118,47 @@ export function Composer({
     }
   }, []);
 
-  const openAttachMenu = useCallback(() => {
-    const options = ["Photo library", "Take photo", "Choose file", "Cancel"];
-    ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: 3 }, (index) => {
-      if (index === 0) void addFrom(picker.photos);
-      else if (index === 1) void addFrom(picker.camera);
-      else if (index === 2) void addFrom(picker.files);
-    });
+  // hasImageAsync never shows iOS's paste prompt; only reading the image does, and that waits for a tap.
+  const [clipboardHasImage, setClipboardHasImage] = useState(false);
+  const checkClipboard = useCallback(async () => {
+    try {
+      setClipboardHasImage(await Clipboard.hasImageAsync());
+    } catch {
+      setClipboardHasImage(false);
+    }
+  }, []);
+
+  const pasteImage = useCallback(async () => {
+    setClipboardHasImage(false);
+    await addFrom(picker.pasted);
   }, [addFrom, picker]);
+
+  const openAttachMenu = useCallback(async () => {
+    let hasImage = false;
+    try {
+      hasImage = await Clipboard.hasImageAsync();
+    } catch {}
+    const options = ["Photo library", "Take photo", "Choose file", "Paste image", "Cancel"];
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options,
+        cancelButtonIndex: 4,
+        disabledButtonIndices: hasImage ? [] : [3],
+      },
+      (index) => {
+        if (index === 0) void addFrom(picker.photos);
+        else if (index === 1) void addFrom(picker.camera);
+        else if (index === 2) void addFrom(picker.files);
+        else if (index === 3) void pasteImage();
+      },
+    );
+  }, [addFrom, picker, pasteImage]);
 
   const plus = (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Attach"
-      onPress={openAttachMenu}
+      onPress={() => void openAttachMenu()}
       hitSlop={8}
       style={[styles.plus, expanded && styles.plusSmall]}
       testID="composer__attach"
@@ -210,6 +238,17 @@ export function Composer({
                 ))}
               </ScrollView>
             ) : null}
+            {focused && clipboardHasImage ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Paste image"
+                onPress={() => void pasteImage()}
+                style={styles.pasteChip}
+                testID="composer__paste-image"
+              >
+                <Text style={styles.chipName}>Paste image</Text>
+              </Pressable>
+            ) : null}
             {hint ? (
               <Text style={styles.hint} testID="composer__hint">
                 {hint}
@@ -257,8 +296,14 @@ export function Composer({
             onChangeText={setText}
             selection={selection}
             onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
+            onFocus={() => {
+              setFocused(true);
+              void checkClipboard();
+            }}
+            onBlur={() => {
+              setFocused(false);
+              setClipboardHasImage(false);
+            }}
             placeholder={running ? "Queue a message…" : "Follow up…"}
             placeholderTextColor={colors.faint}
             style={[styles.input, expanded && styles.inputExpanded]}
@@ -390,6 +435,15 @@ const styles = StyleSheet.create({
     height: 30,
     maxWidth: 220,
     paddingHorizontal: 9,
+  },
+  pasteChip: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.muted,
+    borderRadius: 10,
+    marginBottom: 6,
+    marginHorizontal: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
   },
   thumb: { borderRadius: 4, height: 20, width: 20 },
   chipName: { color: colors.foreground, flexShrink: 1, fontSize: 12.5 },

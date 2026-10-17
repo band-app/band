@@ -1,0 +1,80 @@
+# S9: an image on the clipboard is pasted from the + menu and from the hint chip, then sent; the
+# agent gets an image part. With no image on the clipboard the menu item is disabled and no hint shows.
+appId: app.getband.mobile
+name: S9 paste an image
+---
+- addMedia:
+    - assets/photo.png
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-paste
+# Text on the clipboard: no hint on focus, and Paste image is disabled in the + menu.
+- tapOn:
+    id: composer__input
+- inputText: "plain text"
+- copyTextFrom:
+    id: composer__input
+- eraseText: 20
+- assertNotVisible:
+    id: composer__paste-image
+- tapOn:
+    id: composer__attach
+- assertVisible:
+    text: "Paste image"
+    enabled: false
+- tapOn: "Cancel"
+# Copy the newest photo in Photos, which puts an image on the clipboard.
+- launchApp:
+    appId: com.apple.mobileslideshow
+    clearState: false
+- tapOn:
+    point: "15%,25%"
+# The first tap opened the photo full screen; its share sheet has Copy Photo.
+- tapOn:
+    point: "13%,94%"
+- tapOn: "Copy Photo"
+- launchApp:
+    appId: app.getband.mobile
+    clearState: false
+# The app comes back on the home screen.
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-paste
+- tapOn:
+    id: composer__input
+- extendedWaitUntil:
+    visible:
+      id: composer__paste-image
+    timeout: 10000
+- takeScreenshot: m9-hint
+- tapOn:
+    id: composer__paste-image
+- runFlow:
+    when:
+      visible: "Allow Paste"
+    commands:
+      - tapOn: "Allow Paste"
+- extendedWaitUntil:
+    visible:
+      id: composer__attachment
+    timeout: 20000
+- assertNotVisible:
+    id: composer__paste-image
+- takeScreenshot: m9-pasted
+- tapOn:
+    id: composer__input
+- inputText: "what is in this paste"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      text: "Done."
+    timeout: 20000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt?image=1
+      VALUE: "what is in this paste"

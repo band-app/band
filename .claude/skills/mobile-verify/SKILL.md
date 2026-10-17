@@ -103,6 +103,7 @@ Check each tool first and install only what is missing. All of it is user space 
 | `m1-send.yaml` | A message typed on the phone (Return adds a line, only the button sends) reaches the agent, and the reply streams in. |
 | `m2-queue.yaml` | A message sent during a running turn joins the queue above the composer; one is moved up and another deleted; the kept one is delivered when the turn ends and the deleted one never reaches the agent. |
 | `m3-attach.yaml` | A photo from the simulator's library (added with `addMedia`) is attached and sent; the agent receives an image part. |
+| `m9-paste-image.yaml` | An image copied in Photos is pasted from the hint chip above the input and the + menu (disabled with no image on the clipboard) and sent; the agent receives an image part. |
 | `m4-suggest.yaml` | "/" lists the commands the hub reports for the agent, "@" plus text lists matching files, and picking one fills the field. |
 | `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet (the pill in the focused composer) shows in the pill and in `chats.sessionState`. |
 | `m6-keyboard.yaml` | With the keyboard open, the last message and the composer are both on screen. Run it on other simulators with `BAND_SIM_UDID`. |

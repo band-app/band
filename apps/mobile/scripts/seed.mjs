@@ -273,6 +273,7 @@ export const WORKTREES = {
   GAMMA_COMPOSE: "gamma-compose",
   GAMMA_QUEUE: "gamma-queue",
   GAMMA_ATTACH: "gamma-attach",
+  GAMMA_PASTE: "gamma-paste",
   GAMMA_SUGGEST: "gamma-suggest",
   GAMMA_SESSION: "gamma-session",
   GAMMA_KEYBOARD: "gamma-keyboard",
@@ -386,7 +387,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "paste", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
