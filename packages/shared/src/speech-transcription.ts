@@ -99,10 +99,58 @@ export function baseMimeType(mimeType: string): string {
   return mimeType.split(";")[0]?.trim().toLowerCase() || "audio/webm";
 }
 
+export interface DetectedAudio {
+  extension: "m4a" | "webm" | "ogg" | "wav" | "flac" | "mp3";
+  mimeType: string;
+}
+
+const DETECTED: Record<DetectedAudio["extension"], string> = {
+  m4a: "audio/mp4",
+  webm: "audio/webm",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+  flac: "audio/flac",
+  mp3: "audio/mpeg",
+};
+
+/**
+ * Names the container from the first bytes of a clip, or returns null when they match nothing
+ * known. A client's `Content-Type` can be wrong (React Native rewrites it), the bytes cannot.
+ */
+export function detectAudioType(audio: Uint8Array): DetectedAudio | null {
+  const ascii = (offset: number, text: string) => {
+    if (audio.length < offset + text.length) return false;
+    for (let i = 0; i < text.length; i++) {
+      if (audio[offset + i] !== text.charCodeAt(i)) return false;
+    }
+    return true;
+  };
+  let extension: DetectedAudio["extension"] | null = null;
+  if (ascii(4, "ftyp")) extension = "m4a";
+  else if (audio[0] === 0x1a && audio[1] === 0x45 && audio[2] === 0xdf && audio[3] === 0xa3) {
+    extension = "webm";
+  } else if (ascii(0, "OggS")) extension = "ogg";
+  else if (ascii(0, "RIFF") && ascii(8, "WAVE")) extension = "wav";
+  else if (ascii(0, "fLaC")) extension = "flac";
+  else if (ascii(0, "ID3")) extension = "mp3";
+  else if (
+    audio[0] === 0xff &&
+    (audio[1] ?? 0) >= 0xe0 &&
+    // A reserved version or layer 0 (AAC in ADTS) is not MP3.
+    ((audio[1] ?? 0) >> 3) & 3 &&
+    ((audio[1] ?? 0) >> 1) & 3
+  ) {
+    extension = "mp3";
+  }
+  return extension ? { extension, mimeType: DETECTED[extension] } : null;
+}
+
 export function buildTranscriptionForm(req: TranscriptionRequest): FormData {
   const form = new FormData();
-  const type = baseMimeType(req.mimeType);
-  form.append("file", new Blob([req.audio as BlobPart], { type }), audioFileName(req.mimeType));
+  const detected = detectAudioType(req.audio);
+  const type = detected?.mimeType ?? baseMimeType(req.mimeType);
+  const name = detected ? `audio.${detected.extension}` : audioFileName(req.mimeType);
+  form.append("file", new Blob([req.audio as BlobPart], { type }), name);
   form.append("model", req.model);
   form.append("response_format", "json");
   if (req.language) form.append("language", req.language);

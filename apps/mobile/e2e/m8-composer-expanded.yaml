@@ -1,5 +1,5 @@
-# S5: focused, the composer expands into a card with the attachment button and the model and mode
-# pills; unfocused it is the floating bar again. Sending still works from the expanded card. Runs
+# S5: focused, the composer expands into a card with the attachment button and the model pill;
+# unfocused it is the floating bar again. Sending still works from the expanded card. Runs
 # after m1, which already started this worktree's session, so the agent has reported its model.
 appId: app.getband.mobile
 name: S5 the composer expands when focused
@@ -25,7 +25,7 @@ name: S5 the composer expands when focused
     visible:
       id: chat__model
     timeout: 10000
-- assertVisible:
+- assertNotVisible:
     id: chat__mode
 - takeScreenshot: m8-expanded
 - inputText: "expanded hello"
