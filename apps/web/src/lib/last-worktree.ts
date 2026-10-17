@@ -10,6 +10,7 @@
  */
 
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+
 import { LABEL_FILTER_KEY } from "../dashboard/hooks/use-label-filter";
 import { readLabelLastWorktrees } from "../dashboard/hooks/use-label-last-worktree";
 import type { RepoInfo } from "../dashboard/types";

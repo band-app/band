@@ -16,7 +16,8 @@
  * This unit test pins the bail's decision logic.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { shouldBailAutoOpen } from "../src/dashboard/lib/quick-open-bail";
 
 describe("shouldBailAutoOpen — three-branch contract (issue #539)", () => {

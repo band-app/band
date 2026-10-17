@@ -49,7 +49,11 @@ async function record(name, { file, args = [], cols = 80, rows = 24, env = {}, c
   console.log(`${name}: ${lines.length - 1} events`);
 }
 
-const bash = { file: "/bin/bash", args: ["--norc", "--noprofile"], env: { PS1: "$ ", BASH_SILENCE_DEPRECATION_WARNING: "1" } };
+const bash = {
+  file: "/bin/bash",
+  args: ["--norc", "--noprofile"],
+  env: { PS1: "$ ", BASH_SILENCE_DEPRECATION_WARNING: "1" },
+};
 
 function tmpWork() {
   const dir = mkdtempSync(join(tmpdir(), "band-rec-"));
@@ -82,18 +86,7 @@ const recipes = {
   "less-alt": async () => {
     await record("less-alt", {
       ...bash,
-      steps: [
-        300,
-        "seq 1 300 | sed 's/^/line /' | less\r",
-        500,
-        " ",
-        200,
-        " ",
-        200,
-        "j",
-        "j",
-        300,
-      ],
+      steps: [300, "seq 1 300 | sed 's/^/line /' | less\r", 500, " ", 200, " ", 200, "j", "j", 300],
     });
   },
   "vim-resize": async () => {
@@ -125,7 +118,7 @@ const recipes = {
       ...bash,
       steps: [
         300,
-        "for i in 1 2 3 4 5 6 7 8 9 10; do echo \"row $i: the quick brown fox jumps over the lazy dog\"; done\r",
+        'for i in 1 2 3 4 5 6 7 8 9 10; do echo "row $i: the quick brown fox jumps over the lazy dog"; done\r',
         400,
         [40, 12],
         300,
@@ -146,7 +139,11 @@ const recipes = {
       cols: 100,
       rows: 32,
       cwd: home,
-      env: { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1" },
+      env: {
+        HOME: home,
+        CLAUDE_CONFIG_DIR: join(home, ".claude"),
+        CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1",
+      },
       steps: [4000, [80, 28], 1500, "\u001b[B", 600, "\u001b[A", 800, [100, 32], 1200],
     });
     rmSync(home, { recursive: true, force: true });

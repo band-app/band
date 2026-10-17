@@ -13,9 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 
 const [bandDir, worktreeId, layoutJson] = process.argv.slice(2);
 if (!bandDir || !worktreeId || !layoutJson) {
-  console.error(
-    "Usage: node seed-chat-layout.mjs <band_dir> <worktree_id> <layout_json>",
-  );
+  console.error("Usage: node seed-chat-layout.mjs <band_dir> <worktree_id> <layout_json>");
   process.exit(1);
 }
 

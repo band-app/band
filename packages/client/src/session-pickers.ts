@@ -6,6 +6,7 @@
 
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { SessionState } from "@band-app/shared/chat-events";
+
 import { withResolvedDefaults } from "./claude-default-labels.ts";
 
 export interface Choice {

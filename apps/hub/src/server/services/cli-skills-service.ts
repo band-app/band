@@ -7,6 +7,7 @@
  */
 
 import type { InstallSkillsResult } from "@band-app/host-api";
+
 import { hostRegistry } from "../infra/host/registry";
 
 interface InstallSkillsOptions {

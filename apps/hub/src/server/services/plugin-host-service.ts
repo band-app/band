@@ -9,6 +9,7 @@ import {
   type ReviewProvider,
 } from "@band-app/plugin-api";
 import type { BandServerApi, ServerPlugin } from "@band-app/plugin-api/server";
+
 import { hostRegistry } from "../infra/host/registry";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled-plugins";
 import { loadSettings } from "./state";

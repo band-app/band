@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { ChevronGlyph, Glass, GlassCircle, PlusGlyph, SearchGlyph } from "../components/glass";
 import { avatarColor, initials, RepoAvatar } from "../components/repo-avatar";
 import { StartSheet } from "../components/start-sheet";

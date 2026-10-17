@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { defineConfig } from "vitest/config";
+
+import { defineConfig } from "vite-plus";
 
 // Tests that run pnpm under a temp HOME (dev-server, plain-repos) would make
 // corepack look for pnpm in an empty cache and download it. Point it at the
@@ -17,6 +18,11 @@ export default defineConfig({
     },
   },
   test: {
+    // Vitest v4 compatibility: preserve mock call history.
+    // Remove after tests no longer rely on calls from setup or earlier tests.
+    // https://viteplus.dev/guide/vitest-v5#remove-unneeded-compatibility-settings
+    // https://vitest.dev/guide/migration/#clearmocks-is-enabled-by-default
+    clearMocks: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,
     fileParallelism: false,

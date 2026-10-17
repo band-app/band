@@ -21,6 +21,7 @@
  */
 
 import { type Download, expect, type Locator, type Page, test } from "@playwright/test";
+
 import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FindWidget } from "./FindWidget";
 import { MarkdownTableEditor } from "./MarkdownTableEditor";

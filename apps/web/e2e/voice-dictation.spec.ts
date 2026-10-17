@@ -10,8 +10,11 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { type SttStub, startSttStub } from "../../hub/tests/fixtures/stt-stub";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {

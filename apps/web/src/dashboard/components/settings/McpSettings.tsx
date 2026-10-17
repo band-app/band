@@ -1,6 +1,7 @@
 import { Button, Input } from "@band-app/ui";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { SettingsRow } from "./SettingsRow";
@@ -226,7 +227,7 @@ export function McpSettings() {
 
   // Status of each enabled server, checked once when the list first loads.
   const checkedOnce = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once, when the list first loads
+  // oxlint-disable-next-line react/exhaustive-deps -- runs once, when the list first loads
   useEffect(() => {
     if (!servers.data || checkedOnce.current) return;
     checkedOnce.current = true;
@@ -571,7 +572,7 @@ export function McpSettings() {
                 />
                 <div className="space-y-1" data-testid="settings__mcp-env">
                   {form.env.map((row, index) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: rows have no id and are only edited in place
+                    // oxlint-disable-next-line react/no-array-index-key -- rows have no id and are only edited in place
                     <div key={index} className="flex gap-2">
                       <Input
                         aria-label={`Environment variable ${index + 1} name`}
@@ -942,7 +943,9 @@ function McpAudit({ server }: { server: string }) {
             </span>{" "}
             <span>{entry.ok ? "ok" : `failed: ${entry.error ?? "error"}`}</span>
             <div className="text-muted-foreground">
-              Session <span data-testid="settings__mcp-audit-session">{entry.sessionId}</span> ·{" "}
+              Session <span data-testid="settings__mcp-audit-session">
+                {entry.sessionId}
+              </span> ·{" "}
               {new Date(entry.at).toLocaleString()}
             </div>
           </li>

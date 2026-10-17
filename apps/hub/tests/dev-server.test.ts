@@ -39,10 +39,12 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { WebSocket } from "ws";
+
 import * as schema from "../src/server/infra/db/schema";
 import { findFreePort } from "../src/server/services/_utils/port-utils";
 import { seedSettings, seedState } from "./helpers/seed-state";

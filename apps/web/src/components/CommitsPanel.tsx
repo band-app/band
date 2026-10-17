@@ -7,7 +7,9 @@ import {
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import type React from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import type { FileStatus } from "@/dashboard";
+
 import { FileStatusBadge } from "../dashboard/components/FileStatusBadge";
 import { getFileIcon } from "../dashboard/lib/file-icon";
 import { clientStorage } from "../lib/client-state";
@@ -286,7 +288,7 @@ function LaneContinuation({ lanes }: { lanes: GraphLane[] }) {
     >
       {lanes.map((lane, i) => (
         <line
-          // biome-ignore lint/suspicious/noArrayIndexKey: a lane's position is its identity
+          // oxlint-disable-next-line react/no-array-index-key -- a lane's position is its identity
           key={i}
           x1={LANE_WIDTH * (i + 1)}
           x2={LANE_WIDTH * (i + 1)}

@@ -10,6 +10,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+
 import { SharedTokenRevokeError, TokenNotFoundError } from "../../errors";
 import {
   InvalidPairingAddressError,

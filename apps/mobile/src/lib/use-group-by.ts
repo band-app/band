@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+
 import { useHubSession } from "./hub-session";
 import { type GroupBy, parseGroupBy } from "./worktree-list";
 
@@ -11,7 +12,7 @@ export function useGroupBy(): [GroupBy, (value: GroupBy) => void] {
     parseGroupBy(clientState.getItem(GROUP_BY_KEY)),
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clientStateReady re-reads the saved copy once it is loaded
+  // oxlint-disable-next-line react/exhaustive-deps -- clientStateReady re-reads the saved copy once it is loaded
   useEffect(() => {
     setValue(parseGroupBy(clientState.getItem(GROUP_BY_KEY)));
     return clientState.subscribe((change) => {

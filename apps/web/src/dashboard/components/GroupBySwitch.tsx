@@ -6,6 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@band-app/ui";
 import { Check, ChevronDown, Layers } from "lucide-react";
+
 import { GROUP_BY_OPTIONS, useGroupBy } from "../lib/sidebar-grouping";
 
 /** The Repos header's Group by dropdown: Repo, Origin or Host. Remembered per device. */

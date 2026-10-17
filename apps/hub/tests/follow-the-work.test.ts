@@ -6,8 +6,10 @@
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import type { HostOfflineAnswer } from "@band-app/shared/continuation";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { TEST_TOKEN } from "./helpers/acp-chat";
 import { startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 import { waitFor } from "./helpers/wait-for";

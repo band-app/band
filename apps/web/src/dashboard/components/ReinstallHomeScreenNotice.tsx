@@ -1,6 +1,7 @@
 import { Button } from "@band-app/ui";
 import { CircleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
+
 import { ToastCard } from "./ToastCard";
 
 const DISMISSED_KEY = "band:reinstall-home-screen-dismissed";

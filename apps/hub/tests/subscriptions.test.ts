@@ -12,8 +12,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { closeDb } from "../src/server/infra/db/connection";
 import type { SubscriptionEvent } from "../src/server/infra/subscriptions/event";
 import { agentSessionService } from "../src/server/services/agent-session-service";

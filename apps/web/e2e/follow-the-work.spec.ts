@@ -26,7 +26,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { ACP_STUB_AGENT_PATH, acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,

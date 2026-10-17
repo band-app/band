@@ -4,6 +4,7 @@
 // for the test to release it, so a test can prove the proxy streams instead of buffering.
 
 import type { Server } from "node:http";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";

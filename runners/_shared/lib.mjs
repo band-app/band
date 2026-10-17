@@ -26,7 +26,11 @@ export function printHandle(handle) {
  */
 export async function api(base, method, path, { headers = {}, json, form, allow = [] } = {}) {
   const timeoutMs = Number(process.env.BAND_RUNNER_HTTP_TIMEOUT_MS) || 30000;
-  const init = { method, headers: { accept: "application/json", ...headers }, signal: AbortSignal.timeout(timeoutMs) };
+  const init = {
+    method,
+    headers: { accept: "application/json", ...headers },
+    signal: AbortSignal.timeout(timeoutMs),
+  };
   if (json !== undefined) {
     init.headers["content-type"] = "application/json";
     init.body = JSON.stringify(json);
@@ -45,7 +49,8 @@ export async function api(base, method, path, { headers = {}, json, form, allow 
     }
   }
   if (!res.ok && !allow.includes(res.status)) {
-    const detail = body?.error?.message ?? body?.message ?? body?.error_description ?? text.slice(0, 200);
+    const detail =
+      body?.error?.message ?? body?.message ?? body?.error_description ?? text.slice(0, 200);
     throw new Error(`${method} ${path} answered ${res.status}: ${detail}`);
   }
   return { status: res.status, body };

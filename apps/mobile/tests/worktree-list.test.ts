@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { sortRepoWorktrees, withoutPinned } from "@band-app/shared/sidebar-tree";
+
 import {
   buildOriginRows,
   buildPinnedTree as webPinnedTree,

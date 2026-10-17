@@ -1,4 +1,4 @@
-import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { execFileSync } from "node:child_process";
 /**
  * The desktop viewer (plan step 7.2): noVNC draws a worker's desktop through the hub, starts
  * view-only, and forwards keys only after "Take control".
@@ -10,12 +10,13 @@ import { toWorktreeId } from "@band-app/shared/worktree-id";
  * is `desktop-viewer-x11vnc.spec.ts`, and the real desktop image runs in the CI `docker` job
  * (`apps/hub/tests/desktop-docker.test.ts`). Everything runs in temp dirs.
  */
-
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, test } from "@playwright/test";
+
 import { type RfbStub, startRfbStub } from "./fixtures/rfb-stub";
 import {
   cleanupTmpHome,

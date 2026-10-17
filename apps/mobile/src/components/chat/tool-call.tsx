@@ -16,6 +16,7 @@ import {
 import type { ToolEntry } from "@band-app/client/transcript";
 import { memo, type ReactNode, useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
 import { chatColors, colors, fonts, tones } from "../../theme";
 import { useOpen } from "./chat-context";
 import { Markdown } from "./markdown";
@@ -99,13 +100,13 @@ function Diff({
         <View style={styles.diffBody}>
           {shown.map((line, i) =>
             line.kind === "gap" ? (
-              // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
+              // oxlint-disable-next-line react/no-array-index-key -- diff lines have no identity beyond position
               <Text key={i} style={[styles.diffLine, styles.dim]}>
                 ⋯ {line.skipped} unchanged {line.skipped === 1 ? "line" : "lines"}
               </Text>
             ) : (
               <Text
-                // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
+                // oxlint-disable-next-line react/no-array-index-key -- diff lines have no identity beyond position
                 key={i}
                 style={[
                   styles.diffLine,
@@ -178,10 +179,10 @@ function ToolDetails({ entry }: { entry: ToolEntry }) {
       ))}
       {texts.map((text, i) =>
         prose ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+          // oxlint-disable-next-line react/no-array-index-key -- content blocks have no id
           <Markdown key={i} text={text} />
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+          // oxlint-disable-next-line react/no-array-index-key -- content blocks have no id
           <Output key={i} text={text} />
         ),
       )}

@@ -1,6 +1,7 @@
 import { Popover, PopoverAnchor, PopoverContent } from "@band-app/ui";
 import { Check, Copy, ExternalLink, Globe } from "lucide-react";
 import { useEffect, useState } from "react";
+
 import { writeClipboardText } from "../lib/clipboard";
 import { openExternalUrl } from "../lib/open-external-url";
 import {

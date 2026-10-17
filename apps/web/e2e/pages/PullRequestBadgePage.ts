@@ -16,6 +16,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { WorktreePage } from "./WorktreePage";
 
 /** A tag's border width, style and color, and corner radius. */

@@ -7,6 +7,7 @@
  */
 
 import { expect, test } from "@playwright/test";
+
 import {
   cleanupTmpHome,
   createTmpHome,

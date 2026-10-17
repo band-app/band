@@ -1,4 +1,5 @@
 import { createLogger } from "@band-app/logger";
+
 import { WorktreeNotFoundError } from "../errors";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";

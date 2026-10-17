@@ -105,9 +105,17 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
+
 import * as acp from "@agentclientprotocol/sdk";
 
 const env = process.env;
@@ -200,8 +208,22 @@ function allSessions() {
 
 function configOptions(s) {
   return [
-    { id: "model", name: "Model", category: "model", type: "select", currentValue: s.model, options: MODELS },
-    { id: "mode", name: "Mode", category: "mode", type: "select", currentValue: s.mode, options: MODES },
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: s.model,
+      options: MODELS,
+    },
+    {
+      id: "mode",
+      name: "Mode",
+      category: "mode",
+      type: "select",
+      currentValue: s.mode,
+      options: MODES,
+    },
     ...EXTRA_OPTIONS.map((o) => ({
       type: "select",
       ...o,
@@ -218,7 +240,8 @@ const clis = new Set();
 function startCli(sessionId) {
   if (!cliArgs || clis.has(sessionId)) return;
   clis.add(sessionId);
-  const idle = "const p = process.ppid; setInterval(() => { if (process.ppid !== p) process.exit(); }, 500);";
+  const idle =
+    "const p = process.ppid; setInterval(() => { if (process.ppid !== p) process.exit(); }, 500);";
   spawn(process.execPath, ["-e", idle, "--", `--session-id=${sessionId}`, ...cliArgs], {
     stdio: "ignore",
   }).unref();
@@ -278,7 +301,10 @@ async function runSteps(cx, sessionId, steps, signal, record) {
         if (step.delayMs) await sleep(step.delayMs, signal);
       }
     } else if (step.think !== undefined) {
-      await notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: step.think } });
+      await notify({
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: step.think },
+      });
     } else if (step.update) {
       await notify(step.update);
     } else if (step.asyncTask) {
@@ -367,7 +393,13 @@ async function runSteps(cx, sessionId, steps, signal, record) {
       if (res.action === "cancel") throw new Cancelled();
       const answer = JSON.stringify(res.content ?? {});
       const next = step.after?.[res.action] ?? [{ say: `Answer: ${answer}` }];
-      const out = await runSteps(cx, sessionId, fill(next, { prompt: answer, model: "" }), signal, record);
+      const out = await runSteps(
+        cx,
+        sessionId,
+        fill(next, { prompt: answer, model: "" }),
+        signal,
+        record,
+      );
       if (out) return out;
     } else if (step.sleep) {
       await sleep(step.sleep, signal);
@@ -403,7 +435,8 @@ acp
     while (env.BAND_TEST_ACP_START_DELAY_FILE && existsSync(env.BAND_TEST_ACP_START_DELAY_FILE)) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (env.BAND_TEST_ACP_FAIL_START) throw new acp.RequestError(-32000, env.BAND_TEST_ACP_FAIL_START);
+    if (env.BAND_TEST_ACP_FAIL_START)
+      throw new acp.RequestError(-32000, env.BAND_TEST_ACP_FAIL_START);
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
@@ -424,7 +457,14 @@ acp
     logRequest("session/new", ctx.params);
     const sessionId = newSessionId();
     mcpBySession.set(sessionId, ctx.params.mcpServers ?? []);
-    const s = { cwd: ctx.params.cwd, title: null, updatedAt: new Date().toISOString(), model: MODELS[0].value, mode: MODES[0].value, history: [] };
+    const s = {
+      cwd: ctx.params.cwd,
+      title: null,
+      updatedAt: new Date().toISOString(),
+      model: MODELS[0].value,
+      mode: MODES[0].value,
+      history: [],
+    };
     sessions.set(sessionId, s);
     save(sessionId);
     startCli(sessionId);
@@ -443,7 +483,10 @@ acp
     if (!s) throw new acp.RequestError(-32002, `Resource not found: ${ctx.params.sessionId}`);
     startCli(ctx.params.sessionId);
     for (const update of s.history) {
-      await ctx.client.notify(acp.methods.client.session.update, { sessionId: ctx.params.sessionId, update });
+      await ctx.client.notify(acp.methods.client.session.update, {
+        sessionId: ctx.params.sessionId,
+        update,
+      });
     }
     return { configOptions: configOptions(s) };
   })
@@ -459,8 +502,15 @@ acp
     logRequest("session/list", ctx.params);
     return {
       sessions: allSessions()
-        .filter(([, s]) => env.BAND_TEST_ACP_LIST_ALL_CWDS || !ctx.params.cwd || s.cwd === ctx.params.cwd)
-        .map(([sessionId, s]) => ({ sessionId, cwd: s.cwd, title: s.title, updatedAt: s.updatedAt })),
+        .filter(
+          ([, s]) => env.BAND_TEST_ACP_LIST_ALL_CWDS || !ctx.params.cwd || s.cwd === ctx.params.cwd,
+        )
+        .map(([sessionId, s]) => ({
+          sessionId,
+          cwd: s.cwd,
+          title: s.title,
+          updatedAt: s.updatedAt,
+        })),
     };
   })
   .onRequest("session/set_config_option", (ctx) => {
@@ -490,7 +540,11 @@ acp
     s.updatedAt = new Date().toISOString();
     s.history.push({ sessionUpdate: "user_message_chunk", content: { type: "text", text } });
     const record = (update) => {
-      if (update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      if (
+        update.sessionUpdate === "agent_message_chunk" ||
+        update.sessionUpdate === "tool_call" ||
+        update.sessionUpdate === "tool_call_update"
+      ) {
         s.history.push(update);
       }
     };

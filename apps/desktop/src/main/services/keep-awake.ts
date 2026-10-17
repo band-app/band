@@ -11,6 +11,7 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { bandHome } from "./log.js";
 
 export interface PowerSaveBlocker {

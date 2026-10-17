@@ -9,8 +9,10 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, test } from "@playwright/test";
+
 import {
   cleanupTmpHome,
   createTmpHome,

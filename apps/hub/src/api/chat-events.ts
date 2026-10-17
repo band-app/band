@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { openSseStream, type SseWriter } from "@band-app/chat-runtime/sse-writer";
 import { createLogger } from "@band-app/logger";
 import { type ChatEvent, HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
+
 import {
   getQueuedMessages,
   subscribeQueue,

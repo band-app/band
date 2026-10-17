@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
+
 import { isWorktreeColdParked, subscribeWorktreeColdPark } from "../lib/worktree-cold-park";
 
 /** True while `worktreeId` is a cold-parked hidden worktree, whose heavy

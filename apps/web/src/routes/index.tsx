@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+
 import { DashboardView } from "../components/DashboardView";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isDesktop } from "../lib/is-desktop";

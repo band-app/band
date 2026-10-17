@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+
 import { createLogger } from "@band-app/logger";
+
 import { runDaemon } from "./daemon-server";
 import { daemonPaths } from "./protocol";
 

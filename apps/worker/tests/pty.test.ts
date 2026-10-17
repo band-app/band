@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+
 import type { Channel, ServerSession } from "@band-app/link";
+
 import {
   call,
   cleanup,

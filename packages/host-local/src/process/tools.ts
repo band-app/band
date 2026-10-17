@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
+
 import { extractVersion } from "@band-app/environment";
+
 import { prependBinDirs } from "./path";
 
 /** The tools a repo's `requires` can name, with the binary and arguments that print each one's version. */

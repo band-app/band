@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
 import { highlight } from "../../lib/chat/highlight";
 import { chatColors, codeColors, colors, fonts } from "../../theme";
 import { useChat } from "./chat-context";
@@ -60,7 +61,7 @@ export const CodeBlock = memo(function CodeBlock({
         <Text style={styles.code} testID="chat__code">
           {runs.map((run, i) =>
             run.scope ? (
-              // biome-ignore lint/suspicious/noArrayIndexKey: runs have no identity beyond position
+              // oxlint-disable-next-line react/no-array-index-key -- runs have no identity beyond position
               <Text key={i} style={{ color: codeColors[run.scope] ?? colors.foreground }}>
                 {run.text}
               </Text>

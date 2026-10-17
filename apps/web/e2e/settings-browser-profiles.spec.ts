@@ -10,7 +10,9 @@
  */
 
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import {
   cleanupTmpHome,
   createTmpHome,

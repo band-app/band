@@ -104,7 +104,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       # .nvmrc holds the Node major the desktop app ships (Electron's bundled
       # Node), so CI tests the runtime users actually run.
@@ -156,8 +156,11 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - name: Lint (Biome)
-        run: pnpm exec biome check .
+      - name: Lint (Oxlint)
+        run: pnpm exec vp lint
+
+      - name: Check formatting (Oxfmt)
+        run: pnpm exec vp fmt --check
 
       - name: Check worktree ids are built by toWorktreeId
         run: ./scripts/check-worktree-ids.sh
@@ -264,7 +267,7 @@ jobs:
       - name: Test (desktop)
         run: pnpm --filter @band-app/desktop test
 
-      # Biome above already lints apps/mobile; the iOS build is the `mobile-ios` job.
+      # Oxlint above already lints apps/mobile; the iOS build is the `mobile-ios` job.
       - name: Typecheck (mobile)
         run: pnpm --filter @band-app/mobile typecheck
 
@@ -442,7 +445,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -485,7 +488,7 @@ jobs:
         run: pnpm --filter @band-app/web exec playwright install --with-deps chromium
 
       - name: Test hub (remote-loopback)
-        run: pnpm --filter @band-app/server exec vitest run --shard=${{ matrix.shard }}/${{ matrix.total }}
+        run: pnpm --filter @band-app/server exec vp test run --shard=${{ matrix.shard }}/${{ matrix.total }}
         env:
           BAND_CHROMIUM_NO_SANDBOX: "1"
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
@@ -901,7 +904,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -917,7 +920,7 @@ jobs:
       # The snapshot and restore hooks (plan step 3.10) run in the same job: a container worktree
       # sleeps, its /work is snapshotted into an image, and the restored container has an untracked file.
       - name: Docker runner hook
-        run: pnpm --filter @band-app/server exec vitest run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts
+        run: pnpm --filter @band-app/server exec vp test run tests/runner-docker.test.ts tests/runner-docker-snapshot.test.ts
         env:
           BAND_DOCKER_TEST_IMAGE: band-worker-check
           BAND_DOCKER_TEST_NETWORK: host
@@ -927,7 +930,7 @@ jobs:
       # xdpyinfo in a terminal on the worker.
       - name: Desktop worker
         run: |
-          pnpm --filter @band-app/server exec vitest run tests/desktop-docker.test.ts \
+          pnpm --filter @band-app/server exec vp test run tests/desktop-docker.test.ts \
             --reporter=default --reporter=json --outputFile.json=/tmp/desktop-docker.json
           # 7.1 S1, S2 and 7.2 S1 must run with the real image: a skipped or missing test fails the job.
           node -e '
@@ -1004,7 +1007,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1018,7 +1021,7 @@ jobs:
         run: pnpm --filter @band-app/server build
 
       - name: k8s runner hook on kind (S2)
-        run: pnpm --filter @band-app/server exec vitest run tests/runner-k8s-kind.test.ts
+        run: pnpm --filter @band-app/server exec vp test run tests/runner-k8s-kind.test.ts
         env:
           BAND_K8S_TEST_IMAGE: band-worker:ci
           BAND_K8S_TEST_KUBECONFIG: ${{ github.workspace }}/kind-kubeconfig
@@ -1071,7 +1074,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1178,7 +1181,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1278,7 +1281,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1317,7 +1320,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1373,7 +1376,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1450,7 +1453,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         if: steps.changes.outputs.changed == 'true'

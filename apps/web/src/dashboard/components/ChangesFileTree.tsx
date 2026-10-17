@@ -8,6 +8,7 @@ import {
 import { ChevronDown, ChevronRight, ClipboardCopy } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+
 import { writeClipboardText } from "../../lib/clipboard";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { buildFileTree, type FileTreeNode } from "../lib/build-file-tree";

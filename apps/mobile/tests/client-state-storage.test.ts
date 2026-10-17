@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import type { AsyncKeyValueStore } from "@band-app/client/client-state";
+
 import { createClientStateStorage } from "../src/lib/client-state-storage.ts";
 
 function memoryBackend(): AsyncKeyValueStore & { data: Map<string, string> } {

@@ -1,4 +1,5 @@
 import { createElement, type FC } from "react";
+
 import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-icon-resolve";
 import { buildSymbolMarkup } from "./file-icon-symbol";
 

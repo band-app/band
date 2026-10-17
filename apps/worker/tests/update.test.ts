@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+
 import { RpcError } from "@band-app/link";
+
 import { detectServiceManager, updateWorker } from "../src/update.ts";
 import { WORKER_VERSION } from "../src/worker.ts";
 import {

@@ -5,7 +5,9 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { openStream, turnEnded } from "./helpers/acp-chat";
 import { git, startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 import { waitFor } from "./helpers/wait-for";

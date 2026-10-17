@@ -11,7 +11,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { createLogger } from "@band-app/logger";
+
 import { buildCookieHeader } from "../../../../auth";
 import { PairingExchangeError, tokenService } from "../../services/token-service";
 

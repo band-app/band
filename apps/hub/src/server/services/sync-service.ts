@@ -1,6 +1,7 @@
 import { gitRunner } from "@band-app/host-api";
 import { getRepoInfo } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
+
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";

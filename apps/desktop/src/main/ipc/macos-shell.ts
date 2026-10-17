@@ -15,6 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 import { type BrowserWindow, dialog, shell } from "electron";
 
 import { type CliPathOptions, resolveCliBinary } from "../services/cli-paths.js";

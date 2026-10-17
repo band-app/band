@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+
 import type { Host } from "@band-app/host-api";
+
 import { hostRegistry } from "../../infra/host/registry";
 import { bandHome } from "../state";
 

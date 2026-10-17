@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+
 import { createLogger } from "@band-app/logger";
 import { Cron, type CronOptions } from "croner";
 import { z } from "zod";
+
 import {
   type SubscriptionConfig,
   type SubscriptionCreator,
@@ -117,7 +119,7 @@ export const githubCiCreateInput = sourceCommon.extend({
     .refine(
       (b) =>
         !b.split("/").some((part) => part === "." || part === "..") &&
-        // biome-ignore lint/suspicious/noControlCharactersInRegex: rejects control characters in a ref
+        // oxlint-disable-next-line no-control-regex -- rejects control characters in a ref
         !/[%\u0000-\u001f]/.test(b),
       "invalid branch name",
     ),

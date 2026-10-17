@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, describe, it } from "node:test";
+
 import {
   chromeTimeToUnixSeconds,
   readChromeCookies,

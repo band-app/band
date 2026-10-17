@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, type PanelSize, Separator, usePanelRef } from "react-resizable-panels";
+
 import {
   DashboardProvider,
   DashboardShell,
@@ -23,6 +24,7 @@ import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { ContinuePromptHost } from "@/dashboard/components/ContinueOnHostDialog";
 import { ToastHost } from "@/dashboard/components/ToastHost";
 import { queryClient, queryKeys } from "@/dashboard/query-client";
+
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {
@@ -80,6 +82,7 @@ import {
   zoomOut,
   zoomReset,
 } from "../lib/zoom";
+
 import "../styles/globals.css";
 
 const adapter = isDesktop ? new DesktopDashboardAdapter() : new WebDashboardAdapter();
@@ -441,8 +444,8 @@ function AppShell() {
   // it's safe to call on every render — the mutation only fires when the
   // value actually changes.
   // `adapter` is a module-level singleton (created once per page load)
-  // and is intentionally omitted from the dep array — biome's
-  // `useExhaustiveDependencies` rejects outer-scope values as deps
+  // and is intentionally omitted from the dep array — the
+  // `react/exhaustive-deps` rule rejects outer-scope values as deps
   // because mutating them doesn't trigger a re-render. If we ever
   // promote it to a context or prop, list it then.
   useEffect(() => {
@@ -984,11 +987,11 @@ function RootDocument({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent theme flash */}
+        {/* oxlint-disable-next-line react/no-danger -- static inline script to prevent theme flash */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent zoom layout flash */}
+        {/* oxlint-disable-next-line react/no-danger -- static inline script to prevent zoom layout flash */}
         <script dangerouslySetInnerHTML={{ __html: ZOOM_INIT_SCRIPT }} />
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent a solid-sidebar flash */}
+        {/* oxlint-disable-next-line react/no-danger -- static inline script to prevent a solid-sidebar flash */}
         <script dangerouslySetInnerHTML={{ __html: TRANSLUCENT_SIDEBAR_INIT_SCRIPT }} />
       </head>
       <body>

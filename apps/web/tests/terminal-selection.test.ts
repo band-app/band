@@ -6,7 +6,8 @@
  * the shape xterm exposes at runtime.
  */
 import type { Terminal } from "@xterm/xterm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import {
   applySelection,
   type Cell,
@@ -66,7 +67,7 @@ function makeTerminal(opts: Partial<FakeTerminal> & { cols?: number } = {}): Ter
     },
     // Expose the underlying fake for assertions.
     __fake: t,
-    // biome-ignore lint/suspicious/noExplicitAny: minimal fake; we only access fields the helpers use.
+    // oxlint-disable-next-line typescript/no-explicit-any -- minimal fake; we only access fields the helpers use.
   } as any;
 }
 

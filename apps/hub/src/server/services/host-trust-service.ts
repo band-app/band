@@ -5,6 +5,7 @@
  */
 
 import { defaultHostTrust, type HostTrust, isHostTrust } from "@band-app/shared/host-trust";
+
 import { HostAuditQueries, type HostAuditRow } from "../infra/db/queries/host-audit";
 import { TokenQueries } from "../infra/db/queries/tokens";
 

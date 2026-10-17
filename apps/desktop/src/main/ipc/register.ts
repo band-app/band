@@ -8,6 +8,7 @@
  */
 
 import { type BrowserWindow, ipcMain, powerMonitor } from "electron";
+
 import {
   chromeRunningStatus,
   clearProfileData,

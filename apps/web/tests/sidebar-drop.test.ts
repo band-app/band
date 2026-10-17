@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { moveRefusal } from "../src/dashboard/lib/sidebar-drop";
 import type { WorktreeEntry } from "../src/dashboard/lib/sidebar-grouping";
 import type { RepoInfo, WorktreeInfo } from "../src/dashboard/types";

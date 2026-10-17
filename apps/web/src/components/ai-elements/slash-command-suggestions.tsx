@@ -2,6 +2,7 @@ import { filterSkills, getCommandContext, type SlashCommandSkill } from "@band-a
 import { cn } from "@band-app/ui";
 import { Command as CommandIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { usePromptInputContext } from "./prompt-input";
 
 interface SlashCommandSuggestionsProps {
@@ -23,7 +24,7 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
   const hasResults = filteredSkills.length > 0;
 
   // Reset selection when query changes
-  // biome-ignore lint/correctness/useExhaustiveDependencies: query is the intentional trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- query is the intentional trigger
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);

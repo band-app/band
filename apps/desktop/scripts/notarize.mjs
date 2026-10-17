@@ -130,18 +130,14 @@ export function resolveCredentials(env) {
 function dumpNotarizationLog(submissionId, creds, runner, log) {
   log(`[notarize] fetching diagnostic log for submission ${submissionId}`);
   try {
-    const stdout = runner(
-      "xcrun",
-      ["notarytool", "log", submissionId, ...creds.args],
-      { capture: true },
-    );
+    const stdout = runner("xcrun", ["notarytool", "log", submissionId, ...creds.args], {
+      capture: true,
+    });
     if (typeof stdout === "string" && stdout.trim().length > 0) {
       log("[notarize] --- begin notarytool log ---");
       log(stdout.trimEnd());
       log("[notarize] --- end notarytool log ---");
-      log(
-        "[notarize] tip: each `issues[]` entry tells you which path / arch failed and why.",
-      );
+      log("[notarize] tip: each `issues[]` entry tells you which path / arch failed and why.");
     }
   } catch (err) {
     log(

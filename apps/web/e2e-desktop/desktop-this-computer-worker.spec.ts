@@ -19,7 +19,9 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import {
   cleanupTmpHome,
   createTmpHome,

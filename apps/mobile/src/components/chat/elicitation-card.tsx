@@ -21,6 +21,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+
 import { colors, tones, useScheme } from "../../theme";
 import { Button } from "../ui";
 import { requestCardStyles } from "./permission-card";

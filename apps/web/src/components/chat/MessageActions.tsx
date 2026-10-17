@@ -1,6 +1,7 @@
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
+
 import { writeClipboardText } from "../../lib/clipboard";
 
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [

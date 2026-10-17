@@ -11,6 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
+
 import type * as acp from "@agentclientprotocol/sdk";
 import { findOption } from "@band-app/chat-runtime/config-options";
 import {
@@ -21,6 +22,7 @@ import {
 } from "@band-app/chat-runtime/turns";
 import type { Logger } from "@band-app/logger";
 import type { ChatEvent } from "@band-app/shared/chat-events";
+
 import type { ChatRuntime } from "./runtime.ts";
 import type { ChatStore, StoredQueuedMessage } from "./store.ts";
 

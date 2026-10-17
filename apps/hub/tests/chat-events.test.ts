@@ -22,8 +22,10 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+
 import type { ChatEvent } from "@band-app/shared/chat-events";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import {
   agentText,
   collectEvents,

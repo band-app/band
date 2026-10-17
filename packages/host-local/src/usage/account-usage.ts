@@ -1,4 +1,5 @@
 import type { AccountUsage, AccountUsageProvider } from "@band-app/host-api";
+
 import { readClaudeUsage } from "./claude-usage";
 import { readCodexUsage } from "./codex-usage";
 
@@ -43,16 +44,14 @@ function read(provider: AccountUsageProvider, refresh: boolean): Promise<Account
   const pending = inFlight.get(provider);
   if (pending) return pending;
   const next = readers[provider]()
-    .catch(
-      (): AccountUsage => ({
-        provider,
-        status: "error",
-        account: null,
-        plan: null,
-        windows: [],
-        updatedAt: Date.now(),
-      }),
-    )
+    .catch((): AccountUsage => ({
+      provider,
+      status: "error",
+      account: null,
+      plan: null,
+      windows: [],
+      updatedAt: Date.now(),
+    }))
     .then((result) => {
       cache.set(provider, { result, expiresAt: Date.now() + ttlOf(result) });
       return result;

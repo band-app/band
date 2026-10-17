@@ -3,6 +3,7 @@ import { Button, SegmentedControl, Spinner } from "@band-app/ui";
 import type RFB from "@novnc/novnc";
 import { Eye, Maximize2, Minimize2, Monitor, MousePointer2, Unplug, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import { createHubWebSocket, hubWsUrl } from "../../lib/hub-config";
 
 type Phase = "connecting" | "connected" | "closed";
@@ -186,7 +187,7 @@ export function DesktopViewer({
   }, []);
 
   const downscale = scaleMode === "fit" && needsDownscale(framebuffer, area);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `area` and `settled` re-run the scale when the area's size changes, which noVNC only notices for window resizes.
+  // oxlint-disable-next-line react/exhaustive-deps -- `area` and `settled` re-run the scale when the area's size changes, which noVNC only notices for window resizes.
   useEffect(() => {
     const rfb = rfbRef.current;
     if (!rfb || phase !== "connected") return;

@@ -1,5 +1,6 @@
 import { defineClientPlugin } from "@band-app/plugin-api/client";
 import { GitPullRequest } from "lucide-react";
+
 import { PullRequestPanel } from "./PullRequestPanel";
 
 export default defineClientPlugin({

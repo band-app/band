@@ -25,6 +25,7 @@ import {
 } from "@band-app/ui";
 import { ChevronDown, Globe, History, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+
 // Single source of truth — same type the server-side store uses.
 // Imported from `browser-history-types` (not `browser-history-store`)
 // so this renderer module doesn't pull Drizzle into the client bundle.
@@ -126,10 +127,10 @@ export function HistoryPopover({ worktreeId, onNavigate }: HistoryPopoverProps) 
   // Fetch on open + on query change + when `refresh()` bumps the key.
   // `reloadKey` is intentionally a trigger-only dependency — bumping
   // it via `refresh()` re-runs this effect even though the body
-  // doesn't read its value. Biome's exhaustive-deps rule flags this
+  // doesn't read its value. The exhaustive-deps lint rule flags this
   // as "extra dependency" because the read is absent; the suppression
   // documents that it's the intended re-run mechanism.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey is a trigger-only dep — see comment above.
+  // oxlint-disable-next-line react/exhaustive-deps -- reloadKey is a trigger-only dep — see comment above.
   useEffect(() => {
     if (!open) return;
 

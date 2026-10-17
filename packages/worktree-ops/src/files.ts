@@ -15,7 +15,9 @@
  */
 
 import { dirname, extname, join, resolve, sep } from "node:path";
+
 import type { FsStat, HostFs } from "@band-app/host-api";
+
 import { WorktreeNotFoundError, type WorktreeResolver } from "./resolver";
 
 /**

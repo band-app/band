@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+
 import { FrameLog } from "../../../components/chat/frame-log";
 import { ViewHeader } from "../../../components/files/view-header";
 import { ChevronGlyph, SearchGlyph } from "../../../components/glass";

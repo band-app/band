@@ -18,6 +18,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
+
 import { setBrowserLookup } from "../infra/browser-host/browser-lookup";
 import { setRemoteCdpOpener } from "../infra/browser-host/remote-cdp";
 import {

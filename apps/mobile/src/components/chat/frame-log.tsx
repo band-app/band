@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
+
 import { fonts } from "../../theme";
 
 /** A gap between two JS frames longer than this is a stall. */

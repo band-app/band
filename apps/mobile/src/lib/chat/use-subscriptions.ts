@@ -7,6 +7,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
+
 import { useHubSession } from "../hub-session";
 
 const listKey = (chatId: string) => ["subscriptions.list", chatId] as const;

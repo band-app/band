@@ -27,6 +27,7 @@
  * shared with desktop wheel scrolling.
  */
 import type { Terminal } from "@xterm/xterm";
+
 import {
   arrowSequence,
   hasWheelMouseTracking,

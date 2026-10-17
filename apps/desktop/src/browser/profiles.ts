@@ -15,7 +15,9 @@
 
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+
 import { app, type Session, session } from "electron";
+
 import { BROWSER_PARTITION } from "./guest-policy.js";
 
 const PROFILE_PARTITION_PREFIX = "persist:band-browser-profile-";

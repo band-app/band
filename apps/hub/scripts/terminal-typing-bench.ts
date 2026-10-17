@@ -23,7 +23,9 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+
 import WebSocket from "ws";
+
 import { toWorktreeId } from "../src/dashboard";
 import { seedSettings, seedState } from "../tests/helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "../tests/helpers/server";

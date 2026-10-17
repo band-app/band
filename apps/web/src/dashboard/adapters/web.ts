@@ -1,6 +1,7 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
+
 import { directWorkerLink } from "../../lib/direct-worker";
 import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
@@ -32,7 +33,7 @@ const wsClient = createWSClient({
 export class WebDashboardAdapter implements DashboardAdapter {
   // The AppRouter type lives in apps/web which cannot be imported here
   // (circular dep). Type safety comes from the DashboardAdapter interface.
-  // biome-ignore lint/suspicious/noExplicitAny: tRPC client without router type
+  // oxlint-disable-next-line typescript/no-explicit-any -- tRPC client without router type
   protected trpc: any = createTRPCClient({
     links: [
       // Files, diff and search of a worktree on this computer's worker skip the hub (desktop app only).

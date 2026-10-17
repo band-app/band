@@ -8,6 +8,7 @@ import {
   type VersionRelation,
   workerUpdateCommand,
 } from "@band-app/shared/versions";
+
 import { UNRELEASED_VERSION } from "./hub-version";
 
 export type ServiceManagerName = "launchd" | "systemd";

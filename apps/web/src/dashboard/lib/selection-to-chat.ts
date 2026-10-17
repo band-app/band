@@ -1,5 +1,6 @@
 import { type Extension, Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+
 import { writeClipboardText } from "../../lib/clipboard";
 
 /**

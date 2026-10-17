@@ -34,8 +34,11 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { type BrowserContext, chromium, expect, type Page, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { acpStubEnv } from "./helpers/acp-stub";
 import { git, gitCommit } from "./helpers/git";
 import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";

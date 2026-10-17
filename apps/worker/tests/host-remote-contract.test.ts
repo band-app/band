@@ -1,8 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { runHostContract } from "@band-app/host-api/contract";
 import { RemoteHost } from "@band-app/host-remote";
+
 import { cleanup, startHub, startWorker, type TestHub, type TestWorker } from "./helpers.ts";
 
 // The host contract suite that LocalHost passes, run against RemoteHost over a

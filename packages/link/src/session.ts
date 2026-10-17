@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
+
 import type { WebSocket } from "ws";
+
 import { Channel, type ChannelHost } from "./channel.ts";
 import {
   DEFAULT_CHANNEL_WINDOW,

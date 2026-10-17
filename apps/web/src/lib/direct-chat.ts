@@ -13,6 +13,7 @@
  */
 
 import type { HubFetch } from "@band-app/client/hub-client";
+
 import { directAccessFor, forgetDirectToken, markDirectDown } from "./direct-worker";
 import { hubFetch } from "./hub-config";
 

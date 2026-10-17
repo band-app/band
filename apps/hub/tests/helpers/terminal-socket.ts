@@ -1,6 +1,7 @@
 // A client of the `/terminal` WebSocket, for tests that drive a real shell.
 
 import WebSocket from "ws";
+
 import type { ServerHandle } from "./server";
 import { waitFor } from "./wait-for";
 

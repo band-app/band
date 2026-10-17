@@ -24,7 +24,8 @@
  * specs (`terminal-nested-panes`, `center-tab-cycle-focus`).
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
+
 import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
@@ -94,7 +95,7 @@ interface StubApi {
   getPanel: (id: string) => (StubPanel & { group?: StubGroup }) | undefined;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: stub fed to functions typed against the real LayoutApi
+// oxlint-disable-next-line typescript/no-explicit-any -- stub fed to functions typed against the real LayoutApi
 function asApi(stub: StubApi): any {
   return stub;
 }

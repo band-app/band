@@ -1,6 +1,8 @@
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
 import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+
 import { getCopyFiles } from "./repo-config";
 
 const log = createLogger("worktree-files");

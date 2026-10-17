@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+
 import { colors } from "../../theme";
 
 type Pickers = ReturnType<typeof sessionPickers>;

@@ -15,8 +15,8 @@
 
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(
   new URL("../../../scripts/generate-homebrew-cask.mjs", import.meta.url),
@@ -33,12 +33,7 @@ function run(args) {
   return result;
 }
 
-const VALID_ARGS = [
-  "--version",
-  "0.26.1",
-  "--arm-sha",
-  ARM_SHA,
-];
+const VALID_ARGS = ["--version", "0.26.1", "--arm-sha", ARM_SHA];
 
 describe("generate-homebrew-cask", () => {
   test("valid args render a cask containing version, sha, url, and arm64 constraint", () => {
@@ -53,20 +48,13 @@ describe("generate-homebrew-cask", () => {
     assert.equal(stdout.match(/url "/g)?.length, 1, "exactly one url");
     assert.ok(stdout.includes("depends_on arch: :arm64"), "arm64 constraint");
     assert.equal(stdout.includes("on_intel"), false, "no intel stanza");
-    assert.ok(
-      stdout.includes("Band-#{version}-apple-silicon.dmg"),
-      "arm url present",
-    );
+    assert.ok(stdout.includes("Band-#{version}-apple-silicon.dmg"), "arm url present");
     assert.equal(stdout.includes("-intel.dmg"), false, "no intel url");
 
     // Fix [1]: the app self-updates via Squirrel, so `auto_updates true` owns
     // upgrades and there is no (redundant, contradictory) livecheck block.
     assert.ok(stdout.includes("auto_updates true"), "auto_updates retained");
-    assert.equal(
-      stdout.includes("livecheck do"),
-      false,
-      "unexpected livecheck block in output",
-    );
+    assert.equal(stdout.includes("livecheck do"), false, "unexpected livecheck block in output");
   });
 
   test("missing --version exits 1 with a meaningful message", () => {
@@ -76,12 +64,7 @@ describe("generate-homebrew-cask", () => {
   });
 
   test("malformed --version exits 1", () => {
-    const { status, stderr } = run([
-      "--version",
-      "not-semver",
-      "--arm-sha",
-      ARM_SHA,
-    ]);
+    const { status, stderr } = run(["--version", "not-semver", "--arm-sha", ARM_SHA]);
     assert.equal(status, 1);
     assert.match(stderr, /version/i);
   });

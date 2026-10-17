@@ -9,6 +9,7 @@
  */
 
 import path from "node:path";
+
 import type { RelayHttpRequest } from "@band-app/link";
 import type { HostTrust } from "@band-app/shared/host-trust";
 import { toWorktreeId } from "@band-app/shared/worktree-id";

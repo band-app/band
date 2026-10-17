@@ -32,9 +32,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { findBandBinary } from "@band-app/host-local/agents/skills-install";
 import { findCliBinary } from "@band-app/host-local/process/cli-binary";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { closeDb } from "../src/server/infra/db/connection";
 
 // The CLI build under test. Resolved from the checkout, never from PATH or

@@ -1,4 +1,5 @@
 import type { Host } from "@band-app/host-api";
+
 import { worktreeService } from "./worktree-service";
 
 // ---------------------------------------------------------------------------

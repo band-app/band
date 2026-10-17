@@ -6,6 +6,7 @@
 import { chmodSync } from "node:fs";
 import type { Server } from "node:http";
 import { join } from "node:path";
+
 import express, { type Request } from "express";
 
 /** Absolute path to the fake `gh` executable. */

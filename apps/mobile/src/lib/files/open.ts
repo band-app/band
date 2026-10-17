@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+
 import type { ChangeSection } from "./changes";
 
 export function openFile(worktreeId: string, path: string, line?: number) {

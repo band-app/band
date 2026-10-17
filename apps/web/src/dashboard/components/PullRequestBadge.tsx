@@ -1,6 +1,7 @@
 import { Button, Popover, PopoverAnchor, PopoverContent } from "@band-app/ui";
 import { Check, ExternalLink, Link } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
 import { writeClipboardText } from "../../lib/clipboard";
 import { useCapabilities } from "../context";
 import type { CIState, PullRequestSummary } from "../types";

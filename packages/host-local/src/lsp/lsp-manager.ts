@@ -1,8 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import type { Duplex } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+
 import { shellPath } from "../process/path";
 
 /** Directory of this module — used to locate local node_modules/.bin */

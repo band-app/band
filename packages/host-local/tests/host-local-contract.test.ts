@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+
 import { runHostContract } from "@band-app/host-api/contract";
+
 import { LocalHost } from "../src/local-host";
 import { InProcessTerminalBackend } from "../src/terminals/in-process-backend";
 

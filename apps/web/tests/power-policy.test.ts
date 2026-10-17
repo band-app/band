@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { computeActivity } from "../src/lib/activity-reporter";
 import { pollIntervalFor } from "../src/lib/poll-interval";
 import { isSaver } from "../src/lib/power-state";

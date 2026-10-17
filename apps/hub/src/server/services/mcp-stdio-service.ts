@@ -12,8 +12,10 @@
  */
 
 import { randomBytes } from "node:crypto";
+
 import { HostOfflineError, type McpStdio } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+
 import { hostRegistry } from "../infra/host/registry";
 import { vaultService } from "./vault-service";
 

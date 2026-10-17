@@ -22,6 +22,7 @@ import {
   protocol,
   session,
 } from "electron";
+
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BrowserGuestManager } from "../browser/guest-manager.js";
 import { Events } from "../shared/ipc-channels.js";

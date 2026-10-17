@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
+
 import type { SpawnOptions, TerminalExitEvent, TerminalListEntry } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import type { Terminal as HeadlessTerminal } from "@xterm/headless";
 import type { IPty } from "node-pty";
+
 import { defaultShell, shellPath } from "../process/path";
 import {
   buildClaudeResumeCommand,

@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+
 import { formatHostWarnings, hostWarnings, readLinuxHostSettings } from "../src/host-checks.ts";
 import { cleanup, tmpDir, WORKER_BIN } from "./helpers.ts";
 

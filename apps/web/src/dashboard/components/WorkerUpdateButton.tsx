@@ -9,6 +9,7 @@ import {
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+
 import { trpc } from "../../lib/trpc-client";
 import { HOSTS_LIST_KEY, type HostView } from "../hooks/use-update-status";
 

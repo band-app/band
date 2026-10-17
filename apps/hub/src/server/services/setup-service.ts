@@ -1,4 +1,5 @@
 import { createLogger } from "@band-app/logger";
+
 import { checkCli, installCli, SYMLINK_PATH } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { AGENT_CHECKS } from "./coding-agent-seed";

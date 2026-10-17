@@ -144,7 +144,7 @@ export function VirtualizedMessageList<T>({
     return () => clearTimeout(t);
   }, [ready]);
   const armed = ready || replayWaitOver;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: must arm once `ready` holds, never on `scrollToBottom`/`scrollRef` identity changes
+  // oxlint-disable-next-line react/exhaustive-deps -- must arm once `ready` holds, never on `scrollToBottom`/`scrollRef` identity changes
   useEffect(() => {
     if (!armed || revealed) return;
     let raf = 0;
@@ -244,7 +244,7 @@ export function VirtualizedMessageList<T>({
   // key untouched, so this no-ops on the hot path. The mount transition
   // (null → first key) is skipped so we never fight the first-paint reveal gate.
   const prevFirstKeyRef = useRef<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on `items`; getKey/virtualizer are stable refs
+  // oxlint-disable-next-line react/exhaustive-deps -- keyed on `items`; getKey/virtualizer are stable refs
   useLayoutEffect(() => {
     const firstKey = items.length > 0 ? getKey(items[0], 0) : null;
     const prevFirstKey = prevFirstKeyRef.current;

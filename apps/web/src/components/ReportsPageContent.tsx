@@ -18,6 +18,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
 import {
   formatBucketTick,
   formatBucketTooltipLabel,

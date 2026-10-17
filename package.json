@@ -4,6 +4,7 @@
   "private": true,
   "description": "IDE-agnostic agent orchestrator",
   "type": "module",
+  "packageManager": "pnpm@10.13.1",
   "scripts": {
     "dev:desktop": "pnpm build:cli:desktop && pnpm build:web && pnpm --filter @band-app/desktop build && node scripts/dev-desktop.mjs",
     "dev": "pnpm --filter @band-app/server dev",
@@ -11,25 +12,25 @@
     "dev:docs": "pnpm --filter @band-app/docs dev",
     "build:desktop": "pnpm build:cli:desktop && pnpm build:web && pnpm --filter @band-app/worker build:desktop && pnpm --filter @band-app/desktop build && pnpm --filter @band-app/desktop package",
     "build": "pnpm build:web",
-    "build:web": "pnpm --filter @band-app/web build && pnpm --filter @band-app/server build",
+    "build:web": "vp run ci:build-web",
     "build:cli": "pnpm --filter @band-app/cli build",
     "build:cli:desktop": "pnpm --filter @band-app/cli build && node apps/desktop/scripts/copy-cli-binary.mjs",
-    "test": "pnpm --filter @band-app/server test && pnpm --filter @band-app/web test && pnpm --filter @band-app/link test && pnpm --filter @band-app/environment test && pnpm --filter @band-app/shared test && pnpm --filter @band-app/client test && pnpm --filter @band-app/host-local test && pnpm --filter @band-app/worker test && cargo test --manifest-path apps/cli/Cargo.toml && pnpm --filter @band-app/desktop test",
-    "lint": "./scripts/check-worktree-ids.sh && node scripts/check-theme-tokens.mjs && biome check . && cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings",
-    "lint:fix": "biome check --fix . && cargo clippy --manifest-path apps/cli/Cargo.toml --fix --allow-dirty",
-    "format": "biome format . && cargo fmt --manifest-path apps/cli/Cargo.toml -- --check",
-    "format:fix": "biome format --fix . && cargo fmt --manifest-path apps/cli/Cargo.toml",
-    "check": "./scripts/check-worktree-ids.sh && node scripts/check-theme-tokens.mjs && biome check . && cargo fmt --manifest-path apps/cli/Cargo.toml -- --check && cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings",
+    "test": "vp run ci:test",
+    "lint": "vp run ci:lint",
+    "lint:fix": "vp lint --fix && cargo clippy --manifest-path apps/cli/Cargo.toml --fix --allow-dirty",
+    "format": "vp run ci:format",
+    "format:fix": "vp fmt && cargo fmt --manifest-path apps/cli/Cargo.toml",
+    "check": "vp run ci:check",
     "knip": "knip",
     "jscpd": "jscpd .",
     "prepare": "husky"
   },
   "devDependencies": {
     "@band-app/cli": "workspace:^",
-    "@biomejs/biome": "^2.4.5",
     "husky": "^9.1.7",
     "jscpd": "^4.0.8",
-    "knip": "^6.3.0"
+    "knip": "^6.3.0",
+    "vite-plus": "catalog:"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",

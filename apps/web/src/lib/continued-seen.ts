@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useSyncExternalStore } from "react";
+
 import { clientStorage, subscribeClientState } from "./client-state";
 
 export const CONTINUED_SEEN_PREFIX = "band:continued-seen:";

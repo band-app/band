@@ -19,6 +19,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
+
 import type * as acp from "@agentclientprotocol/sdk";
 import { openSseStream, type SseWriter } from "@band-app/chat-runtime/sse-writer";
 import {
@@ -26,6 +27,7 @@ import {
   HISTORY_PAGE_SIZE,
   SESSION_ID_PATTERN,
 } from "@band-app/shared/chat-events";
+
 import type { ChatMessage, ChatOwner } from "./owner.ts";
 
 /** Largest request body: a message with its attached files. */

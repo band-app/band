@@ -20,6 +20,7 @@
  */
 
 import { Globe } from "lucide-react";
+
 import type { AutocompleteState } from "../hooks/useBrowserPaneControls";
 
 export interface AddressBarAutocompleteProps {

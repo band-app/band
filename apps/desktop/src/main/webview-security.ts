@@ -12,7 +12,9 @@
 
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import type { BrowserWindow } from "electron";
+
 import type { BrowserGuestManager } from "../browser/guest-manager.js";
 import { admitWebviewAttach, hardenGuestWebPreferences } from "../browser/guest-policy.js";
 import { createLogger } from "./services/log.js";

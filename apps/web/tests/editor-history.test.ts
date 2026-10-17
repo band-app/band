@@ -3,7 +3,8 @@
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type UseEditorHistoryReturn, useEditorHistory } from "@/dashboard";
 
 // Tell React we're in a test environment that supports act()

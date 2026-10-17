@@ -1,4 +1,5 @@
 import type { EventEmitter } from "node:events";
+
 import {
   LinkClient,
   type LinkClientOptions,

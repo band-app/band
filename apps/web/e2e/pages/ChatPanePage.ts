@@ -24,6 +24,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { FindWidget } from "./FindWidget";
 
 /** Bounding boxes of the composer's parts, in CSS px. */

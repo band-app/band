@@ -26,8 +26,11 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import {
   cleanupTmpHome,
   createTmpHome,

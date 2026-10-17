@@ -24,6 +24,7 @@ import {
 import type { ChatEventFile, SessionState } from "@band-app/shared/chat-events";
 import type { HostOfflineAnswer } from "@band-app/shared/continuation";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+
 import { announceContinued, requestContinue } from "../../lib/continue-prompt";
 import { chatFetch, directChatCall } from "../../lib/direct-chat";
 import { trpc } from "../../lib/trpc-client";
@@ -41,20 +42,19 @@ export interface UseChatSubscriptionOptions {
   enabled?: boolean;
 }
 
-export interface UseChatSubscriptionResult
-  extends Pick<
-    TranscriptState,
-    | "messages"
-    | "status"
-    | "sessionId"
-    | "queue"
-    | "session"
-    | "plan"
-    | "taskRunning"
-    | "errorMessage"
-    | "hasOlder"
-    | "replayed"
-  > {
+export interface UseChatSubscriptionResult extends Pick<
+  TranscriptState,
+  | "messages"
+  | "status"
+  | "sessionId"
+  | "queue"
+  | "session"
+  | "plan"
+  | "taskRunning"
+  | "errorMessage"
+  | "hasOlder"
+  | "replayed"
+> {
   /** True while the event stream is connected. */
   isConnected: boolean;
   send: (text: string, files?: File[]) => Promise<void>;

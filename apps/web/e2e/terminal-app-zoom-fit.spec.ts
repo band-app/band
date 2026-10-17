@@ -27,8 +27,11 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { makeGitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,

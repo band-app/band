@@ -11,9 +11,11 @@
  */
 
 import { randomUUID } from "node:crypto";
+
 import { cliInvocation } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { AgentMode, AgentSessionRecord } from "@band-app/shared/agent-sessions";
+
 import { WorktreeNotFoundError } from "../errors";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { agentSessionRegistry } from "./agent-session-registry-service";

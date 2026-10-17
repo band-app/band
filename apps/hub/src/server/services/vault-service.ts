@@ -14,7 +14,9 @@
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+
 import { createLogger } from "@band-app/logger";
+
 import { VaultInputError, VaultNotFoundError } from "../errors";
 import { type VaultKind, VaultQueries, type VaultRow } from "../infra/db/queries/vault";
 import {

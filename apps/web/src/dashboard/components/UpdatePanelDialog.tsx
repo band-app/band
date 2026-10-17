@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
+
 import { trpc } from "../../lib/trpc-client";
 import { useHostsList, useUpdateStatus } from "../hooks/use-update-status";
 import { CopyCommand } from "./CopyCommand";

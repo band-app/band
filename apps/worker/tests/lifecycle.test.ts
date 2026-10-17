@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import {
   type LifecycleIdleParams,
   METHOD_LIFECYCLE_IDLE,
   METHOD_LIFECYCLE_POLICY,
   type SessionFile,
 } from "@band-app/link";
+
 import {
   call,
   cleanup,

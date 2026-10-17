@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from "react";
+
 import {
   type ChangeEntry,
   type ChangeSection,
@@ -26,6 +27,7 @@ import {
   useDiffTarget,
   useWorktreePath,
 } from "@/dashboard";
+
 import { countChangedPaths, useWorktreeChanges } from "../hooks/useWorktreeChanges";
 import { clientStorage } from "../lib/client-state";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";

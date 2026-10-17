@@ -5,6 +5,7 @@
  */
 
 import { type ChatLogDb, ChatEventQueries as LogQueries } from "@band-app/chat-runtime/log";
+
 import { getDb } from "../connection";
 
 export type {

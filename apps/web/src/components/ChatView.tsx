@@ -34,7 +34,9 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { Bot, Brain, Check, Clock, Loader2, Plus, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
+
 import { AgentIcon, SearchBar } from "@/dashboard";
+
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { groupModelsByProvider, modelNameWithoutProvider } from "../lib/model-providers";
 import { useToastObstruction } from "../lib/toast-obstructions";
@@ -323,7 +325,7 @@ export function ChatView({
   // Queue view with drag-reorder. `optimisticQueue` holds the local order
   // until the server's next `queue-updated` confirms it.
   const [optimisticQueue, setOptimisticQueue] = useState<QueuedMessageView[] | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally watching `queue`
+  // oxlint-disable-next-line react/exhaustive-deps -- intentionally watching `queue`
   useEffect(() => {
     setOptimisticQueue(null);
   }, [queue]);

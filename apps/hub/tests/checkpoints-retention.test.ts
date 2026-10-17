@@ -6,7 +6,9 @@
 import { randomBytes } from "node:crypto";
 import { readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 
 interface TakeReply {

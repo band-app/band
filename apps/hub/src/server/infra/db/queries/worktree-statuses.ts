@@ -12,6 +12,7 @@
  */
 
 import { and, eq, inArray, notInArray, or } from "drizzle-orm";
+
 import type { WorktreeStatusSnapshot } from "../../events/status-event-bus";
 import { getDb } from "../connection";
 import {

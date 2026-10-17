@@ -1,6 +1,7 @@
 import { Button, Input, Switch } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+
 import { VOICE_STATUS_KEY } from "../../../components/ai-elements/prompt-input-mic";
 import { trpc } from "../../../lib/trpc-client";
 import { SettingsRow } from "./SettingsRow";

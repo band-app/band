@@ -9,9 +9,11 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import WebSocket from "ws";
+
 import { branchRepository, prNode } from "./fixtures/branch-status-data";
 import { type GhStub, ghStub } from "./fixtures/gh-stub";
 import { FAKE_REPO, pullRequestNode, reviewQueryData } from "./fixtures/github-review-data";

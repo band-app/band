@@ -1,4 +1,5 @@
 import { createLogger } from "@band-app/logger";
+
 import { lookupBrowser } from "./browser-lookup";
 
 const log = createLogger("browser-host");
@@ -82,7 +83,7 @@ interface SharedState {
   ensureListeners: Set<EnsureListener>;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: globalThis stash for HMR survival
+// oxlint-disable-next-line typescript/no-explicit-any -- globalThis stash for HMR survival
 const globalAny = globalThis as any;
 let shared: SharedState | undefined = globalAny.__bandBrowserHostState;
 if (!shared) {

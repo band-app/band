@@ -9,7 +9,9 @@ import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import { type GhStub, ghStub } from "./fixtures/gh-stub";
 import { seedAcpHome, startAcpServer, stubRequests, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";

@@ -1,5 +1,5 @@
 import { hintForPtySpawnError } from "@band-app/host-local/terminals/pty-error-hints";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 // `hintForPtySpawnError` is the boundary between the raw node-pty error a
 // spawn failure throws and the short message shown in a terminal pane (see

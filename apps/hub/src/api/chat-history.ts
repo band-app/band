@@ -19,7 +19,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
+
 import { agentSessionService } from "../server/services/agent-session-service";
 import { chatService } from "../server/services/chat-service";
 

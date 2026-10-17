@@ -1,5 +1,6 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { eq, sql } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { branchStatuses as branchStatusesTable, worktrees as worktreesTable } from "../schema";
 

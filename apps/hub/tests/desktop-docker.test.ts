@@ -14,9 +14,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import WebSocket from "ws";
+
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,

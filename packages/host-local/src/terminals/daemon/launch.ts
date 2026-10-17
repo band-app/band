@@ -1,5 +1,6 @@
 import { fork } from "node:child_process";
 import { closeSync, openSync, readFileSync, renameSync, statSync } from "node:fs";
+
 import { retireDaemon } from "./client";
 import { type EndpointIdentity, ensurePrivateDir } from "./endpoint";
 import {

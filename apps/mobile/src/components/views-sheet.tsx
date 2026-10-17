@@ -1,4 +1,5 @@
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+
 import { colors } from "../theme";
 
 export interface ViewsSheetItem {

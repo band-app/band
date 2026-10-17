@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import { useWorktreeDisplay } from "../dashboard/hooks/use-worktree-display";
 import { consumeChatFresh } from "../lib/leaf-instance-ids";
 import { trpc } from "../lib/trpc-client";

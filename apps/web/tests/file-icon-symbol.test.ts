@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+
+import { describe, expect, it } from "vite-plus/test";
 
 import { buildSymbolMarkup } from "../src/dashboard/lib/file-icon-symbol.ts";
 

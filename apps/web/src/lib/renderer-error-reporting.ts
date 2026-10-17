@@ -7,9 +7,9 @@
 import { getElectronBridge } from "./desktop-ipc";
 
 interface ErrorTarget {
-  // biome-ignore lint/suspicious/noExplicitAny: accepts both `Window` and a plain test double
+  // oxlint-disable-next-line typescript/no-explicit-any -- accepts both `Window` and a plain test double
   addEventListener(type: any, listener: any): void;
-  // biome-ignore lint/suspicious/noExplicitAny: accepts both `Window` and a plain test double
+  // oxlint-disable-next-line typescript/no-explicit-any -- accepts both `Window` and a plain test double
   removeEventListener(type: any, listener: any): void;
   location?: { href: string };
 }

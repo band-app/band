@@ -12,6 +12,7 @@ import { closeSync, existsSync, openSync, readdirSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 import type { BrowserCdp, BrowserInfo, BrowserOpenSpec } from "@band-app/host-api";
 
 // A Chromium that is alive but never writes its port file is stuck, and a fresh launch usually is not.

@@ -1,4 +1,5 @@
 import type { Reviewer, ReviewerState } from "@band-app/plugin-api";
+
 import { PanelSection } from "./PanelSection";
 
 const STATE_LABEL: Record<ReviewerState, string> = {

@@ -18,7 +18,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { listWorktreeNames } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -113,24 +115,28 @@ describe("worktree sync during git worktree add", () => {
     expect(res.status).toBe(401);
   });
 
-  it("leaves the worktree out until git has checked out its branch", {
-    timeout: 60_000,
-  }, async () => {
-    if (!server) throw new Error("server not started");
-    await syncThroughPoller(server, testWorktreeId(REPO, "main", false));
+  it(
+    "leaves the worktree out until git has checked out its branch",
+    {
+      timeout: 60_000,
+    },
+    async () => {
+      if (!server) throw new Error("server not started");
+      await syncThroughPoller(server, testWorktreeId(REPO, "main", false));
 
-    expect(listWorktreeNames(tmpHome, REPO)).toEqual(["main"]);
-    expect(await listedWorktreeNames(server)).toEqual(["main"]);
+      expect(listWorktreeNames(tmpHome, REPO)).toEqual(["main"]);
+      expect(await listedWorktreeNames(server)).toEqual(["main"]);
 
-    // What `git worktree add` does next: point HEAD at the branch, unlock.
-    writeFileSync(adminHead, "ref: refs/heads/feat/half\n");
-    rmSync(adminLock);
-    // A restart runs the poller's first tick, and its sync, again.
-    await server.close();
-    server = await startServer({ remoteHost: false, tmpHome });
-    await syncThroughPoller(server, testWorktreeId(REPO, "feat/half", false));
+      // What `git worktree add` does next: point HEAD at the branch, unlock.
+      writeFileSync(adminHead, "ref: refs/heads/feat/half\n");
+      rmSync(adminLock);
+      // A restart runs the poller's first tick, and its sync, again.
+      await server.close();
+      server = await startServer({ remoteHost: false, tmpHome });
+      await syncThroughPoller(server, testWorktreeId(REPO, "feat/half", false));
 
-    expect(listWorktreeNames(tmpHome, REPO)).toEqual(["feat/half", "main"]);
-    expect(await listedWorktreeNames(server)).toEqual(["feat/half", "main"]);
-  });
+      expect(listWorktreeNames(tmpHome, REPO)).toEqual(["feat/half", "main"]);
+      expect(await listedWorktreeNames(server)).toEqual(["feat/half", "main"]);
+    },
+  );
 });

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import type { Socket } from "node:net";
 import { basename, dirname, join } from "node:path";
+
 import type {
   SpawnOptions,
   TerminalExitEvent,

@@ -19,8 +19,11 @@
  */
 
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { createTsLspRepo } from "../../hub/tests/fixtures/ts-lsp-repo";
 import {
   cleanupTmpHome,

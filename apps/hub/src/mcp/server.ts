@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+
 import { createContext } from "../server/api/context.ts";
 import { appRouter } from "../server/api/router.ts";
 
@@ -24,7 +26,7 @@ function discoverProcedures(): ProcedureInfo[] {
   // appRouter._def.procedures is a flat Record<"namespace.method", AnyProcedure>
   const procRecord = (appRouter._def as unknown as Record<string, unknown>).procedures as Record<
     string,
-    // biome-ignore lint/suspicious/noExplicitAny: tRPC internal structure
+    // oxlint-disable-next-line typescript/no-explicit-any -- tRPC internal structure
     any
   >;
 
@@ -108,12 +110,12 @@ function createMcpServer(req: IncomingMessage): McpServer {
       config.inputSchema = proc.inputSchema;
     }
 
-    // biome-ignore lint/suspicious/noExplicitAny: dynamic tRPC caller traversal
+    // oxlint-disable-next-line typescript/no-explicit-any -- dynamic tRPC caller traversal
     const handler = async (args: any) => {
       try {
         // Navigate the caller proxy: "repos.list" → caller.repos.list(args)
         const parts = proc.path.split(".");
-        // biome-ignore lint/suspicious/noExplicitAny: dynamic proxy traversal
+        // oxlint-disable-next-line typescript/no-explicit-any -- dynamic proxy traversal
         let target: any = caller;
         for (const part of parts) {
           target = target[part];
@@ -139,7 +141,7 @@ function createMcpServer(req: IncomingMessage): McpServer {
       }
     };
 
-    // biome-ignore lint/suspicious/noExplicitAny: MCP SDK accepts Zod schemas as AnySchema
+    // oxlint-disable-next-line typescript/no-explicit-any -- MCP SDK accepts Zod schemas as AnySchema
     server.registerTool(proc.toolName, config as any, handler);
   }
 

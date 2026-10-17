@@ -1,4 +1,5 @@
 import { createHubClient } from "@band-app/client/hub-client";
+
 import { directWorkerLink } from "./direct-worker";
 import { crossOriginHub, hubFetch, hubWsUrl } from "./hub-config";
 

@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+
 import { createLogger } from "@band-app/logger";
+
 import { execFileOffThread } from "../process/exec-file-worker";
 import { prependBinDirs } from "../process/path";
 

@@ -16,6 +16,7 @@ import {
 } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { getUsageReader } from "@band-app/coding-agent";
 import type {
   AcpAgentDefinition,
@@ -52,6 +53,7 @@ import type {
   WorktreeInfo,
   WorktreeSpec,
 } from "@band-app/host-api";
+
 import { resolveAcpLaunch } from "./agents/acp-launch";
 import { spawnAgentProcess } from "./agents/agent-spawn";
 import {

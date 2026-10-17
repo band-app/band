@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
 import {
@@ -369,7 +370,7 @@ export function FileViewer({
   // Edited content is initialized from the parent's tab state (via prop).
   // No cleanup effect needed — the parent saves content on every keystroke
   // via onEditedContentChange and saves editor state in handleTabSelect.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: controlledViewMode and initialEditedContent are intentionally excluded — we only reset on file change
+  // oxlint-disable-next-line react/exhaustive-deps -- controlledViewMode and initialEditedContent are intentionally excluded — we only reset on file change
   useEffect(() => {
     if (!controlledViewMode) setInternalViewMode("preview");
     setEditedContent(initialEditedContent ?? null);

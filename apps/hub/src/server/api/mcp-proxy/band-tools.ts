@@ -6,11 +6,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { slugifyBranchName } from "@band-app/shared/branch-name";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+
 import { BranchOnOtherHostError } from "../../errors";
 import { hostRegistry } from "../../infra/host/registry";
 import { chatService } from "../../services/chat-service";
@@ -58,10 +60,10 @@ function createServer(chatId: string): McpServer {
       description:
         "Start linked work: create a worktree in a repo, optionally with a first prompt for a coding agent. " +
         "The new worktree records this chat's worktree and this chat as its origin, and may start work of its own.",
-      // biome-ignore lint/suspicious/noExplicitAny: the SDK accepts a Zod object here
+      // oxlint-disable-next-line typescript/no-explicit-any -- the SDK accepts a Zod object here
       inputSchema: createInput as any,
     },
-    // biome-ignore lint/suspicious/noExplicitAny: arguments are validated by the schema above
+    // oxlint-disable-next-line typescript/no-explicit-any -- arguments are validated by the schema above
     async (args: any) => {
       try {
         const input = createInput.parse(args);

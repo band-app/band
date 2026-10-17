@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+
 import type { UsageReader } from "@band-app/coding-agent";
 import type {
   AcpAgentDefinition,
@@ -53,6 +54,7 @@ import {
   METHOD_RELAY_REVOKE,
   type RelayRegisterReply,
 } from "@band-app/link";
+
 import { RemoteTerminalBackend } from "./pty";
 import { channelBytes, channelJsonLines, RemoteRpc } from "./rpc";
 

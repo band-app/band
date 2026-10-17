@@ -1,5 +1,6 @@
 import { StartClient } from "@tanstack/react-start/client";
 import { hydrateRoot } from "react-dom/client";
+
 import { startBrowserWebviewDomBridge } from "./lib/browser-webview-dom-bridge";
 
 // Repair outside-click dismissal and drag-and-drop across desktop browser

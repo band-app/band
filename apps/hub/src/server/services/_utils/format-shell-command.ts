@@ -35,7 +35,7 @@
 // instead of on every `formatShellCommand` invocation. Matches the C0
 // range (`\x00..\x1f`), DEL (`\x7f`), and the C1 range (`\x80..\x9f`).
 // The character-class bounds are spelled with `String.fromCharCode` so
-// biome's `noControlCharactersInRegex` rule (which flags any literal
+// the `no-control-regex` lint rule (which flags any literal
 // control-char in regex source) doesn't misread the intent.
 const PTY_CONTROL_CHAR_RANGE = new RegExp(
   `[${String.fromCharCode(0)}-${String.fromCharCode(0x1f)}${String.fromCharCode(

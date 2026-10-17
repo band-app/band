@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+
 import { stripTerminalQueries } from "@band-app/worktree-ops/strip-queries";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+
 import { ContinueGateError } from "../../errors";
 import { followService } from "../../services/follow-service";
 import { terminalService } from "../../services/terminal-service";

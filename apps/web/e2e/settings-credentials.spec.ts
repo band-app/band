@@ -8,6 +8,7 @@
  */
 
 import { expect, test } from "@playwright/test";
+
 import { type OAuthStub, startOAuthStub } from "../../hub/tests/fixtures/oauth-stub";
 import {
   cleanupTmpHome,

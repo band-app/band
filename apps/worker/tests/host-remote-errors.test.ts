@@ -4,8 +4,10 @@ import { writeFileSync } from "node:fs";
 import { mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { HostOfflineError, HostPathDeniedError, HostTimeoutError } from "@band-app/host-api";
 import { RemoteHost } from "@band-app/host-remote";
+
 import {
   cleanup,
   startHub,

@@ -13,6 +13,7 @@
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { bandHome } from "./log.js";
 import { activeSecretStore } from "./secret-store.js";
 

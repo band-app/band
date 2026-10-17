@@ -7,6 +7,7 @@
 
 import { createLogger } from "@band-app/logger";
 import { compareVersions, isStrictSemver } from "@band-app/shared/versions";
+
 import { HUB_VERSION } from "./_utils/hub-version";
 
 const log = createLogger("release-check");

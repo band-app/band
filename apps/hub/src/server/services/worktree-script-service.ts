@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+
 import type { ScriptPlan, ScriptWorktree } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+
 import { hostRegistry } from "../infra/host/registry";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";

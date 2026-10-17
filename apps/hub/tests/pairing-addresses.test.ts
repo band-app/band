@@ -4,7 +4,9 @@
 // server in `device-pairing.test.ts`.
 
 import type { NetworkInterfaceInfo } from "node:os";
-import { describe, expect, it } from "vitest";
+
+import { describe, expect, it } from "vite-plus/test";
+
 import {
   listPairingInterfaces,
   normalizeCustomAddress,

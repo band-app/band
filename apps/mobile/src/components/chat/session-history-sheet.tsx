@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from "react-native";
+
 import { type SessionSummary, sessionRows } from "../../lib/chat/session-history";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
@@ -42,7 +43,7 @@ export function SessionHistorySheet({
   const [attempt, setAttempt] = useState(0);
   const [switching, setSwitching] = useState(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is the retry trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- `attempt` is the retry trigger
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;

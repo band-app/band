@@ -28,8 +28,8 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, watch } from "node:fs";
-import { createInterface } from "node:readline";
 import { dirname, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +40,7 @@ const mainEntry = resolve(distDir, "main", "main", "index.js");
 
 /** Strip ANSI escape sequences (color, cursor, etc) from a line. */
 function stripAnsi(s) {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI requires control chars.
+  // oxlint-disable-next-line no-control-regex -- stripping ANSI requires control chars.
   return s.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
 }
 

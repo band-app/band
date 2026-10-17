@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { MAX_ATTACHMENT_BYTES } from "@band-app/client/composer";
+
 import {
   makeAttachment,
   pastedImageResult,

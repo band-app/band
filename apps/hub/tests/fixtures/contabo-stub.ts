@@ -2,6 +2,7 @@
 // `CONTABO_AUTH_URL` and `CONTABO_API_URL`, which the hook reads on every call.
 
 import type { Server } from "node:http";
+
 import express from "express";
 
 export interface StubInstance {

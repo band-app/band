@@ -1,4 +1,5 @@
 import { type Channel, type LinkSession, RpcError } from "@band-app/link";
+
 import { PathDeniedError } from "./path-policy.ts";
 
 export const RPC_INVALID_PARAMS = -32602;

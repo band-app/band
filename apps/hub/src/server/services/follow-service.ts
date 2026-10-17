@@ -20,6 +20,7 @@
  */
 
 import { posix } from "node:path";
+
 import { buildSnapshot, gitIn, WIP_DIR } from "@band-app/host-api/snapshot-git";
 import { createLogger } from "@band-app/logger";
 import {
@@ -40,6 +41,7 @@ import {
   onlyAvailableOnMessage,
 } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+
 import { CheckpointError, ContinueGateError } from "../errors";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";

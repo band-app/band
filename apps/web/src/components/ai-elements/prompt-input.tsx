@@ -11,7 +11,9 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+
 import { buildLineReference, type ChatInsertDetail } from "@/dashboard";
+
 import { clientStorage } from "../../lib/client-state";
 
 let fileIdCounter = 0;
@@ -580,7 +582,7 @@ export const PromptInputTextarea = ({
 
   // JS fallback for auto-resize when CSS field-sizing-content is not supported
   const MAX_HEIGHT = 192; // matches max-h-48 (48 * 4px)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: inputValue triggers resize recalc via scrollHeight
+  // oxlint-disable-next-line react/exhaustive-deps -- inputValue triggers resize recalc via scrollHeight
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;

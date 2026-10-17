@@ -8,6 +8,7 @@ import { HOST_TRUST_LEVELS } from "@band-app/shared/host-trust";
 import { hubUpdateCommand } from "@band-app/shared/versions";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+
 import { hostRegistry } from "../../infra/host/registry";
 import { describeHostVersion } from "../../services/_utils/host-version";
 import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";

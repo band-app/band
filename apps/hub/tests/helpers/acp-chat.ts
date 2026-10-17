@@ -8,7 +8,9 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import type { ChatEvent } from "@band-app/shared/chat-events";
+
 import { seedSettings, seedState } from "./seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./server";
 import { isRemoteLoopback, testWorktreeId } from "./test-host";

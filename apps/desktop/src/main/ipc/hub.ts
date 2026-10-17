@@ -4,6 +4,7 @@
  */
 
 import { ipcMain } from "electron";
+
 import { Channels, HUB_CONFIG_SYNC_CHANNEL } from "../../shared/ipc-channels.js";
 import {
   checkRemoteHub,

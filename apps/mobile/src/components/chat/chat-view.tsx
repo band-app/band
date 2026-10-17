@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import Animated from "react-native-reanimated";
+
 import { pendingRequest, requestText } from "../../lib/chat/pending-request";
 import { setPending } from "../../lib/chat/pending-store";
 import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
@@ -146,7 +147,7 @@ function ChatViewInner({
   const onToggle = useCallback(() => {
     toggled.current = true;
   }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new `rows` is the trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- a new `rows` is the trigger
   useEffect(() => {
     toggled.current = false;
   }, [rows]);

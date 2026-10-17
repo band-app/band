@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -69,52 +71,56 @@ afterAll(async () => {
 });
 
 describe("terminal daemon under a full-speed flood", () => {
-  it("delivers the whole flood and keeps a quiet terminal echoing", {
-    timeout: 120_000,
-  }, async () => {
-    const floodId = await createTerminal();
-    const quietId = await createTerminal();
-    const flood = await TerminalSocket.open(server, {
-      worktreeId: WORKTREE_ID,
-      terminalId: floodId,
-      token: TOKEN,
-      maxOutputChars: 64 * 1024,
-    });
-    const quiet = await TerminalSocket.open(server, {
-      worktreeId: WORKTREE_ID,
-      terminalId: quietId,
-      token: TOKEN,
-    });
-    quiet.type("echo QUIET_READY_$((40+2))\r");
-    await quiet.waitForOutput("QUIET_READY_42");
+  it(
+    "delivers the whole flood and keeps a quiet terminal echoing",
+    {
+      timeout: 120_000,
+    },
+    async () => {
+      const floodId = await createTerminal();
+      const quietId = await createTerminal();
+      const flood = await TerminalSocket.open(server, {
+        worktreeId: WORKTREE_ID,
+        terminalId: floodId,
+        token: TOKEN,
+        maxOutputChars: 64 * 1024,
+      });
+      const quiet = await TerminalSocket.open(server, {
+        worktreeId: WORKTREE_ID,
+        terminalId: quietId,
+        token: TOKEN,
+      });
+      quiet.type("echo QUIET_READY_$((40+2))\r");
+      await quiet.waitForOutput("QUIET_READY_42");
 
-    // Markers are computed by the shell so the echoed command can't match.
-    flood.type(
-      `perl -e '$|=1; my $l = "\\e[32m" . ("x" x 150) . "\\e[0m\\n"; print $l for 1..${Math.ceil(FLOOD_BYTES / 160)}'; echo FLOOD_DONE_$((40+2))\r`,
-    );
-    // Mid-flood, the quiet terminal still answers, and promptly. The bound is
-    // loose for loaded CI runners; a backed-up stream delays echo by seconds.
-    await waitFor(async () => flood.bytes >= 20_000_000 || undefined, {
-      timeoutMs: 30_000,
-      label: "flood under way",
-    });
-    const typedAt = Date.now();
-    quiet.type("echo QUIET_DURING_$((40+3))\r");
-    await quiet.waitForOutput("QUIET_DURING_43", 30_000);
-    expect(Date.now() - typedAt).toBeLessThan(5_000);
+      // Markers are computed by the shell so the echoed command can't match.
+      flood.type(
+        `perl -e '$|=1; my $l = "\\e[32m" . ("x" x 150) . "\\e[0m\\n"; print $l for 1..${Math.ceil(FLOOD_BYTES / 160)}'; echo FLOOD_DONE_$((40+2))\r`,
+      );
+      // Mid-flood, the quiet terminal still answers, and promptly. The bound is
+      // loose for loaded CI runners; a backed-up stream delays echo by seconds.
+      await waitFor(async () => flood.bytes >= 20_000_000 || undefined, {
+        timeoutMs: 30_000,
+        label: "flood under way",
+      });
+      const typedAt = Date.now();
+      quiet.type("echo QUIET_DURING_$((40+3))\r");
+      await quiet.waitForOutput("QUIET_DURING_43", 30_000);
+      expect(Date.now() - typedAt).toBeLessThan(5_000);
 
-    await flood.waitForOutput("FLOOD_DONE_42", 90_000);
-    expect(flood.bytes).toBeGreaterThan(FLOOD_BYTES);
+      await flood.waitForOutput("FLOOD_DONE_42", 90_000);
+      expect(flood.bytes).toBeGreaterThan(FLOOD_BYTES);
 
-    // Both terminals are still live on the server.
-    const res = await trpcQuery(server.url, "terminal.list", { worktreeId: WORKTREE_ID }, TOKEN);
-    expect(res.status).toBe(200);
-    const { terminals } = await trpcData<{ terminals: { terminalId: string }[] }>(res);
-    expect(terminals.map((t) => t.terminalId).sort()).toEqual([floodId, quietId].sort());
+      // Both terminals are still live on the server.
+      const res = await trpcQuery(server.url, "terminal.list", { worktreeId: WORKTREE_ID }, TOKEN);
+      expect(res.status).toBe(200);
+      const { terminals } = await trpcData<{ terminals: { terminalId: string }[] }>(res);
+      expect(terminals.map((t) => t.terminalId).sort()).toEqual([floodId, quietId].sort());
 
-    await flood.close();
-    await quiet.close();
-  });
+      await flood.close();
+      await quiet.close();
+    },
+  );
 
   it("refuses to list terminals without the token", async () => {
     const input = encodeURIComponent(JSON.stringify({ worktreeId: WORKTREE_ID }));

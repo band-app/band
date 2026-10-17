@@ -1,4 +1,5 @@
 import { Button } from "@band-app/ui";
+
 import { trpc } from "../../../lib/trpc-client";
 import type { HostView } from "../../hooks/use-update-status";
 import { CopyCommand } from "../CopyCommand";

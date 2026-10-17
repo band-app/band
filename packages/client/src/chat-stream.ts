@@ -4,6 +4,7 @@
  */
 
 import { CHAT_EVENT_TYPES, type ChatEvent } from "@band-app/shared/chat-events";
+
 import type { HubFetch } from "./hub-client.ts";
 import { openSseStream, type SseStream } from "./sse.ts";
 

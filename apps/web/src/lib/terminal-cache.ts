@@ -1,7 +1,9 @@
 import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
+
 import type { SearchOptions } from "@/dashboard";
+
 import { listen as desktopListen } from "./desktop-ipc";
 import { type DirectSocketTarget, directSocketClosed, directTerminalTarget } from "./direct-worker";
 import { HubWebSocket, hubWsUrl } from "./hub-config";

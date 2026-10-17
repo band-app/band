@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { isOnBattery, parsePmset, readLinuxPower } from "../src/process/power";
 
 describe("parsePmset", () => {

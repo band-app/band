@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ChevronDown, ChevronRight, Minus, Plus, Trash2, Undo2 } from "lucide-react";
 import type React from "react";
 import { useCallback, useMemo, useState } from "react";
+
 import {
   type ChangeEntry,
   type ChangeSection,
@@ -32,6 +33,7 @@ import {
   type ChangesTreeAction,
   type WorktreeChanges,
 } from "@/dashboard";
+
 import {
   CHANGE_SECTIONS,
   invalidateWorktreeChanges,
@@ -222,14 +224,12 @@ export function ChangesSections({
           const isCollapsed = collapsed.has(section);
           const actions = actionsBySection[section];
           // The header runs each row action on every file of the section.
-          const headerActions = actions.map(
-            (action): HeaderAction => ({
-              id: `${action.id}-all`,
-              label: headerLabel(section, action.id),
-              icon: action.icon,
-              run: () => action.run(action.appliesTo ? entries.filter(action.appliesTo) : entries),
-            }),
-          );
+          const headerActions = actions.map((action): HeaderAction => ({
+            id: `${action.id}-all`,
+            label: headerLabel(section, action.id),
+            icon: action.icon,
+            run: () => action.run(action.appliesTo ? entries.filter(action.appliesTo) : entries),
+          }));
           return (
             <section key={section} data-testid={`changes-section--${section}`}>
               <SectionHeader

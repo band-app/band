@@ -7,8 +7,10 @@
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
 import type { ChatEvent } from "@band-app/shared/chat-events";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { agentText, maxId, openStream, TEST_TOKEN, turnEnded } from "./helpers/acp-chat";
 import { startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 import { waitFor } from "./helpers/wait-for";

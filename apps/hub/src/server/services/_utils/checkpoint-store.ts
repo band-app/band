@@ -2,6 +2,7 @@
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+
 import { bandHome } from "../../infra/db/queries/settings";
 import { CheckpointQueries } from "../../infra/db/queries/worktree-checkpoints";
 

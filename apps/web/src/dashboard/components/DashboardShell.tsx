@@ -14,6 +14,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { useToastObstruction } from "../../lib/toast-obstructions";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";

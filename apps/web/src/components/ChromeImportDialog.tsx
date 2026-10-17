@@ -38,6 +38,7 @@ import {
 } from "@band-app/ui";
 import { Chrome, Cookie, History, Loader2 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
+
 import {
   type ChromeCookieSummary,
   type ChromeProfile,

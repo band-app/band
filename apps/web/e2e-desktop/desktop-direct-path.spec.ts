@@ -16,8 +16,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, test } from "@playwright/test";
+
 import { ACP_STUB_AGENT_PATH } from "../e2e/helpers/acp-stub";
 import {
   cleanupTmpHome,

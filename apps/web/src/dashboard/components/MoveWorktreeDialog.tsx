@@ -11,6 +11,7 @@ import {
 } from "@band-app/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
 import { useHostList } from "../hooks/use-host-status";

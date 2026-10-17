@@ -15,7 +15,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { createLogger } from "@band-app/logger";
+
 import type { McpAuthResult, McpServerView } from "../../services/mcp-proxy-service";
 import {
   mcpStdioService,

@@ -10,6 +10,7 @@ import {
   Switch,
 } from "@band-app/ui";
 import { useEffect, useState } from "react";
+
 import { resetAppearance, setAppearance, setMode } from "../../../lib/theme/apply";
 import { normalizeHex } from "../../../lib/theme/color";
 import {

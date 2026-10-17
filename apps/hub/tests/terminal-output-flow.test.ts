@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import WebSocket from "ws";
+
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
@@ -137,33 +139,41 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it("pauses a flooding shell while its output is unacknowledged, and resumes on ack", {
-    timeout: 60_000,
-  }, async () => {
-    const socket = await openFlood(true);
-    await waitForHeld(socket);
+  it(
+    "pauses a flooding shell while its output is unacknowledged, and resumes on ack",
+    {
+      timeout: 60_000,
+    },
+    async () => {
+      const socket = await openFlood(true);
+      await waitForHeld(socket);
 
-    // Acknowledge everything received: the shell runs again, until the next
-    // 256 KB are unacknowledged.
-    const held = socket.bytes;
-    socket.ack(held);
-    await waitFor(async () => socket.bytes > held + 128 * 1024 || undefined, {
-      timeoutMs: INSIDE_STALL_WINDOW_MS,
-      label: "flood resumed after the ack",
-    });
-    await socket.close();
-  });
+      // Acknowledge everything received: the shell runs again, until the next
+      // 256 KB are unacknowledged.
+      const held = socket.bytes;
+      socket.ack(held);
+      await waitFor(async () => socket.bytes > held + 128 * 1024 || undefined, {
+        timeoutMs: INSIDE_STALL_WINDOW_MS,
+        label: "flood resumed after the ack",
+      });
+      await socket.close();
+    },
+  );
 
-  it("does not hold a client that never opted into acknowledgements", {
-    timeout: 60_000,
-  }, async () => {
-    const socket = await openFlood(false);
-    await waitFor(async () => socket.bytes > 4 * HELD_BYTES_BOUND || undefined, {
-      timeoutMs: 30_000,
-      label: "flood well past the hold threshold",
-    });
-    await socket.close();
-  });
+  it(
+    "does not hold a client that never opted into acknowledgements",
+    {
+      timeout: 60_000,
+    },
+    async () => {
+      const socket = await openFlood(false);
+      await waitFor(async () => socket.bytes > 4 * HELD_BYTES_BOUND || undefined, {
+        timeoutMs: 30_000,
+        label: "flood well past the hold threshold",
+      });
+      await socket.close();
+    },
+  );
 
   it("releases the hold when the client disconnects", { timeout: 60_000 }, async () => {
     const terminalId = await createTerminal();
@@ -182,29 +192,33 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
     await second.close();
   });
 
-  it("paces a client that never opted in on what the server has buffered for it", {
-    timeout: 60_000,
-  }, async () => {
-    const socket = await openSocket(await createTerminal(), false);
-    socket.type(COUNTING_FLOOD);
-    await waitFor(async () => linesPrinted() > 10_000 || undefined, {
-      timeoutMs: 15_000,
-      label: "flood under way",
-    });
+  it(
+    "paces a client that never opted in on what the server has buffered for it",
+    {
+      timeout: 60_000,
+    },
+    async () => {
+      const socket = await openSocket(await createTerminal(), false);
+      socket.type(COUNTING_FLOOD);
+      await waitFor(async () => linesPrinted() > 10_000 || undefined, {
+        timeoutMs: 15_000,
+        label: "flood under way",
+      });
 
-    // The client stops reading: once the kernel's socket buffers and 256 KB
-    // in the server's send buffer fill, the shell is held and stops printing.
-    socket.pause();
-    await waitForFlat(linesPrinted, "shell held while the client isn't reading");
+      // The client stops reading: once the kernel's socket buffers and 256 KB
+      // in the server's send buffer fill, the shell is held and stops printing.
+      socket.pause();
+      await waitForFlat(linesPrinted, "shell held while the client isn't reading");
 
-    const whilePaused = linesPrinted();
-    socket.resume();
-    await waitFor(async () => linesPrinted() > whilePaused + 10_000 || undefined, {
-      timeoutMs: 15_000,
-      label: "flood resumed once the client read again",
-    });
-    await socket.close();
-  });
+      const whilePaused = linesPrinted();
+      socket.resume();
+      await waitFor(async () => linesPrinted() > whilePaused + 10_000 || undefined, {
+        timeoutMs: 15_000,
+        label: "flood resumed once the client read again",
+      });
+      await socket.close();
+    },
+  );
 
   it("writes off a client that stops acknowledging for 5 s", { timeout: 60_000 }, async () => {
     const socket = await openFlood(true);

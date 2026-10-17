@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { StatusFeed, type StatusSource, type StatusSubscriber } from "../src/lib/status-feed.ts";
 import type { StatusEvent } from "../src/lib/status-state.ts";
 

@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import type { FileChange } from "@band-app/host-api";
+
 import { LocalHost } from "../src/local-host";
 
 // A real recursive watch over a real temp dir. The host drops events for ignored names before they

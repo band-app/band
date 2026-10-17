@@ -21,8 +21,11 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -118,11 +121,8 @@ test.describe("Chat model settings menu", () => {
     // One trigger: model name plus effort.
     await expect(chatPane.modelMenuButton).toContainText("Stub Small");
     await expect(chatPane.modelMenuEffort).toHaveText("Low");
-    const sessionId = (
-      stubRequests(tmpHome, "session/prompt").at(-1)?.params as {
-        sessionId: string;
-      }
-    ).sessionId;
+    const lastPrompt = stubRequests(tmpHome, "session/prompt").at(-1);
+    const sessionId = (lastPrompt as { params: { sessionId: string } }).params.sessionId;
     const optionsBefore = stubRequests(tmpHome, "session/set_config_option").length;
 
     await chatPane.openModelMenu();

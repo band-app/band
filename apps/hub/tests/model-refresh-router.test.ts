@@ -19,7 +19,9 @@
 
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { STUB_AGENT_PATH } from "./helpers/acp-chat";
 import { seedSettings } from "./helpers/seed-state";
 import {

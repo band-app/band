@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+
 import { RpcError, RpcTimeoutError } from "../src/index.ts";
 import { makeClient, nextSession, startServer, waitFor } from "./helpers.ts";
 

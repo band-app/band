@@ -12,6 +12,7 @@ import {
   Text,
   View,
 } from "react-native";
+
 import type { AgentChoice, ChatTab } from "../../lib/chat/use-worktree-tabs";
 import { colors, tones } from "../../theme";
 import { PlusGlyph } from "../glass";

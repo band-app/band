@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+
 import {
   DaemonTerminalBackend,
   TerminalDaemonUnavailableError,
 } from "@band-app/host-local/terminals/daemon/daemon-backend";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import { createTmpHome } from "./helpers/server";
 import { isAlive, startDaemonOfBuild, stopTerminalDaemon } from "./helpers/terminal-daemon";
 

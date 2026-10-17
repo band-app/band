@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+
 import { useAdapter } from "../context";
 import { queryKeys } from "../query-client";
 import type { Settings } from "../types";

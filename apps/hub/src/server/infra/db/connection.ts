@@ -1,9 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
 import { createLogger } from "@band-app/logger";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
+
 import { bandHome } from "./queries/settings";
 import * as schema from "./schema";
 

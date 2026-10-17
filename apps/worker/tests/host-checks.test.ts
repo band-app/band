@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+
 import { formatHostWarnings, hostWarnings, readLinuxHostSettings } from "../src/host-checks.ts";
 import { cleanup, tmpDir } from "./helpers.ts";
 
