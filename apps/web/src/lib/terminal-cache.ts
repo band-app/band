@@ -11,6 +11,7 @@ import { openExternalUrl } from "./open-external-url";
 import { getPowerState, isSaver, subscribePowerState } from "./power-state";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
 import { createTerminalInputQueue } from "./terminal-input-queue";
+import { handleTerminalLinkClick, isWebUrl } from "./terminal-links";
 import { trackMouseEncoding } from "./terminal-mouse-report";
 import { attachTerminalMouseWheel } from "./terminal-mouse-wheel";
 import { createTerminalOutputQueue } from "./terminal-output-queue";
@@ -461,7 +462,19 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       !liveContainer ||
       liveContainer.clientWidth !== lastFitBox.width ||
       liveContainer.clientHeight !== lastFitBox.height;
-    term.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
+    term.loadAddon(
+      new XWebLinksAddon((event, uri) => {
+        if (!isWebUrl(uri)) {
+          openExternalUrl(uri);
+          return;
+        }
+        handleTerminalLinkClick(event, uri, {
+          worktreeId,
+          terminalId,
+          focusTerminal: () => term.focus(),
+        });
+      }),
+    );
 
     const fileLinkProviderDisposable = term.registerLinkProvider(
       createTerminalFileLinkProvider(term, (filename) => {
