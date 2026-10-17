@@ -2,11 +2,12 @@ import type { SlashCommandSkill } from "@band-app/client/composer";
 import type { sessionPickers } from "@band-app/client/session-pickers";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { insertAtSelection } from "@band-app/shared/dictation-text";
+import * as Clipboard from "expo-clipboard";
 import { useCallback, useRef, useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   Image,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,12 +18,14 @@ import {
 
 import { type Attachment, toWireFiles } from "../../lib/composer/attachments";
 import { useAttachmentPicker } from "../../lib/composer/use-attachment-picker";
+import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { useDictation } from "../../lib/composer/use-dictation";
 import { useDraft } from "../../lib/composer/use-draft";
 import { colors, useScheme } from "../../theme";
 import { Glass, MicGlyph, PlusGlyph } from "../glass";
-import { ChatHeader } from "./chat-header";
+import { ChatHeader, type SessionsControl } from "./chat-header";
 import { ComposerSuggestions } from "./composer-suggestions";
+import { PlusDrawer } from "./plus-drawer";
 
 const MAX_ATTACHMENTS = 10;
 
@@ -30,8 +33,8 @@ const MAX_ATTACHMENTS = 10;
  * The message box at the bottom of a chat, a floating rounded bar: + on the left, a field that
  * grows, and one button that sends, or stops the running turn when the field is empty. Focused,
  * it expands into a card above the keyboard with the attachment chips over the text and the model
- * and mode pills beside +. Attachments come from the photo library, camera or files, `/` and `@`
- * suggestions open above it. Return adds a line; only the button sends.
+ * pill beside +. + opens a drawer with the attachment actions (photo library, camera, files) and
+ * the agent's mode. `/` and `@` suggestions open above it. Return adds a line; only the button sends.
  */
 export function Composer({
   worktreeId,
@@ -39,9 +42,11 @@ export function Composer({
   skills,
   pickers,
   setConfigOption,
+  sessions,
   onSend,
   onStop,
 }: {
+  sessions?: SessionsControl;
   worktreeId: string;
   running: boolean;
   skills: SlashCommandSkill[];
@@ -53,6 +58,8 @@ export function Composer({
   const scheme = useScheme();
   const [focused, setFocused] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const modeChoice = useConfigChoice(setConfigOption);
   const [text, setText] = useDraft(worktreeId);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [hint, setHint] = useState<string | null>(null);
@@ -86,7 +93,7 @@ export function Composer({
   const transcribing = dictation.state.phase === "transcribing";
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
-  const expanded = focused || sheetOpen || attachments.length > 0;
+  const expanded = focused || sheetOpen || drawerOpen || attachments.length > 0;
 
   const submit = useCallback(async () => {
     if (!canSend) return;
@@ -118,20 +125,51 @@ export function Composer({
     }
   }, []);
 
-  const openAttachMenu = useCallback(() => {
-    const options = ["Photo library", "Take photo", "Choose file", "Cancel"];
-    ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: 3 }, (index) => {
-      if (index === 0) void addFrom(picker.photos);
-      else if (index === 1) void addFrom(picker.camera);
-      else if (index === 2) void addFrom(picker.files);
-    });
+  // hasImageAsync never shows iOS's paste prompt; only reading the image does, and that waits for a tap.
+  const [clipboardHasImage, setClipboardHasImage] = useState(false);
+  const checkClipboard = useCallback(async () => {
+    try {
+      setClipboardHasImage(await Clipboard.hasImageAsync());
+    } catch {
+      setClipboardHasImage(false);
+    }
+  }, []);
+
+  const pasteImage = useCallback(async () => {
+    setClipboardHasImage(false);
+    await addFrom(picker.pasted);
   }, [addFrom, picker]);
+
+  // Whether the drawer's Paste image action is enabled, checked each time the drawer opens.
+  const [drawerHasImage, setDrawerHasImage] = useState(false);
+  // The keyboard closes first, so the drawer rises over the chat instead of fighting the input.
+  const openDrawer = useCallback(() => {
+    Keyboard.dismiss();
+    setDrawerHasImage(false);
+    setDrawerOpen(true);
+    Clipboard.hasImageAsync().then(setDrawerHasImage, () => setDrawerHasImage(false));
+  }, []);
+  // iOS cannot present a picker while the drawer's modal is still on screen, so the pick waits
+  // for the modal's dismissal.
+  const afterDrawer = useRef<(() => void) | null>(null);
+  const pickFrom = useCallback(
+    (pick: () => Promise<Attachment[]>) => {
+      afterDrawer.current = () => void addFrom(pick);
+      setDrawerOpen(false);
+    },
+    [addFrom],
+  );
+  const onDrawerDismissed = useCallback(() => {
+    const next = afterDrawer.current;
+    afterDrawer.current = null;
+    next?.();
+  }, []);
 
   const plus = (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Attach"
-      onPress={openAttachMenu}
+      onPress={openDrawer}
       hitSlop={8}
       style={[styles.plus, expanded && styles.plusSmall]}
       testID="composer__attach"
@@ -211,6 +249,17 @@ export function Composer({
                 ))}
               </ScrollView>
             ) : null}
+            {focused && clipboardHasImage ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Paste image"
+                onPress={() => void pasteImage()}
+                style={styles.pasteChip}
+                testID="composer__paste-image"
+              >
+                <Text style={styles.chipName}>Paste image</Text>
+              </Pressable>
+            ) : null}
             {hint ? (
               <Text style={styles.hint} testID="composer__hint">
                 {hint}
@@ -258,8 +307,14 @@ export function Composer({
             onChangeText={setText}
             selection={selection}
             onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
+            onFocus={() => {
+              setFocused(true);
+              void checkClipboard();
+            }}
+            onBlur={() => {
+              setFocused(false);
+              setClipboardHasImage(false);
+            }}
             placeholder={running ? "Queue a message…" : "Follow up…"}
             placeholderTextColor={colors.faint}
             style={[styles.input, expanded && styles.inputExpanded]}
@@ -277,6 +332,7 @@ export function Composer({
             <ChatHeader
               pickers={pickers}
               setConfigOption={setConfigOption}
+              sessions={sessions}
               onOpenChange={setSheetOpen}
             />
             <View style={styles.spacer} />
@@ -285,6 +341,18 @@ export function Composer({
           </View>
         ) : null}
       </Glass>
+      <PlusDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        onDismissed={onDrawerDismissed}
+        onPhotos={() => pickFrom(picker.photos)}
+        onCamera={() => pickFrom(picker.camera)}
+        onFiles={() => pickFrom(picker.files)}
+        canPaste={drawerHasImage}
+        onPaste={() => pickFrom(picker.pasted)}
+        pickers={pickers}
+        onChooseMode={modeChoice.choose}
+      />
     </View>
   );
 }
@@ -391,6 +459,15 @@ const styles = StyleSheet.create({
     height: 30,
     maxWidth: 220,
     paddingHorizontal: 9,
+  },
+  pasteChip: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.muted,
+    borderRadius: 10,
+    marginBottom: 6,
+    marginHorizontal: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
   },
   thumb: { borderRadius: 4, height: 20, width: 20 },
   chipName: { color: colors.foreground, flexShrink: 1, fontSize: 12.5 },

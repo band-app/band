@@ -1,19 +1,31 @@
 import type { sessionPickers } from "@band-app/client/session-pickers";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { colors } from "../../theme";
+import { SessionHistorySheet } from "./session-history-sheet";
 import { SessionSheet } from "./session-sheet";
 
 type Pickers = ReturnType<typeof sessionPickers>;
 
-/** The chat's model and mode as pills in the expanded composer. Tapping either opens the session sheet. */
+/** What the History button needs to list and switch the chat's sessions. */
+export interface SessionsControl {
+  worktreeId: string;
+  chatId: string;
+  currentSessionId: string | undefined;
+  onSwitch: (sessionId: string | undefined, summary?: string) => Promise<void>;
+}
+
+/** The chat's model as a pill in the expanded composer. Tapping it opens the session sheet. */
 export function ChatHeader({
   pickers,
   setConfigOption,
+  sessions,
   onOpenChange,
 }: {
   pickers: Pickers;
+  sessions?: SessionsControl;
   setConfigOption: (configId: string, value: string) => Promise<void>;
   /** Tells the composer a sheet is open, so it stays expanded while the input loses focus. */
   onOpenChange?: (open: boolean) => void;
@@ -26,41 +38,47 @@ export function ChatHeader({
     },
     [onOpenChange],
   );
-  // Changes in flight. A chat without a live session starts one before the change applies.
-  const [pending, setPending] = useState(0);
-
-  const choose = useCallback(
-    (configId: string, value: string) => {
-      setPending((n) => n + 1);
-      setConfigOption(configId, value)
-        .catch((err) =>
-          Alert.alert(
-            "Couldn't change the session",
-            err instanceof Error ? err.message : "Try again.",
-          ),
-        )
-        .finally(() => setPending((n) => n - 1));
+  const [historyOpen, setHistoryOpenState] = useState(false);
+  const setHistoryOpen = useCallback(
+    (next: boolean) => {
+      setHistoryOpenState(next);
+      onOpenChange?.(next);
     },
-    [setConfigOption],
+    [onOpenChange],
   );
+  const { choose, pending } = useConfigChoice(setConfigOption);
 
   const model = pickers.models.find((m) => m.id === pickers.model)?.name ?? pickers.model;
-  const mode = pickers.modes.find((m) => m.id === pickers.mode)?.name ?? pickers.mode;
-  if (!model && !mode) return null;
+  if (!model && !sessions) return null;
 
   return (
     <View style={styles.root} testID="chat__header">
       {model ? (
         <Chip label={model} a11y="Model" onPress={() => setOpen(true)} testID="chat__model" />
       ) : null}
-      {mode ? (
-        <Chip label={mode} a11y="Mode" onPress={() => setOpen(true)} testID="chat__mode" />
+      {sessions ? (
+        <>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Session history"
+            onPress={() => setHistoryOpen(true)}
+            style={styles.iconButton}
+            testID="chat__history"
+          >
+            <Text style={styles.label}>⏱</Text>
+          </Pressable>
+          <SessionHistorySheet
+            visible={historyOpen}
+            onClose={() => setHistoryOpen(false)}
+            {...sessions}
+          />
+        </>
       ) : null}
       <SessionSheet
         visible={open}
         onClose={() => setOpen(false)}
         pickers={pickers}
-        pending={pending > 0}
+        pending={pending}
         onChoose={choose}
       />
     </View>
@@ -105,6 +123,14 @@ const styles = StyleSheet.create({
     gap: 5,
     height: 36,
     paddingHorizontal: 12,
+  },
+  iconButton: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
   label: { color: colors.foreground, flexShrink: 1, fontSize: 14 },
   caret: { color: colors.mutedForeground, fontSize: 11 },

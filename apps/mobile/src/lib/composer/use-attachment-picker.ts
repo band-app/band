@@ -4,6 +4,7 @@
  */
 
 import { ACCEPTED_MEDIA_TYPES } from "@band-app/client/composer";
+import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useCallback } from "react";
@@ -12,20 +13,16 @@ import { Alert } from "react-native";
 import {
   type Attachment,
   makeAttachment,
+  pastedImageResult,
   rejectionFor,
   rejectionMessage,
   resolveMediaType,
 } from "./attachments";
+import { blobToBase64 } from "./blob-bytes";
 
 /** Reads a picked file as base64 through fetch and FileReader, which React Native supports for file URIs. */
 async function readBase64(uri: string): Promise<string> {
-  const blob = await (await fetch(uri)).blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Couldn't read the file."));
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
-    reader.readAsDataURL(blob);
-  });
+  return blobToBase64(await (await fetch(uri)).blob());
 }
 
 function accept(
@@ -93,5 +90,20 @@ export function useAttachmentPicker() {
     return out;
   }, []);
 
-  return { photos, camera, files };
+  /** Reads the clipboard image. Only call this from a tap: reading it may show iOS's "Allow Paste" prompt. */
+  const pasted = useCallback(async (): Promise<Attachment[]> => {
+    const image = await Clipboard.getImageAsync({ format: "png" });
+    if (!image) {
+      Alert.alert("Nothing to paste", "The clipboard no longer holds an image.");
+      return [];
+    }
+    const result = pastedImageResult(image.data, Date.now());
+    if ("why" in result) {
+      Alert.alert("Can't attach", rejectionMessage(result.name, result.why));
+      return [];
+    }
+    return [result.attachment];
+  }, []);
+
+  return { photos, camera, files, pasted };
 }

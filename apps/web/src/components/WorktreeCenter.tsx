@@ -154,6 +154,7 @@ import {
   type TabMru,
 } from "../lib/tab-mru";
 import { disposeTerminal, hasTerminal } from "../lib/terminal-cache";
+import { OPEN_IN_BAND_BROWSER_EVENT, type OpenInBandBrowserDetail } from "../lib/terminal-links";
 import {
   clearLeafOwners,
   deleteNestedLayout,
@@ -204,6 +205,7 @@ import {
   writeCachedTabMeta,
 } from "./tab-status";
 import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
+import { TerminalLinkPopover } from "./TerminalLinkPopover";
 import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
 
 // ---------------------------------------------------------------------------
@@ -2973,6 +2975,21 @@ function addBrowserLeaf(
   });
 }
 
+/** Open `url` in a new Band browser tab and create its server-side record. */
+function openBrowserTab(
+  api: LayoutApi,
+  worktreeId: string,
+  url: string,
+  position?: AddPanelOptions["position"],
+): void {
+  const id = newBrowserId();
+  markBrowserFresh(id);
+  addBrowserLeaf(api, worktreeId, id, url, position);
+  trpc.browsers.create.mutate({ worktreeId, id, url }).catch((err) => {
+    console.error("[WorktreeCenter] browser create failed:", err);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Shared tab list (`band:center-tabs:<ws>`, see lib/center-tabs.ts)
 // ---------------------------------------------------------------------------
@@ -4264,14 +4281,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       const api = apiRef.current;
       const source = api?.getPanel(event.payload.browser_id);
       if (!api || !source) return;
-      const id = newBrowserId();
-      markBrowserFresh(id);
-      addBrowserLeaf(api, worktreeId, id, event.payload.url, {
-        referenceGroup: source.group.id,
-      });
-      trpc.browsers.create.mutate({ worktreeId, id, url: event.payload.url }).catch((err) => {
-        console.error("[WorktreeCenter] popup browser create failed:", err);
-      });
+      openBrowserTab(api, worktreeId, event.payload.url, { referenceGroup: source.group.id });
     }).then((u) => {
       if (disposed) u();
       else unlisten = u;
@@ -4280,6 +4290,28 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       disposed = true;
       unlisten?.();
     };
+  }, [worktreeId]);
+
+  // A URL clicked in one of this worktree's terminals: open it in a new Band
+  // browser tab in the group of that terminal's tab.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const onOpen = (e: Event) => {
+      const detail = (e as CustomEvent<OpenInBandBrowserDetail>).detail;
+      const api = apiRef.current;
+      if (!api || detail.worktreeId !== worktreeId) return;
+      const source = detail.terminalId
+        ? api.getPanel(ownerOfTerminal(detail.terminalId) ?? detail.terminalId)
+        : undefined;
+      openBrowserTab(
+        api,
+        worktreeId,
+        detail.url,
+        source ? { referenceGroup: source.group.id } : activeOrCentralPosition(api),
+      );
+    };
+    window.addEventListener(OPEN_IN_BAND_BROWSER_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_IN_BAND_BROWSER_EVENT, onOpen);
   }, [worktreeId]);
 
   // The file viewer's HTML Preview button: open the file in a Band browser tab,
@@ -4632,6 +4664,8 @@ export const WorktreeCenter = memo(function WorktreeCenter({
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
+
+      <TerminalLinkPopover worktreeId={worktreeId} />
 
       {switcher && <TabSwitcher items={switcher.items} index={switcher.index} />}
 

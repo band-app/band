@@ -3,8 +3,6 @@ import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
-  Keyboard,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -12,12 +10,14 @@ import {
   Text,
   View,
 } from "react-native";
+import Animated from "react-native-reanimated";
 
 import { pendingRequest, requestText } from "../../lib/chat/pending-request";
 import { setPending } from "../../lib/chat/pending-store";
 import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
 import { useChatTranscript } from "../../lib/chat/use-chat";
 import { useChatActions } from "../../lib/chat/use-chat-actions";
+import { tapDismiss } from "../../lib/composer/tap-dismiss";
 import { useKeyboardInset } from "../../lib/composer/use-keyboard-inset";
 import { openFile } from "../../lib/files/open";
 import { useHubSession } from "../../lib/hub-session";
@@ -42,12 +42,15 @@ const keyOf = (row: ChatRow) => row.key;
  * the bottom the list follows new output; scrolling up stops that and shows "Jump to latest".
  * Older turns load when the user reaches the top, and the list keeps its place while they do.
  */
-export const ChatView = memo(function ChatView({
-  chatId,
-  worktreeId,
-  active = true,
-  chips = null,
-}: {
+export const ChatView = memo(function ChatView(props: ChatViewProps) {
+  // Switching session remounts the inner view, which drops the transcript and opens the stream
+  // again. The hub then replays the chat's new active session, as it does on open.
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration((n) => n + 1), []);
+  return <ChatViewInner key={generation} {...props} onReload={reload} />;
+});
+
+interface ChatViewProps {
   chatId: string;
   worktreeId: string;
   /** Chips shown above the composer, such as a link to the tab that needs the user. */
@@ -57,12 +60,19 @@ export const ChatView = memo(function ChatView({
    * has no composer, because the worktree's draft belongs to the shown chat's composer.
    */
   active?: boolean;
-}) {
-  const { hub } = useHubSession();
+}
+
+function ChatViewInner({
+  chatId,
+  worktreeId,
+  active = true,
+  chips = null,
+  onReload,
+}: ChatViewProps & { onReload: () => void }) {
+  const { hub, client } = useHubSession();
   const transcript = useChatTranscript(chatId);
   const { state, loaded, loadingOlder, loadOlder } = transcript;
   const actions = useChatActions(worktreeId, chatId, transcript);
-  const { inset } = useKeyboardInset();
   const pickers = useMemo(() => sessionPickers(state.session), [state.session]);
   const skills = useMemo(
     () =>
@@ -76,6 +86,21 @@ export const ChatView = memo(function ChatView({
   const rows = useMemo(
     () => buildRows(state.messages, state.taskRunning),
     [state.messages, state.taskRunning],
+  );
+
+  // Same calls as the web: queued messages belong to the session they were queued against, then
+  // the active session is set. Like the web, a running turn is not asked about first.
+  const switchSession = useCallback(
+    async (sessionId: string | undefined, summary?: string) => {
+      await client.queue.clear.mutate({ worktreeId, chatId }).catch(() => {});
+      await client.chats.setActiveSession.mutate({ worktreeId, chatId, sessionId, summary });
+      onReload();
+    },
+    [client, worktreeId, chatId, onReload],
+  );
+  const sessions = useMemo(
+    () => ({ worktreeId, chatId, currentSessionId: state.sessionId, onSwitch: switchSession }),
+    [worktreeId, chatId, state.sessionId, switchSession],
   );
 
   const request = useMemo(() => pendingRequest(state.messages), [state.messages]);
@@ -131,11 +156,11 @@ export const ChatView = memo(function ChatView({
     if (pinned.current && !toggled.current) listRef.current?.scrollToEnd({ animated: false });
   }, []);
 
-  // The keyboard shortens the list. Keep the last message in view when it was in view before.
-  useEffect(() => {
-    const sub = Keyboard.addListener("keyboardDidShow", followOutput);
-    return () => sub.remove();
-  }, [followOutput]);
+  // The keyboard shortens the list. The root view's onLayout keeps the last message in view when
+  // it was in view before, after the shorter layout is committed.
+  const keyboardStyle = useKeyboardInset();
+
+  const dismissOnTap = useMemo(tapDismiss, []);
 
   const jumpToLatest = useCallback(() => {
     pinned.current = true;
@@ -160,8 +185,8 @@ export const ChatView = memo(function ChatView({
         openFile(worktreeId, at ? at[1] : path, at ? Number(at[2]) : undefined);
       }}
     >
-      <Animated.View style={[styles.keyboard, { paddingBottom: inset }]}>
-        <View style={styles.root} testID="chat__view">
+      <Animated.View style={[styles.keyboard, keyboardStyle]}>
+        <View style={styles.root} onLayout={followOutput} {...dismissOnTap} testID="chat__view">
           {!loaded ? (
             <View style={styles.center} testID="chat__loading">
               <ActivityIndicator color={colors.mutedForeground} />
@@ -250,6 +275,7 @@ export const ChatView = memo(function ChatView({
             skills={skills}
             pickers={pickers}
             setConfigOption={actions.setConfigOption}
+            sessions={sessions}
             onSend={actions.send}
             onStop={() => void actions.stop()}
           />
@@ -257,7 +283,7 @@ export const ChatView = memo(function ChatView({
       </Animated.View>
     </ChatProvider>
   );
-});
+}
 
 const styles = StyleSheet.create({
   keyboard: { flex: 1 },

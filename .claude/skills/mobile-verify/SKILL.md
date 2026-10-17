@@ -65,6 +65,25 @@ Check each tool first and install only what is missing. All of it is user space 
      token `wrong-token.yaml` types, and fails when the log search found under 10 lines;
    - stops the hub and deletes its temp home.
 
+   Temp files: Maestro is a JVM program and on macOS Java ignores `TMPDIR`, so the script gives
+   it a per-run dir through both `TMPDIR` and `MAESTRO_OPTS=-Djava.io.tmpdir=<dir>`, and deletes
+   that dir when the run ends. At the start it also removes `maestro_xctestrunner_xcodebuild_output*`
+   folders in the system temp dir that are over 2 hours old (leftovers of a crashed run) and logs
+   how many. Each folder is about 1 GB.
+
+   Shared lock: parallel iOS builds and simulator runs have filled the disk twice. Before any iOS
+   build or simulator run, take the lock yourself (`verify.mjs` does not take it, so a caller
+   holding it cannot deadlock) and release it when done:
+
+   ```bash
+   until mkdir /tmp/band-ios-sim.lock 2>/dev/null; do sleep 30; done
+   echo "$BAND_WORKTREE_ID $$" > /tmp/band-ios-sim.lock/owner
+   # ... build / verify.mjs ...
+   rm -rf /tmp/band-ios-sim.lock
+   ```
+
+   Also check `df -h /System/Volumes/Data` and wait while under 8 GB is free.
+
    The first native build takes 5 to 20 minutes (on top of `pnpm install` in a fresh worktree). Later runs with no native change can skip it:
    `node apps/mobile/scripts/verify.mjs --skip-build`. A JS-only change still needs a build,
    because Release embeds the bundle.
@@ -95,16 +114,22 @@ Check each tool first and install only what is missing. All of it is user space 
 | `w2-status-live.yaml` | A row shows "working" within 2 s of the agent starting a turn and "needs you" when it asks for permission. |
 | `w3-foreground.yaml` | After a minute in the background the list shows what changed meanwhile. |
 | `w4-open.yaml` | Tapping a worktree opens its screen with the right name and branch; Back returns to the same place in a long list. |
+| `d1-delete-clean.yaml` | Long press a clean worktree, Delete worktree: the alert asks once (Cancel keeps it), confirming removes the row and `repos.list` drops it. |
+| `d2-delete-dirty.yaml` | A worktree with an uncommitted file names the changes in the alert; Cancel keeps it and its file, Delete anyway removes it. |
+| `d3-delete-not-offered.yaml` | The default-branch worktree and a plain repo's folder have no Delete worktree option. |
 | `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link opens the file viewer on that file (here an error state, because `gamma` has no `src/parser.ts`) and Back returns. |
 | `c2-streaming.yaml` | A streamed turn shows each line as it arrives and the list stays at the bottom; scrolling up stops following and shows Jump to latest, which brings the list back. |
-| `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow long-presses the turn and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
-| `c5-copy.yaml` | A long press on a message copies its text (checked on the simulator's clipboard). |
+| `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow taps the message menu and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
+| `c5-copy.yaml` | The "..." button under a message opens its actions; Copy puts the message text on the simulator's clipboard. |
+| `c7-select.yaml` | A long press on message text selects a word with the system handles and no action sheet; dragging the end handle widens the range and Copy puts exactly that range on the clipboard. |
 | `c6-history.yaml` | Scrolling to the top of a 24-turn chat loads the 4 turns the hub didn't send on open, and the list keeps its place while they arrive. |
 | `m1-send.yaml` | A message typed on the phone (Return adds a line, only the button sends) reaches the agent, and the reply streams in. |
 | `m2-queue.yaml` | A message sent during a running turn joins the queue above the composer; one is moved up and another deleted; the kept one is delivered when the turn ends and the deleted one never reaches the agent. |
 | `m3-attach.yaml` | A photo from the simulator's library (added with `addMedia`) is attached and sent; the agent receives an image part. |
+| `m9-paste-image.yaml` | An image copied in Photos is pasted from the hint chip above the input and the + menu (disabled with no image on the clipboard) and sent; the agent receives an image part. |
 | `m4-suggest.yaml` | "/" lists the commands the hub reports for the agent, "@" plus text lists matching files, and picking one fills the field. |
 | `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet (the pill in the focused composer) shows in the pill and in `chats.sessionState`. |
+| `m9-session-history.yaml`, `m10-session-history-empty.yaml` | The History button lists a chat's sessions newest first, switches to the older one, starts a new one, and says so on a chat with none. Uses `gamma-sessions` and `gamma-no-sessions`. |
 | `m6-keyboard.yaml` | With the keyboard open, the last message and the composer are both on screen. Run it on other simulators with `BAND_SIM_UDID`. |
 | `m7-draft.yaml` | An unsent draft survives leaving the screen and the app going to the background. |
 | `m8-composer-expanded.yaml` | Focused, the composer expands with the attach button and the model and mode pills, and sending still works. |

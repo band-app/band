@@ -1,5 +1,5 @@
 import { CircleAlert, CircleCheck, GitMerge, Loader, Moon } from "lucide-react-native";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { CiTone, PullRequestTone, WorktreeRow } from "../lib/worktree-list";
 import { colors, tints, tones } from "../theme";
@@ -108,6 +108,7 @@ export function WorktreeRowView({
   row,
   onPress,
   onLongPress,
+  deleting,
   first,
   last,
 }: {
@@ -115,6 +116,8 @@ export function WorktreeRowView({
   onPress: () => void;
   /** Opens the row's actions (Pin / Unpin). */
   onLongPress?: () => void;
+  /** The worktree is being deleted: a spinner shows and the row ignores taps. */
+  deleting?: boolean;
   /** First row of a card with no header of its own (Pinned): round the top. */
   first?: boolean;
   last?: boolean;
@@ -124,16 +127,17 @@ export function WorktreeRowView({
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
+      disabled={deleting}
       accessibilityRole="button"
       accessibilityLabel={rowLabel(row)}
-      accessibilityHint={onLongPress ? "Long press for pin options" : undefined}
+      accessibilityHint={onLongPress ? "Long press for pin and delete options" : undefined}
       testID={`home__worktree-${row.id}`}
       style={({ pressed }) => [
         styles.row,
         first && styles.first,
         last && styles.last,
         !first && styles.divided,
-        pressed && styles.pressed,
+        (pressed || deleting) && styles.pressed,
       ]}
     >
       <View style={{ width: row.depth * 16 }} />
@@ -148,7 +152,15 @@ export function WorktreeRowView({
           </Text>
         ) : null}
       </View>
-      <RowMeta row={row} />
+      {deleting ? (
+        <ActivityIndicator
+          size="small"
+          color={colors.mutedForeground}
+          testID={`worktree__deleting-${row.id}`}
+        />
+      ) : (
+        <RowMeta row={row} />
+      )}
     </Pressable>
   );
 }

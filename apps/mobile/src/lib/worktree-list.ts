@@ -136,6 +136,8 @@ export interface WorktreeRow {
   pinned: boolean;
   /** The repo's main worktree, which the web marks with a house instead of a branch. */
   main: boolean;
+  /** The row is the single folder of a plain (non-git) repo. */
+  plain: boolean;
   missing: boolean;
   lifecycle?: "sleeping" | "waking";
   agent: AgentState;
@@ -242,6 +244,7 @@ function toRow(
     remote: hostId !== LOCAL_HOST,
     pinned: worktree.pinned,
     main: repo.kind !== "plain" && worktree.name === repo.defaultBranch,
+    plain: repo.kind === "plain",
     missing: worktree.missing === true,
     lifecycle: worktree.lifecycle,
     agent: agentStateOf(agentStatus),

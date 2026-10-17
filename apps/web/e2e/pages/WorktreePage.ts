@@ -5064,8 +5064,11 @@ export class WorktreePage {
    *  link provider registered — regardless of cell width. A `mouse.move`
    *  precedes the click so xterm's link layer resolves the hovered line
    *  before activation. */
-  async clickTerminalFileLink(text: string): Promise<void> {
-    await test.step(`Click terminal file link "${text}"`, async () => {
+  async clickTerminalFileLink(
+    text: string,
+    modifiers: Array<"Meta" | "Control" | "Shift"> = [],
+  ): Promise<void> {
+    await test.step(`Click terminal link "${text}"`, async () => {
       const rect = await this.waitForTerminalRowRect(text);
       const y = rect.y + rect.height / 2;
       // xterm paints the link to a surface with no per-link DOM node, so we
@@ -5091,15 +5094,35 @@ export class WorktreePage {
             () => false,
           );
         if (hovered) {
-          await this.page.mouse.click(x, y);
+          await this.clickWithModifiers(x, y, modifiers);
           return;
         }
       }
       // No hover registered anywhere along the row — click the left edge so
       // the spec's outcome assertion fails against the real (un-opened) state
       // rather than this helper swallowing the miss.
-      await this.page.mouse.click(rect.x + 4, y);
+      await this.clickWithModifiers(rect.x + 4, y, modifiers);
     });
+  }
+
+  /** Wait until a terminal row whose trimmed text is `text` is painted. */
+  async waitForTerminalOutput(text: string): Promise<void> {
+    await test.step(`Wait for terminal output "${text}"`, async () => {
+      await this.waitForTerminalRowRect(text);
+    });
+  }
+
+  private async clickWithModifiers(
+    x: number,
+    y: number,
+    modifiers: Array<"Meta" | "Control" | "Shift">,
+  ): Promise<void> {
+    for (const key of modifiers) await this.page.keyboard.down(key);
+    try {
+      await this.page.mouse.click(x, y);
+    } finally {
+      for (const key of [...modifiers].reverse()) await this.page.keyboard.up(key);
+    }
   }
 
   /** Poll the DOM-renderer rows until one whose trimmed text equals `text`

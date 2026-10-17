@@ -1,0 +1,79 @@
+# The composer's + opens a drawer with the attachment actions and the mode. Picking a mode applies
+# it on the hub and keeps the drawer open; swiping down or tapping outside closes it.
+appId: app.getband.mobile
+name: S6 the + drawer
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-drawer
+- tapOn:
+    id: composer__attach
+- assertVisible:
+    id: plus-drawer
+- assertVisible:
+    id: plus-drawer__photos
+- assertVisible:
+    id: plus-drawer__camera
+- assertVisible:
+    id: plus-drawer__files
+- assertVisible:
+    id: plus-drawer__modes
+- assertVisible:
+    id: plus-drawer__mode-plan
+    selected: false
+- takeScreenshot: m9-drawer
+# Another mode: checked in the drawer and reached the agent.
+- tapOn:
+    id: plus-drawer__mode-plan
+- assertVisible:
+    id: plus-drawer__mode-plan
+    selected: true
+- takeScreenshot: m9-mode-changed
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-mode?wt=gamma-drawer
+      VALUE: "plan"
+# Swipe down closes.
+- swipe:
+    start: "50%,72%"
+    end: "50%,98%"
+    duration: 400
+- assertNotVisible:
+    id: plus-drawer
+# Tap outside closes.
+- tapOn:
+    id: composer__attach
+- assertVisible:
+    id: plus-drawer
+# The backdrop is outside the modal sheet's accessibility tree, so tap by position.
+- tapOn:
+    point: "50%,10%"
+- assertNotVisible:
+    id: plus-drawer
+# The model pill still opens its sheet, and the sheet has no mode section.
+- tapOn:
+    id: composer__input
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    id: chat__model
+- assertVisible:
+    id: session-sheet
+- assertNotVisible:
+    id: session-sheet__modes
+- tapOn:
+    id: session-sheet__done
+# A picker action closes the drawer and opens the system picker.
+- tapOn:
+    id: composer__attach
+- tapOn:
+    id: plus-drawer__photos
+- assertNotVisible:
+    id: plus-drawer
+- extendedWaitUntil:
+    visible: "Select Photos"
+    timeout: 15000

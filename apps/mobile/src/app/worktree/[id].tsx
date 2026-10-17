@@ -20,6 +20,7 @@ import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
 import { ViewsSheet, type ViewsSheetItem } from "../../components/views-sheet";
 import { type ChatTab, useWorktreeTabs } from "../../lib/chat/use-worktree-tabs";
+import { tapDismiss } from "../../lib/composer/tap-dismiss";
 import { openChanges, openExplorer } from "../../lib/files/open";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
 import { useHosts, useRepos, useStatusFeed } from "../../lib/use-hub-data";
@@ -120,6 +121,7 @@ const WorktreeChats = memo(function WorktreeChats({
   // over a scroll view cannot do. Landing on a neighbouring page shows that tab.
   const { width } = useWindowDimensions();
   const pager = useRef<ScrollView>(null);
+  const dismissOnTap = useMemo(tapDismiss, []);
   const [pageHeight, setPageHeight] = useState(0);
   const shownAt = tabs.tabs.findIndex((t) => t.id === tabs.active);
   const prevTab = shownAt > 0 ? tabs.tabs[shownAt - 1] : undefined;
@@ -215,14 +217,16 @@ const WorktreeChats = memo(function WorktreeChats({
   const mounted = tabs.tabs.filter((t) => tabs.mounted.includes(t.id));
   return (
     <View style={local.fill}>
-      <WorktreeHeader
-        repo={repo}
-        branch={branch}
-        tabs={tabs.tabs}
-        active={tabs.active}
-        onOpenTabs={() => setSheet(true)}
-        onMore={() => setViews(true)}
-      />
+      <View {...dismissOnTap}>
+        <WorktreeHeader
+          repo={repo}
+          branch={branch}
+          tabs={tabs.tabs}
+          active={tabs.active}
+          onOpenTabs={() => setSheet(true)}
+          onMore={() => setViews(true)}
+        />
+      </View>
       {tabs.active ? (
         <View style={local.chats}>
           <ScrollView

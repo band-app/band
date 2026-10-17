@@ -2,6 +2,7 @@ import type { HubClient } from "@band-app/client/hub-client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 
+import type { removeRequest } from "./deleting";
 import { useHubSession } from "./hub-session";
 import { type pinRequest, withPinned } from "./pinning";
 import type { LabelDefinition } from "./worktree-list";
@@ -58,6 +59,17 @@ export function usePinWorktree() {
     onError: (_error, _request, context) => {
       if (context?.previous) queryClient.setQueryData(["repos.list"], context.previous);
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Deletes a worktree with the call the web uses; the list is read again when it settles. */
+export function useRemoveWorktree() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ReturnType<typeof removeRequest>) =>
+      client.worktrees.remove.mutate(request),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
   });
 }

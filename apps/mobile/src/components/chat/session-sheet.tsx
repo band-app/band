@@ -19,7 +19,8 @@ import { colors } from "../../theme";
 type Pickers = ReturnType<typeof sessionPickers>;
 
 /**
- * Model, mode and the other options the agent offers, in the system's page sheet. A choice is
+ * Model and the other options the agent offers (the mode is in the composer's + drawer), in the
+ * system's page sheet. A choice is
  * applied at once through `chats.setConfigOption`, like the web's menus, and the sheet stays
  * open so several can change in one visit.
  */
@@ -76,20 +77,6 @@ export function SessionSheet({
                   selected={m.id === pickers.model}
                   onPress={() => onChoose(pickers.modelConfigId, m.id)}
                   testID={`session-sheet__model-${m.id}`}
-                />
-              ))}
-            </Section>
-          ) : null}
-          {pickers.modes.length > 0 ? (
-            <Section title="Mode" testID="session-sheet__modes">
-              {pickers.modes.map((m) => (
-                <Choice
-                  key={m.id}
-                  name={m.name}
-                  description={m.description}
-                  selected={m.id === pickers.mode}
-                  onPress={() => onChoose(pickers.modeConfigId, m.id)}
-                  testID={`session-sheet__mode-${m.id}`}
                 />
               ))}
             </Section>
