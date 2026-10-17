@@ -24,8 +24,9 @@ name: S9 paste an image
 - assertVisible:
     id: plus-drawer__paste
     enabled: false
+# The backdrop is outside the modal sheet's accessibility tree, so tap by position.
 - tapOn:
-    id: plus-drawer__backdrop
+    point: "50%,10%"
 # Copy the newest photo in Photos, which puts an image on the clipboard.
 - launchApp:
     appId: com.apple.mobileslideshow
