@@ -1,6 +1,7 @@
 import type { sessionPickers } from "@band-app/client/session-pickers";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { colors } from "../../theme";
 import { SessionHistorySheet } from "./session-history-sheet";
 import { SessionSheet } from "./session-sheet";
@@ -15,7 +16,7 @@ export interface SessionsControl {
   onSwitch: (sessionId: string | undefined, summary?: string) => Promise<void>;
 }
 
-/** The chat's model and mode as pills in the expanded composer. Tapping either opens the session sheet. */
+/** The chat's model as a pill in the expanded composer. Tapping it opens the session sheet. */
 export function ChatHeader({
   pickers,
   setConfigOption,
@@ -44,35 +45,15 @@ export function ChatHeader({
     },
     [onOpenChange],
   );
-  // Changes in flight. A chat without a live session starts one before the change applies.
-  const [pending, setPending] = useState(0);
-
-  const choose = useCallback(
-    (configId: string, value: string) => {
-      setPending((n) => n + 1);
-      setConfigOption(configId, value)
-        .catch((err) =>
-          Alert.alert(
-            "Couldn't change the session",
-            err instanceof Error ? err.message : "Try again.",
-          ),
-        )
-        .finally(() => setPending((n) => n - 1));
-    },
-    [setConfigOption],
-  );
+  const { choose, pending } = useConfigChoice(setConfigOption);
 
   const model = pickers.models.find((m) => m.id === pickers.model)?.name ?? pickers.model;
-  const mode = pickers.modes.find((m) => m.id === pickers.mode)?.name ?? pickers.mode;
-  if (!model && !mode && !sessions) return null;
+  if (!model && !sessions) return null;
 
   return (
     <View style={styles.root} testID="chat__header">
       {model ? (
         <Chip label={model} a11y="Model" onPress={() => setOpen(true)} testID="chat__model" />
-      ) : null}
-      {mode ? (
-        <Chip label={mode} a11y="Mode" onPress={() => setOpen(true)} testID="chat__mode" />
       ) : null}
       {sessions ? (
         <>
@@ -96,7 +77,7 @@ export function ChatHeader({
         visible={open}
         onClose={() => setOpen(false)}
         pickers={pickers}
-        pending={pending > 0}
+        pending={pending}
         onChoose={choose}
       />
     </View>

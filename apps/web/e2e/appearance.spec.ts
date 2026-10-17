@@ -150,7 +150,7 @@ test("S3: a preset restyles the app without a reload, terminal included", async 
   await appearance.choosePreset("Nord");
   await appearance.settings.backToApp();
 
-  expect(await appearance.cssVar("--background")).toBe("#2e3440");
+  await expect.poll(() => appearance.cssVar("--background")).toBe("#2e3440");
   // The terminal repainted in place: same xterm instance, new colors.
   await expect.poll(async () => (await terminal.readOptions())?.background).toBe("#2e3440");
   await worktree.selectRightPanelTab("explorer");
@@ -185,7 +185,7 @@ test("an accent change recolors the selection", async ({ page }) => {
   await expect
     .poll(() => appearance.computed(trees.fileTreeRow("src/kept.ts"), "background-color"))
     .not.toBe(before);
-  expect(await appearance.cssVar("--primary")).toBe("#ff0066");
+  await expect.poll(() => appearance.cssVar("--primary")).toBe("#ff0066");
 });
 
 test("S5: font sizes apply to the UI and to code, and the terminal refits", async ({ page }) => {
@@ -203,8 +203,8 @@ test("S5: font sizes apply to the UI and to code, and the terminal refits", asyn
   await appearance.settings.openDialog("appearance");
   await appearance.setSize("ui", 18);
   await appearance.setSize("code", 14);
-  expect(await appearance.rootFontSizePx()).toBe(18);
-  expect(await appearance.cssVar("--code-font-size")).toBe("14px");
+  await expect.poll(() => appearance.rootFontSizePx()).toBe(18);
+  await expect.poll(() => appearance.cssVar("--code-font-size")).toBe("14px");
   await appearance.settings.backToApp();
 
   await expect.poll(async () => (await terminal.readOptions())?.fontSize).toBe(14);
@@ -276,9 +276,9 @@ test("S7: Reset to default returns the Band look and keeps the mode", async ({ p
 
   await expect(appearance.presetSelect()).toContainText("Band");
   await expect(appearance.uiSizeInput()).toHaveValue("16");
-  expect(await appearance.inlineVar("--background")).toBe("");
-  expect(await appearance.inlineVar("--font-code")).toBe("");
-  expect(await appearance.rootFontSizePx()).toBe(16);
+  await expect.poll(() => appearance.inlineVar("--background")).toBe("");
+  await expect.poll(() => appearance.inlineVar("--font-code")).toBe("");
+  await expect.poll(() => appearance.rootFontSizePx()).toBe(16);
   // The device's mode is not reset.
   expect(await appearance.isDark()).toBe(false);
   await expect(appearance.resetButton()).toBeDisabled();
