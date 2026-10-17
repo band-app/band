@@ -35,9 +35,10 @@ import {
   Unlink,
 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
+import { useContinuedIconVisible } from "../../lib/continued-seen";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
-import { useHostLabel } from "../hooks/use-host-names";
+import { useHostLabel, useHostNames } from "../hooks/use-host-names";
 import { timeAgo, useHostSeen } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
@@ -55,7 +56,7 @@ import type {
 } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
-import { ContinuedFromIcon } from "./ContinuedFromLine";
+import { ContinuedFromIcon, continuedFromText } from "./ContinuedFromLine";
 import { ContinueOnHostDialog } from "./ContinueOnHostDialog";
 import { DivergencePanel } from "./DivergencePanel";
 import { GitStatusIndicator } from "./GitStatusIndicator";
@@ -257,6 +258,12 @@ export const WorktreeCard = memo(function WorktreeCard({
 
   const worktreeId = toWorktreeId(repoName, worktree.name, worktree.hostId);
   const isActive = useDashboardStore((s) => s.activeWorktreeId === worktreeId);
+  const continuedIconShown = useContinuedIconVisible(
+    worktreeId,
+    worktree.continuedFrom?.at ?? 0,
+    isActive && !!worktree.continuedFrom,
+  );
+  const hostNameOf = useHostNames();
   // The card stays listed, disabled, until the worktree is gone.
   const isDeleting = useDashboardStore((s) => isWorktreeDeleting(s, worktreeId));
   const href = capabilities.getWorktreeHref?.(worktreeId);
@@ -502,7 +509,7 @@ export const WorktreeCard = memo(function WorktreeCard({
             </Tooltip>
           )}
           {/* The work of this worktree continued here from another host's checkpoint. */}
-          {worktree.continuedFrom && !isDeleting && (
+          {worktree.continuedFrom && !isDeleting && continuedIconShown && (
             <ContinuedFromIcon
               from={worktree.continuedFrom}
               testId="worktree-card__continued-from"
@@ -579,6 +586,17 @@ export const WorktreeCard = memo(function WorktreeCard({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuLabel>Worktree</ContextMenuLabel>
+        {worktree.continuedFrom && (
+          <ContextMenuLabel
+            data-testid="worktree-card__continued-from-line"
+            className="font-normal text-muted-foreground"
+          >
+            {continuedFromText(
+              worktree.continuedFrom,
+              hostNameOf(worktree.continuedFrom.fromHostId),
+            )}
+          </ContextMenuLabel>
+        )}
         <ContextMenuItem
           onClick={() => onTogglePinned(repoName, worktree.name, isPinned, worktree.hostId)}
         >

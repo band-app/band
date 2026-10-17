@@ -90,6 +90,7 @@ export const PromptInput = ({
   const [hasText, setHasText] = useState(() => readDraft(draftStorageKey).trim().length > 0);
   const [inputValue, setInputValue] = useState(() => readDraft(draftStorageKey));
   const [commandHint, setCommandHint] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Restore draft into the uncontrolled textarea on mount.
   // Always set the value — even when the draft is empty — to clear any
@@ -324,6 +325,8 @@ export const PromptInput = ({
           setTextareaValue,
           commandHint,
           setCommandHint,
+          notice,
+          setNotice,
         }}
       >
         {children}
@@ -344,6 +347,9 @@ interface PromptInputContextValue {
   setTextareaValue: (value: string) => void;
   commandHint: string | null;
   setCommandHint: (hint: string | null) => void;
+  /** A line shown full width between the field and the settings row (a dictation error). */
+  notice: string | null;
+  setNotice: (notice: string | null) => void;
 }
 
 const PromptInputContext = createContext<PromptInputContextValue>({
@@ -358,6 +364,8 @@ const PromptInputContext = createContext<PromptInputContextValue>({
   setTextareaValue: () => {},
   commandHint: null,
   setCommandHint: () => {},
+  notice: null,
+  setNotice: () => {},
 });
 
 export function usePromptInputContext() {
@@ -445,11 +453,27 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** The composer's notice line, on its own row so it never squeezes the buttons. */
+export const PromptInputNotice = () => {
+  const { notice } = useContext(PromptInputContext);
+  if (!notice) return null;
+  return (
+    <p
+      role="alert"
+      data-testid="prompt-input__mic-error"
+      className="w-full px-1 text-xs leading-tight text-destructive"
+    >
+      {notice}
+    </p>
+  );
+};
+
 // Settings row below the field (attach, mode, model, context)
 export type PromptInputActionsProps = HTMLAttributes<HTMLDivElement>;
 
 export const PromptInputActions = ({ className, ...props }: PromptInputActionsProps) => (
   <div
+    data-testid="prompt-input__actions"
     className={cn("flex w-full min-w-0 items-center justify-between gap-1 px-0.5", className)}
     {...props}
   />

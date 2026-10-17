@@ -58,6 +58,12 @@ export class FollowPage {
     return this.card(worktreeId).getByTestId("worktree-card__continued-from");
   }
 
+  /** The "Continued from ..." line at the top of the card's context menu. */
+  async openCardContinuedFromLine(worktreeId: string): Promise<Locator> {
+    await this.card(worktreeId).click({ button: "right" });
+    return this.page.getByTestId("worktree-card__continued-from-line");
+  }
+
   divergedBadge(worktreeId: string): Locator {
     return this.card(worktreeId).getByTestId("worktree-card__diverged");
   }
