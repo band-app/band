@@ -12,11 +12,14 @@ import { BackGlyph, Glass, GlassCircle } from "../glass";
 export function ViewHeader({
   title,
   subtitle,
+  icon,
   right,
   testID,
 }: {
   title: string;
   subtitle?: string;
+  /** A file-type icon shown before the title. */
+  icon?: ReactNode;
   right?: ReactNode;
   testID: string;
 }) {
@@ -29,9 +32,12 @@ export function ViewHeader({
         </GlassCircle>
         <View style={styles.pillWrap}>
           <Glass radius={24} innerStyle={styles.pill}>
-            <Text style={styles.title} numberOfLines={1} testID={`${testID}__title`}>
-              {title}
-            </Text>
+            <View style={styles.titleRow}>
+              {icon}
+              <Text style={styles.title} numberOfLines={1} testID={`${testID}__title`}>
+                {title}
+              </Text>
+            </View>
             {subtitle ? (
               <Text style={styles.subtitle} numberOfLines={1} testID={`${testID}__subtitle`}>
                 {subtitle}
@@ -50,7 +56,8 @@ const styles = StyleSheet.create({
   bar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 12 },
   pillWrap: { flex: 1 },
   pill: { alignItems: "center", height: 48, justifyContent: "center", paddingHorizontal: 14 },
-  title: { color: colors.foreground, fontSize: 15, fontWeight: "600", maxWidth: "100%" },
+  titleRow: { alignItems: "center", flexDirection: "row", gap: 6, maxWidth: "100%" },
+  title: { color: colors.foreground, fontSize: 15, fontWeight: "600", flexShrink: 1 },
   subtitle: { color: colors.mutedForeground, fontSize: 11.5, marginTop: -1, maxWidth: "100%" },
   spacer: { width: 44 },
 });

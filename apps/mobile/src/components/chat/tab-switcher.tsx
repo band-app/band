@@ -1,4 +1,4 @@
-import { Bot, MessageSquare, MessageSquarePlus, SquareTerminal } from "lucide-react-native";
+import { MessageSquarePlus, SquareTerminal } from "lucide-react-native";
 import { useRef, useState } from "react";
 import {
   ActionSheetIOS,
@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import type { AgentChoice, ChatTab } from "../../lib/chat/use-worktree-tabs";
 import { colors, tones } from "../../theme";
+import { AgentIcon } from "../agent-icon";
 import { Icon } from "../icon";
 import { StateIcon } from "../state-icon";
 
@@ -129,10 +130,11 @@ function TabRow({
           testID={`tabs__sheet-tab-${tab.id}`}
         >
           <View style={styles.tabIcon}>
-            <Icon
-              icon={tab.kind === "term" ? SquareTerminal : MessageSquare}
-              color={colors.mutedForeground}
-            />
+            {tab.kind === "term" ? (
+              <Icon icon={SquareTerminal} color={colors.mutedForeground} />
+            ) : (
+              <AgentIcon type={tab.agentType} size={18} color={colors.mutedForeground} />
+            )}
           </View>
           <View style={styles.tx}>
             <Text style={styles.txName} numberOfLines={1} testID={`tabs__label-${tab.id}`}>
@@ -276,10 +278,19 @@ export function AgentPicker({
     ? agents.map((a) => ({
         key: a.id,
         label: a.label,
+        type: a.type,
         isDefault: a.isDefault,
         pick: a.isDefault ? undefined : a.id,
       }))
-    : [{ key: "default", label: "Default agent", isDefault: true, pick: undefined }];
+    : [
+        {
+          key: "default",
+          label: "Default agent",
+          type: undefined,
+          isDefault: true,
+          pick: undefined,
+        },
+      ];
   return (
     <Modal
       visible={visible}
@@ -312,7 +323,7 @@ export function AgentPicker({
               style={styles.agentRow}
               testID={`new-chat__agent-${c.key}`}
             >
-              <Icon icon={Bot} />
+              <AgentIcon type={c.type} size={20} />
               <Text style={styles.agentLabel}>{c.label}</Text>
               {c.isDefault ? <Text style={styles.agentMeta}>Default</Text> : null}
             </Pressable>
