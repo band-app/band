@@ -13,7 +13,9 @@ import {
 } from "./protocol.ts";
 import { LinkSession, type SessionOptions } from "./session.ts";
 
-export type AuthResult = { ok: true; sessionToken?: string } | { ok: false; reason: string };
+export type AuthResult =
+  | { ok: true; sessionToken?: string }
+  | { ok: false; reason: string; code?: string };
 
 export interface LinkServerOptions {
   /**
@@ -184,7 +186,7 @@ export class LinkServer extends EventEmitter {
       auth = { ok: false, reason: "authentication failed" };
     }
     if (!auth.ok) {
-      this.reply(ws, { type: "rejected", reason: auth.reason }, true);
+      this.reply(ws, { type: "rejected", reason: auth.reason, code: auth.code }, true);
       return;
     }
     if (ws.readyState !== WebSocket.OPEN) return;

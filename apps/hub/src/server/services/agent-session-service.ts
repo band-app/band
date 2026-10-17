@@ -1392,6 +1392,17 @@ export class AgentSessionService {
     return Boolean(rt?.starting || rt?.attaching);
   }
 
+  /** Chats with an agent process, started or starting, and whether each is mid-work. A host restart ends them. */
+  liveAgents(): { chatId: string; worktreeId: string; busy: boolean }[] {
+    return [...runtimes.values()]
+      .filter((rt) => rt.process !== null || rt.starting !== null)
+      .map((rt) => ({
+        chatId: rt.chatId,
+        worktreeId: rt.worktreeId,
+        busy: rt.inTurn || rt.pending.size > 0 || rt.work.outstanding().length > 0,
+      }));
+  }
+
   /**
    * True while the chat's agent has something Band must not cut off: a turn,
    * a request waiting on the user, or work the agent started on its own.

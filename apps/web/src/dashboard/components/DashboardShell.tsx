@@ -55,6 +55,7 @@ import { GroupBySwitch } from "./GroupBySwitch";
 import { RepoList } from "./RepoList";
 import { ReposPanel } from "./ReposPanel";
 import { SettingsPage } from "./SettingsPage";
+import { UpdateAvailableBadge } from "./UpdateAvailableBadge";
 
 interface DashboardShellProps {
   /** Action cluster rendered on the right of the persistent bottom action
@@ -635,6 +636,7 @@ export function DashboardShell({
             </TooltipTrigger>
             <TooltipContent side="top">Settings</TooltipContent>
           </Tooltip>
+          <UpdateAvailableBadge />
         </div>
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
