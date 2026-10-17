@@ -6,8 +6,9 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     Band includes a built-in cronjob scheduler that lets you run coding agent tasks on
     a recurring schedule. Cronjobs are defined with standard cron expressions and can be
-    scoped to either a repo or a specific worktree. When a cronjob fires, it submits
-    a task to the configured coding agent just as if you had typed the prompt manually.
+    tied to one worktree: a repo's default-branch worktree or any other. When a
+    cronjob fires, it submits a task to a chat in that worktree just as if you had typed
+    the prompt manually.
   </p>
 
   <h2>Creating a Cronjob</h2>
@@ -19,7 +20,9 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     <li><strong>Name</strong> — A human-readable name for the job (e.g., "Daily dependency check").</li>
     <li><strong>Prompt</strong> — The prompt sent to the coding agent when the job fires.</li>
     <li><strong>Cron Expression</strong> — A 5-field cron expression defining the schedule.</li>
-    <li><strong>Scope</strong> — Either "repo" or "worktree".</li>
+    <li><strong>Worktree</strong> — The worktree the job runs in. Each repo's default-branch worktree is listed first.</li>
+    <li><strong>Agent</strong> — Optional. The coding agent the job's chat runs. Without one, the default agent runs.</li>
+    <li><strong>Session ID</strong> — Optional. The agent's own session id. See below.</li>
     <li><strong>Enabled</strong> — Whether the job is active.</li>
   </ul>
 
@@ -51,19 +54,29 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     </tbody>
   </table>
 
-  <h2>Repo-Scoped vs Worktree-Scoped Jobs</h2>
-  <h3>Repo-Scoped</h3>
+  <h2>Worktrees</h2>
   <p>
-    A repo-scoped cronjob runs on the repo's default branch. Band looks up the
-    repo by name and submits the task to the worktree corresponding to the default
-    branch. This is ideal for recurring tasks that should always run against the main
-    codebase, such as dependency updates or code quality checks.
+    Every cronjob belongs to one worktree. For recurring work on a repo's main branch,
+    pick the repo's default-branch worktree. For branch-specific automation, such as
+    checks on a long-lived feature branch, pick that branch's worktree. Removing a
+    worktree removes its cronjobs. Jobs created before this rule, which were scoped to a
+    whole repo, moved to the repo's default-branch worktree on the first start after the
+    upgrade. A job whose repo had no default-branch worktree on any host is disabled, and the
+    cronjobs list shows why.
   </p>
-  <h3>Worktree-Scoped</h3>
+
+  <h2>Pinning a job to an agent session</h2>
   <p>
-    A worktree-scoped cronjob targets a specific worktree (repo + branch
-    combination). You select the worktree when creating the job. This is useful for
-    branch-specific automation, such as running checks on a long-lived feature branch.
+    With a <strong>session ID</strong>, every run goes to the chat in the job's worktree
+    whose active session is that id. When no chat has it, Band opens a new chat on that session
+    (the agent reopens it with <code>session/resume</code> or <code>session/load</code>) and
+    sends the prompt there. The next run reuses that chat. If the agent cannot open the
+    session, the run fails with the reason and Band starts no new session in its place. A
+    session id works with chat dispatch only, not with terminal jobs.
+  </p>
+  <p>
+    A chat that is in the middle of a turn when the job fires queues the prompt behind
+    the running turn.
   </p>
 
   <h2>Enable and Disable</h2>

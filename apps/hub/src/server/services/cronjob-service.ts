@@ -19,10 +19,12 @@ import {
 // dereference at call time. The `via` enum below is deliberately NOT imported
 // from `worktree-service` for exactly this reason — see `cronjobVia`.
 import { formatShellCommand } from "./_utils/format-shell-command";
+import { listedMainHostOf } from "./_utils/repo-host-policy";
+import { agentSessionService } from "./agent-session-service";
 import { BAND_CRON_ID_LABEL, type ChatSession, chatService } from "./chat-service";
 import { settingsService } from "./settings-service";
 import { loadState } from "./state";
-import { TaskConflictError, taskService } from "./task-service";
+import { submitOrQueueTask, TaskConflictError } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
 import { worktreeService } from "./worktree-service";
@@ -99,12 +101,19 @@ export const cronjobVia = z.enum(["chat", "terminal"]);
 export type CronjobVia = z.infer<typeof cronjobVia>;
 
 export const cronjobCreateInput = z.object({
-  key: z.string().min(1),
+  key: z.string().min(1).optional(),
   name: z.string().min(1),
   prompt: z.string().min(1),
   cronExpression: z.string().min(1),
-  scope: z.enum(["repo", "worktree"]),
+  // Every job belongs to one worktree. Both fields stay optional in the schema
+  // so the service answers a repo scope or a missing worktree with its own
+  // message instead of a generic validation error.
   worktreeId: z.string().optional(),
+  scope: z.string().optional(),
+  // Coding agent id from settings. Absent means the default agent.
+  agent: z.string().min(1).optional(),
+  // The agent's provider session id. Fires go to the chat that has it active.
+  sessionId: z.string().min(1).optional(),
   // Dispatch target for scheduled + manual fires. Optional — absent defaults to
   // "chat" in `create()` so existing callers (the web UI) keep their behavior.
   via: cronjobVia.optional(),
@@ -124,6 +133,12 @@ export const cronjobUpdateInput = z.object({
   prompt: z.string().min(1).optional(),
   cronExpression: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
+  // Moves the job to another worktree.
+  worktreeId: z.string().min(1).optional(),
+  // `null` clears the field.
+  agent: z.string().min(1).nullable().optional(),
+  sessionId: z.string().min(1).nullable().optional(),
+  via: cronjobVia.optional(),
 });
 
 /**
@@ -159,7 +174,15 @@ export type CronjobByIdInput = z.infer<typeof cronjobByIdInput>;
  * the chat shape, so callers can always rely on `via` to know what happened.
  */
 export type CronjobTriggerResult =
-  | { via: "chat"; taskId: string; worktreeId: string; chatId: string }
+  | {
+      via: "chat";
+      worktreeId: string;
+      chatId: string;
+      /** Set when the prompt started a turn now. */
+      taskId?: string;
+      /** Set when the chat was mid-turn and the prompt joined its queue. */
+      queuedMessageId?: string;
+    }
   | { via: "terminal"; terminalId: string; worktreeId: string };
 
 // ---------------------------------------------------------------------------
@@ -186,16 +209,25 @@ export class InvalidCronExpressionError extends Error {
 }
 
 export class CronjobWorktreeMissingError extends Error {
-  constructor(message = "worktreeId is required for worktree-scoped cronjobs") {
+  constructor(message = "A cronjob belongs to a worktree: pass worktreeId") {
     super(message);
     this.name = "CronjobWorktreeMissingError";
   }
 }
 
-export class CronjobRepoNotFoundError extends Error {
-  constructor(message = "Repo not found") {
+/** A create or update the service refuses (bad agent, session with a terminal job, agent mismatch). */
+export class CronjobInvalidError extends Error {
+  constructor(message: string) {
     super(message);
-    this.name = "CronjobRepoNotFoundError";
+    this.name = "CronjobInvalidError";
+  }
+}
+
+/** A fire that could not reach its chat. The message is recorded as the run's reason. */
+export class CronjobDispatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CronjobDispatchError";
   }
 }
 
@@ -222,22 +254,16 @@ export class CronjobService {
   // -------------------------------------------------------------------------
 
   /**
-   * List jobs for a key, or — if neither `repo` nor `worktreeId` is
-   * provided — every cronjob across every key.
+   * List the jobs of one worktree, or — without `worktreeId` — every cronjob.
    *
    * Mirrors the legacy tRPC `cronjobs.list` shape so the router stays a
    * straight delegate. The "all" branch returns `fileKey` on each row
    * because callers (the dashboard's cronjob settings page) need both
    * pieces to render the repo/worktree breadcrumbs.
    */
-  list(filter?: { repo?: string; worktreeId?: string }): {
+  list(filter?: { worktreeId?: string }): {
     jobs: (CronjobDefinition & { fileKey: string })[];
   } {
-    if (filter?.repo) {
-      const { repo } = filter;
-      const file = this.queries.loadFile(repo);
-      return { jobs: file.jobs.map((j) => ({ ...j, fileKey: repo })) };
-    }
     if (filter?.worktreeId) {
       const { worktreeId } = filter;
       const file = this.queries.loadFile(worktreeId);
@@ -270,26 +296,35 @@ export class CronjobService {
    */
   create(input: CronjobCreateInput): { job: CronjobDefinition } {
     this.assertValidCron(input.cronExpression);
-    if (input.scope === "worktree" && !input.worktreeId) {
-      throw new CronjobWorktreeMissingError();
+    if (input.scope === "repo") {
+      throw new CronjobWorktreeMissingError(
+        "Repo-scoped cronjobs are gone: a cronjob belongs to a worktree, so pass worktreeId (the default-branch worktree works for a repo's main)",
+      );
     }
+    if (!input.worktreeId) throw new CronjobWorktreeMissingError();
+    const { worktreeId } = input;
+    this.assertWorktreeExists(worktreeId);
+    const via = input.via ?? "chat";
+    this.assertTarget({ worktreeId, via, agent: input.agent, sessionId: input.sessionId });
 
-    const file = this.queries.loadFile(input.key);
+    const file = this.queries.loadFile(worktreeId);
     const job: CronjobDefinition = {
       id: generateCronjobId(),
       name: input.name,
       prompt: input.prompt,
       cronExpression: input.cronExpression,
-      scope: input.scope,
-      worktreeId: input.worktreeId,
+      scope: "worktree",
+      worktreeId,
+      agent: input.agent,
+      sessionId: input.sessionId,
       // Absent `via` means the web UI (or a pre-#581 caller) — default to chat
       // so existing cronjobs keep dispatching exactly as before.
-      via: input.via ?? "chat",
+      via,
       enabled: input.enabled,
       createdAt: new Date().toISOString(),
     };
     file.jobs.push(job);
-    this.queries.saveFile(input.key, file);
+    this.queries.saveFile(worktreeId, file);
     this.reloadSchedules();
     return { job };
   }
@@ -314,8 +349,32 @@ export class CronjobService {
     if (input.prompt !== undefined) job.prompt = input.prompt;
     if (input.cronExpression !== undefined) job.cronExpression = input.cronExpression;
     if (input.enabled !== undefined) job.enabled = input.enabled;
+    if (input.via !== undefined) job.via = input.via;
+    if (input.agent !== undefined) job.agent = input.agent ?? undefined;
+    if (input.sessionId !== undefined) job.sessionId = input.sessionId ?? undefined;
+    let key = input.key;
+    if (input.worktreeId !== undefined && input.worktreeId !== job.worktreeId) {
+      this.assertWorktreeExists(input.worktreeId);
+      job.worktreeId = input.worktreeId;
+      key = input.worktreeId;
+    }
+    this.assertTarget({
+      worktreeId: job.worktreeId ?? key,
+      via: job.via,
+      agent: job.agent,
+      sessionId: job.sessionId,
+    });
 
-    this.queries.saveFile(input.key, file);
+    if (key === input.key) {
+      this.queries.saveFile(key, file);
+    } else {
+      // Moved to another worktree: the job leaves this key's file and joins the new one.
+      file.jobs = file.jobs.filter((j) => j.id !== job.id);
+      this.queries.saveFile(input.key, file);
+      const target = this.queries.loadFile(key);
+      target.jobs.push(job);
+      this.queries.saveFile(key, target);
+    }
     this.reloadSchedules();
     return { job };
   }
@@ -351,14 +410,15 @@ export class CronjobService {
   /**
    * Fire a cronjob synchronously (manual "run now" path).
    *
-   * Uses the same `band:cronId`-labeled chat as the scheduled fire so the
-   * user sees both paths converge on a single dedicated conversation
-   * (issue #520). `submitTask` may throw `TaskConflictError`, which the API
-   * tier translates into a 409 Conflict response.
+   * Goes to the same chat as the scheduled fire (see `dispatchToChat`) so the
+   * user sees both paths converge on a single conversation. A terminal job
+   * that is still running throws `TaskConflictError`, which the API tier
+   * translates into a 409 Conflict response. A chat that is mid-turn queues
+   * the prompt instead.
    *
-   * Atomicity caveat: `getOrCreateCronjobChat` and `submitTask` are not run
-   * inside a single transaction. If `createChat` succeeds but `submitTask`
-   * later throws an unexpected (non-`TaskConflictError`) error, the
+   * Atomicity caveat: `getOrCreateCronjobChat` and `submitOrQueueTask` are not
+   * run inside a single transaction. If `createChat` succeeds but the submit
+   * later throws an unexpected error, the
    * freshly-created chat remains in the worktree as an orphan with no
    * task ever attached. The next manual `trigger` (or scheduled fire)
    * reuses that chat via its `band:cronId` label, so the orphan
@@ -374,8 +434,8 @@ export class CronjobService {
     const job = this.findJob(key, id);
     if (!job) throw new CronjobNotFoundError();
 
-    const worktreeId = this.resolveWorktreeId(job, key);
-    if (!worktreeId) throw new CronjobRepoNotFoundError();
+    const worktreeId = this.resolveWorktreeId(job);
+    if (!worktreeId) throw new CronjobWorktreeMissingError(`Cronjob ${id} has no worktree`);
 
     // Terminal dispatch mirrors the scheduled fire. `spawnCronTerminal` throws
     // `TaskConflictError` when the previous pane is still alive (→ 409, same as
@@ -388,9 +448,14 @@ export class CronjobService {
       }
     }
 
-    const cronChat = this.getOrCreateCronjobChat(worktreeId, job);
-    const task = taskService.submitTask({ worktreeId, chatId: cronChat.id, prompt: job.prompt });
-    return { via: "chat", taskId: task.id, worktreeId, chatId: cronChat.id };
+    try {
+      const sent = await this.dispatchToChat(job, worktreeId);
+      return { via: "chat", worktreeId, ...sent };
+    } catch (err) {
+      if (err instanceof CronjobDispatchError)
+        this.safeUpdateLastRun(job.id, "failed", err.message);
+      throw err;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -429,9 +494,55 @@ export class CronjobService {
     this.queries.deleteFile(key);
   }
 
+  /**
+   * Remove the jobs of every worktree a repo has, plus any repo-keyed job the
+   * boot migration has not moved yet. Call before the repo's rows go away.
+   */
+  removeForRepo(repoName: string): void {
+    const repo = loadState().repos.find((r) => r.name === repoName);
+    for (const wt of repo?.worktrees ?? []) {
+      this.removeForKey(toWorktreeId(repoName, wt.branch, wt.hostId));
+    }
+    this.removeForKey(repoName);
+  }
+
   // -------------------------------------------------------------------------
   // Scheduler lifecycle
   // -------------------------------------------------------------------------
+
+  /**
+   * Turn each repo-scoped job (written before jobs were tied to a worktree)
+   * into a job of the repo's listed default-branch worktree, on the host that
+   * lists it. The job keeps its id, schedule, prompt, `via`, enabled flag and
+   * `band:cronId` chat. A job with nowhere to go is disabled with the reason in
+   * `lastRunMessage`. Nothing is deleted, and a second run changes nothing.
+   * Runs at boot after the worktree sync and before `start()`.
+   */
+  migrateRepoJobs(): void {
+    const legacy = this.queries.listRepoScoped();
+    if (legacy.length === 0) return;
+    const repos = loadState().repos;
+    for (const job of legacy) {
+      const repo = repos.find((r) => r.name === job.fileKey);
+      if (!repo) {
+        this.queries.disableWithReason(job.id, `Repo ${job.fileKey} no longer exists`);
+        log.warn({ jobId: job.id, repo: job.fileKey }, "repo of a repo-scoped cronjob is gone");
+        continue;
+      }
+      const hostId = listedMainHostOf(repo);
+      if (!hostId) {
+        this.queries.disableWithReason(
+          job.id,
+          `The default branch ${repo.defaultBranch} of ${repo.name} is not checked out on any host`,
+        );
+        log.warn({ jobId: job.id, repo: repo.name }, "no default-branch worktree for cronjob");
+        continue;
+      }
+      const worktreeId = toWorktreeId(repo.name, repo.defaultBranch, hostId);
+      this.queries.moveToWorktree(job.id, worktreeId);
+      log.info({ jobId: job.id, worktreeId }, "moved repo-scoped cronjob to its worktree");
+    }
+  }
 
   /** Start the cronjob scheduler. Called once on server boot. */
   start(): void {
@@ -499,19 +610,82 @@ export class CronjobService {
    */
   private getOrCreateCronjobChat(
     worktreeId: string,
-    job: Pick<CronjobDefinition, "id" | "name">,
+    job: Pick<CronjobDefinition, "id" | "name" | "agent">,
   ): ChatSession {
     const labelMatch = { [BAND_CRON_ID_LABEL]: job.id };
     const existing = chatService.findByLabels(worktreeId, labelMatch);
     if (existing) return existing;
     return chatService.create(worktreeId, {
       name: job.name,
+      agent: job.agent,
       labels: labelMatch,
       // Cronjob scheduler is a trusted server-side caller — it's allowed
       // to write the reserved `band:` prefix that user-facing surfaces
       // are blocked from touching.
       allowReservedLabels: true,
     });
+  }
+
+  /**
+   * Send the job's prompt to its chat.
+   *
+   * Without a session id the chat is the job's own `band:cronId` chat. With
+   * one, it is the chat in the worktree whose active session is that id. When
+   * no chat has it, a new chat opens on that session through `session/resume`
+   * or `session/load`. A session the agent cannot open fails the fire and no
+   * fresh session starts in its place. A chat that is mid-turn queues the
+   * prompt behind the running turn.
+   */
+  private async dispatchToChat(
+    job: CronjobDefinition,
+    worktreeId: string,
+  ): Promise<{ chatId: string; taskId?: string; queuedMessageId?: string }> {
+    if (!job.sessionId) {
+      const chat = this.getOrCreateCronjobChat(worktreeId, job);
+      const sent = submitOrQueueTask({
+        worktreeId,
+        chatId: chat.id,
+        prompt: job.prompt,
+        codingAgentId: job.agent,
+      });
+      return sent.queued
+        ? { chatId: chat.id, queuedMessageId: sent.queuedMessageId }
+        : { chatId: chat.id, taskId: sent.task.id };
+    }
+
+    const { sessionId } = job;
+    const found = chatService.list(worktreeId).find((c) => c.activeSessionId === sessionId);
+    if (found && job.agent && found.agent !== job.agent) {
+      throw new CronjobDispatchError(
+        `Session ${sessionId} belongs to a chat that runs ${found.agent}, but the job asks for ${job.agent}`,
+      );
+    }
+    const created = !found;
+    const chat =
+      found ??
+      chatService.create(worktreeId, {
+        name: job.name,
+        agent: job.agent,
+        labels: { [BAND_CRON_ID_LABEL]: job.id },
+        allowReservedLabels: true,
+      });
+    if (created) chatService.updateActiveSession(chat.id, sessionId);
+
+    // Attach strictly before the prompt goes out, so a session that cannot be
+    // reopened fails here instead of being replaced by a fresh one.
+    if (!chat.ownerHostId) {
+      try {
+        await agentSessionService.ensureSession(chat.id, "prompt", { strictSession: true });
+      } catch (err) {
+        if (created) chatService.remove(chat.id);
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new CronjobDispatchError(`Could not open session ${sessionId}: ${reason}`);
+      }
+    }
+    const sent = submitOrQueueTask({ worktreeId, chatId: chat.id, prompt: job.prompt });
+    return sent.queued
+      ? { chatId: chat.id, queuedMessageId: sent.queuedMessageId }
+      : { chatId: chat.id, taskId: sent.task.id };
   }
 
   /**
@@ -593,9 +767,8 @@ export class CronjobService {
 
       // Resolve the agent's HEADLESS CLI invocation on the request thread so we
       // can fall back to chat synchronously when it's unsupported (e.g.
-      // cursor-cli). No `codingAgentId` on the cron row — use the default
-      // agent definition.
-      const agentDef = settingsService.getAgentDefinition();
+      // cursor-cli). The job's own agent when it names one, else the default.
+      const agentDef = settingsService.getAgentDefinition(job.agent);
       const invocation = cliHeadlessInvocation(agentDef.type, job.prompt, {
         command: agentDef.command,
       });
@@ -625,40 +798,51 @@ export class CronjobService {
     }
   }
 
-  /**
-   * Resolve the worktree the cronjob fires into.
-   *
-   * Returns `null` for repo-scoped jobs whose repo no longer exists
-   * (which the scheduled fire path treats as a soft failure — see
-   * `executeCronjob`). The manual trigger route maps the same condition to
-   * a `CronjobRepoNotFoundError`.
-   *
-   * Worktree-scoped jobs return `null` rather than falling through to the
-   * repo-resolution branch when `worktreeId` is somehow missing. The
-   * `create` path already rejects this via `CronjobWorktreeMissingError`,
-   * but a worktree-scoped row written by an older server version could
-   * theoretically reach here with a null `worktreeId`. Falling through
-   * would silently misfire into the repo's default branch; returning
-   * `null` makes the failure explicit (logged + `lastRunStatus = "failed"`
-   * for the scheduler; `CronjobRepoNotFoundError` for the manual
-   * trigger path).
-   */
-  private resolveWorktreeId(job: CronjobDefinition, fileKey: string): string | null {
-    if (job.scope === "worktree") {
-      return job.worktreeId ?? null;
-    }
-    const appState = loadState();
-    const repo = appState.repos.find((p) => p.name === fileKey);
-    if (!repo) return null;
-    // The default branch's worktree, on the local host when it has one.
-    const onDefault = repo.worktrees.filter((wt) => wt.name === repo.defaultBranch);
-    const row = onDefault.find((wt) => (wt.hostId ?? "local") === "local") ?? onDefault[0];
-    return toWorktreeId(repo.name, repo.defaultBranch, row?.hostId);
+  /** The worktree the cronjob fires into, or null for a row that has none. */
+  private resolveWorktreeId(job: CronjobDefinition): string | null {
+    return job.worktreeId ?? null;
   }
 
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  private assertWorktreeExists(worktreeId: string): void {
+    if (!worktreeService.resolve(worktreeId)) {
+      throw new CronjobWorktreeMissingError(`Worktree not found: ${worktreeId}`);
+    }
+  }
+
+  /** Refuse an agent that is not configured, a session on a terminal job, and an agent that contradicts the session's chat. */
+  private assertTarget(target: {
+    worktreeId: string;
+    via: CronjobVia;
+    agent?: string;
+    sessionId?: string;
+  }): void {
+    if (target.agent) {
+      const known = (settingsService.get().codingAgents ?? []).map((a) => a.id);
+      if (!known.includes(target.agent)) {
+        throw new CronjobInvalidError(
+          `Unknown agent "${target.agent}". Configured agents: ${known.join(", ") || "none"}`,
+        );
+      }
+    }
+    if (!target.sessionId) return;
+    if (target.via === "terminal") {
+      throw new CronjobInvalidError(
+        "A session id works only with via=chat: a terminal job starts a new headless run each time",
+      );
+    }
+    const chat = chatService
+      .list(target.worktreeId)
+      .find((c) => c.activeSessionId === target.sessionId);
+    if (chat && target.agent && chat.agent !== target.agent) {
+      throw new CronjobInvalidError(
+        `Session ${target.sessionId} belongs to a chat that runs ${chat.agent}, but the job asks for ${target.agent}`,
+      );
+    }
+  }
 
   private findJob(key: string, id: string): CronjobDefinition | undefined {
     const file = this.queries.loadFile(key);
@@ -712,7 +896,7 @@ export class CronjobService {
 
       state.jobs.set(job.id, cronInstance);
       log.info(
-        { jobId: job.id, name: job.name, cron: job.cronExpression, scope: job.scope },
+        { jobId: job.id, name: job.name, cron: job.cronExpression, worktreeId: job.worktreeId },
         "scheduled cronjob",
       );
     } catch (err) {
@@ -724,10 +908,10 @@ export class CronjobService {
   }
 
   private async executeCronjob(job: CronjobDefinition, fileKey: string): Promise<void> {
-    const worktreeId = this.resolveWorktreeId(job, fileKey);
+    const worktreeId = this.resolveWorktreeId(job);
     if (!worktreeId) {
-      log.warn({ jobId: job.id, fileKey }, "repo not found for cronjob, skipping");
-      this.safeUpdateLastRun(job.id, "failed");
+      log.warn({ jobId: job.id, fileKey }, "cronjob has no worktree, skipping");
+      this.safeUpdateLastRun(job.id, "failed", "The job has no worktree");
       return;
     }
 
@@ -766,24 +950,25 @@ export class CronjobService {
     }
 
     try {
-      const chat = this.getOrCreateCronjobChat(worktreeId, job);
-      const task = taskService.submitTask({ worktreeId, chatId: chat.id, prompt: job.prompt });
+      const sent = await this.dispatchToChat(job, worktreeId);
       // Log the resulting task id so operators auditing a scheduled fire
       // can correlate it back to the `tasks.list` row. Mirrors the
       // observability the manual `trigger()` path returns to its caller.
-      log.info(
-        { jobId: job.id, taskId: task.id, worktreeId, chatId: chat.id },
-        "cronjob task submitted",
-      );
+      log.info({ jobId: job.id, worktreeId, ...sent }, "cronjob prompt sent");
       this.safeUpdateLastRun(job.id, "completed");
     } catch (err) {
+      if (err instanceof CronjobDispatchError) {
+        log.warn({ jobId: job.id, worktreeId }, err.message);
+        this.safeUpdateLastRun(job.id, "failed", err.message);
+        return;
+      }
       if (err instanceof TaskConflictError) {
         log.info({ jobId: job.id, worktreeId }, "task already running, skipping cronjob execution");
         this.safeUpdateLastRun(job.id, "skipped");
         return;
       }
       log.error({ jobId: job.id, err }, "cronjob execution failed");
-      this.safeUpdateLastRun(job.id, "failed");
+      this.safeUpdateLastRun(job.id, "failed", err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -795,9 +980,13 @@ export class CronjobService {
    * DB lock to mask the real outcome by re-raising. The legacy
    * implementation logged at `warn` and moved on; preserved here.
    */
-  private safeUpdateLastRun(jobId: string, status: "completed" | "failed" | "skipped"): void {
+  private safeUpdateLastRun(
+    jobId: string,
+    status: "completed" | "failed" | "skipped",
+    message?: string,
+  ): void {
     try {
-      this.queries.updateLastRun(jobId, status);
+      this.queries.updateLastRun(jobId, status, message);
     } catch (err) {
       log.warn({ jobId, err }, "failed to update lastRun on cronjob");
     }

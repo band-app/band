@@ -967,6 +967,7 @@ async function attach(
   def: CodingAgentDefinition,
   cwd: string,
   purpose: "prompt" | "view",
+  strictSession = false,
 ): Promise<void> {
   const target = chat.activeSessionId;
   const logged = target ? events.currentRevision(target) > 0 : false;
@@ -1013,6 +1014,12 @@ async function attach(
       text: `This session's history couldn't be loaded: ${reason}`,
     });
     return;
+  }
+  // A caller that needs this very session (a cronjob pinned to it) gets the failure.
+  if (strictSession) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`${proc.agentName} can't reopen session ${target}`);
   }
   // Keep the conversation going in a fresh session, and say so.
   await attachNew(rt, proc, chat, def, cwd);
@@ -1148,8 +1155,14 @@ export class AgentSessionService {
    * session, starting a new session when the chat has none. For `view`,
    * only attaches when the session needs `session/load` to show anything.
    * Returns the attached session id, or null when nothing was attached.
+   * With `strictSession`, a session that can't be reopened throws instead of
+   * being replaced by a fresh one.
    */
-  async ensureSession(chatId: string, purpose: "prompt" | "view"): Promise<string | null> {
+  async ensureSession(
+    chatId: string,
+    purpose: "prompt" | "view",
+    options: { strictSession?: boolean } = {},
+  ): Promise<string | null> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
     // A chat its worker owns runs there only, never in a second process here.
@@ -1164,7 +1177,7 @@ export class AgentSessionService {
     while (rt.attaching) await rt.attaching.catch(() => undefined);
     const fresh = chatService.get(chatId) ?? chat;
     const attachedBefore = rt.sessionId;
-    rt.attaching = attach(rt, fresh, def, cwd, purpose);
+    rt.attaching = attach(rt, fresh, def, cwd, purpose, options.strictSession);
     try {
       await rt.attaching;
     } finally {

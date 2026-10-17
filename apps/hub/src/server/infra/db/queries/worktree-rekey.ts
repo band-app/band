@@ -44,7 +44,11 @@ export function rekeyWorktreeRows(oldId: string, newId: string): void {
       .set({ worktreeId: newId })
       .where(eq(agentSessions.worktreeId, oldId))
       .run();
-    tx.update(cronjobs).set({ worktreeId: newId }).where(eq(cronjobs.worktreeId, oldId)).run();
+    // Every job is keyed by its worktree id, so the key moves with the worktree.
+    tx.update(cronjobs)
+      .set({ worktreeId: newId, fileKey: newId })
+      .where(eq(cronjobs.worktreeId, oldId))
+      .run();
     tx.update(subscriptions)
       .set({ worktreeId: newId })
       .where(eq(subscriptions.worktreeId, oldId))

@@ -1,8 +1,9 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+  CronjobDispatchError,
+  CronjobInvalidError,
   CronjobNotFoundError,
-  CronjobRepoNotFoundError,
   CronjobWorktreeMissingError,
   cronjobByIdInput,
   cronjobCreateInput,
@@ -33,7 +34,6 @@ export const cronjobsRouter = t.router({
     .input(
       z
         .object({
-          repo: z.string().optional(),
           worktreeId: z.string().optional(),
         })
         .optional(),
@@ -100,18 +100,27 @@ export type CronjobsRouter = typeof cronjobsRouter;
  *
  * Each domain error class maps to a specific tRPC code that mirrors the
  * legacy router's behavior:
- *   - `CronjobNotFoundError` / `CronjobRepoNotFoundError` → 404 `NOT_FOUND`
- *   - `InvalidCronExpressionError` / `CronjobWorktreeMissingError` → 400
+ *   - `CronjobNotFoundError` → 404 `NOT_FOUND`
+ *   - `InvalidCronExpressionError` / `CronjobWorktreeMissingError` /
+ *     `CronjobInvalidError` → 400
+ *   - `CronjobDispatchError` (session could not be opened) → 412
  *   - `TaskConflictError` → 409 `CONFLICT` (raised inside `service.trigger`)
  * Anything else is rethrown unchanged so unexpected failures surface as a
  * 500 with the original stack rather than being silently swallowed.
  */
 function throwAsTRPCError(err: unknown): never {
-  if (err instanceof CronjobNotFoundError || err instanceof CronjobRepoNotFoundError) {
+  if (err instanceof CronjobNotFoundError) {
     throw new TRPCError({ code: "NOT_FOUND", message: err.message });
   }
-  if (err instanceof InvalidCronExpressionError || err instanceof CronjobWorktreeMissingError) {
+  if (
+    err instanceof InvalidCronExpressionError ||
+    err instanceof CronjobWorktreeMissingError ||
+    err instanceof CronjobInvalidError
+  ) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+  }
+  if (err instanceof CronjobDispatchError) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
   }
   if (err instanceof TaskConflictError) {
     // Surface the actual conflict reason rather than a hardcoded string: since

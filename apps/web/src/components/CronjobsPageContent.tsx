@@ -30,13 +30,23 @@ interface CronjobRecord {
   name: string;
   prompt: string;
   cronExpression: string;
-  scope: "repo" | "worktree";
   worktreeId?: string;
+  agent?: string;
+  sessionId?: string;
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
   lastRunStatus?: "completed" | "failed" | "skipped";
+  lastRunMessage?: string;
 }
+
+interface AgentOption {
+  id: string;
+  label: string;
+}
+
+/** Select value for "no agent chosen": the job runs the default agent. */
+const DEFAULT_AGENT = "default";
 
 interface RepoInfo {
   name: string;
@@ -88,17 +98,13 @@ export function CronjobsPageContent() {
 
   const filteredCronjobs = useMemo(() => {
     if (repoFilter === "all") return cronjobs;
-    return cronjobs.filter((job) => {
-      if (job.scope === "repo") return job.fileKey === repoFilter;
-      return job.worktreeId?.startsWith(`${repoFilter}-`);
-    });
+    return cronjobs.filter((job) => job.worktreeId?.startsWith(`${repoFilter}-`));
   }, [cronjobs, repoFilter]);
 
   const repoNames = useMemo(() => {
     const names = new Set<string>();
     for (const job of cronjobs) {
-      if (job.scope === "repo") names.add(job.fileKey);
-      else if (job.worktreeId) {
+      if (job.worktreeId) {
         const dash = job.worktreeId.indexOf("-");
         if (dash > 0) names.add(job.worktreeId.slice(0, dash));
       }
@@ -296,6 +302,7 @@ function CronjobCard({
 
   return (
     <div
+      data-testid={`cronjobs__job--${job.name}`}
       className={`flex flex-col gap-2 rounded-lg border-2 border-border/50 p-4 transition-colors hover:border-border ${
         !job.enabled ? "opacity-60" : ""
       }`}
@@ -304,9 +311,6 @@ function CronjobCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium text-foreground">{job.name}</p>
-            <Badge variant="outline" className="text-xs">
-              {job.scope}
-            </Badge>
           </div>
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{job.prompt}</p>
         </div>
@@ -321,9 +325,19 @@ function CronjobCard({
           {job.cronExpression}
         </span>
         <span className="text-border">·</span>
-        <span className="font-medium text-foreground/70">
-          {job.scope === "worktree" ? job.worktreeId : job.fileKey}
+        <span className="font-medium text-foreground/70" data-testid="cronjobs__job-worktree">
+          {job.worktreeId ?? job.fileKey}
         </span>
+        <span className="text-border">·</span>
+        <span data-testid="cronjobs__job-agent">{job.agent ?? "default agent"}</span>
+        {job.sessionId && (
+          <>
+            <span className="text-border">·</span>
+            <span className="font-mono" data-testid="cronjobs__job-session">
+              session {job.sessionId}
+            </span>
+          </>
+        )}
         {job.lastRunAt && (
           <>
             <span className="text-border">·</span>
@@ -332,6 +346,12 @@ function CronjobCard({
           </>
         )}
       </div>
+
+      {job.lastRunMessage && (
+        <p className="text-xs text-muted-foreground" data-testid="cronjobs__job-message">
+          {job.lastRunMessage}
+        </p>
+      )}
 
       <div className="flex items-center gap-1 pt-1">
         <Button
@@ -378,7 +398,9 @@ function CronjobDialog({
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [cronExpression, setCronExpression] = useState("");
-  const [scope, setScope] = useState<"repo" | "worktree">("repo");
+  const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [agent, setAgent] = useState<string>(DEFAULT_AGENT);
+  const [sessionId, setSessionId] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<string>("");
   const [enabled, setEnabled] = useState(true);
@@ -388,59 +410,51 @@ function CronjobDialog({
   useEffect(() => {
     if (!open) return;
     setSubmitError(null);
+    trpc.settings.get
+      .query()
+      .then((settings) =>
+        setAgents(
+          (Array.isArray(settings.codingAgents)
+            ? (settings.codingAgents as { id: string; label?: string }[])
+            : []
+          ).map((a) => ({ id: a.id, label: a.label ?? a.id })),
+        ),
+      )
+      .catch(() => setAgents([]));
+    // The fields reset as the dialog opens, before the repo list arrives, so a slow
+    // list never wipes what the person already typed.
+    setName(editingJob?.name ?? "");
+    setPrompt(editingJob?.prompt ?? "");
+    setCronExpression(editingJob?.cronExpression ?? "");
+    setAgent(editingJob?.agent ?? DEFAULT_AGENT);
+    setSessionId(editingJob?.sessionId ?? "");
+    setEnabled(editingJob?.enabled ?? true);
+    setSelectedWorktreeId(editingJob?.worktreeId ?? "");
+    setSelectedRepo("");
     trpc.repos.list.query().then((data) => {
       const loadedRepos = data.repos as RepoInfo[];
       setRepos(loadedRepos);
-
-      if (editingJob) {
-        setName(editingJob.name);
-        setPrompt(editingJob.prompt);
-        setCronExpression(editingJob.cronExpression);
-        setScope(editingJob.scope);
-        setEnabled(editingJob.enabled);
-        if (editingJob.scope === "repo") {
-          setSelectedRepo(editingJob.fileKey);
-          setSelectedWorktreeId("");
-        } else {
-          setSelectedWorktreeId(editingJob.worktreeId ?? "");
-          const proj = loadedRepos.find((p) =>
-            p.worktrees.some((w) => w.worktreeId === editingJob.worktreeId),
-          );
-          setSelectedRepo(proj?.name ?? "");
-        }
-      } else {
-        setName("");
-        setPrompt("");
-        setCronExpression("");
-        setScope("repo");
-        setSelectedRepo("");
-        setSelectedWorktreeId("");
-        setEnabled(true);
-      }
+      if (!editingJob) return;
+      const proj = loadedRepos.find((p) =>
+        p.worktrees.some((w) => w.worktreeId === editingJob.worktreeId),
+      );
+      setSelectedRepo(proj?.name ?? "");
     });
   }, [open, editingJob]);
 
   const worktrees = useMemo(() => {
     const repo = repos.find((p) => p.name === selectedRepo);
-    return (
+    const rows =
       repo?.worktrees.map((w) => ({
         branch: w.branch,
+        isDefault: w.branch === repo.defaultBranch,
         worktreeId: w.worktreeId ?? toWorktreeId(selectedRepo, w.name, w.hostId),
-      })) ?? []
-    );
+      })) ?? [];
+    // The default-branch worktree comes first: it is what a repo's main means.
+    return rows.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
   }, [repos, selectedRepo]);
 
-  const fileKey = useMemo(() => {
-    if (scope === "repo") return selectedRepo;
-    return selectedWorktreeId;
-  }, [scope, selectedRepo, selectedWorktreeId]);
-
-  const canSubmit =
-    name.trim() &&
-    prompt.trim() &&
-    cronExpression.trim() &&
-    fileKey &&
-    (scope === "repo" || selectedWorktreeId);
+  const canSubmit = name.trim() && prompt.trim() && cronExpression.trim() && selectedWorktreeId;
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
@@ -455,15 +469,18 @@ function CronjobDialog({
           prompt: prompt.trim(),
           cronExpression: cronExpression.trim(),
           enabled,
+          worktreeId: selectedWorktreeId,
+          agent: agent === DEFAULT_AGENT ? null : agent,
+          sessionId: sessionId.trim() || null,
         });
       } else {
         await trpc.cronjobs.create.mutate({
-          key: fileKey,
           name: name.trim(),
           prompt: prompt.trim(),
           cronExpression: cronExpression.trim(),
-          scope,
-          worktreeId: scope === "worktree" ? selectedWorktreeId : undefined,
+          worktreeId: selectedWorktreeId,
+          agent: agent === DEFAULT_AGENT ? undefined : agent,
+          sessionId: sessionId.trim() || undefined,
           enabled,
         });
       }
@@ -480,8 +497,8 @@ function CronjobDialog({
     name,
     prompt,
     cronExpression,
-    scope,
-    fileKey,
+    agent,
+    sessionId,
     selectedWorktreeId,
     enabled,
     onOpenChange,
@@ -508,6 +525,7 @@ function CronjobDialog({
             <Label htmlFor="cj-name">Name</Label>
             <Input
               id="cj-name"
+              data-testid="cronjobs__name-input"
               placeholder="e.g., Daily dependency check"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -518,6 +536,7 @@ function CronjobDialog({
             <Label htmlFor="cj-prompt">Prompt</Label>
             <Textarea
               id="cj-prompt"
+              data-testid="cronjobs__prompt-input"
               placeholder="Describe what the agent should do..."
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -529,6 +548,7 @@ function CronjobDialog({
             <Label htmlFor="cj-cron">Cron Expression</Label>
             <Input
               id="cj-cron"
+              data-testid="cronjobs__cron-input"
               placeholder="e.g., 0 */6 * * *"
               value={cronExpression}
               onChange={(e) => setCronExpression(e.target.value)}
@@ -539,68 +559,82 @@ function CronjobDialog({
             </p>
           </div>
 
-          {!editingJob && (
-            <>
-              <div className="flex flex-col gap-2">
-                <Label>Scope</Label>
-                <Select value={scope} onValueChange={(v) => setScope(v as "repo" | "worktree")}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="repo">Repo (main branch)</SelectItem>
-                    <SelectItem value="worktree">Worktree (specific branch)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="flex flex-col gap-2">
+            <Label>Repo</Label>
+            <Select value={selectedRepo} onValueChange={handleRepoChange}>
+              <SelectTrigger data-testid="cronjobs__repo-select">
+                <SelectValue placeholder="Select a repo" />
+              </SelectTrigger>
+              <SelectContent>
+                {repos.map((p) => (
+                  <SelectItem key={p.name} value={p.name}>
+                    <RepoAvatar
+                      avatar={p.avatar}
+                      className="size-4"
+                      fallback={null}
+                      testId={`cronjobs__repo-avatar--${p.name}`}
+                    />
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-              <div className="flex flex-col gap-2">
-                <Label>Repo</Label>
-                <Select value={selectedRepo} onValueChange={handleRepoChange}>
-                  <SelectTrigger data-testid="cronjobs__repo-select">
-                    <SelectValue placeholder="Select a repo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {repos.map((p) => (
-                      <SelectItem key={p.name} value={p.name}>
-                        <RepoAvatar
-                          avatar={p.avatar}
-                          className="size-4"
-                          fallback={null}
-                          testId={`cronjobs__repo-avatar--${p.name}`}
-                        />
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="flex flex-col gap-2">
+            <Label>Worktree</Label>
+            <Select
+              value={selectedWorktreeId}
+              onValueChange={setSelectedWorktreeId}
+              disabled={!selectedRepo}
+            >
+              <SelectTrigger data-testid="cronjobs__worktree-select">
+                <SelectValue
+                  placeholder={selectedRepo ? "Select a worktree" : "Select a repo first"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {worktrees.map((ws) => (
+                  <SelectItem key={ws.worktreeId} value={ws.worktreeId}>
+                    {ws.isDefault ? `${ws.branch} (default branch)` : ws.branch}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-              {scope === "worktree" && (
-                <div className="flex flex-col gap-2">
-                  <Label>Worktree</Label>
-                  <Select
-                    value={selectedWorktreeId}
-                    onValueChange={setSelectedWorktreeId}
-                    disabled={!selectedRepo}
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={selectedRepo ? "Select a worktree" : "Select a repo first"}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {worktrees.map((ws) => (
-                        <SelectItem key={ws.worktreeId} value={ws.worktreeId}>
-                          {ws.branch}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </>
-          )}
+          <div className="flex flex-col gap-2">
+            <Label>Agent</Label>
+            <Select value={agent} onValueChange={setAgent}>
+              <SelectTrigger data-testid="cronjobs__agent-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_AGENT}>Default agent</SelectItem>
+                {agents.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="cj-session">Session ID (optional)</Label>
+            <Input
+              id="cj-session"
+              data-testid="cronjobs__session-input"
+              placeholder="Run in the chat that has this agent session"
+              value={sessionId}
+              onChange={(e) => setSessionId(e.target.value)}
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              Each run goes to the chat with this session, or opens a new chat on it. A session the
+              agent cannot open fails the run.
+            </p>
+          </div>
 
           <div className="flex items-center gap-3">
             <Switch checked={enabled} onCheckedChange={setEnabled} id="cj-enabled" />
@@ -614,7 +648,11 @@ function CronjobDialog({
           <DialogClose asChild>
             <Button variant="outline">Cancel</Button>
           </DialogClose>
-          <Button onClick={handleSubmit} disabled={!canSubmit || submitting}>
+          <Button
+            data-testid="cronjobs__save-button"
+            onClick={handleSubmit}
+            disabled={!canSubmit || submitting}
+          >
             {submitting && <Loader2 className="size-4 animate-spin" />}
             {editingJob ? "Save Changes" : "Create Cronjob"}
           </Button>

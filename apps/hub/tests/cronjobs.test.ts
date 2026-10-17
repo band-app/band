@@ -47,6 +47,8 @@ function createGitRepo(parentDir: string, name: string): string {
 // Cronjobs CRUD
 // ---------------------------------------------------------------------------
 
+const MAIN = testWorktreeId("myrepo", "main");
+
 describe("tRPC — cronjobs CRUD", () => {
   let server: ServerHandle;
   let tmpHome: string;
@@ -81,24 +83,23 @@ describe("tRPC — cronjobs CRUD", () => {
     expect(data.jobs).toEqual([]);
   });
 
-  it("cronjobs.create creates a repo-scoped job", async () => {
+  it("cronjobs.create creates a job on the default-branch worktree", async () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.create",
       {
-        key: "myrepo",
+        worktreeId: MAIN,
         name: "Daily dep check",
         prompt: "Check for outdated dependencies",
         cronExpression: "0 9 * * 1",
-        scope: "repo",
         enabled: true,
       },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
-    const data = await trpcData<{ job: { id: string; name: string; scope: string } }>(res);
+    const data = await trpcData<{ job: { id: string; name: string; worktreeId: string } }>(res);
     expect(data.job.name).toBe("Daily dep check");
-    expect(data.job.scope).toBe("repo");
+    expect(data.job.worktreeId).toBe(MAIN);
     expect(data.job.id).toMatch(/^cj_\d+_[0-9a-f]{8}$/);
   });
 
@@ -107,36 +108,38 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "myrepo",
+        worktreeId: MAIN,
         name: "Bad cron",
         prompt: "This should fail",
         cronExpression: "not a cron",
-        scope: "repo",
       },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(400);
   });
 
-  it("cronjobs.create rejects worktree scope without worktreeId", async () => {
-    // CronjobWorktreeMissingError path: the service requires `worktreeId`
-    // for worktree-scoped jobs and the router maps the typed error to a
-    // 400 Bad Request. Pinning the path here keeps the validation honest
-    // — without this test, a refactor that lost the check would only
-    // surface at runtime against a real worktree-scoped create.
-    const res = await trpcMutate(
+  it("cronjobs.create refuses a repo scope or a missing worktree (S3)", async () => {
+    const base = {
+      name: "No worktree",
+      prompt: "Should be rejected",
+      cronExpression: "0 9 * * 1",
+    };
+    for (const input of [
+      { ...base, key: "myrepo", scope: "repo" },
+      { ...base, key: MAIN },
+      { ...base, scope: "worktree" },
+    ]) {
+      const res = await trpcMutate(server.url, "cronjobs.create", input, DEFAULT_TOKEN);
+      expect(res.status).toBe(400);
+      expect(await res.text()).toMatch(/worktree/i);
+    }
+    const missing = await trpcMutate(
       server.url,
       "cronjobs.create",
-      {
-        key: "myrepo",
-        name: "Missing worktree",
-        prompt: "Should be rejected",
-        cronExpression: "0 9 * * 1",
-        scope: "worktree",
-      },
+      { ...base, worktreeId: "myrepo-nope" },
       DEFAULT_TOKEN,
     );
-    expect(res.status).toBe(400);
+    expect(missing.status).toBe(400);
   });
 
   it("cronjobs.list returns the created job", async () => {
@@ -145,11 +148,11 @@ describe("tRPC — cronjobs CRUD", () => {
     const data = await trpcData<{ jobs: Array<{ name: string; fileKey: string }> }>(res);
     expect(data.jobs).toHaveLength(1);
     expect(data.jobs[0].name).toBe("Daily dep check");
-    expect(data.jobs[0].fileKey).toBe("myrepo");
+    expect(data.jobs[0].fileKey).toBe(MAIN);
   });
 
-  it("cronjobs.list filters by repo", async () => {
-    const res = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
+  it("cronjobs.list filters by worktree", async () => {
+    const res = await trpcQuery(server.url, "cronjobs.list", { worktreeId: MAIN }, DEFAULT_TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: unknown[] }>(res);
     expect(data.jobs).toHaveLength(1);
@@ -157,7 +160,7 @@ describe("tRPC — cronjobs CRUD", () => {
     const empty = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { repo: "nonexistent" },
+      { worktreeId: "myrepo-nope" },
       DEFAULT_TOKEN,
     );
     const emptyData = await trpcData<{ jobs: unknown[] }>(empty);
@@ -169,11 +172,10 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "myrepo",
+        worktreeId: MAIN,
         name: "Code quality sweep",
         prompt: "Run linting and fix issues",
         cronExpression: "0 */6 * * *",
-        scope: "repo",
         enabled: false,
       },
       DEFAULT_TOKEN,
@@ -184,21 +186,26 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.list returns both jobs", async () => {
-    const res = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
+    const res = await trpcQuery(server.url, "cronjobs.list", { worktreeId: MAIN }, DEFAULT_TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: unknown[] }>(res);
     expect(data.jobs).toHaveLength(2);
   });
 
   it("cronjobs.get returns a specific job", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { worktreeId: MAIN },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
     const res = await trpcQuery(
       server.url,
       "cronjobs.get",
-      { key: "myrepo", id: jobId },
+      { key: MAIN, id: jobId },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -210,14 +217,19 @@ describe("tRPC — cronjobs CRUD", () => {
     const res = await trpcQuery(
       server.url,
       "cronjobs.get",
-      { key: "myrepo", id: "cj_nonexistent" },
+      { key: MAIN, id: "cj_nonexistent" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(404);
   });
 
   it("cronjobs.update modifies job properties", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { worktreeId: MAIN },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
@@ -225,7 +237,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myrepo",
+        key: MAIN,
         id: jobId,
         name: "Updated name",
         cronExpression: "0 12 * * *",
@@ -239,7 +251,12 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.update rejects invalid cron expression", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { worktreeId: MAIN },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
@@ -247,7 +264,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myrepo",
+        key: MAIN,
         id: jobId,
         cronExpression: "invalid",
       },
@@ -257,7 +274,12 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.update toggles enabled state", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { worktreeId: MAIN },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string; enabled: boolean }> }>(listRes);
     const job = listData.jobs[0];
 
@@ -265,7 +287,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myrepo",
+        key: MAIN,
         id: job.id,
         enabled: !job.enabled,
       },
@@ -281,7 +303,7 @@ describe("tRPC — cronjobs CRUD", () => {
       server.url,
       "cronjobs.update",
       {
-        key: "myrepo",
+        key: MAIN,
         id: "cj_nonexistent",
         name: "nope",
       },
@@ -291,14 +313,19 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.delete removes a job", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { repo: "myrepo" }, DEFAULT_TOKEN);
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { worktreeId: MAIN },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[1].id;
 
     const res = await trpcMutate(
       server.url,
       "cronjobs.delete",
-      { key: "myrepo", id: jobId },
+      { key: MAIN, id: jobId },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -306,7 +333,7 @@ describe("tRPC — cronjobs CRUD", () => {
     const afterRes = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { repo: "myrepo" },
+      { worktreeId: MAIN },
       DEFAULT_TOKEN,
     );
     const afterData = await trpcData<{ jobs: unknown[] }>(afterRes);
@@ -317,7 +344,7 @@ describe("tRPC — cronjobs CRUD", () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.delete",
-      { key: "myrepo", id: "cj_nonexistent" },
+      { key: MAIN, id: "cj_nonexistent" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(404);
@@ -355,17 +382,16 @@ describe("tRPC — cronjobs cleanup on repo removal", () => {
     removeTmpHome(tmpHome);
   });
 
-  it("removes repo-scoped cronjobs when repo is removed", async () => {
+  it("removes the jobs of a repo's worktrees when the repo is removed", async () => {
     // Create a cronjob for the repo
     const createRes = await trpcMutate(
       server.url,
       "cronjobs.create",
       {
-        key: "removeme",
+        worktreeId: testWorktreeId("removeme", "main"),
         name: "Repo job",
         prompt: "Do something",
         cronExpression: "0 * * * *",
-        scope: "repo",
       },
       DEFAULT_TOKEN,
     );
@@ -375,7 +401,7 @@ describe("tRPC — cronjobs cleanup on repo removal", () => {
     const listRes = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { repo: "removeme" },
+      { worktreeId: testWorktreeId("removeme", "main") },
       DEFAULT_TOKEN,
     );
     const listData = await trpcData<{ jobs: unknown[] }>(listRes);
@@ -394,7 +420,7 @@ describe("tRPC — cronjobs cleanup on repo removal", () => {
     const afterRes = await trpcQuery(
       server.url,
       "cronjobs.list",
-      { repo: "removeme" },
+      { worktreeId: testWorktreeId("removeme", "main") },
       DEFAULT_TOKEN,
     );
     const afterData = await trpcData<{ jobs: unknown[] }>(afterRes);
@@ -446,11 +472,10 @@ describe("tRPC — cronjobs.trigger", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "triggerproj",
+        worktreeId: testWorktreeId("triggerproj", "main"),
         name: "Triggerable job",
         prompt: "Run automated check",
         cronExpression: "0 0 * * *",
-        scope: "repo",
       },
       DEFAULT_TOKEN,
     );
@@ -467,7 +492,7 @@ describe("tRPC — cronjobs.trigger", () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "triggerproj", id: jobId },
+      { key: testWorktreeId("triggerproj", "main"), id: jobId },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
@@ -492,13 +517,13 @@ describe("tRPC — cronjobs.trigger", () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "triggerproj", id: "cj_nonexistent" },
+      { key: testWorktreeId("triggerproj", "main"), id: "cj_nonexistent" },
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(404);
   });
 
-  it("returns CONFLICT when task is already running", async () => {
+  it("queues the prompt when the chat is mid-turn (S7)", async () => {
     // The stub agent's turn never ends on its own, so the task started by
     // the first `triggers a cronjob and creates a task` case is still in
     // flight. Poll `tasks.list` until it reports `status: "running"` before
@@ -539,14 +564,25 @@ describe("tRPC — cronjobs.trigger", () => {
       )
       .toBeGreaterThan(0);
 
-    // Assert the exact status code rather than a [200, 409] union — the
-    // union form silently passes if the conflict path ever stops firing.
+    // The chat is mid-turn, so the fire joins its queue instead of conflicting or starting a second turn.
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "triggerproj", id: jobId },
+      { key: testWorktreeId("triggerproj", "main"), id: jobId },
       DEFAULT_TOKEN,
     );
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ taskId?: string; queuedMessageId?: string; chatId: string }>(res);
+    expect(data.taskId).toBeUndefined();
+    expect(data.queuedMessageId).toBeTruthy();
+
+    // The queued prompt runs once the stub's turn ends: stop the running one.
+    const aborted = await trpcMutate(
+      server.url,
+      "chats.stop",
+      { chatId: data.chatId },
+      DEFAULT_TOKEN,
+    );
+    expect([200, 404]).toContain(aborted.status);
   });
 });

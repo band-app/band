@@ -183,11 +183,10 @@ describe("cronjobs.trigger via=terminal happy path", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "viacron",
+        worktreeId: testWorktreeId("viacron", "main"),
         name: "Terminal cron",
         prompt: "run the terminal check",
         cronExpression: "0 0 * * *",
-        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -207,7 +206,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "viacron", id: jobId },
+      { key: testWorktreeId("viacron", "main"), id: jobId },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -298,11 +297,10 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "overlapcron",
+        worktreeId: testWorktreeId("overlapcron", "main"),
         name: "Overlapping terminal cron",
         prompt: "long running work",
         cronExpression: "0 0 * * *",
-        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -322,7 +320,7 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
     const first = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "overlapcron", id: jobId },
+      { key: testWorktreeId("overlapcron", "main"), id: jobId },
       TOKEN,
     );
     expect(first.status).toBe(200);
@@ -345,7 +343,7 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
     const second = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "overlapcron", id: jobId },
+      { key: testWorktreeId("overlapcron", "main"), id: jobId },
       TOKEN,
     );
     expect(second.status).toBe(409);
@@ -389,11 +387,10 @@ describe("cronjobs.trigger default dispatches to chat", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "chatcron",
+        worktreeId: testWorktreeId("chatcron", "main"),
         name: "Chat cron",
         prompt: "chat dispatch work",
         cronExpression: "0 0 * * *",
-        scope: "repo",
       },
       TOKEN,
     );
@@ -413,7 +410,7 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "chatcron", id: jobId },
+      { key: testWorktreeId("chatcron", "main"), id: jobId },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -492,11 +489,10 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
       server.url,
       "cronjobs.create",
       {
-        key: "fbcron",
+        worktreeId: testWorktreeId("fbcron", "main"),
         name: "Fallback cron",
         prompt: "should fall back to chat",
         cronExpression: "0 0 * * *",
-        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -515,7 +511,7 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "fbcron", id: jobId },
+      { key: testWorktreeId("fbcron", "main"), id: jobId },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -575,11 +571,10 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "delcron",
+        worktreeId: testWorktreeId("delcron", "main"),
         name: "Deletable terminal cron",
         prompt: "long running work",
         cronExpression: "0 0 * * *",
-        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -598,7 +593,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
     const trigger = await trpcMutate(
       server.url,
       "cronjobs.trigger",
-      { key: "delcron", id: jobId },
+      { key: testWorktreeId("delcron", "main"), id: jobId },
       TOKEN,
     );
     expect(trigger.status).toBe(200);
@@ -624,7 +619,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
     const del = await trpcMutate(
       server.url,
       "cronjobs.delete",
-      { key: "delcron", id: jobId },
+      { key: testWorktreeId("delcron", "main"), id: jobId },
       TOKEN,
     );
     expect(del.status).toBe(200);
@@ -727,11 +722,10 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
       server.url,
       "cronjobs.create",
       {
-        key: "racecron",
+        worktreeId: testWorktreeId("racecron", "main"),
         name: "Racing terminal cron",
         prompt: "long running work",
         cronExpression: "0 0 * * *",
-        scope: "repo",
         via: "terminal",
       },
       TOKEN,
@@ -750,8 +744,18 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
     // Fire both at once so their dispatch paths interleave at the `await`
     // boundaries inside `spawnCronTerminal`.
     const [a, b] = await Promise.all([
-      trpcMutate(server.url, "cronjobs.trigger", { key: "racecron", id: jobId }, TOKEN),
-      trpcMutate(server.url, "cronjobs.trigger", { key: "racecron", id: jobId }, TOKEN),
+      trpcMutate(
+        server.url,
+        "cronjobs.trigger",
+        { key: testWorktreeId("racecron", "main"), id: jobId },
+        TOKEN,
+      ),
+      trpcMutate(
+        server.url,
+        "cronjobs.trigger",
+        { key: testWorktreeId("racecron", "main"), id: jobId },
+        TOKEN,
+      ),
     ]);
     const statuses = [a.status, b.status].sort();
 

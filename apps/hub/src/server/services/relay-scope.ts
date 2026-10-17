@@ -167,7 +167,7 @@ const SCOPE_FROM_HEADERS = new Set([
 
 const MCP_PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
 
-/** The cronjob key is a worktree id for a worktree-scoped job and a repo name for a repo-scoped one. */
+/** The cronjob key is the id of the worktree the job belongs to. */
 const CRONJOB_KEY_PROCEDURES = new Set([
   "cronjobs.create",
   "cronjobs.update",
@@ -464,12 +464,21 @@ function checkCall(
   let named = input;
   if (CRONJOB_KEY_PROCEDURES.has(procedure)) {
     const { key, ...rest } = (input ?? {}) as Record<string, unknown>;
-    if (typeof key !== "string") return deny(400, `${procedure} needs a key`);
-    if (procedure === "cronjobs.create" && rest.scope !== "worktree") {
-      return deny(403, `${procedure} is available to agents for worktree-scoped jobs only`);
+    // A create names its worktree in `worktreeId`; the others name it as the key.
+    const worktree = procedure === "cronjobs.create" ? (rest.worktreeId ?? key) : key;
+    if (typeof worktree !== "string") {
+      return deny(
+        400,
+        procedure === "cronjobs.create"
+          ? `${procedure} needs a worktreeId`
+          : `${procedure} needs a key`,
+      );
     }
-    named = { ...rest, worktreeId: key };
-    if (typeof rest.worktreeId === "string" && rest.worktreeId !== key) {
+    named = { ...rest, worktreeId: worktree };
+    if (typeof rest.worktreeId === "string" && rest.worktreeId !== worktree) {
+      return deny(403, `${procedure} names two different worktrees`);
+    }
+    if (typeof key === "string" && key !== worktree) {
       return deny(403, `${procedure} names two different worktrees`);
     }
   }

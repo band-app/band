@@ -333,25 +333,31 @@ band vault rotate-key
 
 The hub keeps credentials encrypted and never shows a value again: `list` prints id, name, kind, scope and last use. `put` reads the value from stdin (`--value` also works, but shows in the process list). A `git` item is an access token for private repositories on workers: workers ask the hub for it per remote, and `--path` is a pattern over `owner/repo` (`*` stays inside one segment). OAuth connections are made in Settings > Credentials, and `delete` revokes one at its server. These commands need an admin token. Run them only when the user asks, and never print or log a value.
 
-### List cronjobs, optionally filtered by repo or worktree
+### List cronjobs, optionally filtered by worktree
 
 ```sh
-band cronjobs list [--repo <string>] [--worktree <string>]
+band cronjobs list [--worktree <string>]
 ```
 
-### Create a new scheduled cronjob
+The table shows each job's worktree, agent and session. A job the hub could not move to a worktree at upgrade shows as disabled with its reason in `lastRunMessage` (`--output json`).
+
+### Create a new scheduled cronjob in a worktree
 
 ```sh
-band cronjobs create <key> --name <string> --prompt <string> --cron <string> [--scope <string>] [--worktree-id <string>] [--via <string>] [--disabled]
+band cronjobs create --worktree <string> --name <string> --prompt <string> --cron <string> [--agent <string>] [--session-id <string>] [--via <string>] [--disabled]
 ```
+
+Every job belongs to one worktree: the default-branch worktree for a repo's main, or any other. `--repo` and `--scope` are gone and fail with a message saying so. `--agent` is a coding agent id from settings (the default agent when omitted). `--session-id` is the agent's own session id. Each fire sends the prompt to the chat in that worktree whose active session is that id, or, when no chat has it, opens a new chat on that session (`session/resume` or `session/load`) and sends it there. A session the agent cannot open fails the run (`lastRunStatus` `failed`, the reason in `lastRunMessage`) and no fresh session starts. A chat that is mid-turn queues the prompt behind the running turn. `--session-id` works with `--via chat` only.
 
 `--via` picks where each fire dispatches the prompt: `chat` (submits a task to the cronjob's dedicated chat pane — the default and backward-compatible behavior) or `terminal` (spawns the agent's vendor CLI in a fresh self-closing PTY pane; if the agent has no vendor CLI it silently falls back to chat). When omitted it resolves via the same precedence as `worktrees create`: `--via` flag → `BAND_DISPATCH` env → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`. A terminal fire is skipped (recorded `skipped`) when the previous run's pane is still active, so an agent that runs longer than the interval is never interrupted.
 
 ### Update an existing cronjob
 
 ```sh
-band cronjobs update <key> <id> [--name <string>] [--prompt <string>] [--cron <string>] [--enable] [--disable]
+band cronjobs update <key> <id> [--name <string>] [--prompt <string>] [--cron <string>] [--worktree <string>] [--agent <string>] [--session-id <string>] [--clear-session] [--enable] [--disable]
 ```
+
+`<key>` is the id of the worktree the job belongs to. `--worktree` moves the job to another worktree.
 
 ### Delete a cronjob
 
