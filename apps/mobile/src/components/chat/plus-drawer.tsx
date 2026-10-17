@@ -11,24 +11,12 @@ import {
   ShieldAlert,
   Zap,
 } from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Animated,
-  Dimensions,
-  Modal,
-  PanResponder,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors } from "../../theme";
+import { BottomSheet } from "../bottom-sheet";
 import { Icon } from "../icon";
 
 type Pickers = ReturnType<typeof sessionPickers>;
-
-const CLOSE_DISTANCE = 60;
-const CLOSE_VELOCITY = 0.8;
 
 /**
  * The composer's + drawer: a sheet that slides up over the chat with the attachment actions and
@@ -55,111 +43,54 @@ export function PlusDrawer({
   pickers: Pickers;
   onChooseMode: (configId: string, value: string) => void;
 }) {
-  const height = Dimensions.get("window").height;
-  const offset = useRef(new Animated.Value(height)).current;
-  const [shown, setShown] = useState(visible);
-
-  const slideTo = useCallback(
-    (to: number, done?: () => void) => {
-      Animated.timing(offset, { toValue: to, duration: 220, useNativeDriver: true }).start(done);
-    },
-    [offset],
-  );
-
-  // Depends on `visible` only, so mounting the modal does not restart the slide-in.
-  useEffect(() => {
-    if (visible) {
-      setShown(true);
-      offset.setValue(height);
-      slideTo(0);
-    } else {
-      slideTo(height, () => setShown(false));
-    }
-  }, [visible, height, offset, slideTo]);
-
-  const pan = useRef(
-    PanResponder.create({
-      // Capture, so a drag that starts on a row or button still moves the drawer.
-      onMoveShouldSetPanResponderCapture: (_e, g) => g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
-      onPanResponderMove: (_e, g) => offset.setValue(Math.max(0, g.dy)),
-      onPanResponderRelease: (_e, g) => {
-        if (g.dy > CLOSE_DISTANCE || g.vy > CLOSE_VELOCITY) onClose();
-        else slideTo(0);
-      },
-      // The system took the gesture (a call, a notification): settle back instead of staying half open.
-      onPanResponderTerminate: () => slideTo(0),
-    }),
-  ).current;
-
   return (
-    <Modal
-      visible={shown}
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
       onDismiss={onDismissed}
+      style={styles.sheet}
+      testID="plus-drawer"
+      backdropTestID="plus-drawer__backdrop"
+      accessibilityLabel="Attach and mode"
     >
-      <View style={styles.root}>
-        <Pressable
-          style={styles.backdrop}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          testID="plus-drawer__backdrop"
+      <View style={styles.actions}>
+        <Action
+          label="Photo library"
+          icon={Image}
+          onPress={onPhotos}
+          testID="plus-drawer__photos"
         />
-        <Animated.View
-          style={[styles.sheet, { transform: [{ translateY: offset }] }]}
-          accessibilityViewIsModal
-          accessibilityLabel="Attach and mode"
-          testID="plus-drawer"
-          {...pan.panHandlers}
-        >
-          <View style={styles.grab} />
-          <View style={styles.actions}>
-            <Action
-              label="Photo library"
-              icon={Image}
-              onPress={onPhotos}
-              testID="plus-drawer__photos"
-            />
-            <Action
-              label="Take photo"
-              icon={Camera}
-              onPress={onCamera}
-              testID="plus-drawer__camera"
-            />
-            <Action label="Choose file" icon={File} onPress={onFiles} testID="plus-drawer__files" />
-          </View>
-          {pickers.modes.length > 0 ? (
-            <View style={styles.section} testID="plus-drawer__modes">
-              <Text style={styles.sectionTitle} accessibilityRole="header">
-                Mode
-              </Text>
-              <View style={styles.card}>
-                {pickers.modes.map((m) => {
-                  const selected = m.id === pickers.mode;
-                  return (
-                    <Pressable
-                      key={m.id}
-                      accessibilityRole="button"
-                      accessibilityLabel={m.name}
-                      accessibilityState={{ selected }}
-                      onPress={() => onChooseMode(pickers.modeConfigId, m.id)}
-                      style={styles.choice}
-                      testID={`plus-drawer__mode-${m.id}`}
-                    >
-                      <Icon icon={modeIcon(m.id, m.name)} />
-                      <Text style={styles.name}>{m.name}</Text>
-                      {selected ? <Icon icon={Check} /> : null}
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          ) : null}
-        </Animated.View>
+        <Action label="Take photo" icon={Camera} onPress={onCamera} testID="plus-drawer__camera" />
+        <Action label="Choose file" icon={File} onPress={onFiles} testID="plus-drawer__files" />
       </View>
-    </Modal>
+      {pickers.modes.length > 0 ? (
+        <View style={styles.section} testID="plus-drawer__modes">
+          <Text style={styles.sectionTitle} accessibilityRole="header">
+            Mode
+          </Text>
+          <View style={styles.card}>
+            {pickers.modes.map((m) => {
+              const selected = m.id === pickers.mode;
+              return (
+                <Pressable
+                  key={m.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={m.name}
+                  accessibilityState={{ selected }}
+                  onPress={() => onChooseMode(pickers.modeConfigId, m.id)}
+                  style={styles.choice}
+                  testID={`plus-drawer__mode-${m.id}`}
+                >
+                  <Icon icon={modeIcon(m.id, m.name)} />
+                  <Text style={styles.name}>{m.name}</Text>
+                  {selected ? <Icon icon={Check} /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+    </BottomSheet>
   );
 }
 
@@ -201,24 +132,7 @@ function Action({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim },
-  sheet: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    gap: 16,
-    paddingBottom: 36,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  grab: {
-    alignSelf: "center",
-    backgroundColor: colors.grab,
-    borderRadius: 3,
-    height: 5,
-    width: 38,
-  },
+  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: 16, paddingBottom: 36 },
   actions: { flexDirection: "row", gap: 10 },
   action: {
     alignItems: "center",

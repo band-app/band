@@ -37,7 +37,11 @@ export const Markdown = memo(function Markdown({ text, muted }: { text: string; 
  * A plain function, not a component: `UITextView` turns only its direct string children into
  * native text, so the spans must be its children and not a wrapper element.
  */
-function renderSpans(spans: readonly Span[], openFile: (path: string) => void) {
+function renderSpans(
+  spans: readonly Span[],
+  openFile: (path: string) => void,
+  Leaf: typeof SelectableText | typeof Text,
+) {
   return spans.map((span, i) => {
     const style: TextStyle[] = [];
     if (span.bold) style.push(styles.bold);
@@ -53,7 +57,7 @@ function renderSpans(spans: readonly Span[], openFile: (path: string) => void) {
         : () => void Linking.openURL(link.url).catch(() => {});
     if (style.length === 0 && !onPress) return span.text;
     return (
-      <SelectableText
+      <Leaf
         // biome-ignore lint/suspicious/noArrayIndexKey: spans have no identity beyond position
         key={i}
         style={style}
@@ -61,15 +65,32 @@ function renderSpans(spans: readonly Span[], openFile: (path: string) => void) {
         accessibilityRole={link ? "link" : undefined}
       >
         {span.text}
-      </SelectableText>
+      </Leaf>
     );
   });
 }
 
-function Paragraph({ spans, style }: { spans: readonly Span[]; style?: TextStyle | TextStyle[] }) {
+/**
+ * Table cells pass `selectable: false`: a `UITextView` under the finger takes the horizontal drag
+ * from the table's `ScrollView`, so a cell is plain `Text` and the table scrolls from any point.
+ */
+function Paragraph({
+  spans,
+  style,
+  selectable = true,
+}: {
+  spans: readonly Span[];
+  style?: TextStyle | TextStyle[];
+  selectable?: boolean;
+}) {
   const { openFile } = useChat();
+  if (!selectable) {
+    return <Text style={[styles.text, style]}>{renderSpans(spans, openFile, Text)}</Text>;
+  }
   return (
-    <SelectableText style={[styles.text, style]}>{renderSpans(spans, openFile)}</SelectableText>
+    <SelectableText style={[styles.text, style]}>
+      {renderSpans(spans, openFile, SelectableText)}
+    </SelectableText>
   );
 }
 
@@ -141,6 +162,7 @@ function TableView({
     <View key={c} style={[styles.cell, { width: widths[c] }]}>
       <Paragraph
         spans={spans ?? []}
+        selectable={false}
         style={[styles.cellText, ...(head ? [styles.bold] : []), { textAlign: align[c] ?? "left" }]}
       />
     </View>

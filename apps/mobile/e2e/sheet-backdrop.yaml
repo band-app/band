@@ -1,0 +1,47 @@
+# The custom bottom sheets (Views, tab switcher, + drawer) open with the backdrop fading in place
+# and the panel sliding up, and close the reverse way. Each opening is a screen recording; the
+# frames are checked by hand, because Maestro cannot assert on motion.
+appId: app.getband.mobile
+name: sheet backdrop fades, panel slides
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-tabs
+- startRecording: sheet-views
+- tapOn:
+    id: worktree__more
+- extendedWaitUntil:
+    visible:
+      id: views__sheet
+    timeout: 5000
+- tapOn:
+    id: views__scrim
+- assertNotVisible:
+    id: views__sheet
+- stopRecording
+- startRecording: sheet-tabs
+- tapOn:
+    id: tabs__switcher
+- extendedWaitUntil:
+    visible:
+      id: tabs__sheet
+    timeout: 5000
+- tapOn:
+    id: tabs__sheet-done
+- assertNotVisible:
+    id: tabs__sheet
+- stopRecording
+- startRecording: sheet-plus
+- tapOn:
+    id: composer__attach
+- extendedWaitUntil:
+    visible:
+      id: plus-drawer
+    timeout: 5000
+- tapOn:
+    id: plus-drawer__backdrop
+- assertNotVisible:
+    id: plus-drawer
+- stopRecording
