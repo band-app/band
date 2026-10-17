@@ -58,17 +58,19 @@ The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub 
 
 ## Builds and TestFlight
 
-`apps/mobile/.eas/workflows/build.yml` is an EAS Workflow. It runs on Expo's servers on every push to `main` that changes `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml`, and has three jobs:
+`apps/mobile/.eas/workflows/build.yml` is an EAS Workflow. It has no push trigger, so a merge to `main` builds nothing. It runs on Expo's servers when started by hand, and has three jobs:
 
 - `build_android`: an Android `preview` build, an APK with internal distribution. Install it from the build page on expo.dev.
 - `build_ios`: an iOS `production` build.
 - `submit_ios`: submits the iOS build to TestFlight with the `production` submit profile (`ascAppId` 6823071973 in `eas.json`).
 
+Releases do not use this workflow. The `mobile` job of `.github/workflows/release.yml` runs `scripts/release.mjs`, which sets the release version in `app.json` and calls `eas build` for iOS (`production`, `--auto-submit` to TestFlight) and Android (`preview`). The release input `mobile` is `auto` (ship when `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml` changed since the previous release tag), `always` or `skip`. The job needs the `EXPO_TOKEN` secret and links the builds in the job summary and the release notes. Build numbers stay with EAS (`appVersionSource: remote`).
+
 Runs show under the project's Workflows page on expo.dev. To run it by hand: `npx eas-cli@latest workflow:run .eas/workflows/build.yml` from `apps/mobile`. After editing the file, check it with `npx eas-cli@latest workflow:validate .eas/workflows/build.yml`.
 
 One-time setup:
 
-1. In the Expo dashboard (owner `band-app`, project `band`), open Project settings > GitHub, link `band-app/band` and set the base directory to `apps/mobile`. Push triggers need the link.
+1. In the Expo dashboard (owner `band-app`, project `band`), open Project settings > GitHub, link `band-app/band` and set the base directory to `apps/mobile`. If the Expo dashboard has push triggers configured for this project, turn them off, or merges would build again.
 2. Create an App Store Connect API key, add it to the Expo account and assign it to the app for EAS Submit.
 3. Create the signing credentials once as a team member, from `apps/mobile`:
    - `npx eas-cli@latest credentials:configure-build -p ios -e production` (distribution certificate and provisioning profile).

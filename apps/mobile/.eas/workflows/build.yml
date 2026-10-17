@@ -1,14 +1,6 @@
 name: Mobile build
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - apps/mobile/**
-      - packages/client/**
-      - packages/shared/**
-      - pnpm-lock.yaml
   workflow_dispatch: {}
 
 concurrency:

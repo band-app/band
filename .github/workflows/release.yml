@@ -22,6 +22,15 @@ on:
         required: false
         type: boolean
         default: false
+      mobile:
+        description: "Mobile app. auto ships it when apps/mobile, packages/client, packages/shared or pnpm-lock.yaml changed since the previous release tag."
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - always
+          - skip
 
 permissions:
   contents: write
@@ -387,3 +396,85 @@ jobs:
       version: ${{ needs.publish.outputs.version }}
       ref: v${{ needs.publish.outputs.version }}
       push: true
+
+  # The iOS app (TestFlight) and the Android preview APK, built by EAS with the
+  # release version. Runs after `publish`, so it ships only for a release that
+  # went out, and its failure leaves the desktop, npm and image parts shipped.
+  mobile:
+    name: Mobile
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VERSION: ${{ needs.publish.outputs.version }}
+
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.publish.outputs.version }}
+          fetch-depth: 0
+
+      - name: Decide whether to ship
+        id: detect
+        run: node apps/mobile/scripts/release.mjs detect --mode "$MOBILE_MODE" --tag "v$VERSION"
+        env:
+          MOBILE_MODE: ${{ inputs.mobile }}
+
+      - name: Setup Node
+        if: steps.detect.outputs.ship == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup pnpm
+        if: steps.detect.outputs.ship == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Install dependencies
+        if: steps.detect.outputs.ship == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup EAS
+        if: steps.detect.outputs.ship == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # eas build archives the git tree and refuses a dirty one, so the version
+      # change gets a local commit. It is never pushed, like the other version bumps.
+      - name: Set the app version
+        if: steps.detect.outputs.ship == 'true'
+        working-directory: apps/mobile
+        run: |
+          node scripts/release.mjs set-version --version "$VERSION"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -am "chore(mobile): set the app version to $VERSION"
+
+      # Builds iOS with auto-submit to TestFlight and the Android preview build,
+      # and waits for both.
+      - name: Build and submit
+        id: ship
+        if: steps.detect.outputs.ship == 'true'
+        working-directory: apps/mobile
+        run: node scripts/release.mjs ship --version "$VERSION"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Link the builds in the release notes
+        if: always() && steps.detect.outputs.ship == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          URLS: ${{ steps.ship.outputs.urls }}
+          OUTCOME: ${{ steps.ship.outcome }}
+        run: |
+          {
+            gh release view "v$VERSION" --json body --jq .body
+            echo
+            echo "Mobile app builds ($OUTCOME):"
+            for url in $URLS; do echo "- $url"; done
+          } > "$RUNNER_TEMP/notes.md"
+          gh release edit "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
