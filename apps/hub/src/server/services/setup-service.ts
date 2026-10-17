@@ -2,6 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { checkCli, installCli, SYMLINK_PATH } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { AGENT_CHECKS } from "./coding-agent-seed";
+import { cronjobService } from "./cronjob-service";
 import { modelRefreshService } from "./model-refresh-service";
 import { repoService } from "./repo-service";
 import { agentModeFromVia } from "./settings-service";
@@ -61,7 +62,9 @@ export async function runFirstTimeSetup(): Promise<void> {
   // The sync goes first: it repairs repo kinds, and the steps after it only add remote URLs
   // with focused writes that it must not overwrite from a stale snapshot.
   forgetLocalWorktrees();
-  const repoSync = ensureRepoStateInSync().then(() => ensureRepoRemotes());
+  const repoSync = ensureRepoStateInSync()
+    .then(() => ensureRepoRemotes())
+    .then(() => migrateRepoCronjobs());
 
   await ensureCliInstalled();
 
@@ -176,6 +179,18 @@ async function ensureRepoRemotes(): Promise<void> {
   } catch (err) {
     log.warn(
       "Failed to record repo remotes at boot: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/** Repo-scoped cronjobs become jobs of their repo's default-branch worktree, once the sync knows the worktrees. */
+function migrateRepoCronjobs(): void {
+  try {
+    cronjobService.migrateRepoJobs();
+  } catch (err) {
+    log.warn(
+      "Failed to move repo-scoped cronjobs to worktrees at boot: %s",
       err instanceof Error ? err.message : String(err),
     );
   }

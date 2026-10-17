@@ -5,7 +5,7 @@ import { cronjobs } from "../schema";
 
 /**
  * One scheduled cron-style task — a prompt the agent runs on a recurring
- * schedule against a repo's main branch or a specific worktree.
+ * schedule against one worktree (the default-branch worktree or any other).
  *
  * Persisted shape matches the Drizzle row 1:1; the `worktreeId` and
  * `lastRun*` columns are nullable in SQLite but exposed here as optional
@@ -13,6 +13,9 @@ import { cronjobs } from "../schema";
  * happens inside `CronjobQueries.rowToDefinition` below.
  */
 export type CronjobScope = "repo" | "worktree";
+// `"repo"` survives only on rows written before jobs were tied to a worktree.
+// The boot migration (`CronjobService.migrateRepoJobs`) turns each one into a
+// worktree job, so nothing creates it any more.
 
 /**
  * Where a cronjob fire dispatches its prompt (issue #581). Defined inline here
@@ -31,10 +34,16 @@ export interface CronjobDefinition {
   prompt: string;
   /** Standard cron expression (5-field format) */
   cronExpression: string;
-  /** Whether this runs on the repo's main branch or a specific worktree */
+  /** Always `"worktree"` once the boot migration has run. */
   scope: CronjobScope;
-  /** For worktree-scoped jobs, the worktree ID (repo-branch) */
+  /** The worktree the job fires into */
   worktreeId?: string;
+  /** Coding agent id (`settings.codingAgents[].id`) the job's chat runs. Default agent when absent. */
+  agent?: string;
+  /** Agent provider session id. Fires go to the chat whose active session is this id. */
+  sessionId?: string;
+  /** Why the last run failed, or why the boot migration disabled the job */
+  lastRunMessage?: string;
   /** Where a fire dispatches the prompt: chat pane (default) or terminal PTY */
   via: CronjobVia;
   /** Whether the job is enabled */
@@ -142,6 +151,9 @@ export class CronjobQueries {
             lastRunAt: job.lastRunAt ?? null,
             lastRunStatus: job.lastRunStatus ?? null,
             lastTerminalId: job.lastTerminalId ?? null,
+            agent: job.agent ?? null,
+            sessionId: job.sessionId ?? null,
+            lastRunMessage: job.lastRunMessage ?? null,
           })
           .run();
       }
@@ -173,10 +185,37 @@ export class CronjobQueries {
    * tick — fire-path latency matters because errors here are silently
    * swallowed and would mask cronjob execution bugs.
    */
-  updateLastRun(jobId: string, status: "completed" | "failed" | "skipped"): void {
+  updateLastRun(jobId: string, status: "completed" | "failed" | "skipped", message?: string): void {
     const db = getDb();
     db.update(cronjobs)
-      .set({ lastRunAt: new Date().toISOString(), lastRunStatus: status })
+      .set({
+        lastRunAt: new Date().toISOString(),
+        lastRunStatus: status,
+        lastRunMessage: message ?? null,
+      })
+      .where(eq(cronjobs.id, jobId))
+      .run();
+  }
+
+  /** Jobs still scoped to a repo, written before jobs were tied to a worktree. */
+  listRepoScoped(): (CronjobDefinition & { fileKey: string })[] {
+    return this.listAll().filter((j) => j.scope === "repo");
+  }
+
+  /** Make a repo-scoped job a job of `worktreeId`, keeping its id and everything else. */
+  moveToWorktree(jobId: string, worktreeId: string): void {
+    const db = getDb();
+    db.update(cronjobs)
+      .set({ scope: "worktree", fileKey: worktreeId, worktreeId })
+      .where(eq(cronjobs.id, jobId))
+      .run();
+  }
+
+  /** Disable a job and record why. The job stays. */
+  disableWithReason(jobId: string, message: string): void {
+    const db = getDb();
+    db.update(cronjobs)
+      .set({ enabled: false, lastRunStatus: "failed", lastRunMessage: message })
       .where(eq(cronjobs.id, jobId))
       .run();
   }
@@ -209,6 +248,9 @@ export class CronjobQueries {
       cronExpression: row.cronExpression,
       scope: row.scope as CronjobDefinition["scope"],
       worktreeId: row.worktreeId ?? undefined,
+      agent: row.agent ?? undefined,
+      sessionId: row.sessionId ?? undefined,
+      lastRunMessage: row.lastRunMessage ?? undefined,
       via: (row.via ?? "chat") as CronjobDefinition["via"],
       enabled: row.enabled,
       createdAt: row.createdAt,
