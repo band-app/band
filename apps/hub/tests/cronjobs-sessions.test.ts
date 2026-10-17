@@ -71,6 +71,15 @@ const promptsSeen = (text: string) =>
     (r.params.prompt as { text?: string }[]).some((b) => b.text === text),
   ).length;
 
+/**
+ * `session/new` requests the chats' agents received in `cwd`. The boot-time model refresh
+ * (`modelRefreshService.refreshAll`) probes each agent with a scratch `session/new` in another
+ * directory, at a time that depends on how fast the hub and worker come up, so counting every
+ * `session/new` in the log races with it.
+ */
+const sessionsStartedIn = (cwd: string) =>
+  stubRequests(home, "session/new").filter((r) => r.params.cwd === cwd).length;
+
 /** A chat with one finished turn, so the agent holds a session for it. */
 async function chatWithSession(): Promise<{ chat: Chat; sessionId: string }> {
   const { chat } = await trpc<{ chat: Chat }>(server.url, "chats.create", {
@@ -93,6 +102,7 @@ afterAll(async () => {
 
 describe("cronjobs with a session id", () => {
   let seed: { chat: Chat; sessionId: string };
+  let chatCwd: string;
 
   it("S4: runs the prompt in the chat that has the session, without a new chat", async () => {
     seed = await chatWithSession();
@@ -111,7 +121,6 @@ describe("cronjobs with a session id", () => {
   it("S5: opens a new chat on the session when no chat has it, and reuses it", async () => {
     await trpc(server.url, "chats.remove", { chatId: seed.chat.id });
     expect(await chats()).toHaveLength(0);
-    const sessionsBefore = stubRequests(home, "session/new").length;
     const job = await createJob({ sessionId: seed.sessionId, via: "chat", name: "Reopen job" });
 
     const first = await trigger(job.id);
@@ -128,7 +137,9 @@ describe("cronjobs with a session id", () => {
         r.params.sessionId === seed.sessionId,
     );
     expect(reopened.length).toBeGreaterThan(0);
-    expect(stubRequests(home, "session/new")).toHaveLength(sessionsBefore);
+    chatCwd = reopened[0].params.cwd as string;
+    // Only the seed chat started a session in the worktree.
+    expect(sessionsStartedIn(chatCwd)).toBe(1);
 
     const second = await trigger(job.id);
     expect(second.chatId).toBe(first.chatId);
@@ -138,7 +149,7 @@ describe("cronjobs with a session id", () => {
 
   it("S6: fails the run and starts no fresh session when the session does not exist", async () => {
     const chatsBefore = await chats();
-    const sessionsBefore = stubRequests(home, "session/new").length;
+    const sessionsBefore = sessionsStartedIn(chatCwd);
     const job = await createJob({ sessionId: "session-that-does-not-exist", via: "chat" });
 
     const res = await fetch(`${server.url}/trpc/cronjobs.trigger`, {
@@ -154,7 +165,7 @@ describe("cronjobs with a session id", () => {
     expect(after.lastRunStatus).toBe("failed");
     expect(after.lastRunMessage).toContain("session-that-does-not-exist");
     expect((await chats()).map((c) => c.id)).toEqual(chatsBefore.map((c) => c.id));
-    expect(stubRequests(home, "session/new")).toHaveLength(sessionsBefore);
+    expect(sessionsStartedIn(chatCwd)).toBe(sessionsBefore);
   });
 });
 
