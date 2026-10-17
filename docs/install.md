@@ -71,6 +71,13 @@ band-worker install-service --hub https://band.example.com --worker-id <id> --to
 Node 22.5 or newer is required. `install-service` writes the worker's settings and starts it:
 
 - On Linux it creates the systemd user unit `~/.config/systemd/user/band-worker.service` and enables it with `systemctl --user enable --now`. It then runs `loginctl enable-linger` so the worker keeps running after you log out. When that is refused it prints the `sudo loginctl enable-linger $USER` command.
+- The unit sets `OOMPolicy=continue`. When the kernel kills an agent or a build for running out of memory, only that process dies, and the worker and the other chats keep running. Without it systemd stops the whole worker. An install from an older Band gets the setting the next time `install-service` runs. The original bootstrap token works for that run: the worker keeps the session token and worker id saved in its state directory, and never trades the spent token again. Pass the same flags as the first install (including `--state-dir` if you set one), because `install-service` rewrites the env file from them. To add the setting without reinstalling, use a drop-in:
+
+  ```sh
+  mkdir -p ~/.config/systemd/user/band-worker.service.d
+  printf '[Service]\nOOMPolicy=continue\n' > ~/.config/systemd/user/band-worker.service.d/oom.conf
+  systemctl --user daemon-reload
+  ```
 - On macOS it creates the launchd agent `~/Library/LaunchAgents/app.band.worker.plist` and loads it.
 - The macOS worker writes its own log, `~/.band/worker-service/worker.log`, and rotates it at 10 MB, keeping 3 files (`worker.log`, `worker.log.1`, `worker.log.2`). A larger existing log is rotated when the worker starts. launchd's own output goes to `/dev/null`, because launchd cannot rotate a file. On Linux the unit logs to journald and writes no file: read it with `journalctl --user -u band-worker`.
 
@@ -108,7 +115,18 @@ FAIL gh           -      not installed
        fix: install the GitHub CLI from https://cli.github.com
 ```
 
-It checks `claude`, `codex`, `opencode`, `gemini` and `cursor-agent`, then `git` and `gh`, and prints the command that fixes each gap. It exits 1 when `git` is missing or no agent is usable. `BAND_AGENT_BIN_DIRS` (a PATH-style list) names extra directories to search first, for CLIs that sit outside the service's PATH.
+It checks `claude`, `codex`, `opencode`, `gemini` and `cursor-agent`, then `git` and `gh`, and prints the command that fixes each gap. It exits 1 when `git` is missing or no agent is usable. On Linux it also warns, with the fix commands, when the machine has no swap and less than 16 GiB of memory, or when `fs.inotify.max_user_watches` is below 262144. It changes nothing itself, and these warnings do not change the exit code:
+
+```
+WARN host         no swap and 7.8 GiB of memory: builds that agents run at once can be killed for running out of memory
+       fix: sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+       fix: grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+WARN host         fs.inotify.max_user_watches is 61656: agents that watch files fail with ENOSPC
+       fix: echo 'fs.inotify.max_user_watches=524288' | sudo tee /etc/sysctl.d/60-band-inotify.conf
+       fix: sudo sysctl --system
+```
+
+`BAND_AGENT_BIN_DIRS` (a PATH-style list) names extra directories to search first, for CLIs that sit outside the service's PATH.
 
 A connected worker sends the same report to the hub on connect and every few minutes (`BAND_CAPABILITY_REFRESH_MS`, default 3 minutes). Settings > Hosts shows it for each worker (installed, version, logged in), instead of the agents in your settings.
 

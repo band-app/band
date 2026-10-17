@@ -28,7 +28,7 @@ function formatElapsed(seconds: number): string {
  * the message. Hidden until the hub has voice set up and this browser can record.
  */
 export function PromptInputMic({ className }: { className?: string }) {
-  const { textareaRef } = usePromptInputContext();
+  const { textareaRef, setNotice } = usePromptInputContext();
   const status = useQuery({
     queryKey: VOICE_STATUS_KEY,
     queryFn: () => trpc.voice.status.query(),
@@ -36,7 +36,6 @@ export function PromptInputMic({ className }: { className?: string }) {
   });
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const recordingRef = useRef<Recording | null>(null);
   const mountedRef = useRef(true);
   const maxSeconds = status.data?.maxSeconds ?? 600;
@@ -69,13 +68,13 @@ export function PromptInputMic({ className }: { className?: string }) {
       const clip = await recording.stop();
       const text = await transcribeClip(clip);
       if (text) insert(text);
-      else setError("No speech was recognized. Try again, closer to the microphone.");
+      else setNotice("No speech was recognized. Try again, closer to the microphone.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Transcription failed.");
+      setNotice(err instanceof Error ? err.message : "Transcription failed.");
     } finally {
       setPhase("idle");
     }
-  }, [insert]);
+  }, [insert, setNotice]);
 
   const cancel = useCallback(() => {
     recordingRef.current?.cancel();
@@ -84,7 +83,7 @@ export function PromptInputMic({ className }: { className?: string }) {
   }, []);
 
   const start = useCallback(async () => {
-    setError(null);
+    setNotice(null);
     setPhase("starting");
     try {
       const recording = await startRecording();
@@ -96,10 +95,10 @@ export function PromptInputMic({ className }: { className?: string }) {
       setElapsed(0);
       setPhase("recording");
     } catch (err) {
-      setError(describeMicError(err).message);
+      setNotice(describeMicError(err).message);
       setPhase("idle");
     }
-  }, []);
+  }, [setNotice]);
 
   // The timer, and the auto-stop at the clip length limit.
   useEffect(() => {
@@ -118,10 +117,11 @@ export function PromptInputMic({ className }: { className?: string }) {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      setNotice(null);
       recordingRef.current?.cancel();
       recordingRef.current = null;
     };
-  }, []);
+  }, [setNotice]);
 
   if (!status.data?.available || !voiceRecordingSupported()) return null;
 
@@ -174,16 +174,6 @@ export function PromptInputMic({ className }: { className?: string }) {
       ) : null}
       {phase === "transcribing" ? (
         <span className="pl-1 text-xs text-muted-foreground">Transcribing</span>
-      ) : null}
-      {error ? (
-        <span
-          role="alert"
-          data-testid="prompt-input__mic-error"
-          className="min-w-0 max-w-[28ch] pl-1 text-xs leading-tight text-destructive sm:max-w-[48ch]"
-          title={error}
-        >
-          {error}
-        </span>
       ) : null}
     </div>
   );

@@ -548,17 +548,32 @@ enum TerminalsCmd {
 enum CronjobsCmd {
     /// List cronjobs
     List {
-        /// Filter by repo name
-        #[arg(long)]
+        /// Removed: cronjobs belong to a worktree. Passing it is an error.
+        #[arg(long, hide = true)]
         repo: Option<String>,
         /// Filter by worktree ID
         #[arg(long)]
         worktree: Option<String>,
     },
-    /// Create a new cronjob
+    /// Create a new cronjob in a worktree
     Create {
-        /// Storage key: repo name (for repo-scoped) or worktree ID (for worktree-scoped)
-        key: String,
+        /// Worktree ID the job fires into (the default-branch worktree or any other)
+        #[arg(long)]
+        worktree: Option<String>,
+        /// Removed: cronjobs belong to a worktree. Passing it is an error.
+        #[arg(long, hide = true)]
+        repo: Option<String>,
+        /// Removed: every cronjob is worktree-scoped. Passing it is an error.
+        #[arg(long, hide = true)]
+        scope: Option<String>,
+        /// Coding agent ID (from `settings.codingAgents`) the job's chat runs.
+        /// Default agent when omitted.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Agent session ID. Each fire goes to the chat whose active session is
+        /// this ID, or opens a new chat on that session. Chat dispatch only.
+        #[arg(long)]
+        session_id: Option<String>,
         /// Human-readable name for the job
         #[arg(long)]
         name: String,
@@ -568,12 +583,6 @@ enum CronjobsCmd {
         /// Cron expression (e.g. "0 */6 * * *")
         #[arg(long)]
         cron: String,
-        /// Scope: repo or worktree
-        #[arg(long, default_value = "repo")]
-        scope: String,
-        /// Worktree ID (required when scope is "worktree")
-        #[arg(long)]
-        worktree_id: Option<String>,
         /// Where each fire dispatches the prompt: `chat` (chat pane) or
         /// `terminal` (agent's vendor CLI in a fresh self-closing PTY). When
         /// omitted, resolved via the same precedence as `worktrees create`:
@@ -589,10 +598,22 @@ enum CronjobsCmd {
     },
     /// Update an existing cronjob
     Update {
-        /// Storage key (repo name or worktree ID)
+        /// Worktree ID the job belongs to
         key: String,
         /// Cronjob ID (e.g. `cj_1234567890`)
         id: String,
+        /// Move the job to another worktree
+        #[arg(long)]
+        worktree: Option<String>,
+        /// Coding agent ID the job's chat runs
+        #[arg(long)]
+        agent: Option<String>,
+        /// Agent session ID the job pins to. Chat dispatch only.
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Stop pinning the job to a session
+        #[arg(long, conflicts_with = "session_id")]
+        clear_session: bool,
         /// New name
         #[arg(long)]
         name: Option<String>,
@@ -611,14 +632,14 @@ enum CronjobsCmd {
     },
     /// Delete a cronjob
     Delete {
-        /// Storage key (repo name or worktree ID)
+        /// Worktree ID the job belongs to
         key: String,
         /// Cronjob ID (e.g. `cj_1234567890`)
         id: String,
     },
     /// Manually trigger a cronjob now
     Trigger {
-        /// Storage key (repo name or worktree ID)
+        /// Worktree ID the job belongs to
         key: String,
         /// Cronjob ID (e.g. `cj_1234567890`)
         id: String,
@@ -1119,27 +1140,35 @@ fn main() {
                 cmd_cronjobs_list(repo.as_deref(), worktree.as_deref())
             }
             CronjobsCmd::Create {
-                key,
+                worktree,
+                repo,
+                scope,
+                agent,
+                session_id,
                 name,
                 prompt,
                 cron,
-                scope,
-                worktree_id,
                 via,
                 disabled,
-            } => cmd_cronjobs_create(
-                &key,
-                &name,
-                &prompt,
-                &cron,
-                &scope,
-                worktree_id.as_deref(),
-                via.as_deref(),
+            } => cmd_cronjobs_create(&CronjobCreateArgs {
+                worktree: worktree.as_deref(),
+                repo: repo.as_deref(),
+                scope: scope.as_deref(),
+                agent: agent.as_deref(),
+                session_id: session_id.as_deref(),
+                name: &name,
+                prompt: &prompt,
+                cron: &cron,
+                via: via.as_deref(),
                 disabled,
-            ),
+            }),
             CronjobsCmd::Update {
                 key,
                 id,
+                worktree,
+                agent,
+                session_id,
+                clear_session,
                 name,
                 prompt,
                 cron,
@@ -1148,11 +1177,17 @@ fn main() {
             } => cmd_cronjobs_update(
                 &key,
                 &id,
-                name.as_deref(),
-                prompt.as_deref(),
-                cron.as_deref(),
-                enable,
-                disable,
+                &CronjobUpdateArgs {
+                    worktree: worktree.as_deref(),
+                    agent: agent.as_deref(),
+                    session_id: session_id.as_deref(),
+                    clear_session,
+                    name: name.as_deref(),
+                    prompt: prompt.as_deref(),
+                    cron: cron.as_deref(),
+                    enable,
+                    disable,
+                },
             ),
             CronjobsCmd::Delete { key, id } => cmd_cronjobs_delete(&key, &id),
             CronjobsCmd::Trigger { key, id } => cmd_cronjobs_trigger(&key, &id),
@@ -3518,13 +3553,15 @@ fn cmd_terminal_attach(terminal_id: Option<&str>, json_output: bool) -> Result<(
 
 // --- Cronjobs commands ---
 
+const CRONJOB_REPO_REMOVED: &str = "Cronjobs belong to a worktree, not a repo. Pass --worktree <id> (the repo's default-branch worktree works for its main branch).";
+
 fn cmd_cronjobs_list(repo: Option<&str>, worktree: Option<&str>) -> Result<CommandResult, String> {
+    if repo.is_some() {
+        return Err(CRONJOB_REPO_REMOVED.to_string());
+    }
     let client = api::ApiClient::from_settings()?;
 
     let mut input = serde_json::json!({});
-    if let Some(p) = repo {
-        input["repo"] = serde_json::json!(p);
-    }
     if let Some(w) = worktree {
         input["worktreeId"] = serde_json::json!(w);
     }
@@ -3536,7 +3573,7 @@ fn cmd_cronjobs_list(repo: Option<&str>, worktree: Option<&str>) -> Result<Comma
         .cloned()
         .unwrap_or_default();
 
-    let mut rows: Vec<[String; 6]> = Vec::new();
+    let mut rows: Vec<[String; 8]> = Vec::new();
     let mut json_jobs = Vec::new();
     for job in &jobs {
         let id = job.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -3545,7 +3582,9 @@ fn cmd_cronjobs_list(repo: Option<&str>, worktree: Option<&str>) -> Result<Comma
             .get("cronExpression")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let scope = job.get("scope").and_then(|v| v.as_str()).unwrap_or("");
+        let worktree = job.get("worktreeId").and_then(|v| v.as_str()).unwrap_or("");
+        let agent = job.get("agent").and_then(|v| v.as_str()).unwrap_or("-");
+        let session = job.get("sessionId").and_then(|v| v.as_str()).unwrap_or("-");
         let enabled = job
             .get("enabled")
             .and_then(serde_json::Value::as_bool)
@@ -3559,7 +3598,9 @@ fn cmd_cronjobs_list(repo: Option<&str>, worktree: Option<&str>) -> Result<Comma
             id.to_string(),
             name.to_string(),
             cron_expr.to_string(),
-            scope.to_string(),
+            worktree.to_string(),
+            agent.to_string(),
+            session.to_string(),
             if enabled {
                 "enabled".to_string()
             } else {
@@ -3571,7 +3612,12 @@ fn cmd_cronjobs_list(repo: Option<&str>, worktree: Option<&str>) -> Result<Comma
         json_jobs.push(job.clone());
     }
 
-    let text = format_table(&["ID", "NAME", "CRON", "SCOPE", "STATE", "LAST RUN"], &rows);
+    let text = format_table(
+        &[
+            "ID", "NAME", "CRON", "WORKTREE", "AGENT", "SESSION", "STATE", "LAST RUN",
+        ],
+        &rows,
+    );
 
     Ok(CommandResult {
         text,
@@ -3579,23 +3625,26 @@ fn cmd_cronjobs_list(repo: Option<&str>, worktree: Option<&str>) -> Result<Comma
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn cmd_cronjobs_create(
-    key: &str,
-    name: &str,
-    prompt: &str,
-    cron: &str,
-    scope: &str,
-    worktree_id: Option<&str>,
-    via: Option<&str>,
+struct CronjobCreateArgs<'a> {
+    worktree: Option<&'a str>,
+    repo: Option<&'a str>,
+    scope: Option<&'a str>,
+    agent: Option<&'a str>,
+    session_id: Option<&'a str>,
+    name: &'a str,
+    prompt: &'a str,
+    cron: &'a str,
+    via: Option<&'a str>,
     disabled: bool,
-) -> Result<CommandResult, String> {
-    if scope != "repo" && scope != "worktree" {
-        return Err("Scope must be 'repo' or 'worktree'".to_string());
+}
+
+fn cmd_cronjobs_create(args: &CronjobCreateArgs) -> Result<CommandResult, String> {
+    if args.repo.is_some() || args.scope == Some("repo") {
+        return Err(CRONJOB_REPO_REMOVED.to_string());
     }
-    if scope == "worktree" && worktree_id.is_none() {
-        return Err("--worktree-id is required when scope is 'worktree'".to_string());
-    }
+    let worktree = args.worktree.ok_or_else(|| {
+        "A cronjob needs a worktree: pass --worktree <id> (the repo's default-branch worktree works for its main branch)".to_string()
+    })?;
 
     // Read settings once and share the snapshot between the API client (port +
     // auth token) and the dispatch-target resolver — same pattern as
@@ -3605,19 +3654,21 @@ fn cmd_cronjobs_create(
     // (BAND_DISPATCH=terminal) defaults to terminal (issue #581).
     let settings = state::load_settings()?;
     let client = api::ApiClient::from_loaded_settings(settings.clone());
-    let resolved_via = resolve_dispatch_target(via, &settings)?;
+    let resolved_via = resolve_dispatch_target(args.via, &settings)?;
 
     let mut input = serde_json::json!({
-        "key": key,
-        "name": name,
-        "prompt": prompt,
-        "cronExpression": cron,
-        "scope": scope,
+        "name": args.name,
+        "prompt": args.prompt,
+        "cronExpression": args.cron,
+        "worktreeId": worktree,
         "via": resolved_via,
-        "enabled": !disabled,
+        "enabled": !args.disabled,
     });
-    if let Some(ws) = worktree_id {
-        input["worktreeId"] = serde_json::json!(ws);
+    if let Some(agent) = args.agent {
+        input["agent"] = serde_json::json!(agent);
+    }
+    if let Some(session_id) = args.session_id {
+        input["sessionId"] = serde_json::json!(session_id);
     }
 
     let data = client.trpc_mutate("cronjobs.create", &input)?;
@@ -3630,33 +3681,53 @@ fn cmd_cronjobs_create(
     })
 }
 
+struct CronjobUpdateArgs<'a> {
+    worktree: Option<&'a str>,
+    agent: Option<&'a str>,
+    session_id: Option<&'a str>,
+    clear_session: bool,
+    name: Option<&'a str>,
+    prompt: Option<&'a str>,
+    cron: Option<&'a str>,
+    enable: bool,
+    disable: bool,
+}
+
 fn cmd_cronjobs_update(
     key: &str,
     id: &str,
-    name: Option<&str>,
-    prompt: Option<&str>,
-    cron: Option<&str>,
-    enable: bool,
-    disable: bool,
+    args: &CronjobUpdateArgs,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let mut input = serde_json::json!({
         "key": key,
         "id": id,
     });
-    if let Some(n) = name {
+    if let Some(n) = args.name {
         input["name"] = serde_json::json!(n);
     }
-    if let Some(p) = prompt {
+    if let Some(p) = args.prompt {
         input["prompt"] = serde_json::json!(p);
     }
-    if let Some(c) = cron {
+    if let Some(c) = args.cron {
         input["cronExpression"] = serde_json::json!(c);
     }
-    if enable {
+    if let Some(w) = args.worktree {
+        input["worktreeId"] = serde_json::json!(w);
+    }
+    if let Some(a) = args.agent {
+        input["agent"] = serde_json::json!(a);
+    }
+    if let Some(sid) = args.session_id {
+        input["sessionId"] = serde_json::json!(sid);
+    }
+    if args.clear_session {
+        input["sessionId"] = serde_json::Value::Null;
+    }
+    if args.enable {
         input["enabled"] = serde_json::json!(true);
     }
-    if disable {
+    if args.disable {
         input["enabled"] = serde_json::json!(false);
     }
 
@@ -3714,7 +3785,22 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
         });
     }
 
+    // A chat that was mid-turn queued the prompt instead of starting a task.
     let task_id = data.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+    let queued_id = data
+        .get("queuedMessageId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if task_id.is_empty() && !queued_id.is_empty() {
+        return Ok(CommandResult {
+            text: format!("queued {queued_id}\n"),
+            json: serde_json::json!({
+                "via": "chat",
+                "queuedMessageId": queued_id,
+                "worktreeId": worktree_id,
+            }),
+        });
+    }
     Ok(CommandResult {
         text: format!("{task_id}\n"),
         json: serde_json::json!({
@@ -5495,22 +5581,21 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "cronjobs list",
-            "description": "List cronjobs, optionally filtered by repo or worktree",
+            "description": "List cronjobs, optionally filtered by worktree",
             "parameters": [
-                {"name": "--repo", "type": "string", "required": false, "description": "Filter by repo name"},
                 {"name": "--worktree", "type": "string", "required": false, "description": "Filter by worktree ID"},
             ]
         }),
         serde_json::json!({
             "name": "cronjobs create",
-            "description": "Create a new scheduled cronjob",
+            "description": "Create a new scheduled cronjob in a worktree",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key: repo name or worktree ID"},
+                {"name": "--worktree", "type": "string", "required": true, "description": "Worktree ID the job fires into (the default-branch worktree or any other)"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID the job's chat runs (default agent when omitted)"},
+                {"name": "--session-id", "type": "string", "required": false, "description": "Agent session ID. Each fire goes to the chat whose active session is this ID, or opens a new chat on that session. Chat dispatch only."},
                 {"name": "--name", "type": "string", "required": true, "description": "Human-readable name for the job"},
                 {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the coding agent"},
                 {"name": "--cron", "type": "string", "required": true, "description": "Cron expression (e.g. \"0 */6 * * *\")"},
-                {"name": "--scope", "type": "string", "required": false, "description": "Scope: repo (default) or worktree"},
-                {"name": "--worktree-id", "type": "string", "required": false, "description": "Worktree ID (required when scope is worktree)"},
                 {"name": "--via", "type": "string", "required": false, "description": "Where each fire dispatches the prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a fresh self-closing PTY). Defaults via the same precedence as 'worktrees create' (--via > BAND_DISPATCH > config > settings > terminal)."},
                 {"name": "--disabled", "type": "boolean", "required": false, "description": "Create the job in disabled state"},
             ]
@@ -5519,8 +5604,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "cronjobs update",
             "description": "Update an existing cronjob",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (repo name or worktree ID)"},
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Worktree ID the job belongs to"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Move the job to another worktree"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID the job's chat runs"},
+                {"name": "--session-id", "type": "string", "required": false, "description": "Agent session ID the job pins to (chat dispatch only)"},
+                {"name": "--clear-session", "type": "boolean", "required": false, "description": "Stop pinning the job to a session"},
                 {"name": "--name", "type": "string", "required": false, "description": "New name"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "New prompt"},
                 {"name": "--cron", "type": "string", "required": false, "description": "New cron expression"},
@@ -5532,7 +5621,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "cronjobs delete",
             "description": "Delete a cronjob",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (repo name or worktree ID)"},
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Worktree ID the job belongs to"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
             ]
         }),
@@ -5540,7 +5629,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "cronjobs trigger",
             "description": "Manually trigger a cronjob now",
             "parameters": [
-                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (repo name or worktree ID)"},
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Worktree ID the job belongs to"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
             ]
         }),

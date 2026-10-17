@@ -786,6 +786,7 @@ export class FollowService {
     await git(["reset", "-q", "--hard", ...(target ? [target] : [])]);
     await git(["clean", "-q", "-fd"]);
     this.repos.setSupersededBy(old.repo.name, old.worktree.name, old.hostId, null);
+    await workerLeaseService.pushBlockedPaths(old.hostId);
     this.repos.setDivergence(old.repo.name, old.worktree.name, old.hostId, null);
     this.repos.setContinuedFrom(old.repo.name, old.worktree.name, old.hostId, null);
   }

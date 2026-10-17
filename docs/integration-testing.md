@@ -858,6 +858,7 @@ A test that cannot run on a worker passes `remoteHost: false` to `startServer`. 
 - `remote-relay` keeps the hub's own worktree local and starts its own workers.
 - `host-capabilities` starts its own worker with a different `HOME`, and needs the hub's own machine to lack an agent that the worker has.
 - `tokens-auth` counts the hub's host rows, and the worker adds one.
+- `cronjobs-worktree-migration` seeds the hub's own checkouts into the database before the boot and expects the migrated job on the local host's worktree id.
 - The "disabled GitHub plugin" cases in `pr-checks` and `branch-status-pr` count calls to the `gh` stub. A worker probes `gh --version` itself when it starts.
 
 Test files that start the server with their own inline helper, instead of `helpers/server.ts`, always run local. That is about 40 files, most of them the older ones. New tests use the shared helper.

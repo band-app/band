@@ -163,6 +163,9 @@ Restart=always
 RestartSec=5
 # Stopping or restarting the worker must not end the terminals' shells, which run in their own daemon.
 KillMode=process
+# An agent or build the kernel kills for running out of memory dies alone. The default (stop)
+# would stop the whole worker and drop every chat on the host.
+OOMPolicy=continue
 
 [Install]
 WantedBy=default.target

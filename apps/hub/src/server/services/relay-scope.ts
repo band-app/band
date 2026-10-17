@@ -240,7 +240,7 @@ const SCOPE_FROM_HEADERS = new Set([
 
 const MCP_PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
 
-/** The cronjob key is a worktree id for a worktree-scoped job and a repo name for a repo-scoped one. */
+/** The cronjob key is the id of the worktree the job belongs to. */
 const CRONJOB_KEY_PROCEDURES = new Set([
   "cronjobs.create",
   "cronjobs.update",
@@ -604,9 +604,10 @@ function checkSettingsCall(procedure: string, input: unknown, ctx: Ctx): RelayVe
   return { ok: true };
 }
 
-/** The cronjobs of an admin host: any key, any scope. Repo-scoped jobs and jobs on other hosts are audited. */
+/** The cronjobs of an admin host: any worktree on a host it may reach. Jobs on other hosts are audited. */
 function checkAdminCronjob(procedure: string, key: string, ctx: Ctx): RelayVerdict {
   const host = ctx.lookups.hostOfWorktree(key);
+  if (host === null) return deny(404, `${procedure}: No such worktree`);
   if (host === HUB_HOST_ID) {
     return deny(403, `${procedure}: Agents cannot schedule work on the hub's own machine`);
   }
@@ -638,15 +639,25 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
   let named = input;
   if (CRONJOB_KEY_PROCEDURES.has(procedure)) {
     const { key, ...rest } = (input ?? {}) as Record<string, unknown>;
-    if (typeof key !== "string") return deny(400, `${procedure} needs a key`);
-    if (typeof rest.worktreeId === "string" && rest.worktreeId !== key) {
+    // A create names its worktree in `worktreeId`; the others name it as the key.
+    const worktree = procedure === "cronjobs.create" ? (rest.worktreeId ?? key) : key;
+    if (typeof worktree !== "string") {
+      return deny(
+        400,
+        procedure === "cronjobs.create"
+          ? `${procedure} needs a worktreeId`
+          : `${procedure} needs a key`,
+      );
+    }
+    named = { ...rest, worktreeId: worktree };
+    if (typeof rest.worktreeId === "string" && rest.worktreeId !== worktree) {
       return deny(403, `${procedure} names two different worktrees`);
     }
-    if (admin) return checkAdminCronjob(procedure, key, ctx);
-    if (procedure === "cronjobs.create" && rest.scope !== "worktree") {
-      return deny(403, `${procedure} is available to agents for worktree-scoped jobs only`);
+    if (typeof key === "string" && key !== worktree) {
+      return deny(403, `${procedure} names two different worktrees`);
     }
-    named = { ...rest, worktreeId: key };
+    // An admin host may schedule on any worktree of a host it can reach, and the call is audited.
+    if (admin) return checkAdminCronjob(procedure, worktree, ctx);
   }
   if (procedure === "worktrees.create") {
     const { repo, branch, hostId, origin } = (input ?? {}) as Record<string, unknown>;

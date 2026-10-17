@@ -133,12 +133,12 @@ export const reposRouter = t.router({
   // would otherwise return before the cronjob teardown finished and racy
   // `cronjobs.list` reads could see the just-deleted repo's jobs.
   remove: publicProcedure.input(z.object({ name: z.string() })).mutation(({ input }) => {
+    // Read the repo's worktrees before they are gone: a cronjob belongs to a worktree.
+    // Cronjobs live in their own rows + scheduler — not repo state — so this
+    // teardown is composed at the API layer rather than buried inside
+    // `RepoService.remove`.
+    cronjobService.removeForRepo(input.name);
     repoService.remove(input.name);
-
-    // Clean up repo-scoped cronjobs. Cronjobs live in their own files
-    // + scheduler — not repo state — so this teardown is composed at
-    // the API layer rather than buried inside `RepoService.remove`.
-    cronjobService.removeForKey(input.name);
     // Same for the repo's default browser profile mapping.
     browserProfileService.forgetRepo(input.name);
 

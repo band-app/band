@@ -645,6 +645,20 @@ export class ChatPanePage {
     });
   }
 
+  /** Height of the composer's button row (attach, mic, pickers), in CSS px. */
+  async micRowHeight(): Promise<number> {
+    const box = await this.page
+      .getByTestId("prompt-input__actions")
+      .filter({ visible: true })
+      .boundingBox();
+    return box?.height ?? 0;
+  }
+
+  /** Width of the dictation error line, in CSS px. */
+  async micErrorWidth(): Promise<number> {
+    return (await this.micError.boundingBox())?.width ?? 0;
+  }
+
   /** Taps the mic: starts recording, or stops and sends the clip when already recording. */
   async tapMic(): Promise<void> {
     await test.step("Tap the mic", async () => {

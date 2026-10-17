@@ -6,63 +6,62 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     The <code>band cronjobs</code> command group manages scheduled recurring tasks. A
-    cronjob is a saved <code>(cron expression, prompt)</code> pair attached to either a
-    repo or a specific worktree. When the cron expression fires, Band sends the
-    prompt to a chat pane in that scope.
+    cronjob is a saved <code>(cron expression, prompt)</code> pair attached to one
+    worktree: the repo's default-branch worktree or any other. When the cron expression
+    fires, Band sends the prompt to a chat pane in that worktree.
   </p>
 
-  <h2>Storage key &amp; ID</h2>
+  <h2>Worktree &amp; ID</h2>
 
   <p>
-    Every cronjob lives under a <strong>storage key</strong>:
-    a repo name (for repo-scoped jobs) or a worktree ID (for worktree-scoped
-    jobs). Inside that key the cronjob has a generated string ID like
-    <code>cj_1234567890</code>. All update / delete / trigger commands take both the key
-    and the ID.
+    Every cronjob lives under the ID of its worktree, which is the <strong>key</strong> the
+    update, delete and trigger commands take. The cronjob itself has a generated string ID like
+    <code>cj_1234567890</code>. Those commands take both the key and the ID.
   </p>
 
   <h2>List cronjobs</h2>
 
   <pre><code>band cronjobs list
-band cronjobs list --repo my-app           # filter by repo
-band cronjobs list --worktree ws_abc123       # filter by worktree</code></pre>
+band cronjobs list --worktree my-app-main     # filter by worktree</code></pre>
 
   <p>Example output:</p>
 
-  <pre><code>ID              NAME              CRON          SCOPE      STATE     LAST RUN
-cj_1701400000   review-prs        0 9 * * *     repo    enabled   ok
-cj_1701400123   weekly-deps       0 0 * * 1     repo    enabled   ok
-cj_1701400456   integration       0 */6 * * *   worktree  disabled  -</code></pre>
+  <pre><code>ID              NAME         CRON         WORKTREE         AGENT   SESSION  STATE     LAST RUN
+cj_1701400000   review-prs   0 9 * * *    my-app-main      -       -        enabled   completed
+cj_1701400123   weekly-deps  0 0 * * 1    my-app-main      codex   -        enabled   completed
+cj_1701400456   integration  0 */6 * * *  my-app-feat-ci   -       sess-42  disabled  -</code></pre>
 
   <h2>Create a cronjob</h2>
 
   <p>
-    The storage key is positional; everything else is named. <code>--name</code>,
-    <code>--prompt</code>, and <code>--cron</code> are required. The default scope is
-    <code>repo</code>; pass <code>--scope worktree --worktree-id &lt;id&gt;</code>
-    for a worktree-scoped job.
+    <code>--worktree</code>, <code>--name</code>, <code>--prompt</code> and <code>--cron</code>
+    are required. <code>--repo</code> and <code>--scope</code> no longer exist and fail with a
+    message saying a cronjob belongs to a worktree.
   </p>
 
-  <pre><code>band cronjobs create my-app \
+  <pre><code>band cronjobs create \
+  --worktree my-app-main \
   --name "review-prs" \
   --prompt "Review all open pull requests and post a summary" \
   --cron "0 9 * * *"
 
-# Worktree-scoped (key is the worktree ID; --scope and --worktree-id required)
-band cronjobs create ws_abc123 \
-  --scope worktree --worktree-id ws_abc123 \
+# Pinned to a coding agent session
+band cronjobs create \
+  --worktree my-app-feat-ci \
+  --agent codex --session-id sess-42 \
   --name "ci-watch" \
   --prompt "Check CI status and report failures" \
   --cron "*/15 * * * *"</code></pre>
 
   <p>Options:</p>
   <ul>
-    <li><code>key</code> (positional, required) — repo name or worktree ID, depending on scope.</li>
+    <li><code>--worktree &lt;id&gt;</code> — the worktree the job runs in (required).</li>
     <li><code>--name &lt;name&gt;</code> — human-readable name (required).</li>
     <li><code>--prompt &lt;text&gt;</code> — prompt sent to the agent (required).</li>
     <li><code>--cron &lt;expr&gt;</code> — 5-field cron expression (required).</li>
-    <li><code>--scope repo|worktree</code> — defaults to <code>repo</code>.</li>
-    <li><code>--worktree-id &lt;id&gt;</code> — required when scope is <code>worktree</code>.</li>
+    <li><code>--agent &lt;id&gt;</code> — coding agent id from settings. The default agent runs without it.</li>
+    <li><code>--session-id &lt;id&gt;</code> — agent session id. Each run goes to the chat with that session, or opens a new chat on it. A session that cannot be opened fails the run. Chat dispatch only.</li>
+    <li><code>--via chat|terminal</code> — where a run goes.</li>
     <li><code>--disabled</code> — start the job disabled.</li>
   </ul>
 
@@ -79,33 +78,34 @@ band cronjobs create ws_abc123 \
   <h2>Update a cronjob</h2>
 
   <p>
-    Both <code>key</code> and <code>id</code> are positional. Pass any of
-    <code>--name</code>, <code>--prompt</code>, <code>--cron</code>, <code>--enable</code>,
-    or <code>--disable</code>. <code>--enable</code> and <code>--disable</code> are
-    mutually exclusive.
+    Both <code>key</code> (the worktree ID) and <code>id</code> are positional. Pass any of
+    <code>--name</code>, <code>--prompt</code>, <code>--cron</code>, <code>--worktree</code>
+    (moves the job), <code>--agent</code>, <code>--session-id</code>, <code>--clear-session</code>,
+    <code>--enable</code> or <code>--disable</code>. <code>--enable</code> and
+    <code>--disable</code> are mutually exclusive.
   </p>
 
-  <pre><code>band cronjobs update my-app cj_1701400000 \
+  <pre><code>band cronjobs update my-app-main cj_1701400000 \
   --cron "30 8 * * 1-5" \
   --prompt "Review open PRs and check CI status"
 
-band cronjobs update my-app cj_1701400000 --disable</code></pre>
+band cronjobs update my-app-main cj_1701400000 --disable</code></pre>
 
   <h2>Delete a cronjob</h2>
 
   <p>Pending runs are cancelled and the schedule is removed. Both <code>key</code> and <code>id</code> are positional.</p>
 
-  <pre><code>band cronjobs delete my-app cj_1701400123</code></pre>
+  <pre><code>band cronjobs delete my-app-main cj_1701400123</code></pre>
 
   <h2>Trigger a cronjob</h2>
 
   <p>
     Manually fire a cronjob now, regardless of its schedule. This is the same as a normal
-    cron tick — it sends the prompt to the configured chat pane and does not affect the
-    next scheduled run.
+    cron tick — it sends the prompt to the job's chat pane (queued when that chat is mid-turn) and does
+    not affect the next scheduled run.
   </p>
 
-  <pre><code>band cronjobs trigger my-app cj_1701400000</code></pre>
+  <pre><code>band cronjobs trigger my-app-main cj_1701400000</code></pre>
 
   <h2>JSON output</h2>
 
@@ -115,8 +115,9 @@ band cronjobs update my-app cj_1701400000 --disable</code></pre>
   "jobs": [
     {
       "id": "cj_1701400000",
-      "key": "my-app",
-      "scope": "repo",
+      "worktreeId": "my-app-main",
+      "agent": "codex",
+      "sessionId": "sess-42",
       "name": "review-prs",
       "prompt": "Review all open pull requests and post a summary",
       "cronExpression": "0 9 * * *",

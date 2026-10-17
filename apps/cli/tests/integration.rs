@@ -3352,7 +3352,8 @@ fn cronjobs_create_and_list() {
     let output = env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
         "Daily check",
         "--prompt",
@@ -3369,7 +3370,7 @@ fn cronjobs_create_and_list() {
     let job_id = json["job"]["id"].as_str().unwrap();
     assert!(job_id.starts_with("cj_"), "expected cj_ prefix: {job_id}");
     assert_eq!(json["job"]["name"], "Daily check");
-    assert_eq!(json["job"]["scope"], "repo");
+    assert_eq!(json["job"]["worktreeId"], "my-repo-main");
 
     // Verify it shows in list
     let list_output = env.band(&["cronjobs", "list", "--output", "json"]);
@@ -3386,7 +3387,8 @@ fn cronjobs_create_text_output() {
     let output = env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
         "Test job",
         "--prompt",
@@ -3409,7 +3411,8 @@ fn cronjobs_create_invalid_cron_fails() {
     let output = env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
         "Bad cron",
         "--prompt",
@@ -3428,7 +3431,8 @@ fn cronjobs_update_modifies_job() {
     let create_output = env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
         "Original",
         "--prompt",
@@ -3444,7 +3448,14 @@ fn cronjobs_update_modifies_job() {
 
     // Update the name
     let output = env.band(&[
-        "cronjobs", "update", "my-repo", job_id, "--name", "Updated", "--output", "json",
+        "cronjobs",
+        "update",
+        "my-repo-main",
+        job_id,
+        "--name",
+        "Updated",
+        "--output",
+        "json",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -3459,7 +3470,8 @@ fn cronjobs_update_enable_disable() {
     let create_output = env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
         "Toggle test",
         "--prompt",
@@ -3477,7 +3489,7 @@ fn cronjobs_update_enable_disable() {
     let output = env.band(&[
         "cronjobs",
         "update",
-        "my-repo",
+        "my-repo-main",
         job_id,
         "--disable",
         "--output",
@@ -3489,7 +3501,13 @@ fn cronjobs_update_enable_disable() {
 
     // Enable
     let output = env.band(&[
-        "cronjobs", "update", "my-repo", job_id, "--enable", "--output", "json",
+        "cronjobs",
+        "update",
+        "my-repo-main",
+        job_id,
+        "--enable",
+        "--output",
+        "json",
     ]);
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
@@ -3503,7 +3521,8 @@ fn cronjobs_delete_removes_job() {
     let create_output = env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
         "Delete me",
         "--prompt",
@@ -3517,7 +3536,7 @@ fn cronjobs_delete_removes_job() {
     let create_json: serde_json::Value = serde_json::from_str(&stdout(&create_output)).unwrap();
     let job_id = create_json["job"]["id"].as_str().unwrap();
 
-    let output = env.band(&["cronjobs", "delete", "my-repo", job_id]);
+    let output = env.band(&["cronjobs", "delete", "my-repo-main", job_id]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     // Verify it's gone
@@ -3533,38 +3552,46 @@ fn cronjobs_delete_removes_job() {
 #[test]
 fn cronjobs_delete_nonexistent_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["cronjobs", "delete", "my-repo", "cj_nonexistent"]);
+    let output = env.band(&["cronjobs", "delete", "my-repo-main", "cj_nonexistent"]);
     assert!(!output.status.success());
 }
 
 #[test]
-fn cronjobs_list_filter_by_repo() {
+fn cronjobs_list_filter_by_worktree() {
     let env = TestEnv::new();
 
     env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
-        "Proj job",
+        "Main job",
         "--prompt",
         "test",
         "--cron",
         "0 * * * *",
     ]);
 
-    let output = env.band(&["cronjobs", "list", "--repo", "my-repo", "--output", "json"]);
+    let output = env.band(&[
+        "cronjobs",
+        "list",
+        "--worktree",
+        "my-repo-main",
+        "--output",
+        "json",
+    ]);
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
     let jobs = json["jobs"].as_array().expect("jobs array");
     assert_eq!(jobs.len(), 1);
 
-    // Filter by nonexistent repo — should be empty
+    // Filter by another worktree: nothing
     let output = env.band(&[
         "cronjobs",
         "list",
-        "--repo",
-        "nonexistent",
+        "--worktree",
+        "my-repo-other",
         "--output",
         "json",
     ]);
@@ -3575,13 +3602,147 @@ fn cronjobs_list_filter_by_repo() {
 }
 
 #[test]
+fn cronjobs_create_needs_a_worktree() {
+    let env = TestEnv::new();
+    let base = [
+        "cronjobs",
+        "create",
+        "--name",
+        "No tree",
+        "--prompt",
+        "x",
+        "--cron",
+        "0 * * * *",
+    ];
+
+    // No worktree at all.
+    let output = env.band(&base);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("needs a worktree"),
+        "stderr: {}",
+        stderr(&output)
+    );
+
+    // A repo is no longer a target, whether passed as --repo or as a repo scope.
+    for flag in [["--repo", "my-repo"], ["--scope", "repo"]] {
+        let mut args = base.to_vec();
+        args.extend(flag);
+        let output = env.band(&args);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("belong to a worktree"),
+            "stderr: {}",
+            stderr(&output)
+        );
+    }
+    let output = env.band(&["cronjobs", "list", "--repo", "my-repo"]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("belong to a worktree"));
+
+    let list = env.band(&["cronjobs", "list", "--output", "json"]);
+    let json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    assert!(json["jobs"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn cronjobs_agent_and_session_round_trip_and_refusals() {
+    let env = TestEnv::new();
+    let create = env.band(&[
+        "cronjobs",
+        "create",
+        "--worktree",
+        "my-repo-main",
+        "--name",
+        "Pinned",
+        "--prompt",
+        "x",
+        "--cron",
+        "0 * * * *",
+        "--via",
+        "chat",
+        "--session-id",
+        "sess-1",
+        "--output",
+        "json",
+    ]);
+    assert!(create.status.success(), "stderr: {}", stderr(&create));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&create)).unwrap();
+    let job_id = json["job"]["id"].as_str().unwrap().to_string();
+    assert_eq!(json["job"]["sessionId"], "sess-1");
+
+    let list = env.band(&["cronjobs", "list"]);
+    assert!(stdout(&list).contains("sess-1"), "list: {}", stdout(&list));
+
+    let cleared = env.band(&[
+        "cronjobs",
+        "update",
+        "my-repo-main",
+        &job_id,
+        "--clear-session",
+        "--output",
+        "json",
+    ]);
+    assert!(cleared.status.success(), "stderr: {}", stderr(&cleared));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&cleared)).unwrap();
+    assert!(json["job"]["sessionId"].is_null());
+
+    // A session needs chat dispatch.
+    let terminal = env.band(&[
+        "cronjobs",
+        "create",
+        "--worktree",
+        "my-repo-main",
+        "--name",
+        "Bad",
+        "--prompt",
+        "x",
+        "--cron",
+        "0 * * * *",
+        "--via",
+        "terminal",
+        "--session-id",
+        "sess-1",
+    ]);
+    assert!(!terminal.status.success());
+    assert!(
+        stderr(&terminal).contains("via=chat"),
+        "stderr: {}",
+        stderr(&terminal)
+    );
+
+    // An agent that is not configured.
+    let unknown = env.band(&[
+        "cronjobs",
+        "create",
+        "--worktree",
+        "my-repo-main",
+        "--name",
+        "Bad",
+        "--prompt",
+        "x",
+        "--cron",
+        "0 * * * *",
+        "--agent",
+        "no-such-agent",
+    ]);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("Unknown agent"),
+        "stderr: {}",
+        stderr(&unknown)
+    );
+}
+
+#[test]
 fn cronjobs_list_text_output_shows_table() {
     let env = TestEnv::new();
 
     env.band(&[
         "cronjobs",
         "create",
-        "my-repo",
+        "--worktree",
+        "my-repo-main",
         "--name",
         "My Job",
         "--prompt",

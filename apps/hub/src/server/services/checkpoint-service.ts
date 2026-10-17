@@ -1125,6 +1125,11 @@ export class CheckpointService {
       }
       if (worktree.origin) this.repos.setOrigin(repo.name, worktree.name, worktree.origin);
       this.repos.setSupersededBy(repo.name, worktree.name, fromHostId, newId);
+      // Each worker learns its new blocked list now, not at its next timed renewal.
+      await Promise.all([
+        workerLeaseService.pushBlockedPaths(fromHostId),
+        onTarget ? workerLeaseService.pushBlockedPaths(toHostId) : undefined,
+      ]);
       if (isRoot) {
         // The repo lists its default branch from the primary host, which is now the live copy's.
         try {

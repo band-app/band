@@ -468,21 +468,19 @@ describe("cronjobs — labeled chat dispatch", () => {
     server = await startAcpServer({ home: tmpHome, turns: [{ steps: [{ say: "Done" }] }] });
 
     const createRes = await trpcMutate(server.url, "cronjobs.create", {
-      key: "triggerproj",
+      worktreeId: testWorktreeId("triggerproj", "main"),
       name: "Daily check",
       prompt: "Run automated check",
       cronExpression: "0 0 * * *",
-      scope: "repo",
     });
     const data = await trpcData<{ job: { id: string } }>(createRes);
     jobId = data.job.id;
 
     const secondRes = await trpcMutate(server.url, "cronjobs.create", {
-      key: "triggerproj",
+      worktreeId: testWorktreeId("triggerproj", "main"),
       name: "Other check",
       prompt: "Run other automated check",
       cronExpression: "30 0 * * *",
-      scope: "repo",
     });
     const secondData = await trpcData<{ job: { id: string } }>(secondRes);
     secondJobId = secondData.job.id;
@@ -523,7 +521,7 @@ describe("cronjobs — labeled chat dispatch", () => {
     expect(matchingBefore).toHaveLength(0);
 
     const res = await trpcMutate(server.url, "cronjobs.trigger", {
-      key: "triggerproj",
+      key: testWorktreeId("triggerproj", "main"),
       id: jobId,
     });
     expect(res.status).toBe(200);
@@ -548,7 +546,7 @@ describe("cronjobs — labeled chat dispatch", () => {
 
   it("subsequent trigger reuses the same chat (no duplicate creation)", async () => {
     const res = await trpcMutate(server.url, "cronjobs.trigger", {
-      key: "triggerproj",
+      key: testWorktreeId("triggerproj", "main"),
       id: jobId,
     });
     expect(res.status).toBe(200);
@@ -598,7 +596,7 @@ describe("cronjobs — labeled chat dispatch", () => {
 
   it("a second cronjob in the same worktree gets its own chat", async () => {
     const res = await trpcMutate(server.url, "cronjobs.trigger", {
-      key: "triggerproj",
+      key: testWorktreeId("triggerproj", "main"),
       id: secondJobId,
     });
     expect(res.status).toBe(200);
@@ -636,7 +634,7 @@ describe("cronjobs — labeled chat dispatch", () => {
 
     // Next trigger should re-create the chat with the same label.
     const triggerRes = await trpcMutate(server.url, "cronjobs.trigger", {
-      key: "triggerproj",
+      key: testWorktreeId("triggerproj", "main"),
       id: jobId,
     });
     expect(triggerRes.status).toBe(200);

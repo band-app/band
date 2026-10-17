@@ -370,11 +370,10 @@ describe("dev server — parity with prod", () => {
     // of execution; that's a deeper test of croner semantics than the
     // dev-parity scope wants today.
     const createRes = await trpcMutate(server.url, "cronjobs.create", {
-      key: "devtest",
+      worktreeId: "devtest-main",
       name: "Dev parity cron",
       prompt: "noop",
       cronExpression: "0 9 * * 1",
-      scope: "repo",
       enabled: true,
     });
     expect(createRes.status).toBe(200);

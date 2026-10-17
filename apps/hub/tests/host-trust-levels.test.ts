@@ -350,18 +350,18 @@ describe("trust levels", () => {
       expect(send.status).toBe(403);
     });
 
-    it("refuses settings and repo-scoped cronjobs", async () => {
+    it("refuses settings and a cronjob on another host's worktree", async () => {
       expect(
         (await shell.call("trpc", query("settings.get", undefined), undefined, "GET")).status,
       ).toBe(403);
       const job = await shell.call("trpc", "/trpc/cronjobs.create", {
-        key: "proj",
+        worktreeId: wt("proj", "seed-b", b),
         name: "r",
         prompt: "p",
         cronExpression: "0 0 1 1 *",
-        scope: "repo",
       });
       expect(job.status).toBe(403);
+      expect(message(job)).toContain("is not on this host");
     });
   });
 
@@ -387,11 +387,10 @@ describe("trust levels", () => {
       expect(create.status).toBe(403);
       expect(message(create)).toContain("restricted");
       const job = await shell.call("trpc", "/trpc/cronjobs.create", {
-        key: wt("proj", "seed-a", a),
+        worktreeId: wt("proj", "seed-a", a),
         name: "j",
         prompt: "p",
         cronExpression: "0 0 1 1 *",
-        scope: "worktree",
       });
       expect(job.status).toBe(403);
       expect(message(job)).toContain("restricted");
@@ -466,7 +465,7 @@ describe("trust levels", () => {
       expect(sendChat.status).toBe(200);
     });
 
-    it("creates a worktree on another host and a repo-scoped cronjob", async () => {
+    it("creates a worktree and a cronjob on another host", async () => {
       const create = await shell.call("trpc", "/trpc/worktrees.create", {
         repo: "proj",
         branch: "made-by-a",
@@ -480,21 +479,11 @@ describe("trust levels", () => {
         .flatMap((r) => r.worktrees)
         .find((w) => w.worktreeId === wt("proj", "made-by-a", b));
       expect(worktree?.hostId).toBe(b.hostId);
-      const job = await shell.call("trpc", "/trpc/cronjobs.create", {
-        key: "proj",
-        name: "repo job",
-        prompt: "p",
-        cronExpression: "0 0 1 1 *",
-        scope: "repo",
-      });
-      expect(job.status, job.body).toBe(200);
       const bJob = await shell.call("trpc", "/trpc/cronjobs.create", {
-        key: wt("proj", "seed-b", b),
         worktreeId: wt("proj", "seed-b", b),
         name: "b job",
         prompt: "p",
         cronExpression: "0 0 1 1 *",
-        scope: "worktree",
       });
       expect(bJob.status, bJob.body).toBe(200);
       const removed = await shell.call("trpc", "/trpc/worktrees.remove", {
@@ -581,12 +570,10 @@ describe("trust levels", () => {
           "cronjobs.create",
           "/trpc/cronjobs.create",
           {
-            key: hubWorktree,
             worktreeId: hubWorktree,
             name: "hub job",
             prompt: "p",
             cronExpression: "0 0 1 1 *",
-            scope: "worktree",
           },
           "POST",
         ],

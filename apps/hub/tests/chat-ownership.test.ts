@@ -273,11 +273,9 @@ describe("requests from the hub side (S4)", () => {
 
   it("runs a cron job's prompt on the worker", async () => {
     const created = await w.m<{ job: { id: string } }>("cronjobs.create", {
-      key: wt,
       name: "Owned cron",
       prompt: "cron job prompt",
       cronExpression: "0 0 1 1 *",
-      scope: "worktree",
       worktreeId: wt,
     });
     const fired = await w.m<{ chatId: string }>("cronjobs.trigger", {

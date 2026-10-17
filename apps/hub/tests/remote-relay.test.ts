@@ -909,6 +909,7 @@ describe("the band CLI through the relay (S2)", () => {
     const job = await json(
       "cronjobs",
       "create",
+      "--worktree",
       ws,
       "--name",
       "relay-job",
@@ -916,10 +917,6 @@ describe("the band CLI through the relay (S2)", () => {
       "check",
       "--cron",
       "0 0 1 1 *",
-      "--scope",
-      "worktree",
-      "--worktree-id",
-      ws,
       "--via",
       "chat",
       "--output",

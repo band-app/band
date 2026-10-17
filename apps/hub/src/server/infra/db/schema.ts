@@ -499,6 +499,15 @@ export const cronjobs = sqliteTable("cronjobs", {
   // fire. Used as the overlap-check handle: if this PTY is still alive when the
   // next tick fires, the run is skipped rather than launching a second agent.
   lastTerminalId: text("last_terminal_id"),
+  // The coding agent (`settings.codingAgents[].id`) the job's chat runs. Null
+  // means the default agent.
+  agent: text("agent"),
+  // The agent's provider session id. When set, every fire goes to the chat
+  // whose active session is this id.
+  sessionId: text("session_id"),
+  // Why the last run failed, or why the job was disabled by the boot migration
+  // of repo-scoped jobs. The cronjobs page shows it.
+  lastRunMessage: text("last_run_message"),
   hostId: hostId(),
 });
 
