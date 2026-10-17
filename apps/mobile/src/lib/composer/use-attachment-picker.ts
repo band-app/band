@@ -17,16 +17,11 @@ import {
   rejectionMessage,
   resolveMediaType,
 } from "./attachments";
+import { blobToBase64 } from "./blob-bytes";
 
 /** Reads a picked file as base64 through fetch and FileReader, which React Native supports for file URIs. */
 async function readBase64(uri: string): Promise<string> {
-  const blob = await (await fetch(uri)).blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Couldn't read the file."));
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
-    reader.readAsDataURL(blob);
-  });
+  return blobToBase64(await (await fetch(uri)).blob());
 }
 
 function accept(

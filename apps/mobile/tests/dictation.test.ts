@@ -163,6 +163,54 @@ describe("uploadClip", () => {
 
   const clip = (bytes: string) => async () => new Blob([bytes]);
 
+  // React Native's Blob has `size` and `type`, and only FileReader can read it.
+  class RnBlob {
+    readonly size: number;
+    readonly type = "";
+    readonly data: Buffer;
+    constructor(data: Buffer) {
+      this.data = data;
+      this.size = data.length;
+    }
+  }
+  class RnFileReader {
+    result: string | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    readAsDataURL(blob: RnBlob | Blob): void {
+      const data =
+        "data" in blob ? Promise.resolve(blob.data) : blob.arrayBuffer().then(Buffer.from);
+      void data.then((buf) => {
+        this.result = `data:application/octet-stream;base64,${buf.toString("base64")}`;
+        this.onload?.();
+      });
+    }
+  }
+  // Node has no FileReader. The shim reads only what React Native's FileReader reads.
+  const realFileReader = globalThis.FileReader;
+  before(() => {
+    globalThis.FileReader = RnFileReader as unknown as typeof FileReader;
+  });
+  after(() => {
+    globalThis.FileReader = realFileReader;
+  });
+
+  it("reads a Blob that only FileReader can read and sends exactly its bytes", async () => {
+    seen.length = 0;
+    {
+      const bytes = Buffer.from([0, 0, 0, 0x20, 0x66, 0x74, 0x79, 0x70, 0xff, 0x80, 0x00, 0x7f]);
+      const text = await uploadClip({
+        hubUrl: url,
+        token: "bdt_secret",
+        uri: "file:///var/clip.m4a",
+        readClip: async () => new RnBlob(bytes) as unknown as Blob,
+      });
+      assert.equal(text, "Fix the login bug");
+      assert.equal(seen[0]?.type, "audio/mp4");
+      assert.deepEqual(seen[0]?.body, bytes);
+    }
+  });
+
   it("posts the raw clip to the hub with the Bearer token and the clip's type", async () => {
     seen.length = 0;
     const text = await uploadClip({
