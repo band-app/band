@@ -1,7 +1,7 @@
-# The "..." button under a message opens its actions (web's message actions: Copy, and when it was sent).
+# The copy button under a message copies it at once and shows a check, like the web's message actions.
 # A long press on the text selects a range instead, see c7-select.yaml.
 appId: app.getband.mobile
-name: S4 the message menu opens the message actions
+name: S5 the copy button copies the message
 ---
 - runFlow: subflows/pair-link.yaml
 - runFlow:
@@ -18,18 +18,15 @@ name: S4 the message menu opens the message actions
     direction: UP
     timeout: 20000
 - tapOn:
-    id: chat__message-menu
+    id: chat__message-copy
     below:
       text: "showcase: fix the parser radix"
-# The sheet shows when the message was sent, and Copy.
+# No sheet opens; the icon turns into a check.
+- assertNotVisible:
+    text: "Cancel"
 - assertVisible:
-    text: "Copy"
-- assertVisible:
-    text: ".*(just now|ago)"
-- takeScreenshot: s4-actions
-- tapOn:
-    text: "Copy"
-- takeScreenshot: s4-copied
+    id: chat__message-copy
+- takeScreenshot: s5-copied
 - runScript:
     file: scripts/hub-control.js
     env:

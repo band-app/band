@@ -4,10 +4,12 @@ import {
   getMentionContext,
   type SlashCommandSkill,
 } from "@band-app/client/composer";
+import { File, SquareSlash } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
+import { Icon } from "../icon";
 
 /** What picking a suggestion does to the composer's text. */
 export interface SuggestionResult {
@@ -78,17 +80,20 @@ function SlashList({
           style={styles.row}
           testID={`suggestions__command-${skill.name}`}
         >
-          <View style={styles.line}>
-            <Text style={styles.name}>/{skill.name}</Text>
-            {skill.argumentHint ? (
-              <Text style={styles.hint} numberOfLines={1}>
-                {skill.argumentHint}
-              </Text>
-            ) : null}
+          <Icon icon={SquareSlash} color={colors.mutedForeground} />
+          <View style={styles.rowText}>
+            <View style={styles.line}>
+              <Text style={styles.name}>/{skill.name}</Text>
+              {skill.argumentHint ? (
+                <Text style={styles.hint} numberOfLines={1}>
+                  {skill.argumentHint}
+                </Text>
+              ) : null}
+            </View>
+            <Text style={styles.description} numberOfLines={1}>
+              {skill.description}
+            </Text>
           </View>
-          <Text style={styles.description} numberOfLines={1}>
-            {skill.description}
-          </Text>
         </Pressable>
       ))}
     </Panel>
@@ -151,12 +156,15 @@ function FileList({
             style={styles.row}
             testID={`suggestions__file-${path}`}
           >
-            <Text style={styles.name} numberOfLines={1}>
-              {path.split("/").pop() || path}
-            </Text>
-            <Text style={styles.description} numberOfLines={1}>
-              {path}
-            </Text>
+            <Icon icon={File} color={colors.mutedForeground} />
+            <View style={styles.rowText}>
+              <Text style={styles.name} numberOfLines={1}>
+                {path.split("/").pop() || path}
+              </Text>
+              <Text style={styles.description} numberOfLines={1}>
+                {path}
+              </Text>
+            </View>
           </Pressable>
         ))
       )}
@@ -192,7 +200,14 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   scroll: { maxHeight: 220 },
-  row: { gap: 2, paddingHorizontal: 12, paddingVertical: 9 },
+  row: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  rowText: { flex: 1, gap: 2 },
   line: { alignItems: "baseline", flexDirection: "row", gap: 8 },
   name: { color: colors.foreground, fontSize: 15, fontWeight: "600" },
   hint: { color: colors.mutedForeground, flexShrink: 1, fontSize: 12 },
