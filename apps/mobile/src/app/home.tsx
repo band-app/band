@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
+  Alert,
   AppState,
   Pressable,
   RefreshControl,
@@ -19,6 +20,7 @@ import { avatarColor, initials, RepoAvatar } from "../components/repo-avatar";
 import { StartSheet } from "../components/start-sheet";
 import { Button } from "../components/ui";
 import { WorktreeRowView } from "../components/worktree-row";
+import { canDelete, deleteFailure, deletePrompt, removeRequest } from "../lib/deleting";
 import { SessionGate, useHubSession } from "../lib/hub-session";
 import { useHubs } from "../lib/hubs-context";
 import { effectiveLabelFilter } from "../lib/label-filter";
@@ -26,7 +28,14 @@ import { resetTo } from "../lib/navigation";
 import { pinRequest } from "../lib/pinning";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
 import { useGroupBy } from "../lib/use-group-by";
-import { useHosts, useLabels, usePinWorktree, useRepos, useStatusFeed } from "../lib/use-hub-data";
+import {
+  useHosts,
+  useLabels,
+  usePinWorktree,
+  useRemoveWorktree,
+  useRepos,
+  useStatusFeed,
+} from "../lib/use-hub-data";
 import { useLabelFilter } from "../lib/use-label-filter";
 import {
   buildSections,
@@ -59,6 +68,8 @@ function WorktreeList() {
   const labels = useLabels();
   const [storedLabel, setLabelFilter] = useLabelFilter();
   const pin = usePinWorktree();
+  const remove = useRemoveWorktree();
+  const [deleting, setDeleting] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -135,17 +146,57 @@ function WorktreeList() {
     );
   }, [labelList, setLabelFilter]);
 
+  const confirmDelete = useCallback(
+    (row: WorktreeRow) => {
+      const prompt = deletePrompt(row);
+      Alert.alert(prompt.title, prompt.message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: prompt.confirm,
+          style: "destructive",
+          onPress: () => {
+            setDeleting((ids) => new Set(ids).add(row.id));
+            remove.mutate(removeRequest(row), {
+              onError: (error) => {
+                const failure = deleteFailure(row, error);
+                Alert.alert(failure.title, failure.message);
+              },
+              onSettled: () =>
+                setDeleting((ids) => {
+                  const next = new Set(ids);
+                  next.delete(row.id);
+                  return next;
+                }),
+            });
+          },
+        },
+      ]);
+    },
+    [remove],
+  );
+
   const rowActions = useCallback(
     (row: WorktreeRow) => {
-      const options = [row.pinned ? "Unpin" : "Pin", "Cancel"];
+      const deletable = canDelete(row);
+      const options = [
+        row.pinned ? "Unpin" : "Pin",
+        ...(deletable ? ["Delete worktree"] : []),
+        "Cancel",
+      ];
       ActionSheetIOS.showActionSheetWithOptions(
-        { title: row.name, options, cancelButtonIndex: 1 },
+        {
+          title: row.name,
+          options,
+          cancelButtonIndex: options.length - 1,
+          ...(deletable ? { destructiveButtonIndex: 1 } : {}),
+        },
         (index) => {
           if (index === 0) pin.mutate(pinRequest(row, !row.pinned));
+          else if (deletable && index === 1) confirmDelete(row);
         },
       );
     },
-    [pin],
+    [pin, confirmDelete],
   );
 
   const loading = repos.isPending || !clientStateReady;
@@ -266,6 +317,7 @@ function WorktreeList() {
             first={(section.kind === "pinned" || section.kind === "origin") && index === 0}
             last={index === section.data.length - 1}
             onPress={() => router.push({ pathname: "/worktree/[id]", params: { id: item.id } })}
+            deleting={deleting.has(item.id)}
             onLongPress={() => rowActions(item)}
           />
         )}

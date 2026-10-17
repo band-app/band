@@ -1,0 +1,93 @@
+# S1 to S4: the History button lists the chat's past sessions newest first and marks the current
+# one. The older session opens with its messages and the next message continues it. New session
+# empties the chat and the next message starts another session. A chat with no sessions says so.
+appId: app.getband.mobile
+name: Session history lists, switches and starts sessions
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-sessions
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+# The header's chat title is also "second session: beta", so messages are checked inside the list.
+- assertVisible:
+    text: "second session: beta"
+    childOf:
+      id: chat__list
+- tapOn:
+    id: composer__input
+- tapOn:
+    id: chat__history
+- extendedWaitUntil:
+    visible:
+      id: session-history__list
+    timeout: 10000
+# Newest first: the second session is on top and is the current one.
+- assertVisible:
+    id: session-history__current
+- takeScreenshot: m9-sheet
+- tapOn: "first session: alpha"
+- extendedWaitUntil:
+    notVisible:
+      id: session-history
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: "first session: alpha"
+      childOf:
+        id: chat__list
+    timeout: 15000
+- assertNotVisible:
+    text: "second session: beta"
+    childOf:
+      id: chat__list
+- takeScreenshot: m9-older
+- tapOn:
+    id: composer__input
+- inputText: "continue the first"
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible: "continue the first"
+    timeout: 15000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt-session?wt=gamma-sessions&which=first
+      VALUE: "continue the first"
+# New session: the chat empties and the next message goes to a new session.
+- tapOn:
+    id: composer__input
+- tapOn:
+    id: chat__history
+- extendedWaitUntil:
+    visible:
+      id: session-history__new
+    timeout: 10000
+- tapOn:
+    id: session-history__new
+- extendedWaitUntil:
+    visible:
+      id: chat__empty
+    timeout: 15000
+- takeScreenshot: m9-new
+- tapOn:
+    id: composer__input
+- inputText: "start fresh"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible: "start fresh"
+    timeout: 15000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt-session?wt=gamma-sessions&which=new
+      VALUE: "start fresh"

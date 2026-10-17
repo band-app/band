@@ -17,9 +17,13 @@ import { join } from "node:path";
 import { expectRerun, finishBuild, startGhStub } from "./checks.mjs";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
 import {
+  acpRequests,
   addSubscription,
   chatSubscriptions,
   fillWorktrees,
+  findWorktree,
+  makePlainRepo,
+  makeWorktree,
   receivedPrompts,
   seedHub,
   sessionState,
@@ -36,7 +40,7 @@ import {
 } from "./seed.mjs";
 import { explorerChange } from "./seed-explorer.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
-import { createRunTmp, removeOnExit } from "./run-tmp.ts";
+import { createRunTmp, maestroTmpEnv, removeOnExit, sweepStaleMaestroOutput } from "./run-tmp.ts";
 import { hubIdFor } from "../src/lib/hub-store.ts";
 import { buildRows, copyText } from "../src/lib/chat/rows.ts";
 import { sessionPickers } from "@band-app/client/session-pickers";
@@ -364,17 +368,53 @@ function startControlServer(hub, chats, udid, notes) {
           if (!hit) throw new Error(`no prompt holding ${JSON.stringify(want)}${image ? " with an image part" : ""}; got ${JSON.stringify(receivedPrompts(hub))}`);
           notes.push(`agent received ${JSON.stringify(want)}: part types ${hit.types.join(", ")}`);
         }
+      } else if (url.pathname === "/expect-prompt-session") {
+        // The last prompt holding `value` went to the session of the seeded prompt `which=first`
+        // ("first session: alpha"), or to one of neither seeded session (`which=new`).
+        const prompts = acpRequests(hub).filter((r) => r.method === "session/prompt");
+        const textOf = (r) => (r.params?.prompt ?? []).map((p) => p.text ?? "").join("\n");
+        const sessionOf = (text) => prompts.find((r) => textOf(r).includes(text))?.params?.sessionId;
+        const first = sessionOf("first session: alpha");
+        const second = sessionOf("second session: beta");
+        const hit = prompts.filter((r) => textOf(r).includes(url.searchParams.get("value") ?? "")).at(-1);
+        if (!hit) throw new Error("the agent received no such prompt");
+        const got = hit.params.sessionId;
+        const which = url.searchParams.get("which");
+        if (which === "first" && got !== first) throw new Error(`prompt went to ${got}, not the first session ${first}`);
+        if (which === "new" && (got === first || got === second)) throw new Error(`prompt went to the old session ${got}`);
+        notes.push(`prompt went to session ${got} (${which})`);
       } else if (url.pathname === "/expect-model") {
         // `chats.sessionState` reports the model the user picked.
         const pickers = sessionPickers(await sessionState(hub, chats, wt));
         const want = url.searchParams.get("value") ?? "";
         if (pickers.model !== want) throw new Error(`the session's model is ${pickers.model}, not ${want}`);
         notes.push(`${wt}: chats.sessionState model ${pickers.model}, mode ${pickers.mode}`);
+      } else if (url.pathname === "/expect-mode") {
+        // `chats.sessionState` reports the mode the user picked in the drawer.
+        const pickers = sessionPickers(await sessionState(hub, chats, wt));
+        const want = url.searchParams.get("value") ?? "";
+        if (pickers.mode !== want) throw new Error(`the session's mode is ${pickers.mode}, not ${want}`);
+        notes.push(`${wt}: chats.sessionState mode ${pickers.mode}`);
       } else if (url.pathname === "/session-commands") {
         const names = ((await sessionState(hub, chats, wt))?.commands ?? []).map((c) => `/${c.name}`);
         notes.push(`${wt}: slash commands from the hub: ${names.join(" ")}`);
         const want = url.searchParams.get("value");
         if (want && !want.split(",").every((n) => names.includes(n))) throw new Error(`hub commands ${names}, expected ${want}`);
+      } else if (url.pathname === "/make-worktree") {
+        await makeWorktree(hub, url.searchParams.get("repo") ?? "alpha", url.searchParams.get("branch") ?? "", url.searchParams.get("dirty") === "1");
+      } else if (url.pathname === "/make-plain") {
+        await makePlainRepo(hub, url.searchParams.get("name") ?? "plain");
+      } else if (url.pathname === "/expect-worktree") {
+        // present=1 fails unless repos.list holds the worktree, present=0 fails if it does;
+        // file=<name> also fails unless that file is still in the worktree's folder.
+        const repo = url.searchParams.get("repo") ?? "";
+        const name = url.searchParams.get("name") ?? "";
+        const want = url.searchParams.get("present") !== "0";
+        const found = await findWorktree(hub, repo, name);
+        notes.push(`${repo}/${name}: repos.list ${found ? "holds" : "does not hold"} it`);
+        if (Boolean(found) !== want) throw new Error(`${repo}/${name} ${found ? "is" : "is not"} in repos.list`);
+        const file = url.searchParams.get("file");
+        if (file && found && !existsSync(join(found.path, file))) throw new Error(`${file} is gone from ${found.path}`);
       } else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
       else if (url.pathname === "/sleep") {
         await new Promise((r) => setTimeout(r, Number(url.searchParams.get("ms") ?? 1000)));
@@ -430,10 +470,14 @@ function stamp() {
 }
 
 async function main() {
-  // Maestro's xcodebuild output (about 200 MB per flow) goes to TMPDIR, so give it a dir of this run's own.
+  const swept = sweepStaleMaestroOutput();
+  if (swept.removed) {
+    console.log(`Removed ${swept.removed} stale Maestro output folder(s), ${(swept.bytes / 1e6).toFixed(0)} MB.`);
+  }
+  // Maestro's xcodebuild output (about 200 MB per flow) goes to the JVM's temp dir, so give it a dir of this run's own.
   const runTmp = createRunTmp();
   removeOnExit(runTmp);
-  const env = { ...toolEnv(), TMPDIR: runTmp.dir };
+  const env = { ...toolEnv(), ...maestroTmpEnv(runTmp.dir, process.env) };
   requireTool("xcrun", "Install Xcode and its command line tools.", env);
   requireTool("maestro", "See the one-time setup in .claude/skills/mobile-verify/SKILL.md.", env);
   requireTool("java", "brew install openjdk@17", env);
