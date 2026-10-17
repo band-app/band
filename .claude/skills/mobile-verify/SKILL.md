@@ -65,6 +65,25 @@ Check each tool first and install only what is missing. All of it is user space 
      token `wrong-token.yaml` types, and fails when the log search found under 10 lines;
    - stops the hub and deletes its temp home.
 
+   Temp files: Maestro is a JVM program and on macOS Java ignores `TMPDIR`, so the script gives
+   it a per-run dir through both `TMPDIR` and `MAESTRO_OPTS=-Djava.io.tmpdir=<dir>`, and deletes
+   that dir when the run ends. At the start it also removes `maestro_xctestrunner_xcodebuild_output*`
+   folders in the system temp dir that are over 2 hours old (leftovers of a crashed run) and logs
+   how many. Each folder is about 1 GB.
+
+   Shared lock: parallel iOS builds and simulator runs have filled the disk twice. Before any iOS
+   build or simulator run, take the lock yourself (`verify.mjs` does not take it, so a caller
+   holding it cannot deadlock) and release it when done:
+
+   ```bash
+   until mkdir /tmp/band-ios-sim.lock 2>/dev/null; do sleep 30; done
+   echo "$BAND_WORKTREE_ID $$" > /tmp/band-ios-sim.lock/owner
+   # ... build / verify.mjs ...
+   rm -rf /tmp/band-ios-sim.lock
+   ```
+
+   Also check `df -h /System/Volumes/Data` and wait while under 8 GB is free.
+
    The first native build takes 5 to 20 minutes (on top of `pnpm install` in a fresh worktree). Later runs with no native change can skip it:
    `node apps/mobile/scripts/verify.mjs --skip-build`. A JS-only change still needs a build,
    because Release embeds the bundle.
