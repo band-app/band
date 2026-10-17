@@ -1,5 +1,5 @@
 /**
- * What a long press on a chat row offers, and the time it shows. The web's message actions are
+ * What the message menu on a chat row offers, and the time it shows. The web's message actions are
  * Copy and the time sent (`MessageActions.tsx`); the phone shows both in one native action sheet.
  */
 

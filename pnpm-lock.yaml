@@ -8365,12 +8365,6 @@ packages:
     resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
     peerDependencies:
       react: ^19.2.4
-  react-native-uitextview@2.7.1:
-    resolution: {integrity: sha512-BT4agx2Gg/idbbqUyCudg/Ml0qB7ar0pwKImgSrzspPAaYNCz6fFh9zypF0GUMGUbGrrlq1PHtXHh1oTSXCYkg==}
-    peerDependencies:
-      react: '*'
-      react-native: '>=0.81.5'
-
 
   react-fast-compare@3.2.2:
     resolution: {integrity: sha512-nsO+KSNgo1SbJqJEYRE9ERzo7YtYbou/OqjSQKxV7jcKox7+usiUVZOAC+XnDOABXggQTno0Y1CpVnuWEc1boQ==}
@@ -8431,6 +8425,12 @@ packages:
     peerDependencies:
       react: '*'
       react-native: '*'
+
+  react-native-uitextview@2.7.1:
+    resolution: {integrity: sha512-BT4agx2Gg/idbbqUyCudg/Ml0qB7ar0pwKImgSrzspPAaYNCz6fFh9zypF0GUMGUbGrrlq1PHtXHh1oTSXCYkg==}
+    peerDependencies:
+      react: '*'
+      react-native: '>=0.81.5'
 
   react-native-worklets@0.13.0:
     resolution: {integrity: sha512-1OrhAeAKaZF4XrBa4YbPQbKzNOpjh52HDlId8e6ete1OCHNdAlrQHzG4gznJ225EAj3dgQXHViJvK51M9B52jQ==}
@@ -19164,11 +19164,6 @@ snapshots:
   react-dom@19.2.4(react@19.2.4):
     dependencies:
       react: 19.2.4
-  react-native-uitextview@2.7.1(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
-    dependencies:
-      react: 19.2.3
-      react-native: 0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3)
-
       scheduler: 0.27.0
 
   react-fast-compare@3.2.2: {}
@@ -19229,6 +19224,11 @@ snapshots:
       react: 19.2.3
       react-native: 0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3)
       warn-once: 0.1.1
+
+  react-native-uitextview@2.7.1(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
+    dependencies:
+      react: 19.2.3
+      react-native: 0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3)
 
   react-native-worklets@0.13.0(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3):
     dependencies:

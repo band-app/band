@@ -83,7 +83,7 @@ export function buildRows(messages: readonly ChatMessage[], streaming: boolean):
   return rows;
 }
 
-/** What a long press on a row copies: the message's text, as the web's copy button does. */
+/** What the message menu on a row copies: the message's text, as the web's copy button does. */
 export function copyText(row: ChatRow): string {
   if (row.kind === "user") return row.message.text.trim();
   if (row.kind === "thinking") return "";
