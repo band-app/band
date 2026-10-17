@@ -156,11 +156,12 @@ A release publishes the desktop DMGs, the Homebrew cask, `@band-app/server` and 
 
 ### How the release workflow runs
 
-`release.yml` is started by hand (Actions > Release > Run workflow) and has three jobs in a chain:
+`release.yml` is started by hand (Actions > Release > Run workflow) and has these jobs:
 
 1. **Build (macOS).** Checks the gate, determines the version, builds the UI and hub, then builds, signs and notarizes the DMG. It uploads the DMGs, the zips, `latest-mac.yml`, the hub bundle and the built UI as artifacts.
 2. **Publish (Linux).** Downloads those artifacts, pushes the tag, creates the GitHub release, publishes `@band-app/server` and `@band-app/worker` to npm, and updates the Homebrew cask. The tag is pushed only after the signed build succeeded.
 3. **Images.** Builds the two images from the tag.
+4. **Mobile.** Runs after Publish. Builds the iOS app with the release version and submits it to TestFlight, and builds the Android preview APK, both through EAS with the `EXPO_TOKEN` secret. The `mobile` input is `auto` (only when `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml` changed since the previous release tag), `always` or `skip`. The build links go in the job summary and the release notes. A failure here leaves the rest of the release shipped. App Store review stays manual.
 
 Both of the first two jobs use the `production` environment, so the signing, npm and tap secrets stay with the jobs that need them.
 
