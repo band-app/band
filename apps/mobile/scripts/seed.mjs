@@ -276,6 +276,8 @@ export const WORKTREES = {
   GAMMA_PASTE: "gamma-paste",
   GAMMA_SUGGEST: "gamma-suggest",
   GAMMA_SESSION: "gamma-session",
+  /** The + drawer flow (attachment actions and the mode). */
+  GAMMA_DRAWER: "gamma-drawer",
   GAMMA_KEYBOARD: "gamma-keyboard",
   /** Empty chats for the interaction flows: permission allow and reject, the form, the plan, the listening pill. */
   GAMMA_PERMIT_ALLOW: "gamma-permit-allow",
@@ -387,7 +389,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "paste", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "paste", "suggest", "session", "drawer", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -641,4 +643,28 @@ export async function waitFor(check, what, timeoutMs = 15_000) {
     await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error(`timed out waiting for ${what}`);
+}
+
+/** Adds a worktree to a repo for the delete flows; `dirty` leaves an uncommitted file in it. */
+export async function makeWorktree(state, repo, branch, dirty) {
+  await trpc(state, "worktrees.create", { repo, branch });
+  if (!dirty) return;
+  const { repos } = await trpcQuery(state, "repos.list", {});
+  const wt = repos.find((r) => r.name === repo)?.worktrees.find((w) => w.name === branch);
+  if (!wt) throw new Error(`${repo}/${branch} is not in repos.list`);
+  writeFileSync(join(wt.path, "unsaved.txt"), "not committed\n");
+}
+
+/** Registers a plain (non-git) folder as the repo `name`. */
+export async function makePlainRepo(state, name) {
+  const dir = join(state.home, "repos", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "notes.txt"), "plain\n");
+  await trpc(state, "repos.add", { path: dir });
+}
+
+/** Whether `repos.list` holds the worktree, and the path it has, for the delete flows. */
+export async function findWorktree(state, repo, name) {
+  const { repos } = await trpcQuery(state, "repos.list", {});
+  return repos.find((r) => r.name === repo)?.worktrees.find((w) => w.name === name) ?? null;
 }

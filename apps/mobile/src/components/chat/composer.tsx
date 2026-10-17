@@ -5,9 +5,9 @@ import { insertAtSelection } from "@band-app/shared/dictation-text";
 import * as Clipboard from "expo-clipboard";
 import { useCallback, useRef, useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   Image,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,12 +17,14 @@ import {
 } from "react-native";
 import { type Attachment, toWireFiles } from "../../lib/composer/attachments";
 import { useAttachmentPicker } from "../../lib/composer/use-attachment-picker";
+import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { useDictation } from "../../lib/composer/use-dictation";
 import { useDraft } from "../../lib/composer/use-draft";
 import { colors, useScheme } from "../../theme";
 import { Glass, MicGlyph, PlusGlyph } from "../glass";
 import { ChatHeader } from "./chat-header";
 import { ComposerSuggestions } from "./composer-suggestions";
+import { PlusDrawer } from "./plus-drawer";
 
 const MAX_ATTACHMENTS = 10;
 
@@ -30,8 +32,8 @@ const MAX_ATTACHMENTS = 10;
  * The message box at the bottom of a chat, a floating rounded bar: + on the left, a field that
  * grows, and one button that sends, or stops the running turn when the field is empty. Focused,
  * it expands into a card above the keyboard with the attachment chips over the text and the model
- * and mode pills beside +. Attachments come from the photo library, camera or files, `/` and `@`
- * suggestions open above it. Return adds a line; only the button sends.
+ * pill beside +. + opens a drawer with the attachment actions (photo library, camera, files) and
+ * the agent's mode. `/` and `@` suggestions open above it. Return adds a line; only the button sends.
  */
 export function Composer({
   worktreeId,
@@ -53,6 +55,8 @@ export function Composer({
   const scheme = useScheme();
   const [focused, setFocused] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const modeChoice = useConfigChoice(setConfigOption);
   const [text, setText] = useDraft(worktreeId);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [hint, setHint] = useState<string | null>(null);
@@ -86,7 +90,7 @@ export function Composer({
   const transcribing = dictation.state.phase === "transcribing";
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
-  const expanded = focused || sheetOpen || attachments.length > 0;
+  const expanded = focused || sheetOpen || drawerOpen || attachments.length > 0;
 
   const submit = useCallback(async () => {
     if (!canSend) return;
@@ -133,32 +137,36 @@ export function Composer({
     await addFrom(picker.pasted);
   }, [addFrom, picker]);
 
-  const openAttachMenu = useCallback(async () => {
-    let hasImage = false;
-    try {
-      hasImage = await Clipboard.hasImageAsync();
-    } catch {}
-    const options = ["Photo library", "Take photo", "Choose file", "Paste image", "Cancel"];
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options,
-        cancelButtonIndex: 4,
-        disabledButtonIndices: hasImage ? [] : [3],
-      },
-      (index) => {
-        if (index === 0) void addFrom(picker.photos);
-        else if (index === 1) void addFrom(picker.camera);
-        else if (index === 2) void addFrom(picker.files);
-        else if (index === 3) void pasteImage();
-      },
-    );
-  }, [addFrom, picker, pasteImage]);
+  // Whether the drawer's Paste image action is enabled, checked each time the drawer opens.
+  const [drawerHasImage, setDrawerHasImage] = useState(false);
+  // The keyboard closes first, so the drawer rises over the chat instead of fighting the input.
+  const openDrawer = useCallback(() => {
+    Keyboard.dismiss();
+    setDrawerHasImage(false);
+    setDrawerOpen(true);
+    Clipboard.hasImageAsync().then(setDrawerHasImage, () => setDrawerHasImage(false));
+  }, []);
+  // iOS cannot present a picker while the drawer's modal is still on screen, so the pick waits
+  // for the modal's dismissal.
+  const afterDrawer = useRef<(() => void) | null>(null);
+  const pickFrom = useCallback(
+    (pick: () => Promise<Attachment[]>) => {
+      afterDrawer.current = () => void addFrom(pick);
+      setDrawerOpen(false);
+    },
+    [addFrom],
+  );
+  const onDrawerDismissed = useCallback(() => {
+    const next = afterDrawer.current;
+    afterDrawer.current = null;
+    next?.();
+  }, []);
 
   const plus = (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Attach"
-      onPress={() => void openAttachMenu()}
+      onPress={openDrawer}
       hitSlop={8}
       style={[styles.plus, expanded && styles.plusSmall]}
       testID="composer__attach"
@@ -329,6 +337,18 @@ export function Composer({
           </View>
         ) : null}
       </Glass>
+      <PlusDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        onDismissed={onDrawerDismissed}
+        onPhotos={() => pickFrom(picker.photos)}
+        onCamera={() => pickFrom(picker.camera)}
+        onFiles={() => pickFrom(picker.files)}
+        canPaste={drawerHasImage}
+        onPaste={() => pickFrom(picker.pasted)}
+        pickers={pickers}
+        onChooseMode={modeChoice.choose}
+      />
     </View>
   );
 }

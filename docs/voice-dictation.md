@@ -7,6 +7,7 @@ Band does not run speech models. The hub sends each recording to one OpenAI-comp
 ## How a recording travels
 
 1. The composer records with the browser's `MediaRecorder` (the Expo app uses `expo-audio`). Chrome and the desktop app produce webm/opus, Safari and the phone produce mp4/aac.
+   The hub names the file it sends to the provider (`audio.m4a`, `audio.webm`, and so on) from the first bytes of the clip, not from the request's `Content-Type`, because a client can send a wrong or empty type. The header's type is used only when the bytes match no known container.
 2. The client posts the clip to the hub at `POST /api/voice/transcribe`, with its normal device token. It never talks to the speech-to-text provider.
 3. The hub makes one non-streaming request, `POST <base URL>/audio/transcriptions`, with the multipart fields `file`, `model`, `response_format=json` and, when set, `language`. The API key goes in an `Authorization: Bearer` header. The hub reads the key from its credential vault, and no client, log line or error message holds it.
 4. The hub returns `{ "text": "..." }`.

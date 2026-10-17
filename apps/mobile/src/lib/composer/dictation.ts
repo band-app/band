@@ -67,6 +67,9 @@ export async function uploadClip(opts: UploadOptions): Promise<string> {
   const clip = await (opts.readClip ?? readFile)(opts.uri);
   if (clip.size === 0) throw new Error("The recording is empty.");
   if (clip.size > MAX_AUDIO_BYTES) throw new Error("The recording is over 25 MB.");
+  // React Native replaces the Content-Type of a Blob body with the Blob's own type, which is empty
+  // for a file read through fetch. Plain bytes keep the header below.
+  const bytes = new Uint8Array(await clip.arrayBuffer());
   const send = opts.fetchImpl ?? fetch;
   let res: Response;
   try {
@@ -78,7 +81,7 @@ export async function uploadClip(opts: UploadOptions): Promise<string> {
         // Keeps iOS's URL cache from writing the Authorization header to disk.
         "Cache-Control": "no-store",
       },
-      body: clip,
+      body: bytes,
     });
   } catch {
     throw new Error("Could not reach the hub.");

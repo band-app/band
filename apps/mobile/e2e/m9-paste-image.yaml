@@ -22,9 +22,10 @@ name: S9 paste an image
 - tapOn:
     id: composer__attach
 - assertVisible:
-    text: "Paste image"
+    id: plus-drawer__paste
     enabled: false
-- tapOn: "Cancel"
+- tapOn:
+    id: plus-drawer__backdrop
 # Copy the newest photo in Photos, which puts an image on the clipboard.
 - launchApp:
     appId: com.apple.mobileslideshow
