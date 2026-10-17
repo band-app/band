@@ -13,7 +13,11 @@ name: Session history lists, switches and starts sessions
     visible:
       id: chat__list
     timeout: 15000
-- assertVisible: "second session: beta"
+# The header's chat title is also "second session: beta", so messages are checked inside the list.
+- assertVisible:
+    text: "second session: beta"
+    childOf:
+      id: chat__list
 - tapOn:
     id: composer__input
 - tapOn:
@@ -32,9 +36,15 @@ name: Session history lists, switches and starts sessions
       id: session-history
     timeout: 10000
 - extendedWaitUntil:
-    visible: "first session: alpha"
+    visible:
+      text: "first session: alpha"
+      childOf:
+        id: chat__list
     timeout: 15000
-- assertNotVisible: "second session: beta"
+- assertNotVisible:
+    text: "second session: beta"
+    childOf:
+      id: chat__list
 - takeScreenshot: m9-older
 - tapOn:
     id: composer__input
