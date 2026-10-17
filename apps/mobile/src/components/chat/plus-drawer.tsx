@@ -158,7 +158,7 @@ export function PlusDrawer({
                       style={styles.choice}
                       testID={`plus-drawer__mode-${m.id}`}
                     >
-                      <Icon icon={/plan/i.test(m.id) ? ClipboardList : Shield} />
+                      <Icon icon={modeIcon(m.id, m.name)} />
                       <Text style={styles.name}>{m.name}</Text>
                       {selected ? <Icon icon={Check} /> : null}
                     </Pressable>
@@ -171,6 +171,16 @@ export function PlusDrawer({
       </View>
     </Modal>
   );
+}
+
+/** The web's mode menu has no icons, so these are picked by what the mode does. */
+function modeIcon(id: string, name: string): LucideIcon {
+  const text = `${id} ${name}`;
+  if (/bypass/i.test(text)) return ShieldAlert;
+  if (/plan/i.test(text)) return ClipboardList;
+  if (/accept|edit/i.test(text)) return PencilLine;
+  if (/auto/i.test(text)) return Zap;
+  return Hand;
 }
 
 function Action({
