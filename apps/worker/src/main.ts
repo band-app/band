@@ -6,6 +6,7 @@ import {
   helperCommand,
   runGitCredentialHelper,
 } from "./git-credentials.ts";
+import { formatHostWarnings, hostWarnings, readLinuxHostSettings } from "./host-checks.ts";
 import {
   defaultServiceEnv,
   installService,
@@ -29,9 +30,13 @@ if (argv[0] === GIT_CREDENTIAL_SUBCOMMAND) {
 
 // `band-worker doctor` prints what this machine can offer: each coding agent installed or not,
 // its version and whether it is logged in, then git and gh, with a command that fixes each gap.
+// On Linux it also warns about host settings that end agents (no swap, a low inotify limit). Those
+// warnings print the fix and leave the exit code alone.
 if (argv[0] === "doctor") {
   const report = await probeCapabilities();
   process.stdout.write(formatReport(report));
+  if (process.platform === "linux")
+    process.stdout.write(formatHostWarnings(hostWarnings(readLinuxHostSettings())));
   const git = report.tools.find((t) => t.tool === "git");
   const usable = report.agents.some((a) => a.installed && a.loggedIn !== false);
   if (!usable)
