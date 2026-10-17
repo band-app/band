@@ -3,8 +3,6 @@ import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
-  Keyboard,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -12,11 +10,13 @@ import {
   Text,
   View,
 } from "react-native";
+import Animated from "react-native-reanimated";
 import { pendingRequest, requestText } from "../../lib/chat/pending-request";
 import { setPending } from "../../lib/chat/pending-store";
 import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
 import { useChatTranscript } from "../../lib/chat/use-chat";
 import { useChatActions } from "../../lib/chat/use-chat-actions";
+import { tapDismiss } from "../../lib/composer/tap-dismiss";
 import { useKeyboardInset } from "../../lib/composer/use-keyboard-inset";
 import { openFile } from "../../lib/files/open";
 import { useHubSession } from "../../lib/hub-session";
@@ -72,7 +72,6 @@ function ChatViewInner({
   const transcript = useChatTranscript(chatId);
   const { state, loaded, loadingOlder, loadOlder } = transcript;
   const actions = useChatActions(worktreeId, chatId, transcript);
-  const { inset } = useKeyboardInset();
   const pickers = useMemo(() => sessionPickers(state.session), [state.session]);
   const skills = useMemo(
     () =>
@@ -156,11 +155,11 @@ function ChatViewInner({
     if (pinned.current && !toggled.current) listRef.current?.scrollToEnd({ animated: false });
   }, []);
 
-  // The keyboard shortens the list. Keep the last message in view when it was in view before.
-  useEffect(() => {
-    const sub = Keyboard.addListener("keyboardDidShow", followOutput);
-    return () => sub.remove();
-  }, [followOutput]);
+  // The keyboard shortens the list. The root view's onLayout keeps the last message in view when
+  // it was in view before, after the shorter layout is committed.
+  const keyboardStyle = useKeyboardInset();
+
+  const dismissOnTap = useMemo(tapDismiss, []);
 
   const jumpToLatest = useCallback(() => {
     pinned.current = true;
@@ -185,8 +184,8 @@ function ChatViewInner({
         openFile(worktreeId, at ? at[1] : path, at ? Number(at[2]) : undefined);
       }}
     >
-      <Animated.View style={[styles.keyboard, { paddingBottom: inset }]}>
-        <View style={styles.root} testID="chat__view">
+      <Animated.View style={[styles.keyboard, keyboardStyle]}>
+        <View style={styles.root} onLayout={followOutput} {...dismissOnTap} testID="chat__view">
           {!loaded ? (
             <View style={styles.center} testID="chat__loading">
               <ActivityIndicator color={colors.mutedForeground} />
