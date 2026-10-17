@@ -83,7 +83,7 @@ npx -y pnpm@10 --filter @band-app/mobile test        # unit tests (node:test)
 npx -y pnpm@10 --filter @band-app/mobile typecheck
 ```
 
-The end-to-end Maestro flows in `e2e/` run against a throwaway hub on one booted simulator. Follow `.claude/skills/mobile-verify/SKILL.md`, or run `node apps/mobile/scripts/verify.mjs`. Set `BAND_SIM_UDID` to pick the simulator. Reports and screenshots go to `apps/mobile/e2e/artifacts/` (gitignored).
+The end-to-end Maestro flows in `e2e/` run against a throwaway hub on one booted simulator. Follow `.claude/skills/mobile-verify/SKILL.md`, or run `node apps/mobile/scripts/verify.mjs`. Set `BAND_SIM_UDID` to pick the simulator. Reports and screenshots go to `apps/mobile/e2e/artifacts/` (gitignored). Maestro runs with a TMPDIR of its own (`band-verify-*` under the system temp dir) that the script deletes when it ends, including on Ctrl-C or SIGTERM, so parallel runs do not share or leak `maestro_xctestrunner_xcodebuild_output*` folders.
 
 ## Terminals
 
