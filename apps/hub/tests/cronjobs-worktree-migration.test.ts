@@ -18,9 +18,9 @@ import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startAcpServer, TEST_TOKEN, trpc } from "./helpers/acp-chat";
+import { STUB_AGENT_PATH, TEST_TOKEN, trpc, writeStubScenario } from "./helpers/acp-chat";
 import { seedSettings } from "./helpers/seed-state";
-import { createTmpHome, type ServerHandle } from "./helpers/server";
+import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 import { removeTmpHome } from "./helpers/tmp-home";
 import { waitFor } from "./helpers/wait-for";
 
@@ -128,9 +128,16 @@ beforeAll(async () => {
     tokenSecret: TEST_TOKEN,
     codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
   });
-  server = await startAcpServer({
-    home,
-    turns: [{ steps: [{ say: "Done" }] }],
+  // The jobs name the hub's own checkouts, so this server stays off the loopback worker.
+  server = await startServer({
+    tmpHome: home,
+    remoteHost: false,
+    env: {
+      BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
+      BAND_TEST_ACP_STATE: join(home, "acp-stub-state"),
+      BAND_TEST_ACP_LOG: join(home, "acp-stub-log.jsonl"),
+      BAND_TEST_ACP_SCENARIO: writeStubScenario(home, [{ steps: [{ say: "Done" }] }]),
+    },
   });
   // First-time setup runs after the server listens; the jobs move once it has synced the worktrees.
   await waitFor(
