@@ -1,5 +1,6 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { router } from "expo-router";
+import { Check } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import {
   ActivityIndicator,
@@ -17,6 +18,7 @@ import {
 import { useHubSession } from "../lib/hub-session";
 import type { RepoLike } from "../lib/worktree-list";
 import { colors, useScheme } from "../theme";
+import { Icon } from "./icon";
 import { RepoAvatar } from "./repo-avatar";
 
 /** A branch name git accepts: no spaces, no `..`, and none of the characters it reserves. */
@@ -245,7 +247,7 @@ function Choice({
       <Text style={[styles.choiceLabel, icon ? styles.withIcon : null]} numberOfLines={1}>
         {label}
       </Text>
-      {selected ? <Text style={styles.tick}>✓</Text> : null}
+      {selected ? <Icon icon={Check} /> : null}
     </Pressable>
   );
 }
@@ -290,7 +292,6 @@ const styles = StyleSheet.create({
   divided: { borderTopColor: colors.divider, borderTopWidth: StyleSheet.hairlineWidth },
   choiceLabel: { color: colors.foreground, flex: 1, fontSize: 16 },
   withIcon: { marginLeft: 10 },
-  tick: { color: colors.foreground, fontSize: 16, fontWeight: "700" },
   branch: {
     borderTopColor: colors.divider,
     borderTopWidth: StyleSheet.hairlineWidth,

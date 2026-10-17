@@ -3,6 +3,7 @@ import {
   selectChoices,
   type sessionPickers,
 } from "@band-app/client/session-pickers";
+import { Check } from "lucide-react-native";
 import {
   ActivityIndicator,
   Modal,
@@ -14,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { colors } from "../../theme";
+import { Icon } from "../icon";
 
 type Pickers = ReturnType<typeof sessionPickers>;
 
@@ -171,7 +173,7 @@ function Choice({
           </Text>
         ) : null}
       </View>
-      {selected ? <Text style={styles.check}>✓</Text> : null}
+      {selected ? <Icon icon={Check} /> : null}
     </Pressable>
   );
 }
@@ -201,6 +203,5 @@ const styles = StyleSheet.create({
   choiceText: { flex: 1, gap: 2 },
   name: { color: colors.foreground, fontSize: 16 },
   description: { color: colors.mutedForeground, fontSize: 13 },
-  check: { color: colors.foreground, fontSize: 17 },
   switchRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
 });

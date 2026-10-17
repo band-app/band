@@ -1,4 +1,5 @@
 import type { sessionPickers } from "@band-app/client/session-pickers";
+import { Camera, Check, ClipboardPaste, File, Image, type LucideIcon } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -11,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { colors } from "../../theme";
+import { Icon } from "../icon";
 
 type Pickers = ReturnType<typeof sessionPickers>;
 
@@ -110,15 +112,20 @@ export function PlusDrawer({
           <View style={styles.actions}>
             <Action
               label="Photo library"
-              glyph="🖼"
+              icon={Image}
               onPress={onPhotos}
               testID="plus-drawer__photos"
             />
-            <Action label="Take photo" glyph="📷" onPress={onCamera} testID="plus-drawer__camera" />
-            <Action label="Choose file" glyph="📄" onPress={onFiles} testID="plus-drawer__files" />
+            <Action
+              label="Take photo"
+              icon={Camera}
+              onPress={onCamera}
+              testID="plus-drawer__camera"
+            />
+            <Action label="Choose file" icon={File} onPress={onFiles} testID="plus-drawer__files" />
             <Action
               label="Paste image"
-              glyph="📋"
+              icon={ClipboardPaste}
               onPress={onPaste}
               disabled={!canPaste}
               testID="plus-drawer__paste"
@@ -143,7 +150,7 @@ export function PlusDrawer({
                       testID={`plus-drawer__mode-${m.id}`}
                     >
                       <Text style={styles.name}>{m.name}</Text>
-                      {selected ? <Text style={styles.check}>✓</Text> : null}
+                      {selected ? <Icon icon={Check} /> : null}
                     </Pressable>
                   );
                 })}
@@ -158,13 +165,13 @@ export function PlusDrawer({
 
 function Action({
   label,
-  glyph,
+  icon,
   onPress,
   disabled,
   testID,
 }: {
   label: string;
-  glyph: string;
+  icon: LucideIcon;
   onPress: () => void;
   disabled?: boolean;
   testID: string;
@@ -179,7 +186,7 @@ function Action({
       style={[styles.action, disabled && styles.actionDisabled]}
       testID={testID}
     >
-      <Text style={styles.glyph}>{glyph}</Text>
+      <Icon icon={icon} size="lg" />
       <Text style={styles.actionLabel} numberOfLines={1}>
         {label}
       </Text>
@@ -216,7 +223,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   actionDisabled: { opacity: 0.4 },
-  glyph: { fontSize: 26 },
   actionLabel: { color: colors.foreground, fontSize: 13 },
   section: { gap: 6 },
   sectionTitle: { color: colors.mutedForeground, fontSize: 13, textTransform: "uppercase" },
@@ -229,5 +235,4 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   name: { color: colors.foreground, fontSize: 16 },
-  check: { color: colors.foreground, fontSize: 17 },
 });

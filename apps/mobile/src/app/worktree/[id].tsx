@@ -1,4 +1,5 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import { ChevronLeft, ChevronRight } from "lucide-react-native";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +15,7 @@ import {
 import { ChatView } from "../../components/chat/chat-view";
 import { AgentPicker, closeTab, renameTab, TabSwitcher } from "../../components/chat/tab-switcher";
 import { WorktreeHeader } from "../../components/chat/worktree-header";
+import { Icon } from "../../components/icon";
 import { StateIcon } from "../../components/state-icon";
 import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
@@ -348,11 +350,11 @@ function NeighbourPage({
   return (
     <View style={[local.neighbour, { width, height }]} testID={`worktree__neighbour-${direction}`}>
       <StateIcon state={tab.shown} />
+      {direction === "prev" ? <Icon icon={ChevronLeft} color={colors.mutedForeground} /> : null}
       <Text style={local.neighbourText} numberOfLines={1}>
-        {direction === "prev" ? "‹ " : ""}
         {tab.label}
-        {direction === "next" ? " ›" : ""}
       </Text>
+      {direction === "next" ? <Icon icon={ChevronRight} color={colors.mutedForeground} /> : null}
     </View>
   );
 }

@@ -1,5 +1,6 @@
 import { sessionPickers } from "@band-app/client/session-pickers";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
+import { ArrowDown } from "lucide-react-native";
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -21,6 +22,7 @@ import { useKeyboardInset } from "../../lib/composer/use-keyboard-inset";
 import { openFile } from "../../lib/files/open";
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
+import { Icon } from "../icon";
 import { ChatProvider } from "./chat-context";
 import { ChatRowView } from "./chat-row";
 import { Composer } from "./composer";
@@ -241,7 +243,8 @@ function ChatViewInner({
               style={styles.jump}
               testID="chat__jump-latest"
             >
-              <Text style={styles.jumpText}>↓ Jump to latest</Text>
+              <Icon icon={ArrowDown} size="sm" />
+              <Text style={styles.jumpText}>Jump to latest</Text>
             </Pressable>
           ) : null}
           {copied ? (
@@ -298,6 +301,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
     bottom: 12,
+    flexDirection: "row",
+    gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 8,
     position: "absolute",

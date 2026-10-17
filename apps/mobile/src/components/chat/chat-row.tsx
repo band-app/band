@@ -1,10 +1,11 @@
 import type { Entry } from "@band-app/client/transcript";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
-import { MoreHorizontal } from "lucide-react-native";
+import { ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react-native";
 import { memo } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import type { ChatRow } from "../../lib/chat/rows";
 import { chatColors, colors, tones } from "../../theme";
+import { Icon } from "../icon";
 import { useAssetSource, useChat, useOpen } from "./chat-context";
 import { Markdown } from "./markdown";
 import { ToolCall, ToolGroup } from "./tool-call";
@@ -44,7 +45,10 @@ function Thought({ id, text }: { id: string; text: string }) {
         style={styles.thoughtRow}
         testID="chat__thought"
       >
-        <Text style={styles.muted}>Thinking {open ? "▾" : "▸"}</Text>
+        <View style={styles.thoughtLabel}>
+          <Text style={styles.muted}>Thinking</Text>
+          <Icon icon={open ? ChevronDown : ChevronRight} size="sm" color={colors.mutedForeground} />
+        </View>
       </Pressable>
       {open ? <Text style={styles.thoughtText}>{text}</Text> : null}
     </View>
@@ -253,6 +257,7 @@ const styles = StyleSheet.create({
   },
   fileName: { color: colors.foreground, flexShrink: 1, fontSize: 15 },
   fileType: { color: colors.mutedForeground, fontSize: 13 },
+  thoughtLabel: { alignItems: "center", flexDirection: "row", gap: 4 },
   thoughtRow: { minHeight: 28, justifyContent: "center" },
   thoughtText: {
     borderLeftColor: colors.border,
