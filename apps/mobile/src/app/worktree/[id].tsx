@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { AgentIcon } from "../../components/agent-icon";
 import { ChatView } from "../../components/chat/chat-view";
 import { AgentPicker, closeTab, renameTab, TabSwitcher } from "../../components/chat/tab-switcher";
 import { WorktreeHeader } from "../../components/chat/worktree-header";
@@ -191,6 +192,7 @@ const WorktreeChats = memo(function WorktreeChats({
             testID="worktree__chip-question"
           >
             <StateIcon state="question" />
+            {needsYou.kind === "chat" ? <AgentIcon type={needsYou.agentType} size={14} /> : null}
             <Text style={local.chipText} numberOfLines={1}>
               {needsYou.label}: question
             </Text>
@@ -348,6 +350,9 @@ function NeighbourPage({
   return (
     <View style={[local.neighbour, { width, height }]} testID={`worktree__neighbour-${direction}`}>
       <StateIcon state={tab.shown} />
+      {tab.kind === "chat" ? (
+        <AgentIcon type={tab.agentType} size={16} color={colors.mutedForeground} />
+      ) : null}
       <Text style={local.neighbourText} numberOfLines={1}>
         {direction === "prev" ? "‹ " : ""}
         {tab.label}

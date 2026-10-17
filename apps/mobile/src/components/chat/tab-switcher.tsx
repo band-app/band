@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import type { AgentChoice, ChatTab } from "../../lib/chat/use-worktree-tabs";
 import { colors, tones } from "../../theme";
+import { AgentIcon } from "../agent-icon";
 import { PlusGlyph } from "../glass";
 import { StateIcon } from "../state-icon";
 
@@ -128,7 +129,11 @@ function TabRow({
           testID={`tabs__sheet-tab-${tab.id}`}
         >
           <View style={styles.tabIcon}>
-            <Text style={styles.tabGlyph}>{tab.kind === "term" ? ">_" : "◌"}</Text>
+            {tab.kind === "term" ? (
+              <Text style={styles.tabGlyph}>{">_"}</Text>
+            ) : (
+              <AgentIcon type={tab.agentType} size={18} color={colors.mutedForeground} />
+            )}
           </View>
           <View style={styles.tx}>
             <Text style={styles.txName} numberOfLines={1} testID={`tabs__label-${tab.id}`}>
@@ -272,10 +277,19 @@ export function AgentPicker({
     ? agents.map((a) => ({
         key: a.id,
         label: a.label,
+        type: a.type,
         isDefault: a.isDefault,
         pick: a.isDefault ? undefined : a.id,
       }))
-    : [{ key: "default", label: "Default agent", isDefault: true, pick: undefined }];
+    : [
+        {
+          key: "default",
+          label: "Default agent",
+          type: undefined,
+          isDefault: true,
+          pick: undefined,
+        },
+      ];
   return (
     <Modal
       visible={visible}
@@ -308,6 +322,7 @@ export function AgentPicker({
               style={styles.agentRow}
               testID={`new-chat__agent-${c.key}`}
             >
+              <AgentIcon type={c.type} size={20} />
               <Text style={styles.agentLabel}>{c.label}</Text>
               {c.isDefault ? <Text style={styles.agentMeta}>Default</Text> : null}
             </Pressable>

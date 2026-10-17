@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { ChatProvider } from "../../../components/chat/chat-context";
 import { Markdown } from "../../../components/chat/markdown";
+import { FileIcon } from "../../../components/file-icon";
 import { CodeList, type CodeRow } from "../../../components/files/code-list";
 import { ViewHeader } from "../../../components/files/view-header";
 import { Body } from "../../../components/ui";
@@ -134,7 +135,12 @@ function FileScreen({
 
   return (
     <View style={styles.screen} testID="file__screen">
-      <ViewHeader title={baseName(path)} subtitle={dirName(path) || "/"} testID="file" />
+      <ViewHeader
+        title={baseName(path)}
+        subtitle={dirName(path) || "/"}
+        icon={<FileIcon name={path} size={16} />}
+        testID="file"
+      />
       {text !== null ? (
         <View style={styles.bar}>
           {kind === "markdown" && text.length <= HIGHLIGHT_FILE_LIMIT ? (
