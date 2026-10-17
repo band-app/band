@@ -15,9 +15,11 @@ name: S9 paste an image
 - tapOn:
     id: composer__input
 - inputText: "plain text"
-- copyTextFrom:
+# copyTextFrom only fills a Maestro variable. Cut puts the text on the iOS pasteboard.
+- longPressOn:
     id: composer__input
-- eraseText: 20
+- tapOn: "Select All"
+- tapOn: "Cut"
 - longPressOn:
     id: composer__input
 - tapOn: "Paste"
