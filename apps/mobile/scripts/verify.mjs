@@ -370,6 +370,12 @@ function startControlServer(hub, chats, udid, notes) {
         const want = url.searchParams.get("value") ?? "";
         if (pickers.model !== want) throw new Error(`the session's model is ${pickers.model}, not ${want}`);
         notes.push(`${wt}: chats.sessionState model ${pickers.model}, mode ${pickers.mode}`);
+      } else if (url.pathname === "/expect-mode") {
+        // `chats.sessionState` reports the mode the user picked in the drawer.
+        const pickers = sessionPickers(await sessionState(hub, chats, wt));
+        const want = url.searchParams.get("value") ?? "";
+        if (pickers.mode !== want) throw new Error(`the session's mode is ${pickers.mode}, not ${want}`);
+        notes.push(`${wt}: chats.sessionState mode ${pickers.mode}`);
       } else if (url.pathname === "/session-commands") {
         const names = ((await sessionState(hub, chats, wt))?.commands ?? []).map((c) => `/${c.name}`);
         notes.push(`${wt}: slash commands from the hub: ${names.join(" ")}`);

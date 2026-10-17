@@ -11,7 +11,8 @@ name: S3 attach a photo
       WT: gamma-attach
 - tapOn:
     id: composer__attach
-- tapOn: "Photo library"
+- tapOn:
+    id: plus-drawer__photos
 # The system picker lists the newest photo first (the one addMedia added). Pick it, then confirm.
 - extendedWaitUntil:
     visible: "Select Photos"
