@@ -36,7 +36,7 @@ import {
 } from "./seed.mjs";
 import { explorerChange } from "./seed-explorer.mjs";
 import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
-import { createRunTmp, removeOnExit } from "./run-tmp.ts";
+import { createRunTmp, maestroTmpEnv, removeOnExit, sweepStaleMaestroOutput } from "./run-tmp.ts";
 import { hubIdFor } from "../src/lib/hub-store.ts";
 import { buildRows, copyText } from "../src/lib/chat/rows.ts";
 import { sessionPickers } from "@band-app/client/session-pickers";
@@ -430,10 +430,14 @@ function stamp() {
 }
 
 async function main() {
-  // Maestro's xcodebuild output (about 200 MB per flow) goes to TMPDIR, so give it a dir of this run's own.
+  const swept = sweepStaleMaestroOutput();
+  if (swept.removed) {
+    console.log(`Removed ${swept.removed} stale Maestro output folder(s), ${(swept.bytes / 1e6).toFixed(0)} MB.`);
+  }
+  // Maestro's xcodebuild output (about 200 MB per flow) goes to the JVM's temp dir, so give it a dir of this run's own.
   const runTmp = createRunTmp();
   removeOnExit(runTmp);
-  const env = { ...toolEnv(), TMPDIR: runTmp.dir };
+  const env = { ...toolEnv(), ...maestroTmpEnv(runTmp.dir, process.env) };
   requireTool("xcrun", "Install Xcode and its command line tools.", env);
   requireTool("maestro", "See the one-time setup in .claude/skills/mobile-verify/SKILL.md.", env);
   requireTool("java", "brew install openjdk@17", env);
