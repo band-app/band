@@ -1,10 +1,13 @@
+import type { LucideIcon } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme";
 import { BottomSheet } from "./bottom-sheet";
+import { Icon } from "./icon";
 
 export interface ViewsSheetItem {
   key: string;
   title: string;
+  icon: LucideIcon;
   subtitle?: string;
   onPress: () => void;
   destructive?: boolean;
@@ -42,8 +45,11 @@ export function ViewsSheet({
       style={({ pressed }) => [styles.row, (pressed || item.disabled) && styles.dim]}
       testID={`views__${item.key}`}
     >
-      <Text style={[styles.rowTitle, item.destructive && styles.destructive]}>{item.title}</Text>
-      {item.subtitle ? <Text style={styles.rowSub}>{item.subtitle}</Text> : null}
+      <Icon icon={item.icon} color={item.destructive ? colors.destructive : colors.foreground} />
+      <View style={styles.rowText}>
+        <Text style={[styles.rowTitle, item.destructive && styles.destructive]}>{item.title}</Text>
+        {item.subtitle ? <Text style={styles.rowSub}>{item.subtitle}</Text> : null}
+      </View>
     </Pressable>
   );
   return (
@@ -80,12 +86,14 @@ const styles = StyleSheet.create({
   row: {
     borderBottomColor: colors.divider,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 2,
-    justifyContent: "center",
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
     minHeight: 50,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
+  rowText: { flex: 1, gap: 2 },
   rowTitle: { color: colors.foreground, fontSize: 16 },
   rowSub: { color: colors.mutedForeground, fontSize: 13 },
   destructive: { color: colors.destructive },

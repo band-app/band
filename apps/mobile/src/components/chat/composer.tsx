@@ -3,6 +3,7 @@ import type { sessionPickers } from "@band-app/client/session-pickers";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { insertAtSelection } from "@band-app/shared/dictation-text";
 import * as Clipboard from "expo-clipboard";
+import { ArrowUp, X } from "lucide-react-native";
 import { useCallback, useRef, useState } from "react";
 import {
   Alert,
@@ -22,6 +23,7 @@ import { useDictation } from "../../lib/composer/use-dictation";
 import { useDraft } from "../../lib/composer/use-draft";
 import { colors, useScheme } from "../../theme";
 import { Glass, MicGlyph, PlusGlyph } from "../glass";
+import { Icon } from "../icon";
 import { ChatHeader, type SessionsControl } from "./chat-header";
 import { ComposerSuggestions } from "./composer-suggestions";
 import { PlusDrawer } from "./plus-drawer";
@@ -201,7 +203,7 @@ export function Composer({
         style={[styles.send, expanded && styles.plusSmall, !canSend && styles.sendDisabled]}
         testID="composer__send"
       >
-        <Text style={styles.sendGlyph}>↑</Text>
+        <Icon icon={ArrowUp} color={colors.primaryForeground} />
       </Pressable>
     ) : (
       <Pressable
@@ -378,7 +380,7 @@ function AttachmentChip({
         hitSlop={8}
         testID="composer__attachment-remove"
       >
-        <Text style={styles.remove}>✕</Text>
+        <Icon icon={X} size="sm" color={colors.mutedForeground} />
       </Pressable>
     </View>
   );
@@ -446,7 +448,6 @@ const styles = StyleSheet.create({
     width: 44,
   },
   sendDisabled: { opacity: 0.35 },
-  sendGlyph: { color: colors.primaryForeground, fontSize: 20, fontWeight: "700" },
   stopSquare: { backgroundColor: colors.primaryForeground, borderRadius: 2, height: 12, width: 12 },
   chips: { gap: 6, paddingBottom: 8, paddingHorizontal: 6 },
   chip: {
@@ -470,6 +471,5 @@ const styles = StyleSheet.create({
   },
   thumb: { borderRadius: 4, height: 20, width: 20 },
   chipName: { color: colors.foreground, flexShrink: 1, fontSize: 12.5 },
-  remove: { color: colors.mutedForeground, fontSize: 12 },
   hint: { color: colors.mutedForeground, fontSize: 12, paddingBottom: 4, paddingHorizontal: 10 },
 });

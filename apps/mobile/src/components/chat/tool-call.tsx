@@ -14,9 +14,11 @@ import {
   toolState,
 } from "@band-app/client/tool-summary";
 import type { ToolEntry } from "@band-app/client/transcript";
+import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react-native";
 import { memo, type ReactNode, useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { chatColors, colors, fonts, tones } from "../../theme";
+import { Icon } from "../icon";
 import { useOpen } from "./chat-context";
 import { Markdown } from "./markdown";
 
@@ -70,7 +72,9 @@ function Row({
       >
         {children}
       </Text>
-      {onToggle ? <Text style={styles.chevron}>{open ? "▾" : "▸"}</Text> : null}
+      {onToggle ? (
+        <Icon icon={open ? ChevronDown : ChevronRight} size="sm" color={colors.mutedForeground} />
+      ) : null}
       {ms !== undefined ? <Text style={styles.duration}>{formatToolDuration(ms)}</Text> : null}
     </Pressable>
   );
@@ -100,9 +104,12 @@ function Diff({
           {shown.map((line, i) =>
             line.kind === "gap" ? (
               // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
-              <Text key={i} style={[styles.diffLine, styles.dim]}>
-                ⋯ {line.skipped} unchanged {line.skipped === 1 ? "line" : "lines"}
-              </Text>
+              <View key={i} style={styles.gapRow}>
+                <Icon icon={Ellipsis} size="sm" color={colors.mutedForeground} />
+                <Text style={[styles.diffLine, styles.dim]}>
+                  {line.skipped} unchanged {line.skipped === 1 ? "line" : "lines"}
+                </Text>
+              </View>
             ) : (
               <Text
                 // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
@@ -260,7 +267,6 @@ const styles = StyleSheet.create({
   highlight: { color: colors.foreground },
   error: { color: tones.failure },
   running: { opacity: 0.7 },
-  chevron: { color: colors.mutedForeground, fontSize: 13 },
   duration: { color: colors.mutedForeground, fontSize: 12, fontVariant: ["tabular-nums"] },
   details: { gap: 8, marginTop: 6 },
   group: {
@@ -284,6 +290,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  gapRow: { alignItems: "center", flexDirection: "row", gap: 6 },
   diffBody: { paddingVertical: 4 },
   diffLine: {
     color: colors.foreground,

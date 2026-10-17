@@ -1,7 +1,21 @@
 import type { sessionPickers } from "@band-app/client/session-pickers";
+import {
+  Camera,
+  Check,
+  ClipboardList,
+  ClipboardPaste,
+  File,
+  Hand,
+  Image,
+  type LucideIcon,
+  PencilLine,
+  ShieldAlert,
+  Zap,
+} from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors } from "../../theme";
 import { BottomSheet } from "../bottom-sheet";
+import { Icon } from "../icon";
 
 type Pickers = ReturnType<typeof sessionPickers>;
 
@@ -46,12 +60,17 @@ export function PlusDrawer({
       accessibilityLabel="Attach and mode"
     >
       <View style={styles.actions}>
-        <Action label="Photo library" glyph="🖼" onPress={onPhotos} testID="plus-drawer__photos" />
-        <Action label="Take photo" glyph="📷" onPress={onCamera} testID="plus-drawer__camera" />
-        <Action label="Choose file" glyph="📄" onPress={onFiles} testID="plus-drawer__files" />
+        <Action
+          label="Photo library"
+          icon={Image}
+          onPress={onPhotos}
+          testID="plus-drawer__photos"
+        />
+        <Action label="Take photo" icon={Camera} onPress={onCamera} testID="plus-drawer__camera" />
+        <Action label="Choose file" icon={File} onPress={onFiles} testID="plus-drawer__files" />
         <Action
           label="Paste image"
-          glyph="📋"
+          icon={ClipboardPaste}
           onPress={onPaste}
           disabled={!canPaste}
           testID="plus-drawer__paste"
@@ -75,8 +94,9 @@ export function PlusDrawer({
                   style={styles.choice}
                   testID={`plus-drawer__mode-${m.id}`}
                 >
+                  <Icon icon={modeIcon(m.id, m.name)} />
                   <Text style={styles.name}>{m.name}</Text>
-                  {selected ? <Text style={styles.check}>✓</Text> : null}
+                  {selected ? <Icon icon={Check} /> : null}
                 </Pressable>
               );
             })}
@@ -87,15 +107,25 @@ export function PlusDrawer({
   );
 }
 
+/** The web's mode menu has no icons, so these are picked by what the mode does. */
+function modeIcon(id: string, name: string): LucideIcon {
+  const text = `${id} ${name}`;
+  if (/bypass/i.test(text)) return ShieldAlert;
+  if (/plan/i.test(text)) return ClipboardList;
+  if (/accept|edit/i.test(text)) return PencilLine;
+  if (/auto/i.test(text)) return Zap;
+  return Hand;
+}
+
 function Action({
   label,
-  glyph,
+  icon,
   onPress,
   disabled,
   testID,
 }: {
   label: string;
-  glyph: string;
+  icon: LucideIcon;
   onPress: () => void;
   disabled?: boolean;
   testID: string;
@@ -110,7 +140,7 @@ function Action({
       style={[styles.action, disabled && styles.actionDisabled]}
       testID={testID}
     >
-      <Text style={styles.glyph}>{glyph}</Text>
+      <Icon icon={icon} size="lg" />
       <Text style={styles.actionLabel} numberOfLines={1}>
         {label}
       </Text>
@@ -130,7 +160,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   actionDisabled: { opacity: 0.4 },
-  glyph: { fontSize: 26 },
   actionLabel: { color: colors.foreground, fontSize: 13 },
   section: { gap: 6 },
   sectionTitle: { color: colors.mutedForeground, fontSize: 13, textTransform: "uppercase" },
@@ -138,10 +167,9 @@ const styles = StyleSheet.create({
   choice: {
     alignItems: "center",
     flexDirection: "row",
-    justifyContent: "space-between",
+    gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  name: { color: colors.foreground, fontSize: 16 },
-  check: { color: colors.foreground, fontSize: 17 },
+  name: { color: colors.foreground, flex: 1, fontSize: 16 },
 });

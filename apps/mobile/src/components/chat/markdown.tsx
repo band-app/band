@@ -1,3 +1,4 @@
+import { Square, SquareCheck } from "lucide-react-native";
 import { type ComponentProps, memo, type ReactNode, useMemo } from "react";
 import { Linking, ScrollView, StyleSheet, Text, type TextStyle, View } from "react-native";
 import { UITextView } from "react-native-uitextview";
@@ -10,6 +11,7 @@ import {
   spansText,
 } from "../../lib/chat/markdown";
 import { chatColors, colors, fonts } from "../../theme";
+import { Icon } from "../icon";
 import { useChat } from "./chat-context";
 import { CodeBlock } from "./code-block";
 
@@ -88,11 +90,19 @@ function ListView({
     <View style={styles.list}>
       {items.map((item, i) => {
         const marker =
-          item.checked !== undefined ? (item.checked ? "☑" : "☐") : ordered ? `${start + i}.` : "•";
+          item.checked !== undefined ? (
+            <Icon
+              icon={item.checked ? SquareCheck : Square}
+              size="sm"
+              color={colors.mutedForeground}
+            />
+          ) : (
+            <Text style={[styles.text, styles.marker]}>{ordered ? `${start + i}.` : "•"}</Text>
+          );
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: list items have no identity beyond position
           <View key={i} style={styles.listItem}>
-            <Text style={[styles.text, styles.marker]}>{marker}</Text>
+            <View style={styles.markerBox}>{marker}</View>
             <View style={styles.listBody}>
               {item.blocks.map((block, j) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: blocks have no identity beyond position
@@ -206,6 +216,7 @@ const styles = StyleSheet.create({
   heading: { fontWeight: "700", lineHeight: 28 },
   list: { gap: 4 },
   listItem: { flexDirection: "row", gap: 8 },
+  markerBox: { alignItems: "flex-end", minWidth: 18, paddingTop: 3 },
   marker: { minWidth: 18, textAlign: "right", color: colors.mutedForeground },
   listBody: { flex: 1, gap: 6 },
   quote: {
