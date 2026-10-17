@@ -1,6 +1,6 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { router } from "expo-router";
-import { Check } from "lucide-react-native";
+import { Check, GitBranch, GitBranchPlus } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import {
   ActivityIndicator,
@@ -163,6 +163,7 @@ export function StartSheet({
               <View style={styles.group}>
                 <Choice
                   label="New branch"
+                  icon={<Icon icon={GitBranchPlus} />}
                   selected={newBranch}
                   onPress={() => setTarget(null)}
                   testID="start__new-branch"
@@ -187,6 +188,7 @@ export function StartSheet({
                     <Choice
                       key={id}
                       label={w.name}
+                      icon={<Icon icon={GitBranch} />}
                       divided
                       selected={target === id}
                       onPress={() => setTarget(id)}

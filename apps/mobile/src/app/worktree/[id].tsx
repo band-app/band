@@ -1,5 +1,14 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, ChevronRight } from "lucide-react-native";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  GitCompare,
+  ListChecks,
+  MessageSquarePlus,
+  Pencil,
+  X,
+} from "lucide-react-native";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -155,25 +164,43 @@ const WorktreeChats = memo(function WorktreeChats({
     {
       key: "checks",
       title: "Checks",
+      icon: ListChecks,
       subtitle: pr ? `PR #${pr.number}` : undefined,
       onPress: afterSheet(() =>
         router.push({ pathname: "/worktree/[id]/checks", params: { id: worktreeId, branch } }),
       ),
     },
-    { key: "explorer", title: "Explorer", onPress: afterSheet(() => openExplorer(worktreeId)) },
-    { key: "changes", title: "Changes", onPress: afterSheet(() => openChanges(worktreeId)) },
+    {
+      key: "explorer",
+      title: "Explorer",
+      icon: FolderOpen,
+      onPress: afterSheet(() => openExplorer(worktreeId)),
+    },
+    {
+      key: "changes",
+      title: "Changes",
+      icon: GitCompare,
+      onPress: afterSheet(() => openChanges(worktreeId)),
+    },
   ];
   const actionItems: ViewsSheetItem[] = [
-    { key: "new-chat", title: "New chat", onPress: afterSheet(() => setPicker(true)) },
+    {
+      key: "new-chat",
+      title: "New chat",
+      icon: MessageSquarePlus,
+      onPress: afterSheet(() => setPicker(true)),
+    },
     {
       key: "rename-chat",
       title: "Rename chat",
+      icon: Pencil,
       disabled: !current || current.kind === "term",
       onPress: afterSheet(() => current && renameTab(current, actions)),
     },
     {
       key: "close-tab",
       title: "Close tab",
+      icon: X,
       destructive: true,
       disabled: !current,
       onPress: afterSheet(() => current && closeTab(actions, current.id)),

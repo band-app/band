@@ -1,4 +1,4 @@
-import { MessageSquare, SquareTerminal } from "lucide-react-native";
+import { Bot, MessageSquare, MessageSquarePlus, SquareTerminal } from "lucide-react-native";
 import { useRef, useState } from "react";
 import {
   ActionSheetIOS,
@@ -15,7 +15,6 @@ import {
 } from "react-native";
 import type { AgentChoice, ChatTab } from "../../lib/chat/use-worktree-tabs";
 import { colors, tones } from "../../theme";
-import { PlusGlyph } from "../glass";
 import { Icon } from "../icon";
 import { StateIcon } from "../state-icon";
 
@@ -233,7 +232,7 @@ export function TabSwitcher({
               style={styles.newChat}
               testID="tabs__new"
             >
-              <PlusGlyph size={14} />
+              <Icon icon={MessageSquarePlus} size="sm" />
               <Text style={styles.newChatText}>Chat</Text>
             </Pressable>
             <Pressable
@@ -243,7 +242,7 @@ export function TabSwitcher({
               style={styles.newChat}
               testID="tabs__new-terminal"
             >
-              <PlusGlyph size={14} />
+              <Icon icon={SquareTerminal} size="sm" />
               <Text style={styles.newChatText}>Terminal</Text>
             </Pressable>
           </View>
@@ -313,6 +312,7 @@ export function AgentPicker({
               style={styles.agentRow}
               testID={`new-chat__agent-${c.key}`}
             >
+              <Icon icon={Bot} />
               <Text style={styles.agentLabel}>{c.label}</Text>
               {c.isDefault ? <Text style={styles.agentMeta}>Default</Text> : null}
             </Pressable>

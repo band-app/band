@@ -3,7 +3,7 @@ import {
   selectChoices,
   type sessionPickers,
 } from "@band-app/client/session-pickers";
-import { Check } from "lucide-react-native";
+import { Check, Cpu, Gauge, type LucideIcon, SlidersHorizontal, Zap } from "lucide-react-native";
 import {
   ActivityIndicator,
   Modal,
@@ -73,6 +73,7 @@ export function SessionSheet({
               {pickers.models.map((m) => (
                 <Choice
                   key={m.id}
+                  icon={Cpu}
                   name={m.name}
                   description={m.description}
                   selected={m.id === pickers.model}
@@ -82,10 +83,15 @@ export function SessionSheet({
               ))}
             </Section>
           ) : null}
-          {pickers.effort ? <OptionSection option={pickers.effort} onChoose={onChoose} /> : null}
+          {pickers.effort ? (
+            <OptionSection option={pickers.effort} effort onChoose={onChoose} />
+          ) : null}
           {pickers.fast ? (
             <View style={styles.switchRow}>
-              <Text style={styles.name}>{pickers.fast.name}</Text>
+              <View style={styles.switchLabel}>
+                <Icon icon={Zap} />
+                <Text style={styles.name}>{pickers.fast.name}</Text>
+              </View>
               <Switch
                 value={pickers.fast.currentValue === "on"}
                 onValueChange={(on) => onChoose(pickers.fast?.id ?? "fast", on ? "on" : "off")}
@@ -105,9 +111,11 @@ export function SessionSheet({
 
 function OptionSection({
   option,
+  effort,
   onChoose,
 }: {
   option: SelectOption;
+  effort?: boolean;
   onChoose: (configId: string, value: string) => void;
 }) {
   return (
@@ -115,6 +123,7 @@ function OptionSection({
       {selectChoices(option).map((c) => (
         <Choice
           key={c.id}
+          icon={effort ? Gauge : SlidersHorizontal}
           name={c.name}
           description={c.description}
           selected={c.id === option.currentValue}
@@ -144,12 +153,14 @@ function Section({
 }
 
 function Choice({
+  icon,
   name,
   description,
   selected,
   onPress,
   testID,
 }: {
+  icon: LucideIcon;
   name: string;
   description?: string;
   selected: boolean;
@@ -165,6 +176,7 @@ function Choice({
       style={styles.choice}
       testID={testID}
     >
+      <Icon icon={icon} />
       <View style={styles.choiceText}>
         <Text style={styles.name}>{name}</Text>
         {description ? (
@@ -203,5 +215,6 @@ const styles = StyleSheet.create({
   choiceText: { flex: 1, gap: 2 },
   name: { color: colors.foreground, fontSize: 16 },
   description: { color: colors.mutedForeground, fontSize: 13 },
+  switchLabel: { alignItems: "center", flexDirection: "row", gap: 8 },
   switchRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
 });

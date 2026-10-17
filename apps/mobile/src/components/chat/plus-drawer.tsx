@@ -1,5 +1,14 @@
 import type { sessionPickers } from "@band-app/client/session-pickers";
-import { Camera, Check, ClipboardPaste, File, Image, type LucideIcon } from "lucide-react-native";
+import {
+  Camera,
+  Check,
+  ClipboardList,
+  ClipboardPaste,
+  File,
+  Image,
+  type LucideIcon,
+  Shield,
+} from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -149,6 +158,7 @@ export function PlusDrawer({
                       style={styles.choice}
                       testID={`plus-drawer__mode-${m.id}`}
                     >
+                      <Icon icon={/plan/i.test(m.id) ? ClipboardList : Shield} />
                       <Text style={styles.name}>{m.name}</Text>
                       {selected ? <Icon icon={Check} /> : null}
                     </Pressable>
@@ -230,9 +240,9 @@ const styles = StyleSheet.create({
   choice: {
     alignItems: "center",
     flexDirection: "row",
-    justifyContent: "space-between",
+    gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  name: { color: colors.foreground, fontSize: 16 },
+  name: { color: colors.foreground, flex: 1, fontSize: 16 },
 });
