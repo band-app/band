@@ -1,4 +1,4 @@
-import { Check, MessageSquare } from "lucide-react-native";
+import { Check, MessageSquare, Plus } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -125,6 +125,7 @@ export function SessionHistorySheet({
               style={styles.row}
               testID="session-history__new"
             >
+              <Icon icon={Plus} />
               <Text style={styles.name}>New session</Text>
             </Pressable>
           </View>
