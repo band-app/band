@@ -104,7 +104,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       # .nvmrc holds the Node major the desktop app ships (Electron's bundled
       # Node), so CI tests the runtime users actually run.
@@ -156,8 +156,11 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - name: Lint (Biome)
-        run: pnpm exec biome check .
+      - name: Lint (Oxlint)
+        run: pnpm exec vp lint
+
+      - name: Check formatting (Oxfmt)
+        run: pnpm exec vp fmt --check
 
       - name: Check worktree ids are built by toWorktreeId
         run: ./scripts/check-worktree-ids.sh
@@ -264,7 +267,7 @@ jobs:
       - name: Test (desktop)
         run: pnpm --filter @band-app/desktop test
 
-      # Biome above already lints apps/mobile; the iOS build is the `mobile-ios` job.
+      # Oxlint above already lints apps/mobile; the iOS build is the `mobile-ios` job.
       - name: Typecheck (mobile)
         run: pnpm --filter @band-app/mobile typecheck
 
@@ -442,7 +445,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -901,7 +904,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1004,7 +1007,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1071,7 +1074,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1178,7 +1181,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1278,7 +1281,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1317,7 +1320,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1373,7 +1376,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -1450,7 +1453,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.13.1
 
       - name: Setup Node.js
         if: steps.changes.outputs.changed == 'true'

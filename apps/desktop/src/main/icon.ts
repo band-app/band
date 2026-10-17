@@ -19,6 +19,7 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { app } from "electron";
 
 const __filename = fileURLToPath(import.meta.url);

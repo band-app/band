@@ -18,6 +18,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
+
 import type { ThisComputerResult, ThisComputerStatus } from "../../shared/types.js";
 import { bandHome } from "./log.js";
 

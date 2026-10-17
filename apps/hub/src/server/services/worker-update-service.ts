@@ -10,6 +10,7 @@
 import { METHOD_WORKER_UPDATE, RPC_METHOD_NOT_FOUND, RpcError } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { workerUpdateCommand } from "@band-app/shared/versions";
+
 import { TokenQueries } from "../infra/db/queries/tokens";
 import { describeHostVersion } from "./_utils/host-version";
 import { HUB_VERSION } from "./_utils/hub-version";

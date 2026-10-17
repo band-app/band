@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { expect } from "@playwright/test";
 
 /** Matches the probe's ready line, but not the typed command that starts it. */

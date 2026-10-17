@@ -1,8 +1,10 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, relative, sep } from "node:path";
+
 import type { SessionFile } from "@band-app/link";
 import { claudeProjectSlug } from "@band-app/shared/claude-session";
+
 import type { Registrar, WorkerContext } from "./context.ts";
 import { optStr, type Params, str, strArray } from "./rpc-util.ts";
 

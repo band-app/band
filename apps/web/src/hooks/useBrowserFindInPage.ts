@@ -21,7 +21,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import type { SearchBarHandle, SearchOptions } from "@/dashboard";
+
 import type { BrowserWebview, WebviewFoundInPageResult } from "../lib/browser-webview";
 
 export interface UseBrowserFindInPageReturn {

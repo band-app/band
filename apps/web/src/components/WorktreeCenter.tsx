@@ -64,6 +64,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+
 import {
   AgentIcon,
   buildLspWsUrl,
@@ -96,6 +97,7 @@ import {
   useWorktreePath,
   type ViewMode,
 } from "@/dashboard";
+
 import {
   BROWSER_LOAD_EVENT,
   type BrowserLoadDetail,
@@ -183,8 +185,8 @@ import {
 } from "./layout/LayoutView";
 import type { AddPanelOptions, LayoutApi, LayoutPanel } from "./layout/model";
 import { isSavedLayout, sanitizeSavedLayout, stripParams } from "./layout/saved-layout";
-import { MarkdownWidthToggle } from "./MarkdownWidthToggle";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
+import { MarkdownWidthToggle } from "./MarkdownWidthToggle";
 import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 import { setPerWorktreeState } from "./per-worktree-state-store";
@@ -194,8 +196,6 @@ import { setPerWorktreeState } from "./per-worktree-state-store";
 // callbacks (call time, never module eval), so the live binding is always
 // populated by then — same pattern the legacy containers use.
 import { crossPanelHandlers } from "./SharedWorktreeLayout";
-import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
-import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
 import {
   readCachedTabMeta,
   TabStatusIndicator,
@@ -203,6 +203,8 @@ import {
   useTerminalTabStatus,
   writeCachedTabMeta,
 } from "./tab-status";
+import { type SwitcherItem, TabSwitcher } from "./TabSwitcher";
+import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
 
 // ---------------------------------------------------------------------------
 // Leaf kinds
@@ -394,7 +396,7 @@ function notifyHeaderActionsChanged(panelId: string): void {
 function usePublishHeaderActions(
   panelId: string,
   render: (() => React.ReactNode) | null,
-  // biome-ignore lint/suspicious/noExplicitAny: caller-controlled dep list
+  // oxlint-disable-next-line typescript/no-explicit-any -- caller-controlled dep list
   deps: any[],
 ): void {
   const renderRef = useRef(render);
@@ -835,7 +837,7 @@ function BrowserLeaf({ params, api }: LayoutPanelProps<BrowserLeafParams>) {
       <BrowserPaneComponent
         params={paneParams}
         api={api}
-        // biome-ignore lint/suspicious/noExplicitAny: layout panel props require matching shape
+        // oxlint-disable-next-line typescript/no-explicit-any -- layout panel props require matching shape
         {...({} as any)}
       />
     </div>
@@ -1040,7 +1042,7 @@ function useLeafFind(
   // `diff` leaves have one (unified) or two (split) — kept untyped to avoid a
   // direct @codemirror/view dependency in this component (same pattern as
   // CodeBrowserView).
-  // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped to avoid cross-package dependency
+  // oxlint-disable-next-line typescript/no-explicit-any -- EditorView from @codemirror/view — kept untyped to avoid cross-package dependency
   const viewsRef = useRef<any[]>([]);
   const getViews = useCallback(() => viewsRef.current, []);
 
@@ -1064,7 +1066,7 @@ function useLeafFind(
   // Re-dispatch the active query to newly-registered views (e.g. a split-diff
   // second pane, or the editor after content loads).
   const setViews = useCallback(
-    // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
+    // oxlint-disable-next-line typescript/no-explicit-any -- EditorView from @codemirror/view — kept untyped
     (views: any[]) => {
       viewsRef.current = views;
       if (views.length > 0) search.dispatchToViews(views);
@@ -1321,10 +1323,10 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
 
   // Hold the live EditorView so we can serialize its cursor selection + scroll
   // offset on unmount/pagehide and restore it next open (see `persistEditorState`).
-  // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
+  // oxlint-disable-next-line typescript/no-explicit-any -- EditorView from @codemirror/view — kept untyped
   const editorViewRef = useRef<any>(null);
   const handleEditorView = useCallback(
-    // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
+    // oxlint-disable-next-line typescript/no-explicit-any -- EditorView from @codemirror/view — kept untyped
     (view: any) => {
       editorViewRef.current = view;
       setViews(view ? [view] : []);
@@ -2884,7 +2886,7 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
 // Component registries
 // ---------------------------------------------------------------------------
 
-// biome-ignore lint/suspicious/noExplicitAny: the layout registers components by name with their own params
+// oxlint-disable-next-line typescript/no-explicit-any -- the layout registers components by name with their own params
 const components: Record<string, React.FunctionComponent<LayoutPanelProps<any>>> = {
   chat: ChatLeaf,
   term: TerminalLeaf,
@@ -2893,7 +2895,7 @@ const components: Record<string, React.FunctionComponent<LayoutPanelProps<any>>>
   diff: DiffLeaf,
 };
 
-// biome-ignore lint/suspicious/noExplicitAny: the layout registers components by name with their own params
+// oxlint-disable-next-line typescript/no-explicit-any -- the layout registers components by name with their own params
 const tabComponents: Record<string, React.FunctionComponent<LayoutTabProps<any>>> = {
   chat: ChatTab,
   term: TerminalTab,

@@ -3,6 +3,7 @@ import { chmodSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { call, cleanup, startHub, startWorker, tmpDir } from "./helpers.ts";
 
 // The worker reports the desktop capability from DISPLAY and an x11vnc on PATH, both read when it starts.

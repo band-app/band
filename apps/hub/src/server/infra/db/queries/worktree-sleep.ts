@@ -1,6 +1,7 @@
 /** Persistence for `worktree_sleep`: worktrees whose ephemeral worker exited (plan step 3.5). */
 
 import { eq } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { worktreeSleep } from "../schema";
 

@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 // The lint is a script CI runs, so the test runs the script on files in a temp dir.
 const script = resolve(import.meta.dirname, "../../../scripts/check-theme-tokens.mjs");

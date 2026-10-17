@@ -47,14 +47,16 @@
  * (see `SharedWorktreeLayout`'s `BrowserPanelComponent` web fallback).
  * The same `data-testid` marker is set on it for parity, but verifying
  * it requires desktop e2e coverage that this web-build spec can't
- * provide. The TypeScript + biome + lint pipeline catches the symbol-
+ * provide. The TypeScript + lint pipeline catches the symbol-
  * level half of the refactor on that container; the structural half
  * (Provider wiring + hook usage) mirrors chat and terminal exactly, so
  * coverage on those two is a reasonable proxy.
  */
 
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import {
   cleanupTmpHome,
   createTmpHome,

@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+
 import { rowsToEvents } from "@band-app/chat-runtime/replay";
 import { FAILED_STOP_REASONS } from "@band-app/chat-runtime/turns";
 import {
@@ -65,6 +66,7 @@ import type {
   SessionState,
 } from "@band-app/shared/chat-events";
 import { worktreeIdIsOnHost } from "@band-app/shared/worktree-id";
+
 import { ChatEventQueries, type ChatEventRow } from "../infra/db/queries/chat-events";
 import { ChatForwardQueries, type ChatForwardRow } from "../infra/db/queries/chat-forwards";
 import { TaskQueries } from "../infra/db/queries/tasks";

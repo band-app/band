@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
+
 import type {
   EnsureRepoResult,
   EnsureRepoSpec,
@@ -13,6 +14,7 @@ import type {
   RepoMapping,
 } from "@band-app/host-api";
 import { parseRemoteUrl, stripUrlCredentials } from "@band-app/shared/remote-url";
+
 import { execGit } from "../git/git-client";
 import { prependBinDirs } from "../process/path";
 

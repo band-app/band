@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
+
 import { syncReviewWithCI } from "@/plugins/client-plugin-host";
+
 import { useAdapter } from "../context";
 import { playSound, type SoundId } from "../lib/sounds";
 import type { SSEEvent } from "../lib/sse";

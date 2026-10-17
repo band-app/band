@@ -26,7 +26,8 @@
  * bypass the self-heal.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { shouldDropPersistedTab } from "../src/lib/persisted-tab-self-heal";
 
 describe("shouldDropPersistedTab — four-branch contract (issue #539)", () => {

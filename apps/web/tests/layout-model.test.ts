@@ -11,7 +11,9 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+
+import { describe, expect, it } from "vite-plus/test";
+
 import { LayoutApi, type LayoutPanel } from "../src/components/layout/model";
 import { sanitizeSavedLayout, stripParams } from "../src/components/layout/saved-layout";
 import { parseSerializedLayout } from "../src/components/layout/serialized";
@@ -24,7 +26,7 @@ function fixture(name: string): Record<string, unknown> {
   );
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: fixtures are edited as loose JSON
+// oxlint-disable-next-line typescript/no-explicit-any -- fixtures are edited as loose JSON
 type JsonObject = Record<string, any>;
 
 interface Shape {

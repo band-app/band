@@ -1,4 +1,5 @@
 import { basename, dirname, isAbsolute } from "node:path";
+
 import {
   type Environment,
   type EnvironmentIssue,
@@ -6,6 +7,7 @@ import {
   unmetRequirements,
 } from "@band-app/environment";
 import { TRPCError } from "@trpc/server";
+
 import { hostRegistry } from "../infra/host/registry";
 import { repoService } from "./repo-service";
 import { MAX_LIST_LIMIT, tokenService } from "./token-service";

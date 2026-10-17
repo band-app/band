@@ -17,10 +17,12 @@ import { request } from "node:http";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { DIRECT_FALLBACK_CLOSE_CODE, type DirectAccess } from "@band-app/shared/direct-access";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import WebSocket from "ws";
+
 import { stopTerminalDaemons } from "../../worker/src/terminals";
 import { TEST_TOKEN } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";

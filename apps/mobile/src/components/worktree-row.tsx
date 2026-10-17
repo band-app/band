@@ -1,5 +1,6 @@
 import { CircleAlert, CircleCheck, GitMerge, Loader, Moon } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
 import type { CiTone, PullRequestTone, WorktreeRow } from "../lib/worktree-list";
 import { colors, tints, tones } from "../theme";
 import { SHOWN_LABEL, StateIcon } from "./state-icon";

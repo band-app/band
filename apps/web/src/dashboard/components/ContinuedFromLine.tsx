@@ -1,6 +1,7 @@
 import { type ContinuedFrom, formatAge } from "@band-app/shared/continuation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { History } from "lucide-react";
+
 import { useHostNames } from "../hooks/use-host-names";
 
 /** "Continued from <host> · auto · checkpoint 4 min old": the record a continuation leaves on the new copy. */

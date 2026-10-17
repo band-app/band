@@ -7,7 +7,8 @@
 // `apps/hub/tests/reports.test.ts`, and the SQL bucketing in
 // `apps/hub/tests/reports-buckets.test.ts`.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import {
   formatBucketTick,
   formatBucketTooltipLabel,

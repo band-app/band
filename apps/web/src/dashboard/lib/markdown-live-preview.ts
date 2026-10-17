@@ -46,6 +46,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
+
 import { loadLanguage } from "./codemirror-setup";
 import { bandCodeHighlightStyle, codeFontSize } from "./codemirror-theme";
 import type { MarkdownPreviewWidth } from "./markdown-preview-width";

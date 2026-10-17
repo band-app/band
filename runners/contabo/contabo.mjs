@@ -24,12 +24,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+
 import { renderCloudInit } from "../_shared/cloud-init.mjs";
 import { api, cloneUrl, die, need, printHandle, repoName, run } from "../_shared/lib.mjs";
 
 const apiBase = process.env.CONTABO_API_URL || "https://api.contabo.com/v1";
 const authUrl =
-  process.env.CONTABO_AUTH_URL || "https://auth.contabo.com/auth/realms/contabo/protocol/openid-connect/token";
+  process.env.CONTABO_AUTH_URL ||
+  "https://auth.contabo.com/auth/realms/contabo/protocol/openid-connect/token";
 const BUSY = "band-busy-";
 const IDLE = "band-idle";
 
@@ -49,7 +51,8 @@ async function fetchToken() {
       grant_type: "password",
     },
   });
-  if (!body?.access_token) throw new Error("Contabo's auth server answered without an access token");
+  if (!body?.access_token)
+    throw new Error("Contabo's auth server answered without an access token");
   return body.access_token;
 }
 
@@ -59,12 +62,18 @@ const call = async (method, path, opts = {}) =>
     headers: { authorization: `Bearer ${await token()}`, "x-request-id": randomUUID() },
   });
 
-const idList = (name) => (process.env[name] || "").split(",").map((s) => s.trim()).filter(Boolean);
+const idList = (name) =>
+  (process.env[name] || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 const mode = process.env.CONTABO_MODE || "pool";
 if (mode !== "pool" && mode !== "new") die(`CONTABO_MODE must be pool or new, got ${mode}`);
 
 async function instance(id) {
-  const { body, status } = await call("GET", `/compute/instances/${encodeURIComponent(id)}`, { allow: [404] });
+  const { body, status } = await call("GET", `/compute/instances/${encodeURIComponent(id)}`, {
+    allow: [404],
+  });
   return status === 404 ? undefined : body?.data?.[0];
 }
 
@@ -72,7 +81,10 @@ async function instance(id) {
 async function bandInstances() {
   const found = [];
   for (let page = 1; ; page++) {
-    const { body } = await call("GET", `/compute/instances?page=${page}&size=100&displayName=band-`);
+    const { body } = await call(
+      "GET",
+      `/compute/instances?page=${page}&size=100&displayName=band-`,
+    );
     const data = body?.data ?? [];
     found.push(...data.filter((i) => (i.displayName ?? "").startsWith("band-")));
     if (data.length < 100) return found;
@@ -82,7 +94,8 @@ async function bandInstances() {
 async function candidates() {
   if (mode === "pool") {
     const pool = idList("CONTABO_POOL");
-    if (pool.length === 0) throw new Error("CONTABO_POOL lists no instance (or set CONTABO_MODE=new)");
+    if (pool.length === 0)
+      throw new Error("CONTABO_POOL lists no instance (or set CONTABO_MODE=new)");
     return (await Promise.all(pool.map(instance))).filter(Boolean);
   }
   return bandInstances();
@@ -125,10 +138,12 @@ async function withLock(fn) {
 
 const sshKeys = () =>
   idList("CONTABO_SSH_KEYS").map((id) => {
-    if (!/^\d+$/.test(id)) throw new Error(`CONTABO_SSH_KEYS must list numeric secret ids, got "${id}"`);
+    if (!/^\d+$/.test(id))
+      throw new Error(`CONTABO_SSH_KEYS must list numeric secret ids, got "${id}"`);
     return Number(id);
   });
-const rename = (id, displayName) => call("PATCH", `/compute/instances/${id}`, { json: { displayName } });
+const rename = (id, displayName) =>
+  call("PATCH", `/compute/instances/${id}`, { json: { displayName } });
 const reinstall = (id, userData) =>
   call("PUT", `/compute/instances/${id}`, {
     json: {
@@ -151,8 +166,15 @@ async function spawn() {
       // A worker id that wakes comes back on the instance it had, wiped by the reinstall below.
       const pick =
         all.find((i) => i.displayName === name) ??
-        all.find((i) => !(i.displayName ?? "").startsWith(BUSY) && !["installing", "provisioning"].includes(i.status));
-      if (!pick) throw new Error(`no idle instance in CONTABO_POOL (${all.length} listed, all busy or still installing)`);
+        all.find(
+          (i) =>
+            !(i.displayName ?? "").startsWith(BUSY) &&
+            !["installing", "provisioning"].includes(i.status),
+        );
+      if (!pick)
+        throw new Error(
+          `no idle instance in CONTABO_POOL (${all.length} listed, all busy or still installing)`,
+        );
       await rename(pick.instanceId, name);
       return pick.instanceId;
     });
@@ -176,14 +198,19 @@ async function spawn() {
   }
 
   printHandle(String(id));
-  if (cloneUrl()) console.log(`BAND_HOST_REPO_PATH=${process.env.BAND_VM_WORKER === "docker" ? "/work" : "/home/band/work"}/${repoName()}`);
+  if (cloneUrl())
+    console.log(
+      `BAND_HOST_REPO_PATH=${process.env.BAND_VM_WORKER === "docker" ? "/work" : "/home/band/work"}/${repoName()}`,
+    );
   console.log(`${mode === "pool" ? "reinstalled pool" : "bought"} instance ${id} as ${name}`);
 }
 
 async function destroy() {
   const name = `${BUSY}${need("BAND_WORKER_ID")}`;
   const handle = process.env.BAND_MACHINE_HANDLE;
-  const found = (await candidates()).filter((i) => i.displayName === name || (handle && String(i.instanceId) === handle));
+  const found = (await candidates()).filter(
+    (i) => i.displayName === name || (handle && String(i.instanceId) === handle),
+  );
   if (found.length === 0) {
     console.log("no instance to release");
     return;

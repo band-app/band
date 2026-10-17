@@ -21,7 +21,9 @@ import {
   useRef,
   useState,
 } from "react";
+
 import { isMacPlatform, type SearchBarHandle, type SearchOptions } from "@/dashboard";
+
 import type { VirtualizedMessageListHandle } from "./VirtualizedMessageList";
 
 /** Marks the rendered text a find searches: a user message's text and each
@@ -271,7 +273,7 @@ export function useChatFind({
   }, [regex, scrollEl, paneId, listRef, onBeforeScroll]);
 
   // Repaint when the match moves.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `currentKey` is the trigger; `repaint` reads the match through a ref
+  // oxlint-disable-next-line react/exhaustive-deps -- `currentKey` is the trigger; `repaint` reads the match through a ref
   useEffect(() => {
     const raf = requestAnimationFrame(repaint);
     return () => cancelAnimationFrame(raf);

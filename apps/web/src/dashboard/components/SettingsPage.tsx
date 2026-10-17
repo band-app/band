@@ -24,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+
 import { useTitleBarOffset } from "../../hooks/useIsFullscreen";
 import { isDesktop } from "../../lib/is-desktop";
 import { trpc } from "../../lib/trpc-client";

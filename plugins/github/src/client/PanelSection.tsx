@@ -1,6 +1,7 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band-app/ui";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
+
 import { type SectionId, useSectionOpen } from "./section-state";
 
 /** A collapsible section: chevron, title and a one-line summary in the header. */

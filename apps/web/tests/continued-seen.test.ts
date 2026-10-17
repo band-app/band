@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
+
 import { CONTINUED_ICON_WINDOW_MS, continuedIconVisible } from "../src/lib/continued-seen";
 
 // Pure rule with no state to fake: continuation time, seen mark and clock in, visibility out.

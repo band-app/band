@@ -4,8 +4,8 @@ import type { ComponentProps, HTMLAttributes } from "react";
 import { memo, useCallback, useState } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
-import { hubAssetUrl } from "../../lib/hub-config";
 
+import { hubAssetUrl } from "../../lib/hub-config";
 import { streamdownPlugins } from "../streamdown-components";
 import {
   fileLinkComponents,

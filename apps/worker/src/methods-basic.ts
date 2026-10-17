@@ -3,8 +3,10 @@ import type { Dirent } from "node:fs";
 import { readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
+
 import type { ClaudeCliArgs, ExecOptions, ScriptLabel, ScriptPlan } from "@band-app/host-api";
 import { RpcError } from "@band-app/link";
+
 import { describeHost, type Registrar, type WorkerContext } from "./context.ts";
 import { PathDeniedError } from "./path-policy.ts";
 import {

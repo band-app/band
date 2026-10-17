@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+
 import { WebSocket, WebSocketServer } from "ws";
+
 import { PROTOCOL_VERSION } from "../src/protocol.ts";
 import { HELLO, makeClient, once, startServer, TOKEN, waitFor } from "./helpers.ts";
 

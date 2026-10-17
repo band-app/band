@@ -7,7 +7,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { git, startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 
 interface Worktree {

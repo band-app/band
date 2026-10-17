@@ -5,6 +5,7 @@
  */
 
 import { networkInterfaces } from "node:os";
+
 import { SettingsQueries } from "../infra/db/queries/settings";
 import {
   listPairingInterfaces,

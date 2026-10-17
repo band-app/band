@@ -10,8 +10,11 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { removeBrowserTabs } from "./helpers/browser-tabs";
 import { git } from "./helpers/git";
 import {

@@ -5,7 +5,8 @@
  * read from the prompts the stub received.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import {
   runTurn,
   startAcpServer,

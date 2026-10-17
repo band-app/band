@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { findFilePaths, isFilePath } from "../src/file-path-detection.ts";
 
 describe("findFilePaths", () => {

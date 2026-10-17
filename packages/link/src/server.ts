@@ -1,7 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createServer, type Server as HttpServer } from "node:http";
+
 import { type RawData, WebSocket, WebSocketServer } from "ws";
+
 import {
   DEFAULT_CHANNEL_WINDOW,
   DEFAULT_HEARTBEAT_MS,

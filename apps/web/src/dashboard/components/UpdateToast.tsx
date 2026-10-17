@@ -1,6 +1,7 @@
 import { Button, Spinner } from "@band-app/ui";
 import { CircleAlert, CircleCheck, Download, RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
+
 import { openExternalUrl } from "../../lib/open-external-url";
 import type { UpdateRelease } from "../adapter";
 import { useAppUpdate } from "../hooks/use-app-update";

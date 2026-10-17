@@ -1,6 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { GitBranch } from "lucide-react";
 import type { ReactNode } from "react";
+
 import type { AgentInfo, AgentStatusType, TabAgentStatus } from "../types";
 
 /** A status that gets a mark. `idle` shows the fallback icon instead. */

@@ -18,6 +18,7 @@ import {
   withoutPinned,
 } from "@band-app/shared/sidebar-tree";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+
 import {
   type AgentState,
   ageLabel,

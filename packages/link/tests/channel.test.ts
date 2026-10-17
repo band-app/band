@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
+
 import { type Channel, PROTOCOL_VERSION } from "../src/index.ts";
 import { makeClient, nextSession, startServer, waitFor } from "./helpers.ts";
 

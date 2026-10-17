@@ -4,6 +4,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { ChevronsUpDown, FolderOpen, GitCompare, Menu, MoreVertical } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+
 import {
   type ChangeEntry,
   type ChangeSection,
@@ -18,6 +19,7 @@ import {
   WorktreeLabel,
   WorktreePickerDialog,
 } from "@/dashboard";
+
 import { countChangedPaths, useWorktreeChanges } from "../hooks/useWorktreeChanges";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
@@ -363,14 +365,12 @@ function MobileWorktreeChrome({
       badge: changeCount,
       testid: "mobile-worktree__menu-changes",
     },
-    ...pluginTabs.map(
-      ({ key, slug, tab }): PanelItem => ({
-        view: `plugin:${key}`,
-        label: tab.label,
-        icon: tab.icon,
-        testid: `mobile-worktree__menu-${slug}`,
-      }),
-    ),
+    ...pluginTabs.map(({ key, slug, tab }): PanelItem => ({
+      view: `plugin:${key}`,
+      label: tab.label,
+      icon: tab.icon,
+      testid: `mobile-worktree__menu-${slug}`,
+    })),
   ];
 
   // Open a file leaf in the center layout, then close the tree sheet.

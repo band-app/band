@@ -2,7 +2,9 @@ import { Button } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { CloudOff, File as FileIcon, FolderOpen, GitCompare } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+
 import { toWorktreeId, useRepos } from "@/dashboard";
+
 import { ContinueOnHostDialog } from "../dashboard/components/ContinueOnHostDialog";
 import { timeAgo, useHostSeen } from "../dashboard/hooks/use-host-status";
 import { trpc } from "../lib/trpc-client";

@@ -3,9 +3,10 @@ import { cn } from "@band-app/ui";
 import { Download, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
-import { CodeMirrorViewer } from "@/dashboard";
-import { hubAssetUrl } from "../../lib/hub-config";
 
+import { CodeMirrorViewer } from "@/dashboard";
+
+import { hubAssetUrl } from "../../lib/hub-config";
 import { detectLanguageFromFilename, downloadFile, isTextMediaType } from "./file-preview-utils";
 
 interface FilePreviewOverlayProps {

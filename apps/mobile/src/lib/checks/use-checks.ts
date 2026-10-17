@@ -24,6 +24,7 @@ import {
 } from "@band-app/client/checks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+
 import { useHubSession } from "../hub-session";
 
 function errorMessage(err: unknown): string {
@@ -57,7 +58,7 @@ export function useWorktreeChecks(worktreeId: string, branch: string) {
     () => feed.getSnapshot().state.branches.get(worktreeId)?.ci?.state,
   );
   const refetch = query.refetch;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new CI state is the trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- a new CI state is the trigger
   useEffect(() => {
     void refetch();
   }, [ciState, refetch]);

@@ -1,5 +1,6 @@
 import { gitRunner, type Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+
 import { SubscriptionQueries } from "../infra/db/queries/subscriptions";
 
 const log = createLogger("pushed-sha");

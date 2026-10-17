@@ -105,7 +105,7 @@ Special cases:
 Run the same checks the pre-push hook runs. From `CLAUDE.md`: *"Never bypass git hooks — do not use `--no-verify`."*
 
 ```bash
-# All-in-one check (biome + cargo fmt --check + cargo clippy -D warnings).
+# All-in-one check (Oxlint + Oxfmt + cargo fmt --check + cargo clippy -D warnings).
 # Documented as the canonical entrypoint in CONTRIBUTING.md.
 pnpm check
 # Tests — for affected package(s), not the whole monorepo.

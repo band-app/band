@@ -2,8 +2,10 @@ import { execFile } from "node:child_process";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 import { getSharedSkillsDir } from "@band-app/coding-agent";
 import type { InstallSkillsResult } from "@band-app/host-api";
+
 import { findCliBinary } from "../process/cli-binary";
 import { whichBinary } from "../process/path";
 

@@ -8,8 +8,10 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { AGENT_MODE_KEY, LABEL_FILTER_KEY, LABEL_LAST_WORKTREE_KEY } from "@/dashboard";
 import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
+
 import { FindWidget } from "./FindWidget";
 
 /** DEAD localStorage key prefix — the legacy `SharedWorktreeLayout`

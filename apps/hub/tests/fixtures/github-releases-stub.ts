@@ -2,6 +2,7 @@
 // `BAND_GITHUB_API_URL` on every call and asks `GET /repos/band-app/band/releases/latest`.
 
 import type { Server } from "node:http";
+
 import express from "express";
 
 export interface ReleasesStub {

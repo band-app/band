@@ -1,8 +1,10 @@
 import { delimiter, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+
 import type { AgentStdio, McpStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
 import { shellPath } from "@band-app/host-local/process/path";
 import { type Channel, decodeFrames, encodeFrame } from "@band-app/link";
+
 import { agentSpawnEnv } from "./agent-env.ts";
 import { browserProfileDir, type Registrar, type WorkerContext } from "./context.ts";
 import { ghTokenEnv } from "./gh-token.ts";

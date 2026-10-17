@@ -16,8 +16,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { seedExplorer } from "./seed-explorer.mjs";
+
 import { CHECKS_BRANCHES, CHECKS_REPO } from "./checks.mjs";
+import { seedExplorer } from "./seed-explorer.mjs";
 
 /** The showcase turn's reply: every markdown construct the chat renders natively. */
 export const SHOWCASE_MARKDOWN = [
@@ -85,7 +86,9 @@ function showcaseSteps() {
       toolUpdate: {
         toolCallId: "edit-1",
         status: "completed",
-        content: [{ type: "diff", path: "src/parser.ts", oldText: PARSER_OLD, newText: PARSER_NEW }],
+        content: [
+          { type: "diff", path: "src/parser.ts", oldText: PARSER_OLD, newText: PARSER_NEW },
+        ],
       },
     },
     {
@@ -101,7 +104,9 @@ function showcaseSteps() {
       toolUpdate: {
         toolCallId: "run-1",
         status: "completed",
-        content: [{ type: "content", content: { type: "text", text: "```\n✓ parser (3 tests)\n```" } }],
+        content: [
+          { type: "content", content: { type: "text", text: "```\n✓ parser (3 tests)\n```" } },
+        ],
       },
     },
     {
@@ -129,7 +134,15 @@ function longSteps() {
     const path = `src/module-${i}.ts`;
     steps.push(
       { say: `Step ${i}: checking \`${path}\` for the old radix call.` },
-      { tool: { toolCallId: id, title: `Read ${path}`, kind: "read", status: "pending", locations: [{ path }] } },
+      {
+        tool: {
+          toolCallId: id,
+          title: `Read ${path}`,
+          kind: "read",
+          status: "pending",
+          locations: [{ path }],
+        },
+      },
       { toolUpdate: { toolCallId: id, status: "completed" } },
       { think: `Module ${i} is fine.` },
     );
@@ -172,7 +185,12 @@ const FORM_SCHEMA = {
     tags: {
       type: "array",
       description: "Which tags?",
-      items: { anyOf: [{ const: "ui", title: "UI" }, { const: "api", title: "API" }] },
+      items: {
+        anyOf: [
+          { const: "ui", title: "UI" },
+          { const: "api", title: "API" },
+        ],
+      },
     },
     agree: { type: "boolean", title: "Run the tests too", description: "Run the tests?" },
     count: { type: "integer", description: "How many retries (1 to 5)?", minimum: 1, maximum: 5 },
@@ -209,7 +227,12 @@ export const SCENARIO = {
       steps: [
         {
           permission: {
-            toolCall: { toolCallId: "tool-1", title: "Run the test suite", kind: "execute", status: "pending" },
+            toolCall: {
+              toolCallId: "tool-1",
+              title: "Run the test suite",
+              kind: "execute",
+              status: "pending",
+            },
             options: [
               { optionId: "allow", name: "Allow", kind: "allow_once" },
               { optionId: "deny", name: "Deny", kind: "reject_once" },
@@ -244,12 +267,20 @@ export const SCENARIO = {
     {
       match: "^form",
       steps: [
-        { elicitation: { message: "A few questions about the change.", requestedSchema: FORM_SCHEMA } },
+        {
+          elicitation: {
+            message: "A few questions about the change.",
+            requestedSchema: FORM_SCHEMA,
+          },
+        },
       ],
     },
     { match: "^plan", steps: planSteps() },
     // A turn of about 90 s that ends by itself, so a flow can queue messages behind it.
-    { match: "^slow", steps: [{ say: "Thinking it over." }, { sleep: 90000 }, { say: "Slow turn finished." }] },
+    {
+      match: "^slow",
+      steps: [{ say: "Thinking it over." }, { sleep: 90000 }, { say: "Slow turn finished." }],
+    },
     { match: "^showcase", steps: showcaseSteps() },
     { match: "^long", steps: longSteps() },
     { match: "^stream", steps: streamSteps() },
@@ -320,7 +351,9 @@ export const HISTORY_TURNS = 24;
 async function trpcResult(procedure, res) {
   const body = await res.json().catch(() => null);
   if (!res.ok || !body?.result) {
-    throw new Error(`${procedure} failed (HTTP ${res.status}): ${body?.error?.message ?? "no body"}`);
+    throw new Error(
+      `${procedure} failed (HTTP ${res.status}): ${body?.error?.message ?? "no body"}`,
+    );
   }
   return body.result.data;
 }
@@ -336,7 +369,11 @@ async function trpcQuery(state, procedure, input) {
 async function trpc(state, procedure, input) {
   const res = await fetch(`${state.url}/trpc/${procedure}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json", Connection: "close" },
+    headers: {
+      Authorization: `Bearer ${state.adminToken}`,
+      "Content-Type": "application/json",
+      Connection: "close",
+    },
     body: JSON.stringify(input),
   });
   return trpcResult(procedure, res);
@@ -348,7 +385,13 @@ function gitRepo(dir) {
     execFileSync("git", args, {
       cwd: dir,
       stdio: "ignore",
-      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@t",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@t",
+      },
     });
   git("init", "-q", "-b", "main");
   writeFileSync(join(dir, "README.md"), "# seed\n");
@@ -368,9 +411,13 @@ async function seedChecks(state) {
     cwd: dir,
   });
   for (const branch of Object.values(CHECKS_BRANCHES)) {
-    execFileSync("git", ["worktree", "add", "-q", "-b", branch, join(state.home, "wt", branch.replace("/", "-"))], {
-      cwd: dir,
-    });
+    execFileSync(
+      "git",
+      ["worktree", "add", "-q", "-b", branch, join(state.home, "wt", branch.replace("/", "-"))],
+      {
+        cwd: dir,
+      },
+    );
   }
   await trpc(state, "repos.add", { path: dir });
 }
@@ -386,11 +433,33 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "suggest", "session", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of [
+    "long",
+    "stream",
+    "resume",
+    "history",
+    "compose",
+    "queue",
+    "attach",
+    "suggest",
+    "session",
+    "keyboard",
+    "tabs",
+    "permit-allow",
+    "permit-reject",
+    "form",
+    "plan",
+    "listen",
+    "term",
+    "term-new",
+    "term-bg",
+    "term-scroll",
+  ]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
-  for (const chat of (await trpcQuery(state, "chats.list", { worktreeId: WORKTREES.GAMMA_TABS })).chats) {
+  for (const chat of (await trpcQuery(state, "chats.list", { worktreeId: WORKTREES.GAMMA_TABS }))
+    .chats) {
     await trpc(state, "chats.remove", { chatId: chat.id });
   }
   for (const chat of TAB_CHATS) {
@@ -443,7 +512,10 @@ const WEB_CHAT = { id: "chat_tabs_web", name: "From web" };
 export async function webEditTabs(state, worktreeId) {
   await trpc(state, "chats.create", { worktreeId, ...WEB_CHAT });
   const key = `band:center-tabs:${worktreeId}`;
-  const { entries } = await trpcQuery(state, "clientState.list", { worktreeId, deviceType: "desktop" });
+  const { entries } = await trpcQuery(state, "clientState.list", {
+    worktreeId,
+    deviceType: "desktop",
+  });
   let entry = entries.find((e) => e.key === key);
   // A write the phone made in between makes the version stale: rebase on it, as the web does.
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -468,7 +540,10 @@ export async function webEditTabs(state, worktreeId) {
 
 /** The shared tab list of a worktree as the hub holds it, and the chats the hub has there. */
 export async function sharedTabs(state, worktreeId) {
-  const { entries } = await trpcQuery(state, "clientState.list", { worktreeId, deviceType: "desktop" });
+  const { entries } = await trpcQuery(state, "clientState.list", {
+    worktreeId,
+    deviceType: "desktop",
+  });
   const entry = entries.find((e) => e.key === `band:center-tabs:${worktreeId}`);
   const { chats } = await trpcQuery(state, "chats.list", { worktreeId });
   return { tabs: entry?.value ?? null, chats: chats.map((c) => ({ id: c.id, name: c.name })) };
@@ -476,7 +551,11 @@ export async function sharedTabs(state, worktreeId) {
 
 /** A 96x64 PNG with a stripe, as a `data:` URL, for a prompt's attached image. */
 function pngFile(filename) {
-  return { mediaType: "image/png", filename, url: `data:image/png;base64,${pngBytes().toString("base64")}` };
+  return {
+    mediaType: "image/png",
+    filename,
+    url: `data:image/png;base64,${pngBytes().toString("base64")}`,
+  };
 }
 
 /** The bytes of a 96x64 PNG with a stripe. */
@@ -544,7 +623,11 @@ export async function startTurn(state, chats, worktreeId, text, files) {
   if (!chatId) throw new Error(`No chat for ${worktreeId}`);
   const res = await fetch(`${state.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${state.adminToken}`, "Content-Type": "application/json", Connection: "close" },
+    headers: {
+      Authorization: `Bearer ${state.adminToken}`,
+      "Content-Type": "application/json",
+      Connection: "close",
+    },
     body: JSON.stringify({ worktreeId, text, ...(files && { files }) }),
   });
   if (!res.ok) throw new Error(`send failed: HTTP ${res.status} ${await res.text()}`);
@@ -567,7 +650,10 @@ export function receivedPrompts(state) {
     .map((r) => {
       const parts = r.params?.prompt ?? [];
       return {
-        text: parts.filter((p) => p.type === "text").map((p) => p.text).join("\n"),
+        text: parts
+          .filter((p) => p.type === "text")
+          .map((p) => p.text)
+          .join("\n"),
         types: parts.map((p) => p.type),
       };
     });

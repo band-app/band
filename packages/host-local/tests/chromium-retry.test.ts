@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+
 import { ChromiumManager } from "../src/browser/chromium";
 
 // A fake Chromium (a node script) stands in for the binary, through BAND_CHROMIUM_BIN. Launch 1 takes the

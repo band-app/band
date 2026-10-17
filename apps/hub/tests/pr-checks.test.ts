@@ -12,7 +12,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type GhInvocation, type GhStub, ghStub } from "./fixtures/gh-stub";
 import {
   checkRunNode,

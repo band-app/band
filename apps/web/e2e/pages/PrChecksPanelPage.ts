@@ -30,6 +30,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { WorktreePage } from "./WorktreePage";
 
 export type MergeMethod = "merge" | "squash" | "rebase";

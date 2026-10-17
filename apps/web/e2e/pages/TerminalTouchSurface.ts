@@ -1,4 +1,5 @@
 import { type CDPSession, test } from "@playwright/test";
+
 import { TerminalSurface } from "./TerminalSurface";
 
 /**

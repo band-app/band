@@ -148,6 +148,7 @@ export function expectRerun(want) {
     (r) =>
       r.runId === want.runId && r.failed === Boolean(want.failed) && (want.job ?? null) === r.job,
   );
-  if (!hit) throw new Error(`no gh run rerun ${JSON.stringify(want)}; got ${JSON.stringify(reruns)}`);
+  if (!hit)
+    throw new Error(`no gh run rerun ${JSON.stringify(want)}; got ${JSON.stringify(reruns)}`);
   return hit;
 }

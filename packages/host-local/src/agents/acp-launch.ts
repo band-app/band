@@ -18,8 +18,10 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { AGENT_DISPATCH_ENV } from "@band-app/coding-agent";
 import type { AcpAgentDefinition, AcpLaunch } from "@band-app/host-api";
+
 import { shellPath } from "../process/path";
 
 const require = createRequire(import.meta.url);

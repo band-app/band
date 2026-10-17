@@ -21,8 +21,11 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,

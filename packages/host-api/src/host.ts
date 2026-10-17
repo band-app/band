@@ -1,5 +1,6 @@
 import type { UsageReader } from "@band-app/coding-agent";
 import type { Environment, EnvironmentIssue } from "@band-app/environment";
+
 import type { TerminalBackend } from "./pty";
 
 /**

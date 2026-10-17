@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+
 import type { UpdateStatus } from "../adapter";
 import { useAdapter } from "../context";
 

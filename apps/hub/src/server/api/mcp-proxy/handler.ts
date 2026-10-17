@@ -19,7 +19,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { createLogger } from "@band-app/logger";
+
 import { rewriteSse, SseEventTooLargeError, sseDataOf } from "../../services/_utils/mcp-sse";
 import {
   BUILTIN_BAND_SERVER,

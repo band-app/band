@@ -9,6 +9,7 @@ import {
 } from "@band-app/ui";
 import { CircleAlert, Info } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
+
 import { subscribeToastObstructions, toastObstructions } from "../../lib/toast-obstructions";
 import { INFO_NOTICE_MS, type Notice } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
@@ -180,7 +181,7 @@ function useObstructionBottom(hostRef: RefObject<HTMLElement | null>): number | 
   }, [hostRef]);
 
   // Switching worktrees swaps `visibility`, which changes no element's size.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on each switch
+  // oxlint-disable-next-line react/exhaustive-deps -- re-measure on each switch
   useEffect(() => {
     measureRef.current();
   }, [activeWorktreeId]);

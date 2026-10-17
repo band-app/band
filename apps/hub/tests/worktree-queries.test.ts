@@ -1,8 +1,10 @@
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { closeDb } from "../src/server/infra/db/connection";
 import { WorktreeQueries } from "../src/server/infra/db/queries/worktrees";
 import { seedState } from "./helpers/seed-state";

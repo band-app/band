@@ -1,6 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import {
   type AddToChatDetail,
   type AddToTerminalDetail,
@@ -15,6 +16,7 @@ import {
   useCapabilities,
   WorktreePickerDialog,
 } from "@/dashboard";
+
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/layout-section-actions";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";

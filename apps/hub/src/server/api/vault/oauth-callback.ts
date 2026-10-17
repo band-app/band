@@ -7,6 +7,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+
 import { vaultService } from "../../services/vault-service";
 
 export const OAUTH_CALLBACK_PATH = "/api/oauth/callback";

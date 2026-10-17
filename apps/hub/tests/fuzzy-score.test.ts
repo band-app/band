@@ -1,5 +1,5 @@
 import { fuzzyScore, scoreFiles } from "@band-app/worktree-ops/fuzzy-score";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 // ---------------------------------------------------------------------------
 // Helper: given a query and a list of file paths, return them sorted by score

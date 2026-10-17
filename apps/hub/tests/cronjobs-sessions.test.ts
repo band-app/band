@@ -2,7 +2,8 @@
 // chat whose active session is that id, opens a new chat on that session when none has it, and fails
 // the run (no fresh session) when the agent cannot open it. The coding agent is the scripted ACP stub.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import {
   type StubRequest,
   seedAcpHome,

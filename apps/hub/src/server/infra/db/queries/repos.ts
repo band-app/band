@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+
 import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
 import { and, eq, isNotNull, ne } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import {
   repoHosts as repoHostsTable,

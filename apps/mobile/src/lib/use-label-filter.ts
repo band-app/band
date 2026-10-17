@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+
 import { useHubSession } from "./hub-session";
 import { LABEL_FILTER_KEY, parseLabelFilter } from "./label-filter";
 
@@ -9,7 +10,7 @@ export function useLabelFilter(): [string | null, (value: string | null) => void
     parseLabelFilter(clientState.getItem(LABEL_FILTER_KEY)),
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clientStateReady re-reads the saved copy once it is loaded
+  // oxlint-disable-next-line react/exhaustive-deps -- clientStateReady re-reads the saved copy once it is loaded
   useEffect(() => {
     setValue(parseLabelFilter(clientState.getItem(LABEL_FILTER_KEY)));
     return clientState.subscribe((change) => {

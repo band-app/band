@@ -8,8 +8,10 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
 import type { DirectAccess } from "@band-app/shared/direct-access";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { agentText, maxId, openStream, turnEnded } from "./helpers/acp-chat";
 import { startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 import { type CuttableProxy, startCuttableProxy } from "./helpers/cuttable-proxy";

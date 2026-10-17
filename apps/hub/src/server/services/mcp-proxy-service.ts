@@ -10,7 +10,9 @@
  */
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+
 import { createLogger } from "@band-app/logger";
+
 import { McpProxyInputError, McpServerNotFoundError } from "../errors";
 import {
   type McpAuditRow,
@@ -502,7 +504,7 @@ export class McpProxyService {
   }
 
   private checkHeaderPrefix(prefix: string): string {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
+    // oxlint-disable-next-line no-control-regex -- rejecting control characters is the point
     if (prefix.length > 32 || /[\u0000-\u001f\u007f]/.test(prefix)) {
       throw new McpProxyInputError("The header prefix is too long or has control characters.");
     }

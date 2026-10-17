@@ -1,4 +1,5 @@
 import type { ChecksReport, ReviewInfo } from "@band-app/plugin-api";
+
 import { type CIStatus, statePriority } from "./github-graphql";
 
 /**

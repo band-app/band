@@ -10,6 +10,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, join, resolve, sep } from "node:path";
 import { pipeline, Readable } from "node:stream";
 import { parseArgs } from "node:util";
+
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import { createTerminalBackend } from "@band-app/host-local/terminals/create-backend";
 import { VOICE_TRANSCRIBE_PATH } from "@band-app/shared/speech-transcription";
@@ -17,6 +18,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
 import { WebSocketServer } from "ws";
+
 import {
   authenticatedCredential,
   createAuthMiddleware,
@@ -363,7 +365,7 @@ function getOpenApiSpec(): Promise<string> {
     if (isDev) {
       // Dynamic import so `@trpc/openapi` doesn't have to be reachable
       // in the prod bundle, where it's external.
-      // biome-ignore lint/suspicious/noExplicitAny: untyped runtime import
+      // oxlint-disable-next-line typescript/no-explicit-any -- untyped runtime import
       const { generateOpenAPIDocument } = (await import("@trpc/openapi")) as any;
       // Resolve the router path against this file's own directory rather
       // than `process.cwd()` so running `tsx apps/hub/start-server.ts`
@@ -838,7 +840,7 @@ async function main() {
   // assets from `dist/client` and every other GET gets the prerendered
   // `_shell.html`. Nothing is server-rendered on request.
   // -----------------------------------------------------------------------
-  // biome-ignore lint/suspicious/noExplicitAny: vite is dev-only, no runtime types in prod
+  // oxlint-disable-next-line typescript/no-explicit-any -- vite is dev-only, no runtime types in prod
   let viteServer: any = null;
   let viteMiddlewares:
     | ((req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) => void)
@@ -1307,7 +1309,7 @@ async function main() {
   // over the upgrade.
   // -----------------------------------------------------------------------
   if (isDev) {
-    // biome-ignore lint/suspicious/noExplicitAny: vite is a devDep, imported dynamically so prod bundle skips it
+    // oxlint-disable-next-line typescript/no-explicit-any -- vite is a devDep, imported dynamically so prod bundle skips it
     const { createServer: createViteServer } = (await import("vite")) as any;
     viteServer = await createViteServer({
       root: uiRoot,
@@ -1323,7 +1325,7 @@ async function main() {
     });
     viteMiddlewares = viteServer.middlewares;
     serverEntryHandler = async (request: Request) => {
-      // biome-ignore lint/suspicious/noExplicitAny: ssrLoadModule returns untyped modules
+      // oxlint-disable-next-line typescript/no-explicit-any -- ssrLoadModule returns untyped modules
       const mod: any = await viteServer.ssrLoadModule("@tanstack/react-start/server-entry");
       return mod.default.fetch(request);
     };

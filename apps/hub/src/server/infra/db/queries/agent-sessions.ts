@@ -7,6 +7,7 @@
 
 import type { AgentSessionRecord } from "@band-app/shared/agent-sessions";
 import { and, asc, eq, ne } from "drizzle-orm";
+
 import { getDb } from "../connection";
 import { agentSessions } from "../schema";
 

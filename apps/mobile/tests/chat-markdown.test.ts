@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { highlight, languageOf } from "../src/lib/chat/highlight.ts";
 import { parseMarkdown, spansText } from "../src/lib/chat/markdown.ts";
 

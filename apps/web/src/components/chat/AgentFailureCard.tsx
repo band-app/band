@@ -10,6 +10,7 @@ import {
 import { Button, cn } from "@band-app/ui";
 import { ChevronDown, ChevronRight, OctagonAlert, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+
 import { writeClipboardText } from "../../lib/clipboard";
 
 function hostLabel(host: string): string {
@@ -155,7 +156,7 @@ export function AgentFailureCard({
             >
               {output.lines.map((l, i) => (
                 <div
-                  // biome-ignore lint/suspicious/noArrayIndexKey: lines are static text
+                  // oxlint-disable-next-line react/no-array-index-key -- lines are static text
                   key={i}
                   data-testid={l.error ? "agent-failure__error-line" : undefined}
                   className={cn(

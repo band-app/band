@@ -14,8 +14,24 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
+
+import { sessionPickers } from "@band-app/client/session-pickers";
+import { foldEvents, INITIAL_TRANSCRIPT } from "@band-app/client/transcript";
+
+import { buildRows, copyText } from "../src/lib/chat/rows.ts";
+import { hubIdFor } from "../src/lib/hub-store.ts";
 import { expectRerun, finishBuild, startGhStub } from "./checks.mjs";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
+import {
+  APP_ROOT,
+  appPath,
+  BUNDLE_ID,
+  buildForSimulator,
+  installApp,
+  pickSimulator,
+} from "./ios.mjs";
+import { createRunTmp, removeOnExit } from "./run-tmp.ts";
+import { explorerChange } from "./seed-explorer.mjs";
 import {
   addSubscription,
   chatSubscriptions,
@@ -34,13 +50,6 @@ import {
   waitFor,
   webEditTabs,
 } from "./seed.mjs";
-import { explorerChange } from "./seed-explorer.mjs";
-import { APP_ROOT, appPath, BUNDLE_ID, buildForSimulator, installApp, pickSimulator } from "./ios.mjs";
-import { createRunTmp, removeOnExit } from "./run-tmp.ts";
-import { hubIdFor } from "../src/lib/hub-store.ts";
-import { buildRows, copyText } from "../src/lib/chat/rows.ts";
-import { sessionPickers } from "@band-app/client/session-pickers";
-import { foldEvents, INITIAL_TRANSCRIPT } from "@band-app/client/transcript";
 
 const args = process.argv.slice(2);
 const skipBuild = args.includes("--skip-build");
@@ -53,14 +62,21 @@ const allFlows = readdirSync(E2E)
   // Sorted: the tab flows build on each other (t1 to t6), and readdir promises no order.
   .sort();
 const wanted = args.filter((a) => !a.startsWith("--"));
-const flows = wanted.length ? [...wanted].sort() : allFlows.filter((f) => f.startsWith("perf-") === perf);
+const flows = wanted.length
+  ? [...wanted].sort()
+  : allFlows.filter((f) => f.startsWith("perf-") === perf);
 for (const f of flows) {
-  if (!allFlows.includes(f)) throw new Error(`No flow e2e/${f}.yaml (have: ${allFlows.join(", ")})`);
+  if (!allFlows.includes(f))
+    throw new Error(`No flow e2e/${f}.yaml (have: ${allFlows.join(", ")})`);
 }
 
 /** Maestro needs Java 17+. Homebrew's openjdk@17 is keg-only, so put it on PATH here. */
 function toolEnv() {
-  const env = { ...process.env, MAESTRO_CLI_NO_ANALYTICS: "1", MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true" };
+  const env = {
+    ...process.env,
+    MAESTRO_CLI_NO_ANALYTICS: "1",
+    MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: "true",
+  };
   const jdk = "/opt/homebrew/opt/openjdk@17";
   if (!env.JAVA_HOME && existsSync(jdk)) {
     env.JAVA_HOME = `${jdk}/libexec/openjdk.jdk/Contents/Home`;
@@ -138,7 +154,9 @@ async function checkTranscript(hub, chats, worktreeId, udid) {
     (e) => e.type === "update" && e.update.sessionUpdate === "agent_message_chunk",
   ).length;
   const counts = STREAM_LINES.map((line) => copied.split(line).length - 1);
-  const ordered = STREAM_LINES.every((line, i) => i === 0 || copied.indexOf(line) > copied.indexOf(STREAM_LINES[i - 1]));
+  const ordered = STREAM_LINES.every(
+    (line, i) => i === 0 || copied.indexOf(line) > copied.indexOf(STREAM_LINES[i - 1]),
+  );
   const ok = copied === expected && counts.every((n) => n === 1) && ordered;
   return {
     ok,
@@ -159,8 +177,10 @@ function checkTabs({ tabs, chats }, params) {
   const chatTabs = list.filter((t) => t.kind === "chat").map((t) => t.id);
   const problems = [];
   const want = params.get("chats");
-  if (want !== null && chatTabs.length !== Number(want)) problems.push(`${chatTabs.length} chat tabs, not ${want}`);
-  if (want !== null && chats.length !== Number(want)) problems.push(`${chats.length} chats on the hub, not ${want}`);
+  if (want !== null && chatTabs.length !== Number(want))
+    problems.push(`${chatTabs.length} chat tabs, not ${want}`);
+  if (want !== null && chats.length !== Number(want))
+    problems.push(`${chats.length} chats on the hub, not ${want}`);
   for (const id of (params.get("keep") ?? "").split(",").filter(Boolean)) {
     if (!list.some((t) => t.id === id)) problems.push(`tab ${id} was dropped`);
   }
@@ -168,14 +188,19 @@ function checkTabs({ tabs, chats }, params) {
     if (!chatTabs.includes(id)) problems.push(`no chat tab ${id}`);
   }
   for (const id of (params.get("lacks") ?? "").split(",").filter(Boolean)) {
-    if (chatTabs.includes(id) || chats.some((c) => c.id === id)) problems.push(`chat ${id} is still there`);
+    if (chatTabs.includes(id) || chats.some((c) => c.id === id))
+      problems.push(`chat ${id} is still there`);
   }
   // `order=<id,...>` is the exact chat tab order, with `new` for a chat not seeded as `chat_tabs_*`.
   const order = params.get("order");
   const seen = chatTabs.map((id) => (/^chat_tabs_/.test(id) ? id : "new")).join(",");
-  if (order !== null && seen !== order) problems.push(`the chat tabs are in the order ${seen}, not ${order}`);
+  if (order !== null && seen !== order)
+    problems.push(`the chat tabs are in the order ${seen}, not ${order}`);
   const active = params.get("active");
-  if (active === "new" && (!tabs?.active || /^chat_tabs_/.test(tabs.active) || !chatTabs.includes(tabs.active))) {
+  if (
+    active === "new" &&
+    (!tabs?.active || /^chat_tabs_/.test(tabs.active) || !chatTabs.includes(tabs.active))
+  ) {
     problems.push(`the active tab is ${tabs?.active}, not a new chat`);
   } else if (active && active !== "new" && tabs?.active !== active) {
     problems.push(`the active tab is ${tabs?.active}, not ${active}`);
@@ -188,7 +213,10 @@ function checkTabs({ tabs, chats }, params) {
     if (found !== name) problems.push(`chat ${id} is named ${found}, not ${name}`);
   }
   const note = `shared tabs ${list.map((t) => `${t.kind}:${t.id}`).join(", ")}; active ${tabs?.active}; hub chats ${chats.map((c) => `${c.id} (${c.name})`).join(", ")}`;
-  return { ok: problems.length === 0, note: problems.length ? `${problems.join("; ")}. ${note}` : note };
+  return {
+    ok: problems.length === 0,
+    note: problems.length ? `${problems.join("; ")}. ${note}` : note,
+  };
 }
 
 /**
@@ -226,7 +254,8 @@ function startControlServer(hub, chats, udid, notes) {
       if (url.pathname === "/stop") await stopHub();
       else if (url.pathname === "/start") await restartHub();
       else if (url.pathname === "/work") await startTurn(hub, target, wt, "work until I say stop");
-      else if (url.pathname === "/ask") await startTurn(hub, target, wt, "ask before you run the tests");
+      else if (url.pathname === "/ask")
+        await startTurn(hub, target, wt, "ask before you run the tests");
       else if (url.pathname === "/halt") await stopTurn(hub, target, wt);
       else if (url.pathname === "/check-tabs") {
         // The phone pushes its tab list 500 ms after a change and removes a chat without waiting,
@@ -239,8 +268,8 @@ function startControlServer(hub, chats, udid, notes) {
         }
         notes.push(`${wt}: ${result.note}`);
         if (!result.ok) throw new Error(result.note);
-      }
-      else if (url.pathname === "/term-open") await termOpen(hub, wt, Number(url.searchParams.get("n")));
+      } else if (url.pathname === "/term-open")
+        await termOpen(hub, wt, Number(url.searchParams.get("n")));
       else if (url.pathname === "/term-send") {
         await termSend(hub, Number(url.searchParams.get("n")), url.searchParams.get("value") ?? "");
       } else if (url.pathname === "/term-expect") {
@@ -250,7 +279,10 @@ function startControlServer(hub, chats, udid, notes) {
         const want = url.searchParams.get("value") ?? "";
         const count = Number(url.searchParams.get("count") ?? 1);
         const seen = async () => (await termOutput(hub, n)).split(want).length - 1;
-        await waitFor(async () => (await seen()) >= count, `${JSON.stringify(want)} x${count} in terminal ${n}`);
+        await waitFor(
+          async () => (await seen()) >= count,
+          `${JSON.stringify(want)} x${count} in terminal ${n}`,
+        );
         notes.push(`terminal ${n}: ${JSON.stringify(want)} printed ${await seen()} times`);
       } else if (url.pathname === "/term-size") {
         // Runs `stty size` and reads "<rows> <cols>" from the output; `smaller=<tag>` needs fewer rows than that tag.
@@ -273,38 +305,46 @@ function startControlServer(hub, chats, udid, notes) {
         notes.push(`terminal ${n}: stty size ${tag} = ${rows} rows x ${cols} columns`);
         const than = url.searchParams.get("smaller");
         if (than && !(rows < termSizes[than].rows)) {
-          throw new Error(`the shell sees ${rows} rows, not fewer than the ${termSizes[than].rows} of ${than}`);
+          throw new Error(
+            `the shell sees ${rows} rows, not fewer than the ${termSizes[than].rows} of ${than}`,
+          );
         }
       } else if (url.pathname === "/term-count") {
         // The hub holds `n` terminals for the worktree, and the shared tab list lists the same ids.
         const want = Number(url.searchParams.get("n") ?? 0);
         const deadline = Date.now() + 10_000;
         let live = await termList(hub, wt);
-        let listed = ((await sharedTabs(hub, wt)).tabs?.tabs ?? []).filter((t) => t.kind === "term");
+        let listed = ((await sharedTabs(hub, wt)).tabs?.tabs ?? []).filter(
+          (t) => t.kind === "term",
+        );
         while ((live.length !== want || listed.length !== want) && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 200));
           live = await termList(hub, wt);
           listed = ((await sharedTabs(hub, wt)).tabs?.tabs ?? []).filter((t) => t.kind === "term");
         }
-        notes.push(`${wt}: ${live.length} live terminals, ${listed.length} terminal tabs in the shared list`);
+        notes.push(
+          `${wt}: ${live.length} live terminals, ${listed.length} terminal tabs in the shared list`,
+        );
         if (live.length !== want || listed.length !== want) {
-          throw new Error(`${live.length} live terminals and ${listed.length} terminal tabs, expected ${want}`);
+          throw new Error(
+            `${live.length} live terminals and ${listed.length} terminal tabs, expected ${want}`,
+          );
         }
       } else if (url.pathname === "/appearance") {
         // The simulator's system appearance: light or dark.
         const mode = url.searchParams.get("mode") === "dark" ? "dark" : "light";
         execFileSync("xcrun", ["simctl", "ui", udid, "appearance", mode]);
-      }
-      else if (url.pathname === "/web-tabs") await webEditTabs(hub, wt);
-      else if (url.pathname === "/explorer-change") explorerChange(hub, url.searchParams.get("name") ?? undefined);
+      } else if (url.pathname === "/web-tabs") await webEditTabs(hub, wt);
+      else if (url.pathname === "/explorer-change")
+        explorerChange(hub, url.searchParams.get("name") ?? undefined);
       else if (url.pathname === "/subscribe") await addSubscription(hub, chats, wt);
       else if (url.pathname === "/expect-subscriptions") {
         const want = Number(url.searchParams.get("n") ?? 0);
         const subs = await chatSubscriptions(hub, chats, wt);
         notes.push(`${wt}: subscriptions.list holds ${subs.length}`);
-        if (subs.length !== want) throw new Error(`the hub holds ${subs.length} subscriptions, expected ${want}`);
-      }
-      else if (url.pathname === "/checks-finish-build") finishBuild();
+        if (subs.length !== want)
+          throw new Error(`the hub holds ${subs.length} subscriptions, expected ${want}`);
+      } else if (url.pathname === "/checks-finish-build") finishBuild();
       else if (url.pathname === "/expect-rerun") {
         // `gh run rerun <run>` was called, with `--failed` (`failed=1`) or `--job <id>`.
         const want = {
@@ -325,8 +365,7 @@ function startControlServer(hub, chats, udid, notes) {
           }
         }
         notes.push(`gh run rerun ${JSON.stringify(hit)}`);
-      }
-      else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
+      } else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
       else if (url.pathname === "/clipboard") {
         const want = url.searchParams.get("value") ?? "";
         const got = clipboard(udid);
@@ -336,7 +375,8 @@ function startControlServer(hub, chats, udid, notes) {
         // The simulator's clipboard matches a regular expression (`re`).
         const re = new RegExp(url.searchParams.get("re") ?? "");
         const got = clipboard(udid);
-        if (!re.test(got)) throw new Error(`clipboard holds ${JSON.stringify(got.slice(0, 200))}, not ${re}`);
+        if (!re.test(got))
+          throw new Error(`clipboard holds ${JSON.stringify(got.slice(0, 200))}, not ${re}`);
         notes.push(`clipboard: ${JSON.stringify(got)}`);
       } else if (url.pathname === "/check-transcript") {
         const result = await checkTranscript(hub, chats, wt, udid);
@@ -351,31 +391,39 @@ function startControlServer(hub, chats, udid, notes) {
         if (limit !== null && !(gap <= Number(limit))) {
           throw new Error(`the longest JS frame gap was ${value}, over ${limit} ms`);
         }
-      }
-      else if (url.pathname === "/expect-prompt" || url.pathname === "/expect-no-prompt") {
+      } else if (url.pathname === "/expect-prompt" || url.pathname === "/expect-no-prompt") {
         // The agent received (or never received) a prompt holding `value`. `image=1` also needs an image part.
         const want = url.searchParams.get("value") ?? "";
         const prompts = receivedPrompts(hub).filter((p) => p.text.includes(want));
         const image = url.searchParams.get("image") === "1";
         if (url.pathname === "/expect-no-prompt") {
-          if (prompts.length > 0) throw new Error(`the agent received a prompt holding ${JSON.stringify(want)}`);
+          if (prompts.length > 0)
+            throw new Error(`the agent received a prompt holding ${JSON.stringify(want)}`);
         } else {
           const hit = prompts.find((p) => !image || p.types.includes("image"));
-          if (!hit) throw new Error(`no prompt holding ${JSON.stringify(want)}${image ? " with an image part" : ""}; got ${JSON.stringify(receivedPrompts(hub))}`);
+          if (!hit)
+            throw new Error(
+              `no prompt holding ${JSON.stringify(want)}${image ? " with an image part" : ""}; got ${JSON.stringify(receivedPrompts(hub))}`,
+            );
           notes.push(`agent received ${JSON.stringify(want)}: part types ${hit.types.join(", ")}`);
         }
       } else if (url.pathname === "/expect-model") {
         // `chats.sessionState` reports the model the user picked.
         const pickers = sessionPickers(await sessionState(hub, chats, wt));
         const want = url.searchParams.get("value") ?? "";
-        if (pickers.model !== want) throw new Error(`the session's model is ${pickers.model}, not ${want}`);
+        if (pickers.model !== want)
+          throw new Error(`the session's model is ${pickers.model}, not ${want}`);
         notes.push(`${wt}: chats.sessionState model ${pickers.model}, mode ${pickers.mode}`);
       } else if (url.pathname === "/session-commands") {
-        const names = ((await sessionState(hub, chats, wt))?.commands ?? []).map((c) => `/${c.name}`);
+        const names = ((await sessionState(hub, chats, wt))?.commands ?? []).map(
+          (c) => `/${c.name}`,
+        );
         notes.push(`${wt}: slash commands from the hub: ${names.join(" ")}`);
         const want = url.searchParams.get("value");
-        if (want && !want.split(",").every((n) => names.includes(n))) throw new Error(`hub commands ${names}, expected ${want}`);
-      } else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
+        if (want && !want.split(",").every((n) => names.includes(n)))
+          throw new Error(`hub commands ${names}, expected ${want}`);
+      } else if (url.pathname === "/fill")
+        await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
       else if (url.pathname === "/sleep") {
         await new Promise((r) => setTimeout(r, Number(url.searchParams.get("ms") ?? 1000)));
       } else {
@@ -411,7 +459,19 @@ function tokenInFiles(udid, token) {
 function tokenInLog(udid, tokens, since) {
   const log = execFileSync(
     "xcrun",
-    ["simctl", "spawn", udid, "log", "show", "--style", "compact", "--start", since, "--predicate", 'process == "Band"'],
+    [
+      "simctl",
+      "spawn",
+      udid,
+      "log",
+      "show",
+      "--style",
+      "compact",
+      "--start",
+      since,
+      "--predicate",
+      'process == "Band"',
+    ],
     { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
   );
   return { found: tokens.some((t) => log.includes(t)), lines: log.split("\n").length };
@@ -525,7 +585,9 @@ async function main() {
     ...results.map((r) => `| ${r.flow} | ${r.ok ? "pass" : "FAIL"} |`),
     "",
     `Token in logs or app files: ${leaks.length ? `FOUND in ${leaks.join(", ")}` : `none (searched ${log.lines} log lines, and the app's data container after each flow)`}`,
-    ...(logSearched ? [] : [`Log search: FAILED, only ${log.lines} lines of the app's log since ${since}`]),
+    ...(logSearched
+      ? []
+      : [`Log search: FAILED, only ${log.lines} lines of the app's log since ${since}`]),
     ...(notes.length ? ["", "Measurements and checks:", ...notes.map((n) => `- ${n}`)] : []),
     "",
     "Screenshots:",

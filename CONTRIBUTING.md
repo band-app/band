@@ -46,7 +46,7 @@ git checkout -b my-feature upstream/main
 
 ### 2. Make Your Changes
 
-Follow the existing code style — the repo uses [Biome](https://biomejs.dev/) for JS/TS and `cargo fmt` / `cargo clippy` for Rust.
+Follow the existing code style — the repo uses [Oxlint and Oxfmt](https://viteplus.dev/) (`vp lint`, `vp fmt`) for JS/TS and `cargo fmt` / `cargo clippy` for Rust.
 
 ### 3. Run Checks Locally
 

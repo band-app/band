@@ -29,8 +29,10 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import type { AppRouter } from "../src/server/api/router";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {

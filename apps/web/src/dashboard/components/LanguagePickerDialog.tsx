@@ -38,6 +38,7 @@ import {
 } from "@band-app/ui";
 import { Check, Wand2 } from "lucide-react";
 import { useCallback } from "react";
+
 import { SUPPORTED_LANGUAGES } from "../lib/language-map";
 
 /**

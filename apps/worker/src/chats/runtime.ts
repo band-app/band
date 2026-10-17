@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+
 import type * as acp from "@agentclientprotocol/sdk";
 import {
   type AcpAgentHandlers,
@@ -32,6 +33,7 @@ import type {
   LoggedChatEvent,
   SessionState,
 } from "@band-app/shared/chat-events";
+
 import type { ChatStore } from "./store.ts";
 
 /** After `session/cancel`, how long a turn gets to stop before its agent process is killed. */

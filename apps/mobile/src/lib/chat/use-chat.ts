@@ -17,6 +17,7 @@ import {
 } from "@band-app/client/transcript";
 import { type Dispatch, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { AppState } from "react-native";
+
 import { useHubSession } from "../hub-session";
 
 export interface ChatTranscript {

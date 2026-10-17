@@ -1,6 +1,7 @@
 /** The release version of this hub, and how it was installed. */
 
 import { type InstallMethod, isStrictSemver, parseInstallMethod } from "@band-app/shared/versions";
+
 import pkg from "../../../../package.json" with { type: "json" };
 
 // Imported, not read at run time, so the bundle (which has no package.json beside it) has it too.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,9 +18,7 @@ const JSON_FILES = [
   "packages/logger/package.json",
 ];
 
-const TOML_FILES = [
-  "apps/cli/Cargo.toml",
-];
+const TOML_FILES = ["apps/cli/Cargo.toml"];
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -49,14 +47,12 @@ function parseArgs() {
   const modes = [opts.version, opts.bump, opts.fromCommits].filter(Boolean);
   if (modes.length === 0) {
     console.error(
-      "Must specify one of: --version <ver>, --bump <patch|minor|major>, --from-commits"
+      "Must specify one of: --version <ver>, --bump <patch|minor|major>, --from-commits",
     );
     process.exit(1);
   }
   if (modes.length > 1) {
-    console.error(
-      "Specify only one of: --version, --bump, or --from-commits"
-    );
+    console.error("Specify only one of: --version, --bump, or --from-commits");
     process.exit(1);
   }
 
@@ -154,11 +150,8 @@ function updateJsonFile(filePath, newVersion, dryRun) {
   const oldVersion = json.version;
   if (!dryRun) {
     // Use string replacement to preserve the original formatting (avoids
-    // JSON.stringify reformatting that breaks biome's style expectations).
-    const updated = content.replace(
-      `"version": "${oldVersion}"`,
-      `"version": "${newVersion}"`
-    );
+    // JSON.stringify reformatting that breaks the formatter's style expectations).
+    const updated = content.replace(`"version": "${oldVersion}"`, `"version": "${newVersion}"`);
     writeFileSync(fullPath, updated);
   }
   console.log(`  ${filePath}: ${oldVersion} → ${newVersion}`);

@@ -3,8 +3,10 @@
 // allowlist. Real production server on a random port with auth on.
 
 import { rmSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import WebSocket from "ws";
+
 import { seedSettings } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 

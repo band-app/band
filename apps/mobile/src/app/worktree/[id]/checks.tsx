@@ -22,6 +22,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { BackGlyph, Glass, GlassCircle } from "../../../components/glass";
 import { Body, Centered } from "../../../components/ui";
 import { useWorktreeChecks } from "../../../lib/checks/use-checks";

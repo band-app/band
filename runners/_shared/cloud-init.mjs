@@ -27,7 +27,8 @@ const SAFE_ENV_VALUE = /^[^\n\r"\\]*$/;
  * keeps them as part of the value, so docker mode writes the value bare.
  */
 function envLine(key, value, quote) {
-  if (!SAFE_ENV_VALUE.test(value)) throw new Error(`${key} holds a character that cannot go in the worker's environment file`);
+  if (!SAFE_ENV_VALUE.test(value))
+    throw new Error(`${key} holds a character that cannot go in the worker's environment file`);
   return quote ? `${key}="${value}"` : `${key}=${value}`;
 }
 
@@ -64,14 +65,19 @@ export function renderCloudInit(env = process.env) {
     return env[name];
   };
   const mode = env.BAND_VM_WORKER || "npm";
-  if (mode !== "npm" && mode !== "docker") throw new Error(`BAND_VM_WORKER must be npm or docker, got ${mode}`);
+  if (mode !== "npm" && mode !== "docker")
+    throw new Error(`BAND_VM_WORKER must be npm or docker, got ${mode}`);
   const image = env.BAND_VM_WORKER_IMAGE || "";
-  if (mode === "docker" && !image) throw new Error("BAND_VM_WORKER_IMAGE is required when BAND_VM_WORKER is docker");
-  if (image && !/^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$/.test(image)) throw new Error("BAND_VM_WORKER_IMAGE is not an image name");
+  if (mode === "docker" && !image)
+    throw new Error("BAND_VM_WORKER_IMAGE is required when BAND_VM_WORKER is docker");
+  if (image && !/^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$/.test(image))
+    throw new Error("BAND_VM_WORKER_IMAGE is not an image name");
   const pkg = env.BAND_VM_WORKER_PACKAGE || "@band-app/worker";
-  if (!/^[A-Za-z0-9@][A-Za-z0-9_.@/~^<>=-]*$/.test(pkg)) throw new Error("BAND_VM_WORKER_PACKAGE is not a package spec");
+  if (!/^[A-Za-z0-9@][A-Za-z0-9_.@/~^<>=-]*$/.test(pkg))
+    throw new Error("BAND_VM_WORKER_PACKAGE is not a package spec");
   const hours = Number(env.BAND_VM_MAX_HOURS || 12);
-  if (!Number.isFinite(hours) || hours <= 0) throw new Error("BAND_VM_MAX_HOURS must be a positive number");
+  if (!Number.isFinite(hours) || hours <= 0)
+    throw new Error("BAND_VM_MAX_HOURS must be a positive number");
 
   const hubUrl = need("BAND_HUB_URL");
   const home = mode === "docker" ? "/work/home" : "/home/band";
@@ -93,9 +99,13 @@ export function renderCloudInit(env = process.env) {
     "",
   ].join("\n");
 
-  const packages = mode === "docker" ? ["git", "docker.io", "ca-certificates"] : ["git", "curl", "ca-certificates", "gnupg"];
+  const packages =
+    mode === "docker"
+      ? ["git", "docker.io", "ca-certificates"]
+      : ["git", "curl", "ca-certificates", "gnupg"];
 
-  const stateDir = mode === "docker" ? "/var/lib/band-work/.band-worker" : "/home/band/work/.band-worker";
+  const stateDir =
+    mode === "docker" ? "/var/lib/band-work/.band-worker" : "/home/band/work/.band-worker";
   const restore = Boolean(env.BAND_SNAPSHOT_ID);
 
   // Every step runs under `set -e`. Any failure powers the VM off at once: a VM with no worker only costs money,
@@ -109,31 +119,37 @@ export function renderCloudInit(env = process.env) {
           `rm -f '${stateDir}/session-token'`,
         ]
       : mode === "docker"
-      ? [
-          "mkdir -p /var/lib/band-work/home",
-          ...(repo
-            ? [`GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- '${repo.replace(/'/g, "'\\''")}' '/var/lib/band-work/${name}'`]
-            : []),
-          "chown -R 65532:65532 /var/lib/band-work",
-          `docker pull --quiet '${image}'`,
-        ]
-      : [
-          "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
-          "apt-get install -y nodejs",
-          `npm install -g '${pkg}'`,
-          "useradd --create-home --shell /bin/bash band",
-          "mkdir -p /home/band/work",
-          ...(repo
-            ? [
-                `runuser -u band -- env GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- '${repo.replace(/'/g, "'\\''")}' '/home/band/work/${name}'`,
-              ]
-            : []),
-          "chown -R band:band /home/band",
-        ]),
+        ? [
+            "mkdir -p /var/lib/band-work/home",
+            ...(repo
+              ? [
+                  `GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- '${repo.replace(/'/g, "'\\''")}' '/var/lib/band-work/${name}'`,
+                ]
+              : []),
+            "chown -R 65532:65532 /var/lib/band-work",
+            `docker pull --quiet '${image}'`,
+          ]
+        : [
+            "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
+            "apt-get install -y nodejs",
+            `npm install -g '${pkg}'`,
+            "useradd --create-home --shell /bin/bash band",
+            "mkdir -p /home/band/work",
+            ...(repo
+              ? [
+                  `runuser -u band -- env GIT_ALLOW_PROTOCOL=https:ssh:git git clone --quiet -- '${repo.replace(/'/g, "'\\''")}' '/home/band/work/${name}'`,
+                ]
+              : []),
+            "chown -R band:band /home/band",
+          ]),
     "systemctl daemon-reload",
     "systemctl start band-worker.service",
     // `docker run --env-file` reads the file after the unit forks, so wait for the container before the file goes.
-    ...(mode === "docker" ? ["for i in $(seq 1 60); do docker inspect band-worker >/dev/null 2>&1 && break; sleep 1; done"] : []),
+    ...(mode === "docker"
+      ? [
+          "for i in $(seq 1 60); do docker inspect band-worker >/dev/null 2>&1 && break; sleep 1; done",
+        ]
+      : []),
     // The unit has read its environment file, so the token goes. It also goes from cloud-init's copy of the
     // user data. The provider's metadata service keeps serving the user data, so the token's single use is
     // what protects it, not this cleanup.
@@ -153,7 +169,12 @@ export function renderCloudInit(env = process.env) {
         owner: "root:root",
         content: systemdUnit({ mode, image, maxSeconds: Math.round(hours * 3600) }),
       },
-      { path: "/usr/local/sbin/band-bootstrap.sh", permissions: "0700", owner: "root:root", content: bootstrap },
+      {
+        path: "/usr/local/sbin/band-bootstrap.sh",
+        permissions: "0700",
+        owner: "root:root",
+        content: bootstrap,
+      },
     ],
     runcmd: [["sh", "-c", "/usr/local/sbin/band-bootstrap.sh || poweroff"]],
   };

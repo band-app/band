@@ -240,9 +240,7 @@ export function renderSecret(c, ownerUid) {
       name: c.name,
       namespace: c.namespace,
       labels: labelsFor(c),
-      ownerReferences: [
-        { ...ownerApi(c.kind), name: c.name, uid: ownerUid },
-      ],
+      ownerReferences: [{ ...ownerApi(c.kind), name: c.name, uid: ownerUid }],
     },
     stringData: { token: c.token },
   };

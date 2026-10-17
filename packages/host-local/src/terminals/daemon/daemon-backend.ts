@@ -1,5 +1,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
+
 import { createLogger } from "@band-app/logger";
+
 import {
   AttachGate,
   type TerminalAttachment,

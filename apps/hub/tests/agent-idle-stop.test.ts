@@ -14,7 +14,8 @@
  */
 
 import type { ChatEvent } from "@band-app/shared/chat-events";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import {
   agentText,
   collectEvents,

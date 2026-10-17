@@ -1,6 +1,7 @@
 import { FlashList } from "@shopify/flash-list";
 import { memo, type ReactElement, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+
 import { type CodeRun, highlight } from "../../lib/chat/highlight";
 import { chatColors, codeColors, colors, fonts } from "../../theme";
 
@@ -138,7 +139,7 @@ const CodeLine = memo(function CodeLine({
     <View style={[styles.line, { width }, bg ? { backgroundColor: bg } : null]}>
       {Array.from({ length: columns }, (_, i) => (
         <Text
-          // biome-ignore lint/suspicious/noArrayIndexKey: gutter columns are positional
+          // oxlint-disable-next-line react/no-array-index-key -- gutter columns are positional
           key={i}
           style={[styles.gutter, { width: columnWidth }]}
           numberOfLines={1}
@@ -158,7 +159,7 @@ const CodeLine = memo(function CodeLine({
         {runs
           ? runs.map((run, i) =>
               run.scope ? (
-                // biome-ignore lint/suspicious/noArrayIndexKey: runs have no identity beyond position
+                // oxlint-disable-next-line react/no-array-index-key -- runs have no identity beyond position
                 <Text key={i} style={{ color: codeColors[run.scope] ?? colors.foreground }}>
                   {displayText(run.text)}
                 </Text>

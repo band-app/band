@@ -1,11 +1,13 @@
 import { existsSync } from "node:fs";
 import { basename, join, posix, resolve } from "node:path";
+
 import { gitRunner, type Host } from "@band-app/host-api";
 import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
 import { parseRemoteUrl } from "@band-app/shared/remote-url";
 import { checkpointsEnabledFor, isHostAllowed } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { TRPCError } from "@trpc/server";
+
 import { RepoConflictError, RepoInputError, RepoOutsideRootsError } from "../errors";
 import {
   type RepoKind,

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { DaemonTerminalBackend } from "@band-app/host-local/terminals/daemon/daemon-backend";
 import { InProcessTerminalBackend } from "@band-app/host-local/terminals/in-process-backend";
 import type { TerminalBackend } from "@band-app/host-local/terminals/terminal-backend";

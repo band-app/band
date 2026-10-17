@@ -13,6 +13,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { before, describe, it } from "node:test";
+
 import xterm from "@xterm/headless";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -141,26 +142,30 @@ function swiftScreen(file: string): Screen {
  */
 const ACCEPTED: Record<string, string[]> = {};
 
-describe("native terminal replay", {
-  skip: !hasSwift && "needs macOS and the Swift toolchain",
-}, () => {
-  before(() => {
-    if (hasSwift)
-      execFileSync("swift", ["build", "-c", "release"], { cwd: REPLAY, stdio: "inherit" });
-  });
-  const recordings = readdirSync(FIXTURES)
-    .filter((f) => f.endsWith(".jsonl"))
-    .sort();
-  for (const name of recordings) {
-    it(`${name.replace(".jsonl", "")}: the final screen matches xterm.js`, async () => {
-      const file = join(FIXTURES, name);
-      const expected = await xtermScreen(file);
-      const actual = swiftScreen(file);
-      const accepted = new Set(ACCEPTED[name] ?? []);
-      for (const field of ["cols", "rows", "alt", "cursor", "lines", "cells"] as const) {
-        if (accepted.has(field)) continue;
-        assert.deepEqual(actual[field], expected[field], `${name}: ${field}`);
-      }
+describe(
+  "native terminal replay",
+  {
+    skip: !hasSwift && "needs macOS and the Swift toolchain",
+  },
+  () => {
+    before(() => {
+      if (hasSwift)
+        execFileSync("swift", ["build", "-c", "release"], { cwd: REPLAY, stdio: "inherit" });
     });
-  }
-});
+    const recordings = readdirSync(FIXTURES)
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort();
+    for (const name of recordings) {
+      it(`${name.replace(".jsonl", "")}: the final screen matches xterm.js`, async () => {
+        const file = join(FIXTURES, name);
+        const expected = await xtermScreen(file);
+        const actual = swiftScreen(file);
+        const accepted = new Set(ACCEPTED[name] ?? []);
+        for (const field of ["cols", "rows", "alt", "cursor", "lines", "cells"] as const) {
+          if (accepted.has(field)) continue;
+          assert.deepEqual(actual[field], expected[field], `${name}: ${field}`);
+        }
+      });
+    }
+  },
+);

@@ -24,6 +24,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
+
 import { beginLayoutResize, endLayoutResize } from "../../lib/layout-resizing";
 import {
   type BranchNode,
@@ -63,7 +64,7 @@ export interface LayoutHeaderActionsProps {
   isGroupActive: boolean;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: components are registered by name with caller-defined params
+// oxlint-disable-next-line typescript/no-explicit-any -- components are registered by name with caller-defined params
 type AnyComponent<Props> = ComponentType<Props & { params: any }>;
 
 export interface LayoutReactProps {
@@ -648,7 +649,7 @@ function SashView({
   };
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a draggable splitter cannot be an <hr>
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a draggable splitter cannot be an <hr>
     <div
       className="band-layout-sash"
       data-testid="layout-sash"

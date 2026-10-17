@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+
 import { normalizeRemoteUrl, parseRemoteUrl, stripUrlCredentials } from "../src/remote-url.ts";
 
 test("every spelling of one remote gives one key", () => {

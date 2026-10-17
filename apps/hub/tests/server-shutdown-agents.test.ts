@@ -11,7 +11,8 @@
 // for a minute, which keeps the stub process alive after its stdin closes,
 // so without the fix it is still running when `close()` returns.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { sendMessage, startAcpServer, stubRequests, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";

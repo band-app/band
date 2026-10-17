@@ -27,6 +27,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
+
 import type { Host } from "@band-app/host-api";
 import {
   buildSnapshot,
@@ -52,6 +53,7 @@ import {
   onlyAvailableOnMessage,
 } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+
 import { CheckpointError, RepoHostNotAllowedError } from "../errors";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { CheckpointQueries, type CheckpointRow } from "../infra/db/queries/worktree-checkpoints";

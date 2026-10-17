@@ -2,6 +2,7 @@ import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+
 import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";

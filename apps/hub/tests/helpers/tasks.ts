@@ -9,7 +9,8 @@
 // raw tRPC HTTP shape) and domain-shaped helpers like this one can grow
 // independently as new tests need them.
 
-import { expect } from "vitest";
+import { expect } from "vite-plus/test";
+
 import { trpcQuery } from "./server";
 
 export interface TaskListItem {

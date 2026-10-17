@@ -3,7 +3,9 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { SERVER_RUNTIME } from "./helpers/server-runtime";
 import { removeTmpHome } from "./helpers/tmp-home";
 

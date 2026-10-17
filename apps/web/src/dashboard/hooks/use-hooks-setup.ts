@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState, useSyncExternalStore } from "react";
+
 import { clientStorage } from "../../lib/client-state";
 import { trpc } from "../../lib/trpc-client";
 import type { HostHooks } from "../types";

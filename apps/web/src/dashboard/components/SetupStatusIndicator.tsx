@@ -1,5 +1,6 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { CircleAlert, Loader } from "lucide-react";
+
 import type { SetupStatus } from "../types";
 
 interface Props {

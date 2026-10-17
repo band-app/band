@@ -16,8 +16,11 @@
 
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { expect, test } from "@playwright/test";
+
 import { toWorktreeId } from "@/dashboard";
+
 import { type GhInvocation, type GhStub, ghStub } from "../../hub/tests/fixtures/gh-stub";
 import {
   checkRunNode,

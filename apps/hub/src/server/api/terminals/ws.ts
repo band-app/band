@@ -1,7 +1,9 @@
 import type { IncomingMessage } from "node:http";
+
 import { createLogger } from "@band-app/logger";
 import { attachSession, createInbox, safeClose } from "@band-app/worktree-ops/terminal-socket";
 import type { WebSocket } from "ws";
+
 import { type SpawnOptions, terminalService } from "../../services/terminal-service";
 
 const log = createLogger("terminal-ws");

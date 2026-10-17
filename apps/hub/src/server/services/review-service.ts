@@ -1,4 +1,5 @@
 import { tmpdir } from "node:os";
+
 import { gitRunner } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX, getRepoInfo } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
@@ -11,6 +12,7 @@ import type {
   ReviewProvider,
   WorktreeReview,
 } from "@band-app/plugin-api";
+
 import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
 import { requestCIRefresh } from "./_utils/ci-refresh-request";

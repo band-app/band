@@ -11,9 +11,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
+
 import { execGh } from "@band-app/host-local/git/git-client";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { closeDb } from "../src/server/infra/db/connection";
 import { initialCursor } from "../src/server/infra/subscriptions/github-poll";
 import {

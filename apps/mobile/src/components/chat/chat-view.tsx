@@ -12,6 +12,7 @@ import {
   Text,
   View,
 } from "react-native";
+
 import { pendingRequest, requestText } from "../../lib/chat/pending-request";
 import { setPending } from "../../lib/chat/pending-store";
 import { buildRows, type ChatRow, rowType } from "../../lib/chat/rows";
@@ -121,7 +122,7 @@ export const ChatView = memo(function ChatView({
   const onToggle = useCallback(() => {
     toggled.current = true;
   }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new `rows` is the trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- a new `rows` is the trigger
   useEffect(() => {
     toggled.current = false;
   }, [rows]);

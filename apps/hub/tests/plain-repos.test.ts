@@ -7,8 +7,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { countBranchStatusRows, readRepoKind, seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome as createCanonicalTmpHome,

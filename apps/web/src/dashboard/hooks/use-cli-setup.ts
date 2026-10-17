@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+
 import { useAdapter } from "../context";
 import type { CliStatus } from "../types";
 

@@ -1,7 +1,9 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 import { createLogger } from "@band-app/logger";
+
 import { computeCost } from "../pricing.ts";
 import type { SessionUsageSnapshot, SessionUsageTurn } from "../types.ts";
 import { readLines } from "./read-lines.ts";

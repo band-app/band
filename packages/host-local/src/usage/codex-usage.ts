@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 import type { AccountUsage, UsageWindow } from "@band-app/host-api";
+
 import { failure, fetchJson, ok, percentOf, resetOf, titleCase, UsageHttpError } from "./common";
 
 const DEFAULT_URL = "https://chatgpt.com/backend-api/wham/usage";

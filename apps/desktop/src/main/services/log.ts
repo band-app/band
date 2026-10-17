@@ -25,6 +25,7 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 import type { Logger } from "@band-app/logger";
 import pino from "pino";
 

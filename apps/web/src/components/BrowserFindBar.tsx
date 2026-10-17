@@ -11,6 +11,7 @@
  */
 
 import { SearchBar } from "@/dashboard";
+
 import type { UseBrowserFindInPageReturn } from "../hooks/useBrowserFindInPage";
 
 export function BrowserFindBar({ find }: { find: UseBrowserFindInPageReturn }) {

@@ -10,7 +10,9 @@ import {
   useRef,
   useState,
 } from "react";
+
 import { AgentStateDot, isMacPlatform, useDashboardStore } from "@/dashboard";
+
 import { promptOnHostOffline } from "../lib/continue-prompt";
 import {
   cycleGridGroups,

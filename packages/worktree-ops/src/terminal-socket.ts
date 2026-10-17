@@ -9,6 +9,7 @@
 import type { TerminalAttachment, TerminalExitEvent } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
+
 import { OutputFlow } from "./output-flow";
 import { stripTerminalQueries } from "./strip-queries";
 

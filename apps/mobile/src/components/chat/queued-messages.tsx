@@ -1,6 +1,7 @@
 import type { QueuedChatMessage } from "@band-app/shared/chat-events";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+
 import { moveItem } from "../../lib/composer/queue";
 import { chatColors, colors, useScheme } from "../../theme";
 

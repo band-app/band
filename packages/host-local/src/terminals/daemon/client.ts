@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
+
 import { checkEndpointOwner } from "./endpoint";
 import {
   type ControlNotify,

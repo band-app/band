@@ -56,6 +56,7 @@ import type {
   QueuedChatMessage,
   SessionState,
 } from "@band-app/shared/chat-events";
+
 import { agentSpawnEnv } from "../agent-env.ts";
 import type { Registrar, WorkerContext } from "../context.ts";
 import { ChatRuntime } from "./runtime.ts";

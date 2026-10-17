@@ -1,6 +1,7 @@
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
+
 import { useIsDark } from "../hooks/use-is-dark";
 import {
   baseEditorExtensions,

@@ -20,6 +20,7 @@
  */
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+
 import { createLogger } from "./services/log.js";
 import { isUpdaterEnabled } from "./updater.js";
 

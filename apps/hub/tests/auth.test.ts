@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { createAuthMiddleware } from "../auth.ts";
 
 const TEST_TOKEN = "test-token-for-auth";

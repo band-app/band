@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+
 import type { Host } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
@@ -25,6 +26,7 @@ import {
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { VERSION_REFUSED_CODE } from "@band-app/shared/versions";
+
 import pkg from "../package.json" with { type: "json" };
 import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";

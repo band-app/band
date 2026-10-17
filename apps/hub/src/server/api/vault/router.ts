@@ -8,6 +8,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+
 import { VaultInputError, VaultNotFoundError } from "../../errors";
 import { MAX_SECRET_LENGTH, vaultService } from "../../services/vault-service";
 import { adminProcedure, t } from "../trpc";

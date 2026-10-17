@@ -1,5 +1,6 @@
 // theme-lint-ignore-file: the mode cards are fixed miniatures of the light and dark themes
 import { cn } from "@band-app/ui";
+
 import type { ThemeMode } from "../../../lib/theme/model";
 
 const LIGHT = { page: "#ffffff", side: "#f4f4f5", line: "#d4d4d8", accent: "#3b82f6" };

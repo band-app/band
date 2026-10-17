@@ -20,7 +20,9 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { app, BrowserWindow, powerMonitor, screen, shell } from "electron";
+
 import { type HubFallbackAction, hubFallbackAction } from "./hub-unreachable.js";
 import { resolveAppIcon } from "./icon.js";
 import { decideNavigation, decideOpen } from "./navigation-guard.js";

@@ -5,7 +5,12 @@
   "ignoreBinaries": ["wrangler"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs", "scripts/xterm-patches/regenerate.mjs", "runners/*/*.mjs"],
+      "entry": [
+        "vite.config.ts",
+        "scripts/*.mjs",
+        "scripts/xterm-patches/regenerate.mjs",
+        "runners/*/*.mjs"
+      ],
       "ignoreDependencies": [
         "@band-app/cli",
         "@tanstack/react-query",
@@ -34,7 +39,11 @@
         "vscode-jsonrpc",
         "@babel/runtime",
         "@codemirror/lint"
-      ]
+      ],
+      "vitest": {
+        "config": ["vitest.config.ts"],
+        "entry": ["tests/**/*.test.ts"]
+      }
     },
     "apps/hub": {
       "entry": ["bin/band-server.mjs", "terminal-daemon.ts", "src/index.ts", "scripts/*.{mjs,ts}"],
@@ -46,7 +55,11 @@
         "@agentclientprotocol/codex-acp",
         "@vscode/ripgrep",
         "node-pty"
-      ]
+      ],
+      "vitest": {
+        "config": ["vitest.config.ts"],
+        "entry": ["tests/**/*.test.ts"]
+      }
     },
     "packages/host-local": {
       "project": ["src/**/*.ts", "tests/**/*.ts"],

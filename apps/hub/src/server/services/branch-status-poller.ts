@@ -1,4 +1,5 @@
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+
 import {
   ghRunner,
   gitRunner,
@@ -10,6 +11,7 @@ import { getRepoInfo, type RepoInfo } from "@band-app/host-local/git/git-client"
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { eq } from "drizzle-orm";
+
 import { getDb } from "../infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { hostRegistry } from "../infra/host/registry";

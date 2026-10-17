@@ -6,6 +6,7 @@ import {
 } from "@band-app/client/composer";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
 import { useHubSession } from "../../lib/hub-session";
 import { colors } from "../../theme";
 

@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
+
 import { type ClientOptions, WebSocket } from "ws";
+
 import {
   DEFAULT_CHANNEL_WINDOW,
   type HandshakeReply,

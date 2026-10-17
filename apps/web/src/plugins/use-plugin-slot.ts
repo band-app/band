@@ -1,6 +1,7 @@
 import type { WorktreeSideTab } from "@band-app/plugin-api/client";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+
 import { trpc } from "../lib/trpc-client";
 import { BUNDLED_CLIENT_PLUGINS } from "./bundled-client-plugins";
 

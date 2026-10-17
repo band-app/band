@@ -7,9 +7,11 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type McpStub, startMcpStub } from "./fixtures/mcp-stub";
 import { type OAuthStub, startOAuthStub } from "./fixtures/oauth-stub";
 import { seedSettings, seedState } from "./helpers/seed-state";

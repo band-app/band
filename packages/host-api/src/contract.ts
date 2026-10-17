@@ -10,6 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { join } from "node:path";
+
 import type { FileChange, Host, TerminalExitEvent } from "./index";
 
 /** The slice of the test framework the suite needs. Vitest's exports fit. */

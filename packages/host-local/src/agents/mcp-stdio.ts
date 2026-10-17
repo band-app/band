@@ -8,7 +8,9 @@
  */
 
 import { homedir } from "node:os";
+
 import type { McpStdio, McpStdioSpec } from "@band-app/host-api";
+
 import { spawnAgentProcess } from "./agent-spawn";
 
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;

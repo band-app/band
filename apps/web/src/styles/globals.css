@@ -404,8 +404,7 @@ button,
    With reduced motion the label keeps its normal colors. */
 @media (prefers-reduced-motion: no-preference) {
   .tool-shimmer {
-    background:
-      linear-gradient(
+    background: linear-gradient(
         90deg,
         var(--muted-foreground) 40%,
         var(--foreground) 50%,
@@ -586,7 +585,6 @@ html[data-on-battery][data-translucent-sidebar] {
  * The pane root is `inert` while hidden, so its page can't take focus.
  */
 .band-worktree-entry:has([data-band-browser-paint-retained]) {
-  /* biome-ignore lint/complexity/noImportantStyles: must beat the entry's inline content-visibility. */
   content-visibility: visible !important;
 }
 
@@ -599,7 +597,6 @@ html[data-on-battery][data-translucent-sidebar] {
 @media (prefers-reduced-motion: reduce) {
   /* Neutralize tw-animate-css movement; opacity fades
      (--tw-enter-opacity / --tw-exit-opacity) are deliberately untouched. */
-  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper `zoom` rules. */
   * {
     --tw-enter-translate-x: 0;
     --tw-enter-translate-y: 0;

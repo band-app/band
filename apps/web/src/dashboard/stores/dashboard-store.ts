@@ -1,5 +1,6 @@
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
+
 import { isOldHubGap, NEEDS_NEWER_HUB } from "../../lib/hub-version";
 import type { DashboardAdapter } from "../adapter";
 import type {

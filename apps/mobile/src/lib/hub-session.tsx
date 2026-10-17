@@ -28,6 +28,7 @@ import {
   useState,
 } from "react";
 import { AppState } from "react-native";
+
 import { createClientStateStorage } from "./client-state-storage";
 import type { SavedHub } from "./hub-store";
 import { StatusFeed, type StatusSource } from "./status-feed";
@@ -127,7 +128,7 @@ function SessionHost({
   // Bumped each time the app returns from the background; a new number builds a new client.
   const [epoch, setEpoch] = useState(0);
   // The URL and token are the connection's inputs; `epoch` only forces a fresh socket.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: epoch is a rebuild trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- epoch is a rebuild trigger
   const connection = useMemo(
     () => createHubConnection({ hubUrl: hub.url, token: hub.token, fetch: noStoreFetch }),
     [hub.url, hub.token, epoch],
@@ -144,7 +145,7 @@ function SessionHost({
 
   const feed = useMemo(() => new StatusFeed(statusSource(() => clientRef.current)), []);
   const feedStarted = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a rebuilt connection is the trigger to resubscribe
+  // oxlint-disable-next-line react/exhaustive-deps -- a rebuilt connection is the trigger to resubscribe
   useEffect(() => {
     // The first run starts the feed; later ones follow a rebuilt client.
     if (feedStarted.current) feed.retarget(statusSource(() => clientRef.current));

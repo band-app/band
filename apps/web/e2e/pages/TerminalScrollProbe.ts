@@ -102,7 +102,7 @@ export class TerminalScrollProbe {
       const terminalSockets = new WeakSet<WebSocket>();
       Native.prototype.send = function (this: WebSocket, data) {
         if (probe.active && terminalSockets.has(this) && typeof data === "string") {
-          // biome-ignore lint/suspicious/noControlCharactersInRegex: SGR wheel reports start with ESC
+          // oxlint-disable-next-line no-control-regex -- SGR wheel reports start with ESC
           const reports = (data.match(/\x1b\[<6[45];/g) ?? []).length;
           if (reports > 0) probe.sends.push({ at: performance.now(), reports });
         }

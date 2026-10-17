@@ -27,6 +27,7 @@
 
 import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+
 import type {
   CachedAgentModel,
   CodingAgentDefinition,

@@ -1,6 +1,8 @@
 import { cn } from "@band-app/ui";
 import { GitCompare, Globe, MessageSquare, TerminalSquare } from "lucide-react";
+
 import { AgentIcon, getFileIcon } from "@/dashboard";
+
 import {
   readCachedTabMeta,
   TabStatusIndicator,

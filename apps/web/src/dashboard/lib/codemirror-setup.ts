@@ -34,6 +34,7 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
+
 import { bandEditorTheme, codeFontSize } from "./codemirror-theme";
 
 /**

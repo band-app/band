@@ -13,6 +13,7 @@
  */
 
 import { join } from "node:path";
+
 import { createLogger } from "../../main/services/log.js";
 import {
   isValidProfileId,

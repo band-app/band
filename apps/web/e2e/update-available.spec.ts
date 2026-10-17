@@ -9,6 +9,7 @@
  */
 
 import { expect, test } from "@playwright/test";
+
 import {
   type ReleasesStub,
   startReleasesStub,

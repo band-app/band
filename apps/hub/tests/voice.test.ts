@@ -6,8 +6,10 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { silentWav } from "@band-app/shared/speech-transcription";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type SttStub, startSttStub } from "./fixtures/stt-stub";
 import { seedSettings } from "./helpers/seed-state";
 import {

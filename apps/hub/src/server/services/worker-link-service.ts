@@ -16,6 +16,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+
 import type { HostInfo } from "@band-app/host-api";
 import { RemoteHost } from "@band-app/host-remote";
 import {
@@ -32,6 +33,7 @@ import {
   workerVersionOf,
 } from "@band-app/shared/versions";
 import { type WebSocket, WebSocketServer } from "ws";
+
 import { selectWsProtocol } from "../../../auth";
 import { RepoQueries } from "../infra/db/queries/repos";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";

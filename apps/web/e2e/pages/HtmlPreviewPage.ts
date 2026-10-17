@@ -15,6 +15,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+
 import { listBrowserTabs } from "../helpers/browser-tabs";
 
 export class HtmlPreviewPage {

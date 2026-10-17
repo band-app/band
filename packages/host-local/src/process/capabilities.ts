@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+
 import { extractVersion } from "@band-app/environment";
 import {
   type AgentCapability,
@@ -8,6 +9,7 @@ import {
   type CapabilityReport,
   type ToolCapability,
 } from "@band-app/host-api";
+
 import { prependBinDirs } from "./path";
 
 interface AgentProbe {

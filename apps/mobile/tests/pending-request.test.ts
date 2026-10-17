@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import { foldEvents, INITIAL_TRANSCRIPT } from "@band-app/client/transcript";
 import type { ChatEvent } from "@band-app/shared/chat-events";
+
 import {
   pendingRequest,
   permissionInput,

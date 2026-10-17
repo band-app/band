@@ -3,7 +3,9 @@
 // `mcp.audit` pages. Real hub on a random port, real MCP server (`fixtures/mcp-stub.ts`).
 
 import { rmSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { type McpStub, startMcpStub } from "./fixtures/mcp-stub";
 import { seedSettings } from "./helpers/seed-state";
 import {

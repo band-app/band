@@ -2,6 +2,7 @@ import { Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { type ReactNode, useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+
 import { restoreAppearance } from "../lib/appearance";
 import { HubSessionProvider } from "../lib/hub-session";
 import { HubsProvider, useHubs } from "../lib/hubs-context";

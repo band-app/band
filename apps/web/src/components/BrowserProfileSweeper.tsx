@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+
 import { pruneBrowserProfileData } from "../lib/chrome-import";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";

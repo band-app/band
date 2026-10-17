@@ -1,6 +1,7 @@
 import { describeWatch, formatExpiry } from "@band-app/client/subscription-label";
 import { memo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
 import { useSubscriptions } from "../../lib/chat/use-subscriptions";
 import { colors } from "../../theme";
 

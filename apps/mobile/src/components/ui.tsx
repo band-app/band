@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
 import { colors, useScheme } from "../theme";
 
 /** A screen's body: safe-area padded, scrollable so the keyboard never hides a field. */

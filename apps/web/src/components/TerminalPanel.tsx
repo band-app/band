@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+
 import {
   SearchBar,
   type SearchBarHandle,
@@ -6,6 +7,7 @@ import {
   TerminalSelectionContextMenu,
   useSettingsQuery,
 } from "@/dashboard";
+
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import {
   getOrCreateTerminal,

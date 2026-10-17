@@ -17,6 +17,7 @@
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+
 import { ChatEventQueries, type ChatLogDb } from "@band-app/chat-runtime/log";
 import type { ChatLaunchReply, OwnedChatInfo } from "@band-app/link";
 
@@ -322,9 +323,9 @@ export class ChatStore {
 
   /** The reply a forwarded request got, when it ran before. */
   forwardReply(forwardId: string): unknown {
-    const row = this.db.prepare("SELECT reply FROM forwards WHERE forward_id = ?").get(forwardId) as
-      | { reply: string }
-      | undefined;
+    const row = this.db
+      .prepare("SELECT reply FROM forwards WHERE forward_id = ?")
+      .get(forwardId) as { reply: string } | undefined;
     return row ? JSON.parse(row.reply) : undefined;
   }
 

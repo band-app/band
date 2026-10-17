@@ -12,8 +12,10 @@
 
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import type { AgentSessionRecord } from "@band-app/shared/agent-sessions";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { startAcpServer, stubRequests, TEST_TOKEN, trpc, WORKTREE_ID } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle } from "./helpers/server";

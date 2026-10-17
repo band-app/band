@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@band-app/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { useAdapter } from "../context";
 import { getFileIcon } from "../lib/file-icon";
 import type { ContentSearchMatch } from "../types";
@@ -122,7 +123,7 @@ export function SearchFilesDialog({
   // O(N) string allocation — memoised so it only recomputes when the result set
   // changes, not on every `selectedValue` / hover render.
   const resultKey = useMemo(() => itemValues.join("\n"), [itemValues]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstValue is unchanged) — it isn't read in the body
+  // oxlint-disable-next-line react/exhaustive-deps -- resultKey is an intentional trigger dependency (fires on any content change, incl. when firstValue is unchanged) — it isn't read in the body
   useEffect(() => {
     setSelectedValue(firstValue);
     if (listRef.current) listRef.current.scrollTop = 0;

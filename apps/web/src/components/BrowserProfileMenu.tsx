@@ -16,7 +16,9 @@ import {
 } from "@band-app/ui";
 import { UserRound } from "lucide-react";
 import { useState } from "react";
+
 import type { BrowserProfileInfo } from "@/dashboard";
+
 import { isDesktop } from "../lib/is-desktop";
 import { ChromeImportDialog } from "./ChromeImportDialog";
 

@@ -16,7 +16,17 @@
 import type { Terminal } from "@xterm/xterm";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
+
 import { TerminalToolbar } from "../src/components/TerminalToolbar";
 import { useVirtualKeyboardToolbar } from "../src/hooks/useVirtualKeyboardToolbar";
 

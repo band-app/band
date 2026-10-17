@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+
 import { ChatView } from "../../components/chat/chat-view";
 import { AgentPicker, closeTab, renameTab, TabSwitcher } from "../../components/chat/tab-switcher";
 import { WorktreeHeader } from "../../components/chat/worktree-header";
@@ -125,7 +126,7 @@ const WorktreeChats = memo(function WorktreeChats({
   const nextTab = shownAt >= 0 ? tabs.tabs[shownAt + 1] : undefined;
   const centerX = prevTab ? width : 0;
   // After a tab change the page list changes, so put the shown tab's page back in view.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new shown tab or page list is the trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- a new shown tab or page list is the trigger
   useLayoutEffect(() => {
     pager.current?.scrollTo({ x: centerX, animated: false });
   }, [tabs.active, centerX, width]);

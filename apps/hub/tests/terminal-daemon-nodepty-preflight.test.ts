@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+
 import { launchDaemon } from "@band-app/host-local/terminals/daemon/launch";
 import { daemonPaths } from "@band-app/host-local/terminals/daemon/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,

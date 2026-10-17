@@ -13,6 +13,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { VaultInputError } from "../../errors";
 import { bandHome } from "../../infra/db/queries/settings";
 

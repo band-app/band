@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+
 import { findCliBinary } from "@band-app/host-local/process/cli-binary";
 import {
   type CliFetchParams,

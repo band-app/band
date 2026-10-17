@@ -2,6 +2,7 @@ import { Button } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
+
 import { compareHubVersion, isOldHubGap, setAppNewerThanHub } from "../../lib/hub-version";
 import { trpc } from "../../lib/trpc-client";
 import { ToastCard } from "./ToastCard";

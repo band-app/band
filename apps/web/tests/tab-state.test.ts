@@ -2,7 +2,8 @@
 import { createElement, useReducer } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { type UseTabStateReturn, useTabState } from "../src/hooks/useTabState";
 
 beforeAll(() => {

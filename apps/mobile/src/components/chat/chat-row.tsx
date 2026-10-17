@@ -2,6 +2,7 @@ import type { Entry } from "@band-app/client/transcript";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { memo } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
+
 import type { ChatRow } from "../../lib/chat/rows";
 import { chatColors, colors, tones } from "../../theme";
 import { useAssetSource, useChat, useOpen } from "./chat-context";

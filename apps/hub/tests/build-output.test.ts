@@ -11,7 +11,8 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 const packageRoot = join(import.meta.dirname, "..");
 const dist = join(packageRoot, "dist");
@@ -239,8 +240,10 @@ describe("published @band-app/server runs via the bin shim", () => {
     }
   }, 120_000);
 
-  afterAll(async (ctx) => {
-    if (ctx.tasks.some((t) => t.result?.state === "fail")) {
+  // Vitest 5 passes the suite as the second argument; the first must be a destructured fixture object.
+  // oxlint-disable-next-line no-empty-pattern -- required by Vitest 5's hook signature
+  afterAll(async ({}, suite) => {
+    if (suite.tasks.some((t) => t.result?.state === "fail")) {
       process.stderr.write(
         `\n--- @band-app/server output ---\n${serverOutput.join("")}\n--- exit code: ${exitCode} ---\n`,
       );

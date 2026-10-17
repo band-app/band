@@ -1,5 +1,6 @@
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { createContext, type ReactNode, useCallback, useContext } from "react";
+
 import type { DropZone } from "../lib/sidebar-drop";
 
 /** What the sidebar's drag layer knows about a draggable or droppable row. */

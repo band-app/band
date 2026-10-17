@@ -1,6 +1,7 @@
 import { Button } from "@band-app/ui";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
 import { writeClipboardText } from "../../lib/clipboard";
 
 interface Props {

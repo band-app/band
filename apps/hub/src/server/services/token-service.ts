@@ -11,10 +11,12 @@
  */
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+
 import type { CapabilityReport } from "@band-app/host-api";
 import type { AuthResult, Hello } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { defaultHostTrust, type HostTrust } from "@band-app/shared/host-trust";
+
 import { SharedTokenRevokeError, TokenNotFoundError } from "../errors";
 import { SocketRegistry } from "../infra/auth/socket-registry";
 import {

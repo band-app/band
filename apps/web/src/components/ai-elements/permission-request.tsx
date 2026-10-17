@@ -2,6 +2,7 @@ import type { Entry } from "@band-app/client/transcript";
 import { Button } from "@band-app/ui";
 import { Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
+
 import { MessageResponse } from "./message";
 
 type PermissionEntry = Extract<Entry, { kind: "permission" }>;
@@ -49,7 +50,7 @@ export function PermissionRequest({
         <span className="font-medium">{toolCall.title ?? "a tool"}</span>
       </div>
       {texts.map((text, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+        // oxlint-disable-next-line react/no-array-index-key -- content blocks have no id
         <MessageResponse key={i}>{text}</MessageResponse>
       ))}
       {entry.answer ? (

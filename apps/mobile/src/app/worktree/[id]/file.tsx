@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+
 import { ChatProvider } from "../../../components/chat/chat-context";
 import { Markdown } from "../../../components/chat/markdown";
 import { CodeList, type CodeRow } from "../../../components/files/code-list";

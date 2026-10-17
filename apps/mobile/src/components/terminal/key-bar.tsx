@@ -1,6 +1,7 @@
 import * as Haptics from "expo-haptics";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { BAR_KEYS, type BarKey } from "../../lib/terminal/key-bar";
 import { terminalColors } from "../../theme";
 

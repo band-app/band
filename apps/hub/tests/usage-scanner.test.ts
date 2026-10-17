@@ -13,10 +13,12 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
 import type { SessionUsageSnapshot, UsageReader, UsageSessionItem } from "@band-app/coding-agent";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
 import { closeDb } from "../src/server/infra/db/connection";
 import { UsageEventQueries } from "../src/server/infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../src/server/infra/db/queries/usage-scan-state";

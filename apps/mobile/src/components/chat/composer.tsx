@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+
 import { type Attachment, toWireFiles } from "../../lib/composer/attachments";
 import { useAttachmentPicker } from "../../lib/composer/use-attachment-picker";
 import { useDictation } from "../../lib/composer/use-dictation";

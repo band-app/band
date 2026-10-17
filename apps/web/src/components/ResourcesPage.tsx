@@ -9,6 +9,7 @@ import {
 import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+
 import { invoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
@@ -207,11 +208,11 @@ export function ResourcesPage() {
   // freezes the list while the underlying repo set is stable.
   //
   // `repos` is intentionally NOT in the dep list — the join'd
-  // names string is the stable identity we're keying on. Biome's
-  // exhaustive-deps rule reads that as a missing dep; suppressing
+  // names string is the stable identity we're keying on. The exhaustive-deps
+  // lint rule reads that as a missing dep; suppressing
   // is the correct call.
   const repoNames = repos.map((p) => p.repo).join("\n");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: repoNames is the intentional stable-identity key
+  // oxlint-disable-next-line react/exhaustive-deps -- repoNames is the intentional stable-identity key
   const reposRef = useMemo(() => repos, [repoNames]);
 
   // Kick off per-repo size fetches in a concurrency-limited loop
@@ -220,9 +221,9 @@ export function ResourcesPage() {
   // dialog unmounts or another refresh fires mid-flight.
   //
   // `refreshKey` is a deliberate re-run trigger (no body read), so
-  // biome's exhaustive-deps rule flags it as "extra" — but forcing
+  // the exhaustive-deps lint rule flags it as "extra" — but forcing
   // the re-run is the entire point on Refresh.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is the re-run trigger
+  // oxlint-disable-next-line react/exhaustive-deps -- refreshKey is the re-run trigger
   useEffect(() => {
     if (reposRef.length === 0) return;
     let cancelled = false;

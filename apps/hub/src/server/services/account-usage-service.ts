@@ -4,6 +4,7 @@ import type {
   AccountUsageProvider,
   UsageWindow,
 } from "@band-app/host-api";
+
 import { hostRegistry } from "../infra/host/registry";
 import { tokenService } from "./token-service";
 

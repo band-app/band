@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+
 import { HubStore, hubIdFor, type SecureKV } from "../src/lib/hub-store.ts";
 
 /** An in-memory stand-in for the Keychain that records every key written. */

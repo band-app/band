@@ -1,6 +1,7 @@
 import { Folder } from "lucide-react-native";
 import { useState } from "react";
 import { Image, StyleSheet, View } from "react-native";
+
 import { colors } from "../theme";
 
 /** Up to two letters of a name, for an avatar with no picture. */

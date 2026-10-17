@@ -25,7 +25,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+
 import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, trpcMutate, trpcQuery } from "./helpers/server";

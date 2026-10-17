@@ -4,7 +4,9 @@
 // it was installed.
 
 import { rmSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
+
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
 import { type ReleasesStub, startReleasesStub } from "./fixtures/github-releases-stub";
 import { seedSettings } from "./helpers/seed-state";
 import {
