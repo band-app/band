@@ -48,6 +48,8 @@ export interface ServerHandle {
    * server restart, where the daemon and its shells must survive.
    */
   close: (opts?: { keepTerminalDaemon?: boolean }) => Promise<void>;
+  /** Everything the server has printed so far (stdout and stderr). */
+  output: () => string;
 }
 
 /**
@@ -286,7 +288,14 @@ async function startHubServer(opts: StartServerOptions): Promise<ServerHandle> {
     }
 
     let stderr = "";
+    let allOutput = "";
     let settled = false;
+    child.stdout!.on("data", (chunk: Buffer) => {
+      allOutput += chunk.toString();
+    });
+    child.stderr!.on("data", (chunk: Buffer) => {
+      allOutput += chunk.toString();
+    });
 
     child.stderr!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -304,6 +313,7 @@ async function startHubServer(opts: StartServerOptions): Promise<ServerHandle> {
         resolve({
           url: `http://127.0.0.1:${boundPort}`,
           home: tmpHome,
+          output: () => allOutput,
           close: async (closeOpts) => {
             await new Promise<void>((r) => {
               // Already gone (e.g. a second close after a failed restart):

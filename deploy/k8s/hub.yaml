@@ -46,6 +46,10 @@ spec:
           ports:
             - containerPort: 3456
           env:
+            # How this hub was installed, so the update panel shows the right command.
+            # Use `helm` instead when the hub is deployed from a Helm chart.
+            - name: BAND_INSTALL_METHOD
+              value: k8s
             - name: BAND_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:

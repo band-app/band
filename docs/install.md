@@ -138,6 +138,18 @@ A worker owns a table from remote URL to folder (`repos.json` in its state direc
 
 A runner starts workers on demand when a worktree asks for a host that does not exist yet (a Docker container, a Kubernetes Pod, a cloud VM, an SSH machine). The hooks and their settings are in [Runner hooks](runner-hooks.md), and sleeping workers in [Ephemeral workers](ephemeral-workers.md).
 
+## Updating
+
+Settings > Hosts shows the Band version each host runs, and marks a worker that is behind the hub. Once a day the hub asks GitHub for the latest release (`BAND_UPDATE_CHECK=off` turns that off for an air-gapped hub). When a newer one exists, the sidebar footer shows an "update available" badge. It opens a panel that lists the hub and every worker with their version and the version to move to.
+
+Update the workers first and the hub last, so the hub is never older than its workers.
+
+- **A worker under launchd (`app.band.worker`) or a systemd user unit (`band-worker`)**: an admin clicks Update. A dialog lists the agents on that host, because the restart ends them. On confirm, the worker runs `npm i -g @band-app/worker@<version>` and restarts through its service manager. If the install fails, the worker keeps running as it was and the error shows on the host. A worker with the target version is the hub's own when the worker is behind it, otherwise the latest release (when it stays within a minor of the hub).
+- **Any other worker** shows the command to run by hand (`npm i -g @band-app/worker@<version>`, then restart it).
+- **The hub** only shows the command; it never updates itself. The command follows `BAND_INSTALL_METHOD`, which the compose file (`compose`), the Kubernetes manifest (`k8s`, or `helm` for a chart) and the image default (`docker`) set. With none set the panel says to pull `ghcr.io/band-app/band-hub:<version>` and recreate the container.
+
+A hub run from source reports the unreleased version `0.1.0` and accepts every worker (it logs that it skipped the check). A worker whose version differs from a released hub's by more than one minor version (`0.47.0` against `0.50.0`) is refused with a message that says what to do. The worker logs it, waits five minutes (`BAND_WORKER_VERSION_RETRY_MS`) and exits instead of redialing, and its host shows "update required". A worker from before version reporting is accepted and shown with an unknown version. `band hosts list` has a VERSION column with the same marks.
+
 ## Releases
 
 A release publishes the desktop DMGs, the Homebrew cask, `@band-app/server` and `@band-app/worker` on npm, and the two images `ghcr.io/band-app/band-hub` and `ghcr.io/band-app/band-worker`. Each image is tagged with the release version and `latest`. Pull requests that change `docker/`, `deploy/compose/` or the release workflows build both images for both architectures without pushing them (`.github/workflows/images.yml`).

@@ -2425,6 +2425,11 @@ fn hosts_list_shows_the_local_host_and_new_workers() {
     assert!(text.starts_with("ID"), "text: {text}");
     assert!(text.contains("Local"), "text: {text}");
     assert!(text.contains("online"), "text: {text}");
+    assert!(text.contains("VERSION"), "text: {text}");
+    // The local host runs the hub's own version, which is never marked as behind.
+    assert!(hosts[0]["workerVersion"].is_string(), "hosts: {listed}");
+    assert_eq!(hosts[0]["versionState"], "current", "hosts: {listed}");
+    assert!(!text.contains("(behind)"), "text: {text}");
 }
 
 #[test]

@@ -191,6 +191,20 @@ export class TokenQueries {
       .run();
   }
 
+  /** Records that the hub refused a worker's link for its version: what it ran, and why. Cleared by its next successful connect. */
+  setHostRefusal(id: string, fields: { version: string | null; reason: string }): void {
+    const row = this.findHost(id);
+    if (!row) return;
+    this.db()
+      .update(hosts)
+      .set({
+        version: fields.version ?? row.version,
+        info: { ...(row.info ?? {}), updateRequired: fields.reason },
+      })
+      .where(eq(hosts.id, id))
+      .run();
+  }
+
   /** Replaces what a host reported about itself, without touching its status. */
   setHostInfo(id: string, info: Record<string, unknown>): void {
     this.db().update(hosts).set({ info }).where(eq(hosts.id, id)).run();

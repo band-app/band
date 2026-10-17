@@ -29,6 +29,10 @@ export interface Hello {
   labels: Record<string, string>;
   roots: string[];
   agents: string[];
+  /** The worker's own release version (`0.50.0`). Absent from workers that predate version reporting. */
+  version?: string;
+  /** The service manager that supervises the worker, so the hub knows it can restart it. Absent when none. */
+  serviceManager?: "launchd" | "systemd";
   /** Toolchain versions on the worker's PATH (`node`, `python`, `go`, ...). Absent from older workers. */
   tools?: Record<string, string>;
   /** Highest sequence number the sender has received on each channel. */
@@ -53,6 +57,18 @@ export interface Mismatch {
 export interface Rejected {
   type: "rejected";
   reason: string;
+  /** Machine-readable kind, such as `version-incompatible`. Older clients ignore it. */
+  code?: string;
+}
+
+/** Thrown by `LinkClient.connect` for a refused hello. */
+export class LinkRejectedError extends Error {
+  readonly code: string | undefined;
+  constructor(reason: string, code?: string) {
+    super(`rejected: ${reason}`);
+    this.name = "LinkRejectedError";
+    this.code = code;
+  }
 }
 
 export type HandshakeReply = Ready | Mismatch | Rejected;
@@ -87,6 +103,16 @@ export function validateHello(h: Hello): string | null {
     !Object.values(labels).every((v) => typeof v === "string")
   ) {
     return "labels must map strings to strings";
+  }
+  if (h.version !== undefined && (typeof h.version !== "string" || h.version.length > 64)) {
+    return "version must be a short string";
+  }
+  if (
+    h.serviceManager !== undefined &&
+    h.serviceManager !== "launchd" &&
+    h.serviceManager !== "systemd"
+  ) {
+    return "serviceManager must be launchd or systemd";
   }
   if (h.tools !== undefined) {
     const tools = h.tools as unknown;

@@ -8,6 +8,7 @@ import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
 import { useIsAdmin } from "./DevicesSettings";
 import { EvacuateHostDialog } from "./EvacuateHostDialog";
+import { HostVersionLine } from "./HostVersionLine";
 import { SettingsRow } from "./SettingsRow";
 import { ThisComputerSettings } from "./ThisComputerSettings";
 import {
@@ -135,6 +136,7 @@ export function HostsSettings() {
       }),
     [adapter, refetchFresh],
   );
+  const isAdmin = useIsAdmin();
   const hosts = useQuery<HostList>({
     queryKey: HOSTS_KEY,
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
@@ -284,6 +286,7 @@ export function HostsSettings() {
                     </span>
                   </div>
                 ) : null}
+                {host.usable ? <HostVersionLine host={host} isAdmin={isAdmin} /> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span data-testid="settings__host-status" className="text-xs text-muted-foreground">

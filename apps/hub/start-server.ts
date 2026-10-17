@@ -85,6 +85,7 @@ import { githubWebhookService } from "./src/server/services/github-webhook-servi
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
+import { releaseCheckService } from "./src/server/services/release-check-service.ts";
 import { repoAvatarService } from "./src/server/services/repo-avatar-service.ts";
 import { runnerReaperService } from "./src/server/services/runner-reaper-service.ts";
 import { runnerService } from "./src/server/services/runner-service.ts";
@@ -807,6 +808,7 @@ async function main() {
   tokenService.ensureSharedToken(persistedToken);
   // Known workers become resolvable hosts, before any worktree asks for one.
   workerLinkService.start();
+  releaseCheckService.start();
   placementService.start();
   environmentBuildService.start();
   runnerService.start();
@@ -1725,6 +1727,7 @@ async function main() {
     vaultService.stop();
     mcpProxyService.stop();
     placementService.stop();
+    releaseCheckService.stop();
     environmentBuildService.stop();
     await workerLinkService.close().catch(() => {});
 

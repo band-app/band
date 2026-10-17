@@ -4,10 +4,10 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LinkServer, MAX_MESSAGE_BYTES, type ServerSession } from "@band-app/link";
+import { type Hello, LinkServer, MAX_MESSAGE_BYTES, type ServerSession } from "@band-app/link";
 import { WebSocketServer } from "ws";
 import { parseConfig } from "../src/config.ts";
-import { Worker } from "../src/worker.ts";
+import { Worker, type WorkerOptions } from "../src/worker.ts";
 
 // Nothing in these tests may touch the real ~/.band, and the agents are the
 // scripted ACP stub, not the installed adapters.
@@ -46,6 +46,8 @@ export interface TestHub {
   url: string;
   /** Every `POST /api/workers/exchange` the hub accepted. */
   bootstraps: BootstrapCall[];
+  /** Every hello the hub received, refused ones included. */
+  hellos: Hello[];
   /** Resolves with the next worker session that completes a handshake. */
   nextSession(): Promise<ServerSession>;
   close(): Promise<void>;
@@ -58,13 +60,21 @@ export interface TestHub {
  * issues for every redial after that.
  */
 export async function startHub(
-  opts: { credentials?: string[]; bootstrapTokens?: string[] } = {},
+  opts: {
+    credentials?: string[];
+    bootstrapTokens?: string[];
+    /** Refuse every hello with this reason and code, as a hub does for a worker too far from its version. */
+    refuse?: { reason: string; code?: string };
+  } = {},
 ): Promise<TestHub> {
   const credentials = opts.credentials ?? [TOKEN];
   const bootstrapTokens = opts.bootstrapTokens ?? [];
   const bootstraps: BootstrapCall[] = [];
+  const hellos: Hello[] = [];
   const server = new LinkServer({
     authenticate: (hello) => {
+      hellos.push(hello);
+      if (opts.refuse) return { ok: false, ...opts.refuse };
       const sessionToken = `sess-${hello.workerId}`;
       return credentials.includes(hello.token) || hello.token === sessionToken
         ? { ok: true, sessionToken }
@@ -114,6 +124,7 @@ export async function startHub(
     server,
     url: `http://127.0.0.1:${port}`,
     bootstraps,
+    hellos,
     nextSession: () =>
       new Promise((resolve) => {
         const on = (s: ServerSession) => {
@@ -141,7 +152,13 @@ export interface TestWorker {
 /** Starts an attached worker in this process and waits for the hub to see it. */
 export async function startWorker(
   hub: TestHub,
-  extra: { args?: string[]; root?: string; stateDir?: string; token?: string } = {},
+  extra: {
+    args?: string[];
+    root?: string;
+    stateDir?: string;
+    token?: string;
+    options?: Partial<WorkerOptions>;
+  } = {},
 ): Promise<TestWorker> {
   const root = extra.root ?? tmpDir();
   const stateDir = extra.stateDir ?? tmpDir("band-worker-state-");
@@ -160,7 +177,10 @@ export async function startWorker(
     {},
   );
   const connected = hub.nextSession();
-  const worker = await Worker.start(config, { link: { reconnect: { minMs: 20, maxMs: 100 } } });
+  const worker = await Worker.start(config, {
+    link: { reconnect: { minMs: 20, maxMs: 100 } },
+    ...extra.options,
+  });
   return { worker, session: await connected, root, stateDir };
 }
 

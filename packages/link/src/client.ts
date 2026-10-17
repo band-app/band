@@ -6,6 +6,7 @@ import {
   type Hello,
   type HelloInfo,
   LinkClosedError,
+  LinkRejectedError,
   MAX_MESSAGE_BYTES,
   PROTOCOL_VERSION,
   type Ready,
@@ -32,7 +33,7 @@ export interface LinkClientOptions {
  * handlers, channels and queued sends survive a dropped socket.
  *
  * Events: `connected` (ready, resumed), `disconnected`, `lost` (missed
- * heartbeats), `rejected` (reason, terminal), `mismatch` (need, terminal).
+ * heartbeats), `rejected` (reason, code, terminal), `mismatch` (need, terminal).
  */
 export class LinkClient extends EventEmitter {
   readonly session: LinkSession;
@@ -152,9 +153,9 @@ export class LinkClient extends EventEmitter {
         const err =
           reply.type === "mismatch"
             ? new Error(`protocol mismatch: hub needs ${reply.need}`)
-            : new Error(`rejected: ${reply.reason}`);
+            : new LinkRejectedError(reply.reason, reply.code);
         if (reply.type === "mismatch") this.emit("mismatch", reply.need);
-        else this.emit("rejected", reply.reason);
+        else this.emit("rejected", reply.reason, reply.code);
         this.firstReady?.reject(err);
         this.firstReady = null;
         ws.terminate();
