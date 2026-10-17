@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { useMemo } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { FileIcon } from "../../../components/file-icon";
 import { ViewHeader } from "../../../components/files/view-header";
 import { Body } from "../../../components/ui";
 import {
@@ -135,6 +136,7 @@ function Item({
       testID={`changes__row-${item.section}-${entry.path}`}
     >
       <Text style={[styles.status, { color: tone }]}>{conflict ? "!" : entry.status}</Text>
+      <FileIcon name={entry.path} />
       <View style={styles.names}>
         <Text style={styles.name} numberOfLines={1}>
           {baseName(entry.path)}

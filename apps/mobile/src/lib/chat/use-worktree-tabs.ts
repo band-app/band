@@ -41,6 +41,8 @@ const KEEP_ALIVE = 3;
 export interface AgentChoice {
   id: string;
   label: string;
+  /** `codingAgents[].type`, which picks the icon. */
+  type?: string;
   isDefault: boolean;
 }
 
@@ -49,6 +51,8 @@ export interface ChatTab {
   /** A chat, or a terminal (whose state is always idle). */
   kind: "chat" | "term";
   label: string;
+  /** The chat's agent type, for its icon. */
+  agentType?: string;
   state: TabState;
   /** The icon: the hub's status mapped by `shownState`. */
   shown: ShownState;
@@ -90,7 +94,7 @@ function readTabs(raw: string | null): CenterTabs | null {
 }
 
 interface SettingsLike {
-  codingAgents?: { id: string; label: string }[];
+  codingAgents?: { id: string; label: string; type?: string }[];
   defaultCodingAgent?: string;
 }
 
@@ -240,7 +244,7 @@ export function useWorktreeTabs(worktreeId: string) {
     const defaultId = settings.data?.defaultCodingAgent ?? list[0]?.id;
     return [...list]
       .sort((a, b) => Number(b.id === defaultId) - Number(a.id === defaultId))
-      .map((a) => ({ id: a.id, label: a.label, isDefault: a.id === defaultId }));
+      .map((a) => ({ id: a.id, label: a.label, type: a.type, isDefault: a.id === defaultId }));
   }, [settings.data]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: pendingTick re-reads the pending store
@@ -281,6 +285,7 @@ export function useWorktreeTabs(worktreeId: string) {
           agentLabel: settings.data?.codingAgents?.find((a) => a.id === agentId)?.label,
           agentId,
         }),
+        agentType: settings.data?.codingAgents?.find((a) => a.id === agentId)?.type,
         state: tabState(id, statuses, unread),
         shown,
         summary: summaryOf(shown, pendingText, chat, Date.now()),
