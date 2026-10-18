@@ -20,8 +20,8 @@ export const settingsRouter = t.router({
   get: publicProcedure.query(({ ctx }) => {
     // The shared token secret is an admin credential, so no caller gets it back.
     // The voice endpoint (URL, host, key item) is for admins; other devices use voice.status.
-    const { tokenSecret: _tokenSecret, voice, ...settings } = settingsService.get();
-    return ctx.admin ? { ...settings, voice } : settings;
+    const { tokenSecret: _tokenSecret, voice, provisioning, ...settings } = settingsService.get();
+    return ctx.admin ? { ...settings, voice, provisioning } : settings;
   }),
 
   update: publicProcedure.input(settingsUpdateInput).mutation(({ input, ctx }) => {
@@ -38,6 +38,12 @@ export const settingsRouter = t.router({
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "Changing voice needs an admin token.",
+      });
+    }
+    if (input.provisioning !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing provisioning needs an admin token.",
       });
     }
     if (input.runners !== undefined && !ctx.admin) {

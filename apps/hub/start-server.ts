@@ -37,6 +37,7 @@ import {
   isPairLinkRequest,
   PAIR_EXCHANGE_PATH,
 } from "./src/server/api/pairing/handler.ts";
+import { handleProvision, isProvisionRequest } from "./src/server/api/provisioning/handler.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { handleOAuthCallback, OAUTH_CALLBACK_PATH } from "./src/server/api/vault/oauth-callback.ts";
@@ -912,6 +913,13 @@ async function main() {
     // the device-token check, because the bootstrap token is the credential.
     if (req.url?.split("?")[0] === WORKER_EXCHANGE_PATH) {
       await workerLinkService.handleExchange(req, res);
+      return;
+    }
+
+    // Provisioning: the script, its exchange, the bundle and the log. The one-time code and the
+    // run token are the credentials.
+    if (isProvisionRequest(req)) {
+      await handleProvision(req, res);
       return;
     }
 

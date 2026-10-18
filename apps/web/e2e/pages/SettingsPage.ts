@@ -1034,6 +1034,35 @@ export class SettingsPage {
     });
   }
 
+  /** Clicks "Get provisioning command" in the Hosts section's "Add a host" row. */
+  async getProvisioningCommand(): Promise<void> {
+    await test.step("Get the provisioning command", async () => {
+      await this.dialog.getByTestId("settings__provision-create").click();
+    });
+  }
+
+  /** The `curl ... | sh` line shown after "Get provisioning command". */
+  provisionCommand(): Locator {
+    return this.dialog.getByTestId("settings__provision-command");
+  }
+
+  provisionExpiry(): Locator {
+    return this.dialog.getByTestId("settings__provision-expiry");
+  }
+
+  /** The status line of the newest provisioning command; `data-status` holds the state. */
+  provisionStatus(): Locator {
+    return this.dialog.getByTestId("settings__provision-status");
+  }
+
+  provisionLog(): Locator {
+    return this.dialog.getByTestId("settings__provision-log");
+  }
+
+  provisionCopyCloudInitButton(): Locator {
+    return this.dialog.getByTestId("settings__provision-copy-cloud-init");
+  }
+
   /** The "Add worker" button in the Hosts section, before the form opens. */
   addWorkerButton(): Locator {
     return this.dialog.getByTestId("settings__add-worker");

@@ -66,6 +66,7 @@ import { modesRouter } from "./modes/router";
 import { panelFocusRouter } from "./panel-focus/router";
 import { pluginsRouter } from "./plugins/router";
 import { prereqsRouter } from "./prereqs/router";
+import { provisioningRouter } from "./provisioning/router";
 import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
 import { reposRouter } from "./repos/router";
@@ -115,6 +116,7 @@ export const appRouter = t.router({
   runners: runnersRouter,
   tokens: tokensRouter,
   vault: vaultRouter,
+  provisioning: provisioningRouter,
   agentLogins: agentLoginsRouter,
   voice: voiceRouter,
   mcp: mcpServersRouter,
