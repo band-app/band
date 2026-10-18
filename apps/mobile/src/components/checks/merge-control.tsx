@@ -73,7 +73,7 @@ export function MergeControl({
           <ChevronDown size={16} color="#ffffff" />
         </Pressable>
       </View>
-      {status.hint && !status.canMerge ? (
+      {status.hint ? (
         <Text style={styles.hint} testID="checks__merge-hint">
           {status.hint}
         </Text>
