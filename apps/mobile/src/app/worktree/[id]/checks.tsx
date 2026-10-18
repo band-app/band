@@ -8,7 +8,6 @@ import {
   countChecks,
   isCountingUp,
 } from "@band-app/client/checks";
-import { FlashList } from "@shopify/flash-list";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useEffect, useState } from "react";
 import {
@@ -17,6 +16,7 @@ import {
   Linking,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -28,7 +28,6 @@ import { BackGlyph, Glass, GlassCircle } from "../../../components/glass";
 import { Body, Centered } from "../../../components/ui";
 import { useWorktreeChecks } from "../../../lib/checks/use-checks";
 import { SessionGate, useHubSession } from "../../../lib/hub-session";
-
 import { colors, tints, tones } from "../../../theme";
 
 /** The worktree's Checks view: the pull request's CI checks, re-run, and the Fix agent. */
@@ -177,86 +176,72 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
     );
   } else {
     body = (
-      <FlashList
-        data={shown}
-        keyExtractor={(c) => c.id}
-        renderItem={renderItem}
-        extraData={{ now, expanded, rerunning: checks.rerunning, errors: checks.rerunErrors }}
+      <ScrollView
         refreshControl={
           <RefreshControl refreshing={query.isRefetching} onRefresh={() => void query.refetch()} />
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        ListHeaderComponent={
-          <View>
-            {review ? <MergeControl review={review} onMerge={checks.mergeReview} /> : null}
-            {failing.length > 0 ? (
-              <View style={styles.banner} testID="checks__failing-banner">
-                <Text style={styles.bannerTitle} testID="checks__failing-count">
-                  {failing.length} failing {failing.length === 1 ? "check" : "checks"}
-                </Text>
-                <Text style={styles.bannerText}>
-                  {checks.rerunFailedError ?? "Inspect details or start an AI fix pass."}
-                </Text>
-                <View style={styles.bannerActions}>
-                  {checks.canRerunFailed ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={checks.rerunFailedBusy}
-                      onPress={() => void checks.rerunFailed()}
-                      style={[styles.action, checks.rerunFailedBusy && styles.dim]}
-                      testID="checks__rerun-failed"
-                    >
-                      <Text style={styles.actionText}>Re-run failed</Text>
-                    </Pressable>
-                  ) : null}
+        testID="checks__list"
+      >
+        <View>
+          {review ? <MergeControl review={review} onMerge={checks.mergeReview} /> : null}
+          {failing.length > 0 ? (
+            <View style={styles.banner} testID="checks__failing-banner">
+              <Text style={styles.bannerTitle} testID="checks__failing-count">
+                {failing.length} failing {failing.length === 1 ? "check" : "checks"}
+              </Text>
+              <Text style={styles.bannerText}>
+                {checks.rerunFailedError ?? "Inspect details or start an AI fix pass."}
+              </Text>
+              <View style={styles.bannerActions}>
+                {checks.canRerunFailed ? (
                   <Pressable
                     accessibilityRole="button"
-                    disabled={checks.fixing}
-                    onPress={() => void fix()}
-                    style={[styles.action, styles.actionPrimary, checks.fixing && styles.dim]}
-                    testID="checks__fix"
+                    disabled={checks.rerunFailedBusy}
+                    onPress={() => void checks.rerunFailed()}
+                    style={[styles.action, checks.rerunFailedBusy && styles.dim]}
+                    testID="checks__rerun-failed"
                   >
-                    <Text style={[styles.actionText, styles.actionPrimaryText]}>Fix</Text>
+                    <Text style={styles.actionText}>Re-run failed</Text>
                   </Pressable>
-                </View>
+                ) : null}
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={checks.fixing}
+                  onPress={() => void fix()}
+                  style={[styles.action, styles.actionPrimary, checks.fixing && styles.dim]}
+                  testID="checks__fix"
+                >
+                  <Text style={[styles.actionText, styles.actionPrimaryText]}>Fix</Text>
+                </Pressable>
               </View>
-            ) : null}
-            <View style={styles.summary} testID="checks__summary">
-              {counts.passing > 0 ? (
-                <Text
-                  style={[styles.count, { color: tones.success }]}
-                  testID="checks__count-passing"
-                >
-                  {counts.passing} passing
-                </Text>
-              ) : null}
-              {counts.failing > 0 ? (
-                <Text
-                  style={[styles.count, { color: tones.failure }]}
-                  testID="checks__count-failing"
-                >
-                  {counts.failing} failing
-                </Text>
-              ) : null}
-              {counts.pending > 0 ? (
-                <Text
-                  style={[styles.count, { color: tones.pending }]}
-                  testID="checks__count-pending"
-                >
-                  {counts.pending} pending
-                </Text>
-              ) : null}
             </View>
+          ) : null}
+          <View style={styles.summary} testID="checks__summary">
+            {counts.passing > 0 ? (
+              <Text style={[styles.count, { color: tones.success }]} testID="checks__count-passing">
+                {counts.passing} passing
+              </Text>
+            ) : null}
+            {counts.failing > 0 ? (
+              <Text style={[styles.count, { color: tones.failure }]} testID="checks__count-failing">
+                {counts.failing} failing
+              </Text>
+            ) : null}
+            {counts.pending > 0 ? (
+              <Text style={[styles.count, { color: tones.pending }]} testID="checks__count-pending">
+                {counts.pending} pending
+              </Text>
+            ) : null}
           </View>
-        }
-        ListEmptyComponent={
+        </View>
+        {shown.length === 0 ? (
           <Body testID="checks__empty">No checks reported for this pull request.</Body>
-        }
-        ListFooterComponent={
-          review?.discussion ? <DiscussionSection discussion={review.discussion} hub={hub} /> : null
-        }
-        testID="checks__list"
-      />
+        ) : (
+          shown.map((item) => <View key={item.id}>{renderItem({ item })}</View>)
+        )}
+        {review?.discussion ? <DiscussionSection discussion={review.discussion} hub={hub} /> : null}
+      </ScrollView>
     );
   }
 

@@ -17,7 +17,7 @@ name: p2 squash and merge a clean pull request
 - tapOn:
     id: checks__merge
 - assertVisible:
-    id: checks__merge-confirm
+    id: checks__merge-confirm-text
     text: ".*Squash and merge #51\\?.*"
 - takeScreenshot: p2-confirm
 - tapOn:

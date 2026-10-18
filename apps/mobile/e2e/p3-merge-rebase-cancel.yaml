@@ -22,7 +22,7 @@ name: p3 pick rebase from the menu, cancel, then confirm
 - tapOn:
     id: checks__merge-method-rebase
 - assertVisible:
-    id: checks__merge-confirm
+    id: checks__merge-confirm-text
     text: ".*Rebase and merge #52\\?.*"
 - tapOn:
     id: checks__merge-cancel

@@ -80,7 +80,7 @@ export function MergeControl({
       ) : null}
       {confirming ? (
         <View style={styles.confirm} testID="checks__merge-confirm">
-          <Text style={styles.confirmText}>
+          <Text style={styles.confirmText} testID="checks__merge-confirm-text">
             {mergeMethodLabel(confirming)} #{review.number}?
           </Text>
           <Pressable
