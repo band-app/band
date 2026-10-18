@@ -39,6 +39,7 @@ function discoverProcedures(): ProcedureInfo[] {
     if (
       path.startsWith("tokens.") ||
       path.startsWith("vault.") ||
+      path.startsWith("agentLogins.") ||
       path.startsWith("checkpoints.") ||
       path.startsWith("follow.") ||
       path.startsWith("mcp.") ||

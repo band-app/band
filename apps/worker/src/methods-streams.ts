@@ -151,6 +151,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       command: str(a, "command"),
       args: strArray(a, "args"),
       env,
+      unsetEnv: a.unsetEnv === undefined ? undefined : strArray(a, "unsetEnv"),
     };
     const cwd = await path(a, "cwd");
     ctx.lease.assertMayRun(cwd);
@@ -315,6 +316,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       command: optStr(o, "command"),
       cwd: optStr(o, "cwd"),
       env: o.env === undefined ? undefined : strRecord(o, "env"),
+      unsetEnv: o.unsetEnv === undefined ? undefined : strArray(o, "unsetEnv"),
     };
     // The hub's `band` CLI goes first. A PATH in `options.env` would replace the pool's
     // login-shell PATH, so this starts from that PATH unless the hub set one.

@@ -45,6 +45,7 @@ export type SettingsNavId =
   | "hosts"
   | "devices"
   | "credentials"
+  | "agent-logins"
   | "voice"
   | "mcp"
   | "agent-hooks"
@@ -743,6 +744,99 @@ export class SettingsPage {
     await test.step(`Delete the credential ${name}`, async () => {
       await this.dialog.getByRole("button", { name: `Delete credential ${name}` }).click();
     });
+  }
+
+  /** One row per agent login. `data-testid` set in `AgentLoginsSettings.tsx`. */
+  agentLoginRow(label: string): Locator {
+    return this.dialog.getByTestId("settings-agent-logins__login").filter({
+      has: this.page
+        .getByTestId("settings-agent-logins__login-label")
+        .getByText(label, { exact: true }),
+    });
+  }
+
+  /** The note under the kind picker of the Add login form. */
+  agentLoginNote(): Locator {
+    return this.dialog.getByTestId("settings-agent-logins__note");
+  }
+
+  /** The notice a token without the admin flag sees in place of the page. */
+  agentLoginsDenied(): Locator {
+    return this.dialog.getByTestId("settings-agent-logins__denied");
+  }
+
+  /** The section of one agent type (such as `claude-code`) on the Agent logins page. */
+  private agentLoginSection(agentType: string): Locator {
+    return this.dialog
+      .getByTestId("settings-agent-logins__agent")
+      .and(this.page.locator(`[data-agent="${agentType}"]`));
+  }
+
+  /** The default login picker of an agent type. */
+  agentLoginDefaultPicker(agentType: string): Locator {
+    return this.agentLoginSection(agentType).getByTestId("settings-agent-logins__default");
+  }
+
+  /** Adds a login for an agent type from its Add login form. `kindId` is a kind of `AGENT_LOGIN_KINDS`. */
+  async addAgentLogin(agentType: string, kindId: string, label: string, secret: string) {
+    await test.step(`Add the agent login ${label}`, async () => {
+      await this.dialog
+        .getByRole("combobox", { name: `Login kind for ${agentType}` })
+        .selectOption(kindId);
+      await this.dialog.getByRole("textbox", { name: `Login label for ${agentType}` }).fill(label);
+      const secretInput = this.dialog.getByLabel(`Login secret for ${agentType}`);
+      await secretInput.fill(secret);
+      await this.dialog.getByTestId("settings-agent-logins__add-submit").click();
+      // The form clears once the hub has stored the login.
+      await expect(secretInput).toHaveValue("");
+    });
+  }
+
+  /** Picks the default login of an agent type. An empty `loginLabel` goes back to the machine's login. */
+  async setAgentLoginDefault(agentType: string, loginLabel: string) {
+    await test.step(`Make ${loginLabel || "the machine's login"} the default for ${agentType}`, async () => {
+      const picker = this.agentLoginDefaultPicker(agentType);
+      if (loginLabel) await picker.selectOption({ label: loginLabel });
+      else await picker.selectOption("");
+    });
+  }
+
+  async removeAgentLogin(label: string) {
+    await test.step(`Remove the agent login ${label}`, async () => {
+      const row = this.agentLoginRow(label);
+      await row.getByTestId("settings-agent-logins__remove").click();
+      await row.getByTestId("settings-agent-logins__remove-confirm").click();
+    });
+  }
+
+  /** The label of the login selected in an agent type's default picker. */
+  async agentLoginDefaultLabel(agentType: string): Promise<string> {
+    return this.agentLoginDefaultPicker(agentType).evaluate(
+      (el) => (el as HTMLSelectElement).selectedOptions[0]?.text ?? "",
+    );
+  }
+
+  /** Picks a repo's login override for an agent type. An empty `loginLabel` uses the default. */
+  async setRepoLoginOverride(agentType: string, repoName: string, loginLabel: string) {
+    await test.step(`Override the ${agentType} login of ${repoName} with ${loginLabel || "the default"}`, async () => {
+      const picker = this.repoLoginOverride(agentType, repoName);
+      if (loginLabel) await picker.selectOption({ label: loginLabel });
+      else await picker.selectOption("");
+    });
+  }
+
+  /** The label of the login selected in a repo's override picker. */
+  async repoLoginOverrideLabel(agentType: string, repoName: string): Promise<string> {
+    return this.repoLoginOverride(agentType, repoName).evaluate(
+      (el) => (el as HTMLSelectElement).selectedOptions[0]?.text ?? "",
+    );
+  }
+
+  /** A repo's login override picker in Settings > Repos. */
+  repoLoginOverride(agentType: string, repoName: string): Locator {
+    return this.dialog
+      .getByTestId("settings-repos__login-override")
+      .and(this.page.locator(`[data-agent="${agentType}"][data-repo="${repoName}"]`));
   }
 
   /** One row per MCP server. `data-testid` set in `McpSettings.tsx`. */

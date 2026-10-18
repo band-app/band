@@ -20,6 +20,10 @@
  *   BAND_TEST_ACP_LOG       File to append one JSON line per request and
  *                           notification received ({ method, params, cwd,
  *                           pid, env }), so a test can assert what Band sent.
+ *   BAND_TEST_ACP_LOG_ENV   Comma-separated variable names. Each logged line's
+ *                           `env.NAMED` holds their values in the agent's own
+ *                           environment (null when unset), so a test can
+ *                           assert which credential Band gave it.
  *   BAND_TEST_ACP_CAPS      JSON overriding advertised capabilities:
  *                           { "loadSession": false, "list": false,
  *                             "resume": false, "image": false,
@@ -138,6 +142,13 @@ function logRequest(method, params) {
         BAND_CHAT_ID: env.BAND_CHAT_ID,
         BAND_WORKTREE_ID: env.BAND_WORKTREE_ID,
         PATH: env.PATH,
+        // Variables named in BAND_TEST_ACP_LOG_ENV (comma separated), recorded as set or absent.
+        NAMED: Object.fromEntries(
+          (env.BAND_TEST_ACP_LOG_ENV ?? "")
+            .split(",")
+            .filter(Boolean)
+            .map((name) => [name, env[name] ?? null]),
+        ),
         LEAK: Object.values(env).some((v) => typeof v === "string" && v.includes("bws_")),
       },
     })}\n`,

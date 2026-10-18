@@ -445,6 +445,8 @@ export interface AcpLaunch {
   args: string[];
   /** Merged over the host's environment at spawn. */
   env: Record<string, string>;
+  /** Removed from the host's environment before `env` is merged. */
+  unsetEnv?: string[];
 }
 
 /** The parts of a settings agent definition the launcher reads. */

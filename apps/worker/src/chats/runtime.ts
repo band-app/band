@@ -319,10 +319,10 @@ export class ChatRuntime {
         command: launch.agent.command,
       });
       if (typeof resolved === "string") throw new Error(resolved);
-      const env = await this.env.spawnEnv({ ...resolved.env, ...launch.env });
+      const env = await this.env.spawnEnv({ ...resolved.env, ...launch.env, ...launch.loginEnv });
       const proc = await AcpAgentProcess.start(
         this.env.host.acp,
-        { ...resolved, env },
+        { ...resolved, env, unsetEnv: launch.unsetEnv },
         launch.cwd,
         launch.agent.label,
         this.handlers(generation),

@@ -118,6 +118,10 @@ export class ChatPanePage {
   /** The model settings trigger on the right of the composer: model name
    *  plus effort, opening the model / effort / fast mode menu. */
   readonly modelMenuButton: Locator;
+  /** The agent login trigger next to the model menu. Shown when the agent has a login to pick. */
+  readonly loginMenuButton: Locator;
+  /** The login name shown in the login trigger. */
+  readonly loginMenuCurrent: Locator;
   /** The model name shown in the model settings trigger. */
   readonly modelMenuModel: Locator;
   /** The effort value shown in the model settings trigger. */
@@ -238,6 +242,8 @@ export class ChatPanePage {
     this.elicitationForms = page.getByTestId("chat-pane__elicitation");
     this.composer = page.getByTestId("chat__composer").filter({ visible: true });
     this.modelMenuButton = page.getByTestId("chat-pane__model-menu");
+    this.loginMenuButton = page.getByTestId("chat-pane__login-menu");
+    this.loginMenuCurrent = page.getByTestId("chat-pane__login-menu-current");
     this.modelMenuModel = page.getByTestId("chat-pane__model-menu-model");
     this.modelMenuEffort = page.getByTestId("chat-pane__model-menu-effort");
     this.modelMenuContent = page.getByTestId("chat-pane__model-menu-content");
@@ -434,6 +440,14 @@ export class ChatPanePage {
     await test.step("Open the model settings menu", async () => {
       await this.modelMenuButton.click();
       await expect(this.modelMenuContent).toBeVisible();
+    });
+  }
+
+  /** Picks a login for this chat from the login menu. `Default` picks the entry that starts with it. */
+  async selectLogin(label: string | RegExp): Promise<void> {
+    await test.step(`Pick the login ${label}`, async () => {
+      await this.loginMenuButton.click();
+      await this.page.getByTestId("chat-pane__login-option").filter({ hasText: label }).click();
     });
   }
 

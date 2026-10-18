@@ -150,6 +150,7 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames).toContain("band_cronjobs_list");
     // Credentials stay out of agent reach.
     expect(toolNames.filter((n) => n.startsWith("band_vault_"))).toEqual([]);
+    expect(toolNames.filter((n) => n.startsWith("band_agentLogins_"))).toEqual([]);
     // So does the bearer token for a worker's loopback listener.
     expect(toolNames).not.toContain("band_worktree_directAccess");
 

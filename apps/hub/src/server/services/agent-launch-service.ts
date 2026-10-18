@@ -85,6 +85,7 @@ export class AgentLaunchService {
           input,
           agentDef.id,
           formatShellCommand(invocation.command, invocation.args),
+          agentDef.type,
         );
       }
       log.warn(
@@ -133,6 +134,7 @@ export class AgentLaunchService {
     input: LaunchAgentInput,
     agentDefinitionId: string,
     command: string,
+    agentType: string,
   ): LaunchAgentResult {
     const { worktreeId } = input;
     const terminalId = input.terminalId ?? randomUUID();
@@ -142,9 +144,11 @@ export class AgentLaunchService {
       mode: "tui",
       terminalId,
     });
-    const ready = terminalService.spawn(worktreeId, terminalId, { command }).then(() => {
-      emit({ kind: "terminal-created", worktreeId, terminalId });
-    });
+    const ready = terminalService
+      .spawn(worktreeId, terminalId, { command }, { agentType })
+      .then(() => {
+        emit({ kind: "terminal-created", worktreeId, terminalId });
+      });
     ready.catch((err) => {
       agentSessionRegistry.end(agentSession.id);
       log.error(
