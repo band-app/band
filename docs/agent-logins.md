@@ -57,7 +57,7 @@ The table is `AGENT_LOGIN_KINDS` in `packages/shared/src/agent-logins.ts`, which
 
 The Codex ACP adapter reads `CODEX_API_KEY` first and `OPENAI_API_KEY` second, and uses the key only when it signs in with the API-key method. Band sets `DEFAULT_AUTH_REQUEST` so the adapter signs in with the key when the machine has no Codex login.
 
-A login or provider already configured for Codex on the machine wins. The adapter signs in with the key only when Codex reports that it needs authentication, and a ChatGPT login or a configured provider means it does not. Making the key win needs a separate `CODEX_HOME` per login, which is a later phase. Until then, a Codex API key login is for machines with no Codex login, such as a fresh worker.
+A login or provider already configured for Codex on the machine wins. The adapter signs in with the key only when Codex reports that it needs authentication, and a ChatGPT login or a configured provider means it does not. Making the key win needs a separate `CODEX_HOME` per login, which is a later phase. Until then, a Codex API key login is used only on hosts with no Codex login or provider of their own, such as a fresh worker. Settings > Agent logins says the same under the Codex kind.
 
 ## Exposure and trust
 
@@ -67,7 +67,7 @@ Band replaces the exact value of a login's secret in the agent's stderr and in t
 
 Hosts with the `restricted` trust level receive logins like any other host. Trust limits what an agent may call through the relay. It does not limit the credential the agent itself runs on, and ephemeral runner hosts, which are `restricted` by default, are a main use for logins. An agent on any host can see its own login, as above.
 
-The worker relay refuses `agentLogins.*` and `chats.update` with a `loginId`, at every trust level, so an agent on a worker cannot read a login or switch its own chat to another account. An agent on the hub's own machine reaches the hub without the relay and can still send `chats.update { loginId }` over MCP, to another login of the same agent type. It cannot read any secret.
+The worker relay refuses `agentLogins.*` and `chats.update` with a `loginId`, at every trust level, so an agent on a worker cannot read a login or switch its own chat to another account. The MCP endpoint refuses `chats.update` with a `loginId` as well, for an agent on the hub's own machine, so no agent picks its own login.
 
 A worker that owns its chats keeps the login out of its `chats.db` cache. If the hub is unreachable when such a chat starts its agent, the worker falls back to the cached launch, which has no login, and the agent runs on the machine's own login.
 

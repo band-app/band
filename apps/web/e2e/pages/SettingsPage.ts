@@ -760,6 +760,11 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-agent-logins__note");
   }
 
+  /** The line under the Codex Add login form about hosts that already have a Codex login. */
+  agentLoginCodexNote(): Locator {
+    return this.dialog.getByTestId("settings-agent-logins__codex-note");
+  }
+
   /** The notice a token without the admin flag sees in place of the page. */
   agentLoginsDenied(): Locator {
     return this.dialog.getByTestId("settings-agent-logins__denied");
@@ -786,7 +791,9 @@ export class SettingsPage {
       await this.dialog.getByRole("textbox", { name: `Login label for ${agentType}` }).fill(label);
       const secretInput = this.dialog.getByLabel(`Login secret for ${agentType}`);
       await secretInput.fill(secret);
-      await this.dialog.getByTestId("settings-agent-logins__add-submit").click();
+      await this.agentLoginSection(agentType)
+        .getByTestId("settings-agent-logins__add-submit")
+        .click();
       // The form clears once the hub has stored the login.
       await expect(secretInput).toHaveValue("");
     });

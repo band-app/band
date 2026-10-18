@@ -111,6 +111,15 @@ function createMcpServer(req: IncomingMessage): McpServer {
 
     // biome-ignore lint/suspicious/noExplicitAny: dynamic tRPC caller traversal
     const handler = async (args: any) => {
+      // Which account a chat runs on is a person's choice. An agent may not pick its own login.
+      if (proc.path === "chats.update" && args?.loginId !== undefined) {
+        return {
+          content: [
+            { type: "text" as const, text: "Error: an agent may not change a chat's login" },
+          ],
+          isError: true,
+        };
+      }
       try {
         // Navigate the caller proxy: "repos.list" → caller.repos.list(args)
         const parts = proc.path.split(".");

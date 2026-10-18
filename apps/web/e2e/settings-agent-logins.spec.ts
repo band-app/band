@@ -49,7 +49,10 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
-    codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
+    codingAgents: [
+      { id: "claude-code", type: "claude-code", label: "Claude Code" },
+      { id: "codex", type: "codex", label: "Codex" },
+    ],
   });
   server = await startServer({
     tmpHome,
@@ -76,6 +79,8 @@ test("adds, defaults, overrides and removes a login without ever showing its sec
 
   // The setup token kind says what it cannot do.
   await expect(settingsPage.agentLoginNote()).toBeVisible();
+  // A Codex key login is used only where Codex has no login of its own.
+  await expect(settingsPage.agentLoginCodexNote()).toContainText("no Codex login of their own");
 
   await settingsPage.addAgentLogin("claude-code", "setup-token", "Team", TEAM_SECRET);
   await settingsPage.addAgentLogin("claude-code", "setup-token", "Spare", SPARE_SECRET);

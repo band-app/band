@@ -188,6 +188,22 @@ describe("MCP server — tool listing and invocation", () => {
     expect(data.repos).toEqual([]);
   });
 
+  it("refuses band_chats_update with a loginId, so an agent cannot pick its own login", async () => {
+    const callRes = await mcpPost(
+      server.url,
+      mcpRequest("tools/call", {
+        name: "band_chats_update",
+        arguments: { chatId: "any-chat", loginId: "al-x" },
+      }),
+    );
+    expect(callRes.status).toBe(200);
+    const [message] = (await parseMcpResponse(callRes)) as Array<{
+      result: { isError?: boolean; content: Array<{ text: string }> };
+    }>;
+    expect(message.result.isError).toBe(true);
+    expect(message.result.content[0].text).toContain("may not change a chat's login");
+  });
+
   it("calls band_settings_get tool and gets results", async () => {
     const callRes = await mcpPost(
       server.url,
