@@ -6,6 +6,7 @@ import { useHostNames } from "../../hooks/use-host-names";
 import { useRepos } from "../../hooks/use-repos";
 import type { RepoInfo } from "../../types";
 import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "../RepoHostsFields";
+import { RepoLoginOverrides } from "./AgentLoginsSettings";
 import { useIsAdmin } from "./DevicesSettings";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -316,6 +317,7 @@ export function ReposSettings() {
               <RepoHostsEditor repo={repo} />
               <CheckpointsSwitch repo={repo} />
               <AutoContinueSwitch repo={repo} />
+              <RepoLoginOverrides repoName={repo.name} />
               {inUse ? (
                 <p className="text-xs text-muted-foreground" data-testid="settings-repos__in-use">
                   Remove its worktrees before removing it here.

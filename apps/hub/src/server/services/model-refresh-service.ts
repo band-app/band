@@ -36,6 +36,7 @@ import { bandHome, resolveAgentDefinition, SettingsQueries } from "../infra/db/q
 import { TokenQueries } from "../infra/db/queries/tokens";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
+import { type AgentLoginOption, agentLoginService } from "./agent-login-service";
 import {
   agentSessionService,
   type CatalogEntry,
@@ -62,6 +63,8 @@ export interface AgentModelsEntry {
   models: CachedAgentModel[];
   updatedAt?: number;
   defaultModel?: string;
+  /** Band-managed logins for this agent (`agentLogins`). The chat shows a picker when there are two or more choices. */
+  logins?: AgentLoginOption[];
 }
 
 /** Whether one agent can start on one host. */
@@ -370,6 +373,7 @@ export class ModelRefreshService {
         models,
         updatedAt: def.cachedModelsUpdatedAt,
         defaultModel: def.model,
+        logins: agentLoginService.optionsFor(def.type),
       });
     }
     return out;

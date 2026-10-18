@@ -42,6 +42,7 @@
  */
 
 import { accountUsageRouter } from "./account-usage/router";
+import { agentLoginsRouter } from "./agent-logins/router";
 import { agentSessionsRouter } from "./agent-sessions/router";
 import { browserHostRouter, hostRouter } from "./browser-host/router";
 import { browserProfilesRouter } from "./browser-profiles/router";
@@ -116,6 +117,7 @@ export const appRouter = t.router({
   tokens: tokensRouter,
   vault: vaultRouter,
   provisioning: provisioningRouter,
+  agentLogins: agentLoginsRouter,
   voice: voiceRouter,
   mcp: mcpServersRouter,
   browserHost: browserHostRouter,

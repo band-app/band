@@ -18,6 +18,7 @@ import { resolve } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import type { AcpLaunch, AgentStdio, HostAcp } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
+import { loginSecretScrubber } from "@band-app/shared/agent-logins";
 
 const log = createLogger("acp-agent");
 
@@ -169,13 +170,14 @@ function iterableToReadable(source: AsyncIterable<Uint8Array>): ReadableStream<U
 }
 
 /** The last few KB of stderr, which is where an agent explains a crash. */
-function stderrTail() {
+function stderrTail(scrub: (text: string) => string) {
   let buf = "";
   return {
     push: (d: Uint8Array) => {
-      buf = (buf + Buffer.from(d).toString()).slice(-4000);
+      // Scrub before cutting to the tail, so a cut cannot leave a recognisable part of a secret.
+      buf = scrub(buf + Buffer.from(d).toString()).slice(-4000);
     },
-    text: () => buf,
+    text: () => scrub(buf),
   };
 }
 
@@ -249,6 +251,7 @@ export class AcpAgentProcess {
     private readonly label: string,
     readonly init: acp.InitializeResponse,
     private readonly stderr: { text: () => string },
+    private readonly scrub: (text: string) => string,
   ) {}
 
   /**
@@ -262,7 +265,10 @@ export class AcpAgentProcess {
     label: string,
     handlers: AcpAgentHandlers,
   ): Promise<AcpAgentProcess> {
-    const stderr = stderrTail();
+    // An agent that fails on its credential may print it. Neither stderr nor an error message
+    // that reaches a failure card or the chat log may hold a Band login's secret.
+    const scrub = loginSecretScrubber(launch.env);
+    const stderr = stderrTail(scrub);
     const lifecycle: Lifecycle = { exited: false, exit: null };
     let child: AgentStdio;
     try {
@@ -323,10 +329,10 @@ export class AcpAgentProcess {
         { label, agent: init.agentInfo?.name, version: init.agentInfo?.version, pid: child.pid },
         "agent initialized",
       );
-      return new AcpAgentProcess(lifecycle, child, connection, label, init, stderr);
+      return new AcpAgentProcess(lifecycle, child, connection, label, init, stderr, scrub);
     } catch (err) {
       child.kill("SIGTERM");
-      throw withStderr(label, err, stderr.text(), lifecycle.exit);
+      throw withStderr(label, err, stderr.text(), lifecycle.exit, scrub);
     }
   }
 
@@ -548,7 +554,13 @@ export class AcpAgentProcess {
         ]);
         clearTimeout(timer);
       }
-      throw withStderr(this.label, err, this.alive ? "" : this.stderr.text(), this.lifecycle.exit);
+      throw withStderr(
+        this.label,
+        err,
+        this.alive ? "" : this.stderr.text(),
+        this.lifecycle.exit,
+        this.scrub,
+      );
     }
   }
 }
@@ -558,8 +570,9 @@ function withStderr(
   err: unknown,
   stderr: string,
   exit: Lifecycle["exit"] = null,
+  scrub: (text: string) => string = (text) => text,
 ): AgentProcessError {
-  const message = err instanceof Error ? err.message : describe(err);
+  const message = scrub(err instanceof Error ? err.message : describe(err));
   const detail = stderr.trim();
   return new AgentProcessError(`${label}: ${message}${detail ? `\n\n${detail}` : ""}`, {
     exitCode: exit?.code ?? null,

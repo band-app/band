@@ -1,0 +1,32 @@
+# S5 (settings): Voice shows its status for a device, and an admin's Test returns the
+# speech-to-text stub's result (the stub saw the request).
+appId: app.getband.mobile
+name: Voice status and test
+---
+- runFlow: subflows/pair-admin.yaml
+- runFlow:
+    file: subflows/open-settings-section.yaml
+    env:
+      SECTION: voice
+- extendedWaitUntil:
+    visible:
+      id: settings__voice-status
+    timeout: 15000
+- assertVisible:
+    text: Available
+- extendedWaitUntil:
+    visible:
+      id: settings__voice-test
+    timeout: 15000
+- takeScreenshot: st5-voice
+- tapOn:
+    id: settings__voice-test
+- extendedWaitUntil:
+    visible:
+      id: settings__voice-ok
+    timeout: 30000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-stt
+- takeScreenshot: st5-voice-tested

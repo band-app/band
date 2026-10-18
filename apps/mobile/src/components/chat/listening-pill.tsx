@@ -1,8 +1,10 @@
 import { describeWatch, formatExpiry } from "@band-app/client/subscription-label";
+import { Radio, X } from "lucide-react-native";
 import { memo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSubscriptions } from "../../lib/chat/use-subscriptions";
 import { colors } from "../../theme";
+import { Icon } from "../icon";
 
 /**
  * Shows that a chat is listening for events and lists what it waits for, like the web's
@@ -37,8 +39,9 @@ export const ListeningPill = memo(function ListeningPill({ chatId }: { chatId: s
           style={styles.pill}
           testID="listening__pill"
         >
+          <Icon icon={Radio} size="sm" color={colors.mutedForeground} />
           <Text style={styles.pillText}>
-            ◉ Listening <Text testID="listening__count">{subscriptions.length}</Text>
+            Listening <Text testID="listening__count">{subscriptions.length}</Text>
           </Text>
         </Pressable>
       ) : null}
@@ -54,7 +57,7 @@ export const ListeningPill = memo(function ListeningPill({ chatId }: { chatId: s
               hitSlop={8}
               testID="listening__close"
             >
-              <Text style={styles.close}>✕</Text>
+              <Icon icon={X} color={colors.mutedForeground} />
             </Pressable>
           </View>
           {subscriptions.length === 0 ? (
@@ -99,6 +102,9 @@ export const ListeningPill = memo(function ListeningPill({ chatId }: { chatId: s
 
 const styles = StyleSheet.create({
   pill: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 5,
     backgroundColor: colors.background,
     borderColor: colors.border,
     borderRadius: 14,
@@ -123,7 +129,6 @@ const styles = StyleSheet.create({
   },
   sheetHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   sheetTitle: { color: colors.foreground, fontSize: 17, fontWeight: "600" },
-  close: { color: colors.mutedForeground, fontSize: 18 },
   empty: { color: colors.mutedForeground, fontSize: 15, paddingVertical: 20 },
   item: {
     alignItems: "center",

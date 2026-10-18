@@ -126,6 +126,8 @@ export interface StubRequest {
     BAND_SERVER_URL?: string;
     BAND_CHAT_ID?: string;
     BAND_WORKTREE_ID?: string;
+    /** Variables named in `BAND_TEST_ACP_LOG_ENV`, null when unset. */
+    NAMED?: Record<string, string | null>;
   };
 }
 

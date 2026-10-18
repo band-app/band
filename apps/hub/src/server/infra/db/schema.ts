@@ -842,6 +842,33 @@ export const vaultItems = sqliteTable(
   (t) => [uniqueIndex("vault_items_scope_name_idx").on(t.scope, t.name)],
 );
 
+// Coding agent logins. A login names a vault item that holds the secret and
+// the kind that decides which environment variable carries it. The row holds no secret.
+export const agentLogins = sqliteTable(
+  "agent_logins",
+  {
+    id: text("id").primaryKey(),
+    agentType: text("agent_type").notNull(),
+    label: text("label").notNull(),
+    kind: text("kind").notNull(),
+    vaultItemId: text("vault_item_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("agent_logins_agent_type_idx").on(t.agentType)],
+);
+
+// The login an agent type uses by default (`repo` is the empty string) or in one repo.
+export const agentLoginChoices = sqliteTable(
+  "agent_login_choices",
+  {
+    agentType: text("agent_type").notNull(),
+    repo: text("repo").notNull().default(""),
+    loginId: text("login_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.agentType, t.repo] })],
+);
+
 // HTTP MCP servers the hub proxies at `/mcp-proxy/<name>` (plan step 4.2). The
 // credential is a vault item (`vault_item_id`), never stored here. `allow_tools`
 // null means every tool; `read_only` keeps only tools in `read_only_tools` or

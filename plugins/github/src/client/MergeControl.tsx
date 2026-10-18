@@ -1,3 +1,4 @@
+import { MERGE_METHODS, mergeMethodLabel, mergeStatus } from "@band-app/client/merge";
 import type { MergeMethod, ReviewInfo } from "@band-app/plugin-api";
 import { useClientPluginHost } from "@band-app/plugin-api/client";
 import {
@@ -10,43 +11,6 @@ import {
 } from "@band-app/ui";
 import { ChevronDown, GitMerge } from "lucide-react";
 import { useState } from "react";
-
-const MERGE_METHODS: Array<{ method: MergeMethod; label: string }> = [
-  { method: "squash", label: "Squash and merge" },
-  { method: "merge", label: "Create a merge commit" },
-  { method: "rebase", label: "Rebase and merge" },
-];
-
-/** The main button's label and whether it can merge, from the PR's state. */
-function mergeStatus(review: ReviewInfo): { label: string; canMerge: boolean; hint: string } {
-  if (review.state === "merged") return { label: "Merged", canMerge: false, hint: "" };
-  if (review.state === "closed") return { label: "Closed", canMerge: false, hint: "" };
-  switch (review.mergeState) {
-    case "clean":
-    case "has_hooks":
-      return { label: "Squash and merge", canMerge: true, hint: "" };
-    case "unstable":
-      return {
-        label: "Squash and merge",
-        canMerge: true,
-        hint: "Some checks that are not required are failing.",
-      };
-    case "blocked":
-      return {
-        label: "Blocked",
-        canMerge: false,
-        hint: "Required reviews or checks are missing.",
-      };
-    case "behind":
-      return { label: "Behind base", canMerge: false, hint: "The branch is out of date." };
-    case "dirty":
-      return { label: "Conflicts", canMerge: false, hint: "The branch has merge conflicts." };
-    case "draft":
-      return { label: "Draft", canMerge: false, hint: "Mark the PR ready for review first." };
-    default:
-      return { label: "Checking mergeability", canMerge: false, hint: "" };
-  }
-}
 
 /** The merge button, its method menu and the inline confirm step. */
 export function MergeControl({ worktreeId, review }: { worktreeId: string; review: ReviewInfo }) {
@@ -138,7 +102,7 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
           data-testid="pr-checks__merge-confirm"
         >
           <span className="min-w-0 flex-1">
-            {MERGE_METHODS.find((m) => m.method === confirming)?.label} #{review.number}?
+            {mergeMethodLabel(confirming)} #{review.number}?
           </span>
           <button
             type="button"

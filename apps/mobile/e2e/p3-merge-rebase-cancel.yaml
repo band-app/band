@@ -1,0 +1,50 @@
+# p3 (S4): the method menu offers the three methods; Rebase and merge goes out as rebase, and
+# cancelling at the confirm step merges nothing.
+appId: app.getband.mobile
+name: p3 pick rebase from the menu, cancel, then confirm
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-merge-rebase
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-label
+      text: "Squash and merge"
+    timeout: 20000
+- tapOn:
+    id: checks__merge-menu
+- assertVisible: "Squash and merge"
+- assertVisible: "Create a merge commit"
+- assertVisible: "Rebase and merge"
+- takeScreenshot: p3-menu
+- tapOn:
+    id: checks__merge-method-rebase
+- assertVisible:
+    id: checks__merge-confirm-text
+    text: ".*Rebase and merge #52\\?.*"
+- tapOn:
+    id: checks__merge-cancel
+- assertNotVisible:
+    id: checks__merge-confirm
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-no-merge?pr=52
+- takeScreenshot: p3-cancelled
+- tapOn:
+    id: checks__merge-menu
+- tapOn:
+    id: checks__merge-method-rebase
+- tapOn:
+    id: checks__merge-confirm-button
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-merge?pr=52&method=rebase
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-label
+      text: "Merged"
+    timeout: 30000

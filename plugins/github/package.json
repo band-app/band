@@ -9,6 +9,7 @@
     "./client": "./src/client/index.tsx"
   },
   "dependencies": {
+    "@band-app/client": "workspace:^",
     "@band-app/plugin-api": "workspace:^",
     "@band-app/ui": "workspace:^",
     "lucide-react": "^0.576.0"

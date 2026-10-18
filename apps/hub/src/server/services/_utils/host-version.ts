@@ -8,7 +8,7 @@ import {
   type VersionRelation,
   workerUpdateCommand,
 } from "@band-app/shared/versions";
-import { UNRELEASED_VERSION } from "./hub-version";
+import { isUnreleasedVersion } from "./hub-version";
 
 export type ServiceManagerName = "launchd" | "systemd";
 
@@ -49,7 +49,7 @@ export function updateTargetFor(
 ): string | null {
   if (relation === "behind" || relation === "unknown") {
     // A hub run from source has no release to move a worker to.
-    if (hubVersion === UNRELEASED_VERSION) return null;
+    if (isUnreleasedVersion(hubVersion)) return null;
     return parseSemver(hubVersion) ? hubVersion : null;
   }
   if (relation === "current" && latest) {

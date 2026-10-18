@@ -44,6 +44,7 @@ import { rowsToEvents } from "@band-app/chat-runtime/replay";
 import { loggedSessionCost, sessionStateFromLog } from "@band-app/chat-runtime/session-state";
 import {
   type AcpAgentDefinition,
+  type AcpLaunch,
   type ClaudeCliArgs,
   type ClaudeDefaults,
   type Host,
@@ -70,6 +71,7 @@ import {
 import { hostRegistry } from "../infra/host/registry";
 import { agentExtraDirs, openSharedDir } from "./_utils/shared-dir";
 // FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in method bodies.
+import { agentLoginService } from "./agent-login-service";
 import { chatOwnershipService } from "./chat-ownership-service";
 import { type ChatSession, chatService } from "./chat-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
@@ -665,6 +667,25 @@ function chatLocation(chat: ChatSession): { cwd: string; host: Host } | undefine
 // Process and session attach
 // ---------------------------------------------------------------------------
 
+/**
+ * Adds the Band login that applies to `agentType` to a launch: its variables, and the inherited
+ * ones that would compete with it removed. A launch with no login applying comes back unchanged.
+ */
+async function withAgentLogin(
+  launch: AcpLaunch,
+  agentType: string,
+  scope: { worktreeId?: string; chatLoginId?: string } = {},
+): Promise<AcpLaunch> {
+  const repo = scope.worktreeId ? worktreeService.resolve(scope.worktreeId)?.repo.name : undefined;
+  const login = await agentLoginService.resolve({
+    agentType,
+    repo,
+    chatLoginId: scope.chatLoginId,
+  });
+  if (!login) return launch;
+  return { ...launch, env: { ...launch.env, ...login.env }, unsetEnv: login.unsetEnv };
+}
+
 async function ensureProcess(
   rt: Runtime,
   def: CodingAgentDefinition,
@@ -675,8 +696,12 @@ async function ensureProcess(
   const generation = ++rt.generation;
   rt.starting = (async () => {
     const host = hostRegistry.hostFor(rt.worktreeId);
-    const launch = await host.acp.resolveLaunch(launchDefinition(def));
-    if (typeof launch === "string") throw new Error(launch);
+    const resolved = await host.acp.resolveLaunch(launchDefinition(def));
+    if (typeof resolved === "string") throw new Error(resolved);
+    const launch = await withAgentLogin(resolved, def.type, {
+      worktreeId: rt.worktreeId,
+      chatLoginId: chatService.get(rt.chatId)?.loginId,
+    });
     // An agent on a remote host reaches the hub through the worker's relay,
     // with a token that works for this chat's host only.
     const grant = await host.relay?.issue({ worktreeId: rt.worktreeId, chatId: rt.chatId });
@@ -1090,6 +1115,11 @@ export class AgentSessionService {
     const grant = await worktree.host.relay?.issue({ worktreeId: chat.worktreeId, chatId });
     if (grant) ownerGrants.set(chatId, grant);
     const shared = await openSharedDir(chat.worktreeId).catch(() => null);
+    const login = await agentLoginService.resolve({
+      agentType: def.type,
+      repo: worktree.repo.name,
+      chatLoginId: chat.loginId,
+    });
     return {
       chat: ownedChatInfo(chat),
       agent: {
@@ -1100,7 +1130,14 @@ export class AgentSessionService {
         model: def.model,
       },
       cwd: worktree.worktree.path,
-      env: { ...grant?.env, BAND_CHAT_ID: chatId, BAND_WORKTREE_ID: chat.worktreeId },
+      env: {
+        ...grant?.env,
+        BAND_CHAT_ID: chatId,
+        BAND_WORKTREE_ID: chat.worktreeId,
+      },
+      // Kept apart from `env` because the worker caches `env` on disk and must not cache a secret.
+      ...(login ? { loginEnv: login.env } : {}),
+      ...(login?.unsetEnv.length ? { unsetEnv: login.unsetEnv } : {}),
       mcpServers: mcpServerEntries(chatId, chat.worktreeId, grant?.env ?? null),
       additionalDirectories: await agentExtraDirs(chat.worktreeId),
       sharedDir: shared?.path ?? null,
@@ -1711,8 +1748,9 @@ export class AgentSessionService {
     host: Host = hostRegistry.local,
     cwd = bandHome(),
   ): Promise<CatalogEntry> {
-    const launch = await host.acp.resolveLaunch(launchDefinition(def));
-    if (typeof launch === "string") throw new Error(launch);
+    const resolved = await host.acp.resolveLaunch(launchDefinition(def));
+    if (typeof resolved === "string") throw new Error(resolved);
+    const launch = await withAgentLogin(resolved, def.type);
     let commands: acp.AvailableCommand[] = [];
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {
       onUpdate: (n) => {
@@ -1779,8 +1817,9 @@ export class AgentSessionService {
     prompt: string,
     host: Host = hostRegistry.local,
   ): Promise<string> {
-    const launch = await host.acp.resolveLaunch(launchDefinition(def));
-    if (typeof launch === "string") throw new Error(launch);
+    const resolved = await host.acp.resolveLaunch(launchDefinition(def));
+    if (typeof resolved === "string") throw new Error(resolved);
+    const launch = await withAgentLogin(resolved, def.type);
     let sessionId: string | null = null;
     let text = "";
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {

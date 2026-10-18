@@ -1,0 +1,7 @@
+# Pairs with the throwaway hub through an admin device token (pair-link.yaml uses a non-admin one).
+appId: app.getband.mobile
+---
+- runFlow:
+    file: pair-link.yaml
+    env:
+      PAIR_LINK: ${ADMIN_PAIR_LINK}

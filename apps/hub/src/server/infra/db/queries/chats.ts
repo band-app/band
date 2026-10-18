@@ -62,6 +62,8 @@ export interface ChatRow {
    * undefined when the hub runs it.
    */
   ownerHostId: string | undefined;
+  /** The agent login (`agentLogins`) this chat picked, or undefined for the repo's or the agent's default. */
+  loginId: string | undefined;
 }
 
 /**
@@ -82,6 +84,8 @@ export interface ChatUpdatePatch {
   status?: ChatStatus;
   /** `null` gives the chat back to the hub. */
   ownerHostId?: string | null;
+  /** `null` clears the chat's pick. */
+  loginId?: string | null;
   /**
    * When supplied, replaces the `labels` column. Pass `{}` to clear (the
    * column is stored as SQL `NULL` to keep the on-disk representation
@@ -107,6 +111,7 @@ interface ChatStateBlob {
   activeSessionLastModified?: number | null;
   status: ChatStatus;
   ownerHostId?: string | null;
+  loginId?: string | null;
 }
 
 function serializeState(row: {
@@ -119,6 +124,7 @@ function serializeState(row: {
   activeSessionLastModified: number | undefined | null;
   status: ChatStatus;
   ownerHostId: string | undefined | null;
+  loginId: string | undefined | null;
 }): string {
   const blob: ChatStateBlob = {
     name: row.name,
@@ -130,6 +136,7 @@ function serializeState(row: {
     activeSessionLastModified: row.activeSessionLastModified ?? null,
     status: row.status,
     ...(row.ownerHostId ? { ownerHostId: row.ownerHostId } : {}),
+    ...(row.loginId ? { loginId: row.loginId } : {}),
   };
   return JSON.stringify(blob);
 }
@@ -241,6 +248,7 @@ export class ChatQueries {
       labels: patch.labels ?? current.labels,
       ownerHostId:
         patch.ownerHostId === undefined ? current.ownerHostId : (patch.ownerHostId ?? undefined),
+      loginId: patch.loginId === undefined ? current.loginId : (patch.loginId ?? undefined),
     };
 
     const labelsTouched = patch.labels !== undefined;
@@ -303,6 +311,7 @@ export class ChatQueries {
         status: parsed.status,
         labels: parseLabels(row.labels, row.id),
         ownerHostId: parsed.ownerHostId ?? undefined,
+        loginId: parsed.loginId ?? undefined,
       });
     }
     return out;

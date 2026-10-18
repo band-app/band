@@ -120,10 +120,11 @@ beforeAll(async () => {
   scratch.push(home);
   seedSettings(home, { tokenSecret: ADMIN });
   // No loopback worker: the one the remote-loopback CI job adds runs this checkout's version,
-  // which a hub told to report 0.50.0 correctly refuses.
+  // which a hub told to report 0.50.0 correctly refuses. No release check either: the real
+  // latest release on GitHub would make a worker on HUB_VERSION look out of date.
   server = await startServer({
     tmpHome: home,
-    env: { BAND_HUB_VERSION: HUB_VERSION },
+    env: { BAND_HUB_VERSION: HUB_VERSION, BAND_UPDATE_CHECK: "off" },
     remoteHost: false,
   });
 }, 120_000);

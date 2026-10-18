@@ -30,6 +30,8 @@ export interface ServiceOptions {
   workerId?: string;
   /** The worker runs its worktrees' chats (`--own-chats`). */
   ownChats?: boolean;
+  /** Git asks only the hub for credentials (`--hub-git-credentials-only`). */
+  hubGitCredentialsOnly?: boolean;
 }
 
 export type Runner = (cmd: string, args: string[]) => string;
@@ -73,6 +75,7 @@ const USAGE = `Usage: band-worker install-service --hub <url> --token <bootstrap
   --worker-id <id>   The id the hub issued with the token.
   --state-dir <dir>  Where the worker keeps its id and session token.
   --own-chats        Run the chats of this worker's worktrees here and copy them to the hub.
+  --hub-git-credentials-only  Ignore this machine's git credential helpers; git asks only the hub.
 `;
 
 export function serviceUsage(): string {
@@ -103,6 +106,7 @@ export function parseServiceOptions(
     stateDir: values["state-dir"] ? resolve(values["state-dir"]) : undefined,
     workerId: values["worker-id"],
     ownChats: values["own-chats"] === true,
+    hubGitCredentialsOnly: values["hub-git-credentials-only"] === true,
   };
 }
 
@@ -118,6 +122,7 @@ function parse(argv: string[]) {
       "state-dir": { type: "string" },
       "worker-id": { type: "string" },
       "own-chats": { type: "boolean" },
+      "hub-git-credentials-only": { type: "boolean" },
     },
     strict: true,
   });
@@ -135,6 +140,7 @@ export function serviceVariables(opts: ServiceOptions): Record<string, string> {
   if (opts.roots.length > 0) vars.BAND_WORKER_ROOTS = opts.roots.join(delimiter);
   if (opts.stateDir) vars.BAND_WORKER_STATE_DIR = opts.stateDir;
   if (opts.ownChats) vars.BAND_WORKER_OWN_CHATS = "1";
+  if (opts.hubGitCredentialsOnly) vars.BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY = "1";
   return vars;
 }
 

@@ -1,5 +1,5 @@
 # S1: a long press on message text selects a range with the system handles, and Copy puts exactly
-# that range on the clipboard. The message menu (c5-copy.yaml) still copies the whole message.
+# that range on the clipboard. The copy button (c5-copy.yaml) still copies the whole message.
 appId: app.getband.mobile
 name: S1 a range of a message's text can be selected and copied
 ---

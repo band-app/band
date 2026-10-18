@@ -1,3 +1,4 @@
+import { REVIEW_LABEL, relativeTime } from "@band-app/client/merge";
 import type { ReviewComment, ReviewDiscussion, ReviewThread } from "@band-app/plugin-api";
 import { useClientPluginHost } from "@band-app/plugin-api/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band-app/ui";
@@ -5,34 +6,6 @@ import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { PanelSection } from "./PanelSection";
 import { Avatar } from "./ReviewersSection";
-
-const REVIEW_LABEL = {
-  approved: "approved",
-  changes_requested: "requested changes",
-  commented: "reviewed",
-  pending: "reviewed",
-  dismissed: "review dismissed",
-} as const;
-
-function relativeTime(iso: string, now = Date.now()): string {
-  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
-  const units: Array<[number, Intl.RelativeTimeFormatUnit]> = [
-    [60, "second"],
-    [60, "minute"],
-    [24, "hour"],
-    [30, "day"],
-    [12, "month"],
-    [Number.POSITIVE_INFINITY, "year"],
-  ];
-  let value = seconds;
-  for (const [size, unit] of units) {
-    if (value < size) {
-      return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(-value, unit);
-    }
-    value = Math.floor(value / size);
-  }
-  return iso;
-}
 
 export function CommentsSection({
   worktreeId,

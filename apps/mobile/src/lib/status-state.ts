@@ -52,6 +52,11 @@ export interface BranchStatusLike {
 export interface StatusState {
   agents: ReadonlyMap<string, WorktreeStatusLike>;
   branches: ReadonlyMap<string, BranchStatusLike>;
+  /**
+   * Worktrees whose branch status predates the last snapshot and has not been re-sent since.
+   * They keep showing their old value until the hub's fresh one arrives.
+   */
+  staleBranches: ReadonlySet<string>;
 }
 
 /** One event of `status.stream`. Kinds this app does not use (setup-status, ...) are ignored. */
@@ -67,41 +72,56 @@ export interface StatusEvent {
 }
 
 export function emptyStatusState(): StatusState {
-  return { agents: new Map(), branches: new Map() };
+  return { agents: new Map(), branches: new Map(), staleBranches: new Set() };
 }
 
 export function applyStatusEvent(state: StatusState, event: StatusEvent): StatusState {
   switch (event.kind) {
     case "snapshot": {
-      // The branch statuses follow the snapshot as their own events, so start them empty: a
-      // worktree removed while the stream was down sends no `remove`.
+      // The hub sends one `branch-status` per worktree right after the snapshot. Keep the old
+      // entries on screen meanwhile, so a reconnect never blanks the PR badges and CI icons, and
+      // mark them stale. A worktree removed while the stream was down sends no `remove`, so an
+      // entry that is still stale at the first later event that is not a `branch-status` was not
+      // re-sent, and `dropStale` removes it.
       const agents = new Map<string, WorktreeStatusLike>();
       for (const status of event.statuses ?? []) agents.set(status.worktreeId, status);
-      return { agents, branches: new Map() };
+      return { agents, branches: state.branches, staleBranches: new Set(state.branches.keys()) };
     }
     case "update": {
       if (!event.status) return state;
       const agents = new Map(state.agents);
       agents.set(event.status.worktreeId, event.status);
-      return { agents, branches: state.branches };
+      return dropStale({ ...state, agents });
     }
     case "remove": {
       if (!event.worktreeId) return state;
       const agents = new Map(state.agents);
       const branches = new Map(state.branches);
+      const staleBranches = new Set(state.staleBranches);
       agents.delete(event.worktreeId);
       branches.delete(event.worktreeId);
-      return { agents, branches };
+      staleBranches.delete(event.worktreeId);
+      return dropStale({ agents, branches, staleBranches });
     }
     case "branch-status": {
       if (!event.worktreeId) return state;
       const branches = new Map(state.branches);
       branches.set(event.worktreeId, { git: event.git, ci: event.ci });
-      return { agents: state.agents, branches };
+      const staleBranches = new Set(state.staleBranches);
+      staleBranches.delete(event.worktreeId);
+      return { agents: state.agents, branches, staleBranches };
     }
     default:
-      return state;
+      return dropStale(state);
   }
+}
+
+/** Removes the branch statuses the hub did not re-send after the last snapshot. */
+function dropStale(state: StatusState): StatusState {
+  if (state.staleBranches.size === 0) return state;
+  const branches = new Map(state.branches);
+  for (const id of state.staleBranches) branches.delete(id);
+  return { agents: state.agents, branches, staleBranches: new Set() };
 }
 
 /** `running`: an agent is working. `attention`: one waits for the user. `idle`: neither. */

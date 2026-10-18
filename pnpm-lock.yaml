@@ -198,6 +198,9 @@ importers:
       '@band-app/shared':
         specifier: workspace:^
         version: link:../../packages/shared
+      '@mattermost/react-native-paste-input':
+        specifier: 2.0.1
+        version: 2.0.1(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
       '@react-native-async-storage/async-storage':
         specifier: 2.2.0
         version: 2.2.0(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))
@@ -931,6 +934,9 @@ importers:
 
   plugins/github:
     dependencies:
+      '@band-app/client':
+        specifier: workspace:^
+        version: link:../../packages/client
       '@band-app/plugin-api':
         specifier: workspace:^
         version: link:../../packages/plugin-api
@@ -2604,6 +2610,12 @@ packages:
 
   '@marijn/find-cluster-break@1.0.2':
     resolution: {integrity: sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g==}
+
+  '@mattermost/react-native-paste-input@2.0.1':
+    resolution: {integrity: sha512-Q9zjXvjwxVQ1M8ylxr9Y+wUpG7xb1wW4u+I34oPvF3etTyBrGtVyA4Bt7Xphgc29eW6wQFUxTIbzZc3E6W2MQg==}
+    peerDependencies:
+      react: '*'
+      react-native: '>=0.76.0'
 
   '@mermaid-js/parser@1.0.0':
     resolution: {integrity: sha512-vvK0Hi/VWndxoh03Mmz6wa1KDriSPjS2XMZL/1l19HFwygiObEEoEwSDxOqyLzzAI6J2PU3261JjTMTO7x+BPw==}
@@ -11984,6 +11996,11 @@ snapshots:
       - supports-color
 
   '@marijn/find-cluster-break@1.0.2': {}
+
+  '@mattermost/react-native-paste-input@2.0.1(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      react: 19.2.3
+      react-native: 0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.87.1(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3)
 
   '@mermaid-js/parser@1.0.0':
     dependencies:
