@@ -114,6 +114,7 @@ export const ADMIN_EXTRA_PROCEDURES: ReadonlySet<string> = new Set([
 const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure.startsWith("tokens.") ||
   procedure.startsWith("vault.") ||
+  procedure.startsWith("provisioning.") ||
   procedure === "hosts.setTrust" ||
   procedure === "hosts.audit";
 

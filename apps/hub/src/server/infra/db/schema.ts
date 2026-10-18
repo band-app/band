@@ -784,6 +784,40 @@ export const tokens = sqliteTable(
   ],
 );
 
+// One provisioning command (`services/provisioning-service.ts`). The one-time code and the run
+// token are stored as SHA-256 hashes only. `host_id` is the host row the exchange created, and
+// `commit_sha` is the commit of the provisioning repo the bundle was pinned to. `log` holds the
+// script output with tokens removed.
+export const hostProvisions = sqliteTable(
+  "host_provisions",
+  {
+    id: text("id").primaryKey(),
+    codeHash: text("code_hash").notNull(),
+    runHash: text("run_hash"),
+    hubUrl: text("hub_url").notNull(),
+    hostName: text("host_name").notNull(),
+    labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+    repoUrl: text("repo_url"),
+    branch: text("branch"),
+    command: text("command"),
+    commitSha: text("commit_sha"),
+    hostId: text("host_id"),
+    state: text("state", { enum: ["pending", "running", "failed", "done"] })
+      .notNull()
+      .default("pending"),
+    exitCode: integer("exit_code"),
+    log: text("log").notNull().default(""),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    spentAt: integer("spent_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("host_provisions_code_idx").on(t.codeHash),
+    index("host_provisions_created_idx").on(t.createdAt),
+  ],
+);
+
 // Credentials the hub holds for services (API keys, OAuth tokens, env values).
 // `encrypted` is the AES-256-GCM blob of the secret (`services/_utils/vault-crypto.ts`);
 // `metadata` is JSON that never holds a secret (server URL, scopes, expiry,

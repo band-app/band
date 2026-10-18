@@ -134,6 +134,16 @@ export const settingsUpdateInput = z
       })
       .passthrough()
       .optional(),
+    // The provisioning repo a new host runs (`services/provisioning-service.ts`). Admin only,
+    // because its start command runs on every machine provisioned from this hub.
+    provisioning: z
+      .object({
+        repoUrl: z.string().max(500).optional(),
+        branch: z.string().max(200).optional(),
+        command: z.string().max(200).optional(),
+      })
+      .passthrough()
+      .optional(),
     // Where environment images are built (plan step 3.2).
     environmentBuilder: z
       .object({

@@ -9,6 +9,7 @@ import { useAdapter } from "../../context";
 import { useIsAdmin } from "./DevicesSettings";
 import { EvacuateHostDialog } from "./EvacuateHostDialog";
 import { HostVersionLine } from "./HostVersionLine";
+import { ProvisionHostRow } from "./ProvisionHostRow";
 import { SettingsRow } from "./SettingsRow";
 import { ThisComputerSettings } from "./ThisComputerSettings";
 import {
@@ -407,9 +408,11 @@ export function HostsSettings() {
         </SettingsRow>
       ) : null}
 
+      <ProvisionHostRow />
+
       <SettingsRow
         variant="stacked"
-        label="Add worker"
+        label="Manual install"
         description="Create a one-time token for a worker on another machine. It works once and expires in an hour."
       >
         {!adding ? (
