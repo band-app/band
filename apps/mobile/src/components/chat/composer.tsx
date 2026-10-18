@@ -2,7 +2,7 @@ import type { SlashCommandSkill } from "@band-app/client/composer";
 import type { sessionPickers } from "@band-app/client/session-pickers";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { insertAtSelection } from "@band-app/shared/dictation-text";
-import * as Clipboard from "expo-clipboard";
+import PasteInput, { type PastedFile } from "@mattermost/react-native-paste-input";
 import { ArrowUp, X } from "lucide-react-native";
 import { useCallback, useRef, useState } from "react";
 import {
@@ -13,7 +13,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { type Attachment, toWireFiles } from "../../lib/composer/attachments";
@@ -126,29 +125,18 @@ export function Composer({
     }
   }, []);
 
-  // hasImageAsync never shows iOS's paste prompt; only reading the image does, and that waits for a tap.
-  const [clipboardHasImage, setClipboardHasImage] = useState(false);
-  const checkClipboard = useCallback(async () => {
-    try {
-      setClipboardHasImage(await Clipboard.hasImageAsync());
-    } catch {
-      setClipboardHasImage(false);
-    }
-  }, []);
+  const onPaste = useCallback(
+    (error: string | null | undefined, pasted: PastedFile[]) => {
+      if (error) Alert.alert("Couldn't paste", error);
+      else void addFrom(() => picker.pasted(pasted));
+    },
+    [addFrom, picker],
+  );
 
-  const pasteImage = useCallback(async () => {
-    setClipboardHasImage(false);
-    await addFrom(picker.pasted);
-  }, [addFrom, picker]);
-
-  // Whether the drawer's Paste image action is enabled, checked each time the drawer opens.
-  const [drawerHasImage, setDrawerHasImage] = useState(false);
   // The keyboard closes first, so the drawer rises over the chat instead of fighting the input.
   const openDrawer = useCallback(() => {
     Keyboard.dismiss();
-    setDrawerHasImage(false);
     setDrawerOpen(true);
-    Clipboard.hasImageAsync().then(setDrawerHasImage, () => setDrawerHasImage(false));
   }, []);
   // iOS cannot present a picker while the drawer's modal is still on screen, so the pick waits
   // for the modal's dismissal.
@@ -250,17 +238,6 @@ export function Composer({
                 ))}
               </ScrollView>
             ) : null}
-            {focused && clipboardHasImage ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Paste image"
-                onPress={() => void pasteImage()}
-                style={styles.pasteChip}
-                testID="composer__paste-image"
-              >
-                <Text style={styles.chipName}>Paste image</Text>
-              </Pressable>
-            ) : null}
             {hint ? (
               <Text style={styles.hint} testID="composer__hint">
                 {hint}
@@ -299,7 +276,7 @@ export function Composer({
         ) : null}
         <View style={expanded ? styles.fieldExpanded : styles.fieldRow}>
           {expanded ? null : plus}
-          <TextInput
+          <PasteInput
             keyboardAppearance={scheme}
             accessibilityLabel="Message"
             multiline
@@ -308,14 +285,9 @@ export function Composer({
             onChangeText={setText}
             selection={selection}
             onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-            onFocus={() => {
-              setFocused(true);
-              void checkClipboard();
-            }}
-            onBlur={() => {
-              setFocused(false);
-              setClipboardHasImage(false);
-            }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onPaste={onPaste}
             placeholder={running ? "Queue a message…" : "Follow up…"}
             placeholderTextColor={colors.faint}
             style={[styles.input, expanded && styles.inputExpanded]}
@@ -349,8 +321,6 @@ export function Composer({
         onPhotos={() => pickFrom(picker.photos)}
         onCamera={() => pickFrom(picker.camera)}
         onFiles={() => pickFrom(picker.files)}
-        canPaste={drawerHasImage}
-        onPaste={() => pickFrom(picker.pasted)}
         pickers={pickers}
         onChooseMode={modeChoice.choose}
       />
@@ -459,15 +429,6 @@ const styles = StyleSheet.create({
     height: 30,
     maxWidth: 220,
     paddingHorizontal: 9,
-  },
-  pasteChip: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.muted,
-    borderRadius: 10,
-    marginBottom: 6,
-    marginHorizontal: 6,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
   },
   thumb: { borderRadius: 4, height: 20, width: 20 },
   chipName: { color: colors.foreground, flexShrink: 1, fontSize: 12.5 },

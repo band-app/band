@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { MAX_ATTACHMENT_BYTES } from "@band-app/client/composer";
 import {
   makeAttachment,
-  pastedImageResult,
+  pastedFileName,
   rejectionFor,
   rejectionMessage,
   resolveMediaType,
@@ -55,19 +55,14 @@ describe("queue order", () => {
 });
 
 describe("pasted images", () => {
-  it("attaches a small pasted PNG as an image", () => {
-    const result = pastedImageResult("data:image/png;base64,QUJD", 42);
-    assert.ok("attachment" in result);
-    assert.equal(result.attachment.file.mediaType, "image/png");
-    assert.equal(result.attachment.file.filename, "pasted-42.png");
-    assert.equal(result.attachment.size, 3);
+  it("names a pasted image by time and type", () => {
+    assert.equal(pastedFileName(42, "image/png", 0), "pasted-42.png");
+    assert.equal(pastedFileName(42, "image/jpeg", 1), "pasted-42-2.jpg");
   });
 
   it("refuses a pasted image over the limit with the picked-photo message", () => {
-    const big = "A".repeat(Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 8);
-    const result = pastedImageResult(big, 1);
-    assert.ok("why" in result);
-    assert.equal(result.why, "too-large");
-    assert.match(rejectionMessage(result.name, result.why), /larger than/);
+    const why = rejectionFor("image/png", MAX_ATTACHMENT_BYTES + 1);
+    assert.equal(why, "too-large");
+    assert.match(rejectionMessage(pastedFileName(1, "image/png", 0), why), /larger than/);
   });
 });

@@ -3,7 +3,6 @@ import {
   Camera,
   Check,
   ClipboardList,
-  ClipboardPaste,
   File,
   Hand,
   Image,
@@ -31,8 +30,6 @@ export function PlusDrawer({
   onPhotos,
   onCamera,
   onFiles,
-  canPaste,
-  onPaste,
   pickers,
   onChooseMode,
 }: {
@@ -43,9 +40,6 @@ export function PlusDrawer({
   onPhotos: () => void;
   onCamera: () => void;
   onFiles: () => void;
-  /** The clipboard holds an image. Reading it waits for the tap on Paste image. */
-  canPaste: boolean;
-  onPaste: () => void;
   pickers: Pickers;
   onChooseMode: (configId: string, value: string) => void;
 }) {
@@ -68,13 +62,6 @@ export function PlusDrawer({
         />
         <Action label="Take photo" icon={Camera} onPress={onCamera} testID="plus-drawer__camera" />
         <Action label="Choose file" icon={File} onPress={onFiles} testID="plus-drawer__files" />
-        <Action
-          label="Paste image"
-          icon={ClipboardPaste}
-          onPress={onPaste}
-          disabled={!canPaste}
-          testID="plus-drawer__paste"
-        />
       </View>
       {pickers.modes.length > 0 ? (
         <View style={styles.section} testID="plus-drawer__modes">
@@ -121,23 +108,19 @@ function Action({
   label,
   icon,
   onPress,
-  disabled,
   testID,
 }: {
   label: string;
   icon: LucideIcon;
   onPress: () => void;
-  disabled?: boolean;
   testID: string;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled: !!disabled }}
-      disabled={disabled}
       onPress={onPress}
-      style={[styles.action, disabled && styles.actionDisabled]}
+      style={styles.action}
       testID={testID}
     >
       <Icon icon={icon} size="lg" />
@@ -159,7 +142,6 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 16,
   },
-  actionDisabled: { opacity: 0.4 },
   actionLabel: { color: colors.foreground, fontSize: 13 },
   section: { gap: 6 },
   sectionTitle: { color: colors.mutedForeground, fontSize: 13, textTransform: "uppercase" },
