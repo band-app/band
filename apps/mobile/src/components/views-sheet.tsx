@@ -1,9 +1,13 @@
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import type { LucideIcon } from "lucide-react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors } from "../theme";
+import { BottomSheet } from "./bottom-sheet";
+import { Icon } from "./icon";
 
 export interface ViewsSheetItem {
   key: string;
   title: string;
+  icon: LucideIcon;
   subtitle?: string;
   onPress: () => void;
   destructive?: boolean;
@@ -41,61 +45,34 @@ export function ViewsSheet({
       style={({ pressed }) => [styles.row, (pressed || item.disabled) && styles.dim]}
       testID={`views__${item.key}`}
     >
-      <Text style={[styles.rowTitle, item.destructive && styles.destructive]}>{item.title}</Text>
-      {item.subtitle ? <Text style={styles.rowSub}>{item.subtitle}</Text> : null}
+      <Icon icon={item.icon} color={item.destructive ? colors.destructive : colors.foreground} />
+      <View style={styles.rowText}>
+        <Text style={[styles.rowTitle, item.destructive && styles.destructive]}>{item.title}</Text>
+        {item.subtitle ? <Text style={styles.rowSub}>{item.subtitle}</Text> : null}
+      </View>
     </Pressable>
   );
   return (
-    <Modal
+    <BottomSheet
       visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={onClose}
+      onClose={onClose}
       onDismiss={onDismiss}
+      testID="views__sheet"
+      backdropTestID="views__scrim"
     >
-      <View style={styles.modal}>
-        <Pressable
-          style={styles.scrim}
-          onPress={onClose}
-          accessibilityLabel="Close"
-          accessibilityRole="button"
-          testID="views__scrim"
-        />
-        <View style={styles.sheet} testID="views__sheet">
-          <View style={styles.grab} />
-          <Text style={styles.title} accessibilityRole="header">
-            Views
-          </Text>
-          <Text style={styles.sub} numberOfLines={1}>
-            {title}
-          </Text>
-          <View style={styles.group}>{views.map(row)}</View>
-          <View style={styles.group}>{actions.map(row)}</View>
-        </View>
-      </View>
-    </Modal>
+      <Text style={styles.title} accessibilityRole="header">
+        Views
+      </Text>
+      <Text style={styles.sub} numberOfLines={1}>
+        {title}
+      </Text>
+      <View style={styles.group}>{views.map(row)}</View>
+      <View style={styles.group}>{actions.map(row)}</View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  modal: { flex: 1, justifyContent: "flex-end" },
-  scrim: { backgroundColor: colors.scrim, flex: 1 },
-  sheet: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingBottom: 34,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  grab: {
-    alignSelf: "center",
-    backgroundColor: colors.grab,
-    borderRadius: 3,
-    height: 5,
-    marginBottom: 12,
-    width: 38,
-  },
   title: { color: colors.foreground, fontSize: 20, fontWeight: "600", marginHorizontal: 4 },
   sub: { color: colors.mutedForeground, fontSize: 13, marginBottom: 12, marginHorizontal: 4 },
   group: {
@@ -109,12 +86,14 @@ const styles = StyleSheet.create({
   row: {
     borderBottomColor: colors.divider,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 2,
-    justifyContent: "center",
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
     minHeight: 50,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
+  rowText: { flex: 1, gap: 2 },
   rowTitle: { color: colors.foreground, fontSize: 16 },
   rowSub: { color: colors.mutedForeground, fontSize: 13 },
   destructive: { color: colors.destructive },

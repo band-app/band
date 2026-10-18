@@ -4,6 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { FrameLog } from "../../../components/chat/frame-log";
+import { FileIcon, FolderIcon } from "../../../components/file-icon";
 import { ViewHeader } from "../../../components/files/view-header";
 import { ChevronGlyph, SearchGlyph } from "../../../components/glass";
 import { Body } from "../../../components/ui";
@@ -146,6 +147,7 @@ function TreeRowView({ row, onPress }: { row: TreeRow; onPress: () => void }) {
       <View style={styles.chevron}>
         {dir ? <ChevronGlyph direction={row.expanded ? "down" : "right"} size={7} /> : null}
       </View>
+      {dir ? <FolderIcon name={row.name} open={row.expanded} /> : <FileIcon name={row.name} />}
       <Text style={[styles.name, dir && styles.dirName]} numberOfLines={1}>
         {row.name}
       </Text>
@@ -206,9 +208,12 @@ function SearchResults({
             style={({ pressed }) => [styles.result, pressed && styles.pressed]}
             testID={`explorer__result-${item}`}
           >
-            <Text style={styles.name} numberOfLines={1}>
-              {baseName(item)}
-            </Text>
+            <View style={styles.resultName}>
+              <FileIcon name={item} />
+              <Text style={styles.name} numberOfLines={1}>
+                {baseName(item)}
+              </Text>
+            </View>
             <Text style={styles.where} numberOfLines={1}>
               {dirName(item) || "/"}
             </Text>
@@ -288,6 +293,7 @@ const styles = StyleSheet.create({
   chevron: { alignItems: "center", width: 16 },
   name: { color: colors.foreground, flexShrink: 1, fontSize: 15 },
   dirName: { fontWeight: "600" },
+  resultName: { alignItems: "center", flexDirection: "row", gap: 8 },
   result: { gap: 2, paddingHorizontal: 16, paddingVertical: 9 },
   where: { color: colors.mutedForeground, fontSize: 12 },
   matchText: { color: colors.foreground, fontFamily: fonts.mono, fontSize: 12.5 },

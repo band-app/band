@@ -16,8 +16,8 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { ActionSheetIOS, Alert } from "react-native";
-import { messageActions, rowTime, timeAgo } from "../../lib/chat/message-actions";
+import { Alert } from "react-native";
+import { messageActions } from "../../lib/chat/message-actions";
 import { type ChatRow, copyText } from "../../lib/chat/rows";
 
 class OpenSet {
@@ -55,10 +55,10 @@ interface ChatContextValue {
   onToggle: () => void;
   copy: (text: string) => void;
   /**
-   * Opens the action sheet of the row `key` (Copy, and when the message was sent), read from the
-   * current transcript.
+   * Copies the text of the row `key`, read from the current transcript. Resolves true once it is
+   * on the clipboard; a failure alerts and resolves false.
    */
-  showActions: (key: string) => void;
+  copyRow: (key: string) => Promise<boolean>;
   openFile: (path: string) => void;
 }
 
@@ -97,12 +97,19 @@ export function ChatProvider({
   const openFileRef = useRef(onOpenFile);
   openFileRef.current = onOpenFile;
   const value = useMemo<ChatContextValue>(() => {
-    const copy = (text: string) => {
-      if (!text) return;
+    const copyOk = (text: string): Promise<boolean> =>
       Clipboard.setStringAsync(text).then(
-        () => copiedRef.current(),
-        () => Alert.alert("Couldn't copy"),
+        () => {
+          copiedRef.current();
+          return true;
+        },
+        () => {
+          Alert.alert("Couldn't copy");
+          return false;
+        },
       );
+    const copy = (text: string) => {
+      if (text) void copyOk(text);
     };
     return {
       hubUrl,
@@ -110,24 +117,10 @@ export function ChatProvider({
       openSet,
       onToggle: () => toggledRef.current(),
       copy,
-      showActions: (key) => {
+      copyRow: async (key) => {
         const row = rowForRef.current(key);
-        if (!row) return;
-        const actions = messageActions(row);
-        const sent = rowTime(row);
-        if (actions.length === 0 && sent === undefined) return;
-        const text = copyText(row);
-        ActionSheetIOS.showActionSheetWithOptions(
-          {
-            title: sent === undefined ? undefined : new Date(sent).toLocaleString(),
-            message: sent === undefined ? undefined : timeAgo(sent, Date.now()),
-            options: [...actions.map(() => "Copy"), "Cancel"],
-            cancelButtonIndex: actions.length,
-          },
-          (index) => {
-            if (actions[index] === "copy") copy(text);
-          },
-        );
+        if (!row || messageActions(row).length === 0) return false;
+        return copyOk(copyText(row));
       },
       openFile: (path) => {
         if (openFileRef.current) openFileRef.current(path);

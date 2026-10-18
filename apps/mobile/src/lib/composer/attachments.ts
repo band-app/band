@@ -67,16 +67,8 @@ export function toWireFiles(attachments: Attachment[]): ChatEventFile[] | undefi
   return attachments.length > 0 ? attachments.map((a) => a.file) : undefined;
 }
 
-/** The attachment for a pasted PNG, or the reason the composer refuses it (the same limit as a picked photo). */
-export function pastedImageResult(
-  base64: string,
-  now: number,
-): { attachment: Attachment } | { name: string; why: AttachmentRejection } {
-  const data = base64.replace(/^data:[^,]*,/, "");
-  const name = `pasted-${now}.png`;
-  // base64 is 4/3 of the bytes, minus padding.
-  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-  const size = Math.floor((data.length * 3) / 4) - padding;
-  const why = rejectionFor("image/png", size);
-  return why ? { name, why } : { attachment: makeAttachment(name, "image/png", data, size) };
+/** The name a pasted image gets: `pasted-<time>.png`, with a counter when one paste carries several. */
+export function pastedFileName(now: number, mediaType: string, index: number): string {
+  const ext = mediaType === "image/jpeg" ? "jpg" : (mediaType.split("/")[1] ?? "png");
+  return `pasted-${now}${index > 0 ? `-${index + 1}` : ""}.${ext}`;
 }

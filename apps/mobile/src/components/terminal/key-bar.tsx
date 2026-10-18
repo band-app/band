@@ -1,10 +1,26 @@
 import * as Haptics from "expo-haptics";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Keyboard,
+  type LucideIcon,
+} from "lucide-react-native";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BAR_KEYS, type BarKey } from "../../lib/terminal/key-bar";
 import { terminalColors } from "../../theme";
+import { Icon } from "../icon";
 
 /** Esc, Tab, Ctrl, arrows and a few symbols the iOS keyboard buries, above the keyboard. */
+const ARROW_ICONS: Partial<Record<string, LucideIcon>> = {
+  left: ArrowLeft,
+  down: ArrowDown,
+  up: ArrowUp,
+  right: ArrowRight,
+};
+
 export function KeyBar({
   ctrl,
   onToggleCtrl,
@@ -44,7 +60,7 @@ export function KeyBar({
           style={styles.key}
           testID="terminal__key-keyboard"
         >
-          <Text style={styles.label}>⌨</Text>
+          <Icon icon={Keyboard} color={terminalColors.keyLabel} />
         </Pressable>
         <Pressable
           accessibilityRole="togglebutton"
@@ -65,7 +81,11 @@ export function KeyBar({
             style={styles.key}
             testID={`terminal__key-${k.key}`}
           >
-            <Text style={styles.label}>{k.label}</Text>
+            {ARROW_ICONS[k.key] ? (
+              <Icon icon={ARROW_ICONS[k.key] as LucideIcon} color={terminalColors.keyLabel} />
+            ) : (
+              <Text style={styles.label}>{k.label}</Text>
+            )}
           </Pressable>
         ))}
       </ScrollView>

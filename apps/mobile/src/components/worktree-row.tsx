@@ -1,7 +1,8 @@
-import { CircleAlert, CircleCheck, GitMerge, Loader, Moon } from "lucide-react-native";
+import { ArrowUp, CircleAlert, CircleCheck, GitMerge, Loader, Moon } from "lucide-react-native";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import type { CiTone, PullRequestTone, WorktreeRow } from "../lib/worktree-list";
 import { colors, tints, tones } from "../theme";
+import { Icon as GlyphIcon } from "./icon";
 import { SHOWN_LABEL, StateIcon } from "./state-icon";
 
 const PR_COLOR: Record<PullRequestTone, { fg: typeof tones.failure; bg: typeof tints.failure }> = {
@@ -84,9 +85,10 @@ export function RowMeta({ row, showHost = true }: { row: WorktreeRow; showHost?:
   return (
     <View style={styles.meta}>
       {row.ahead > 0 ? (
-        <Text style={styles.metaText} testID={`worktree__ahead-${row.id}`}>
-          ↑{row.ahead}
-        </Text>
+        <View style={styles.ahead} testID={`worktree__ahead-${row.id}`}>
+          <GlyphIcon icon={ArrowUp} size="sm" color={colors.mutedForeground} />
+          <Text style={styles.metaText}>{row.ahead}</Text>
+        </View>
       ) : null}
       {row.dirty ? <View style={styles.dirty} accessibilityLabel="Uncommitted changes" /> : null}
       <LifecycleIcon row={row} />
@@ -204,6 +206,7 @@ const styles = StyleSheet.create({
   nameStrong: { fontWeight: "600" },
   sub: { color: colors.mutedForeground, fontSize: 12.5 },
   meta: { alignItems: "center", flexDirection: "row", gap: 6 },
+  ahead: { alignItems: "center", flexDirection: "row" },
   metaText: { color: colors.mutedForeground, fontSize: 12.5 },
   dirty: { width: 6, height: 6, borderRadius: 3, backgroundColor: tones.pending },
   pr: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },

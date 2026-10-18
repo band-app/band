@@ -10,6 +10,7 @@ import {
   toContent,
   validateStep,
 } from "@band-app/client/elicitation";
+import { Check, ChevronLeft, ChevronRight, X } from "lucide-react-native";
 import { useCallback, useMemo, useState } from "react";
 import {
   Pressable,
@@ -22,6 +23,7 @@ import {
   View,
 } from "react-native";
 import { colors, tones, useScheme } from "../../theme";
+import { Icon } from "../icon";
 import { Button } from "../ui";
 import { requestCardStyles } from "./permission-card";
 
@@ -171,7 +173,7 @@ export function ElicitationCard({
                 style={[styles.pagerButton, (sending || index === 0) && styles.dim]}
                 testID="request__previous"
               >
-                <Text style={styles.pagerText}>‹</Text>
+                <Icon icon={ChevronLeft} color={colors.mutedForeground} />
               </Pressable>
               <Text style={styles.pagerCount} testID="request__step">
                 {index + 1} of {steps.length}
@@ -185,7 +187,7 @@ export function ElicitationCard({
                 style={[styles.pagerButton, (sending || isLast) && styles.dim]}
                 testID="request__forward"
               >
-                <Text style={styles.pagerText}>›</Text>
+                <Icon icon={ChevronRight} color={colors.mutedForeground} />
               </Pressable>
             </>
           ) : null}
@@ -198,7 +200,7 @@ export function ElicitationCard({
             style={[styles.pagerButton, sending && styles.dim]}
             testID="request__dismiss"
           >
-            <Text style={styles.pagerText}>✕</Text>
+            <Icon icon={X} color={colors.mutedForeground} />
           </Pressable>
         </View>
       </View>
@@ -300,7 +302,7 @@ function StepBody({
               <Text style={styles.choiceTitle}>{choice.title}</Text>
               {choice.description ? <Text style={styles.muted}>{choice.description}</Text> : null}
             </View>
-            {selected ? <Text style={styles.check}>✓</Text> : null}
+            {selected ? <Icon icon={Check} color={tones.success} /> : null}
           </Pressable>
         );
       })}
@@ -348,7 +350,6 @@ const styles = StyleSheet.create({
   muted: { color: colors.mutedForeground, fontSize: 14 },
   pager: { alignItems: "center", flexDirection: "row", gap: 4 },
   pagerButton: { alignItems: "center", height: 32, justifyContent: "center", width: 28 },
-  pagerText: { color: colors.mutedForeground, fontSize: 20 },
   pagerCount: { color: colors.mutedForeground, fontSize: 13 },
   dim: { opacity: 0.4 },
   stepBody: { gap: 6 },
@@ -379,7 +380,6 @@ const styles = StyleSheet.create({
   numberTextSelected: { color: colors.background },
   choiceText: { flex: 1, gap: 2 },
   choiceTitle: { color: colors.foreground, fontSize: 15 },
-  check: { color: tones.success, fontSize: 16 },
   boolean: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   textInput: {
     backgroundColor: colors.background,

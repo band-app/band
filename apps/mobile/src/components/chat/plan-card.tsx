@@ -1,14 +1,23 @@
 import type { TranscriptState } from "@band-app/client/transcript";
+import {
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  Loader,
+  type LucideIcon,
+} from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, tones } from "../../theme";
+import { Icon } from "../icon";
 
 type PlanEntry = TranscriptState["plan"][number];
 
-const MARKS: Record<PlanEntry["status"], string> = {
-  completed: "✓",
-  in_progress: "◐",
-  pending: "○",
+const MARKS: Record<PlanEntry["status"], LucideIcon> = {
+  completed: CircleCheck,
+  in_progress: Loader,
+  pending: Circle,
 };
 
 /**
@@ -28,7 +37,10 @@ export function PlanCard({ plan }: { plan: PlanEntry[] }) {
         testID="chat__plan-toggle"
         style={styles.header}
       >
-        <Text style={styles.title}>{collapsed ? "▸" : "▾"} Todos</Text>
+        <View style={styles.titleRow}>
+          <Icon icon={collapsed ? ChevronRight : ChevronDown} size="sm" />
+          <Text style={styles.title}>Todos</Text>
+        </View>
         <Text style={styles.count} testID="chat__plan-count">{`${done}/${plan.length}`}</Text>
       </Pressable>
       {collapsed
@@ -36,15 +48,19 @@ export function PlanCard({ plan }: { plan: PlanEntry[] }) {
         : plan.map((task, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: plan entries have no id; each update replaces the whole plan
             <View key={i} style={styles.entry} testID="chat__plan-entry">
-              <Text
-                style={[
-                  styles.mark,
-                  task.status === "in_progress" && { color: tones.running },
-                  task.status === "completed" && { color: tones.success },
-                ]}
-              >
-                {MARKS[task.status]}
-              </Text>
+              <View style={styles.mark}>
+                <Icon
+                  icon={MARKS[task.status]}
+                  size="sm"
+                  color={
+                    task.status === "in_progress"
+                      ? tones.running
+                      : task.status === "completed"
+                        ? tones.success
+                        : colors.mutedForeground
+                  }
+                />
+              </View>
               <Text style={[styles.text, task.status === "completed" && styles.done]}>
                 {task.content}
               </Text>
@@ -70,10 +86,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  titleRow: { alignItems: "center", flexDirection: "row", gap: 4 },
   title: { color: colors.foreground, fontSize: 14, fontWeight: "600" },
   count: { color: colors.mutedForeground, fontSize: 13 },
   entry: { flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 2 },
-  mark: { color: colors.mutedForeground, fontSize: 14, width: 16 },
+  mark: { alignItems: "center", height: 20, justifyContent: "center", width: 16 },
   text: { color: colors.foreground, flexShrink: 1, fontSize: 14 },
   done: { color: colors.mutedForeground, textDecorationLine: "line-through" },
 });

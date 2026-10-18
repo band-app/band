@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams } from "expo-router";
 import { useMemo } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { FileIcon } from "../../../components/file-icon";
 import { CodeList, type CodeRow } from "../../../components/files/code-list";
 import { ViewHeader } from "../../../components/files/view-header";
 import { Body } from "../../../components/ui";
@@ -81,6 +82,7 @@ function Diff({
     <View style={styles.screen} testID="diff__screen">
       <ViewHeader
         title={baseName(path)}
+        icon={<FileIcon name={path} size={16} />}
         subtitle={
           parsed && !parsed.binary
             ? `+${parsed.added} −${parsed.removed} · ${dirName(path) || "/"}`

@@ -120,13 +120,13 @@ Check each tool first and install only what is missing. All of it is user space 
 | `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link opens the file viewer on that file (here an error state, because `gamma` has no `src/parser.ts`) and Back returns. |
 | `c2-streaming.yaml` | A streamed turn shows each line as it arrives and the list stays at the bottom; scrolling up stops following and shows Jump to latest, which brings the list back. |
 | `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow taps the message menu and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
-| `c5-copy.yaml` | The "..." button under a message opens its actions; Copy puts the message text on the simulator's clipboard. |
+| `c5-copy.yaml` | The copy button under a message copies it at once and shows a check; the text lands on the simulator's clipboard. |
 | `c7-select.yaml` | A long press on message text selects a word with the system handles and no action sheet; dragging the end handle widens the range and Copy puts exactly that range on the clipboard. |
 | `c6-history.yaml` | Scrolling to the top of a 24-turn chat loads the 4 turns the hub didn't send on open, and the list keeps its place while they arrive. |
 | `m1-send.yaml` | A message typed on the phone (Return adds a line, only the button sends) reaches the agent, and the reply streams in. |
 | `m2-queue.yaml` | A message sent during a running turn joins the queue above the composer; one is moved up and another deleted; the kept one is delivered when the turn ends and the deleted one never reaches the agent. |
 | `m3-attach.yaml` | A photo from the simulator's library (added with `addMedia`) is attached and sent; the agent receives an image part. |
-| `m9-paste-image.yaml` | An image copied in Photos is pasted from the hint chip above the input and the + menu (disabled with no image on the clipboard) and sent; the agent receives an image part. |
+| `m9-paste-image.yaml` | Text on the clipboard pastes into the field as text with no chip. An image copied in Photos is pasted with long-press > Paste in the field, becomes an attachment chip with no text, and is sent; the agent receives an image part. |
 | `m4-suggest.yaml` | "/" lists the commands the hub reports for the agent, "@" plus text lists matching files, and picking one fills the field. |
 | `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet (the pill in the focused composer) shows in the pill and in `chats.sessionState`. |
 | `m9-session-history.yaml`, `m10-session-history-empty.yaml` | The History button lists a chat's sessions newest first, switches to the older one, starts a new one, and says so on a chat with none. Uses `gamma-sessions` and `gamma-no-sessions`. |

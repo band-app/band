@@ -1,0 +1,45 @@
+# S1: a wide markdown table scrolls sideways when the drag starts on a cell's text. Table cells
+# are plain text, so they no longer offer range selection (c7-select.yaml covers other messages).
+# A vertical drag starting on the table still scrolls the chat.
+appId: app.getband.mobile
+name: S1 a table scrolls sideways from its cell text
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-main
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      text: "Plan for the parser fix"
+    direction: UP
+    speed: 15
+    timeout: 30000
+- assertVisible:
+    text: "parse as base 10"
+- assertVisible:
+    text: "README.md"
+- takeScreenshot: s1-table-before
+# The drag starts on the text of a cell ("parse as base 10"), not on the gap between cells. The
+# first column's "README.md" leaves the screen. Maestro counts clipped text as visible, so the
+# check is that a first-column cell is gone, not that the last column shows.
+- swipe:
+    start: 55%, 59%
+    end: 5%, 59%
+    duration: 600
+- assertNotVisible:
+    text: "README.md"
+- takeScreenshot: s1-table-scrolled
+# S2: a vertical drag that starts on the table scrolls the chat, so the heading above it leaves
+# the screen.
+- swipe:
+    start: 30%, 59%
+    end: 30%, 12%
+    duration: 600
+- assertNotVisible:
+    text: "Plan for the parser fix"
+- takeScreenshot: s2-chat-scrolled

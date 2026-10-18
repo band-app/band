@@ -314,8 +314,15 @@ test("Origin view: dropping on a row makes a child, in the gap a sibling, and a 
   await sidebar.drag(sidebar.row("alpha-c"), sidebar.row("alpha-a"), "bottom");
   await expect.poll(() => originOf("alpha-c")).toBeNull();
 
+  // Onto the main's own row: the main is named as the parent, and the row stays nested after a reload.
+  await sidebar.drag(sidebar.row("alpha-d"), sidebar.row("alpha-main"), "middle");
+  await expect.poll(() => originOf("alpha-d")).toBe("alpha-main");
+  await expect(sidebar.row("alpha-d")).toHaveAttribute("data-depth", "1");
+  await page.reload();
+  await expect(sidebar.row("alpha-d")).toHaveAttribute("data-depth", "1");
+
   // A worktree can't become a child of its own descendant.
-  await sidebar.drag(sidebar.row("alpha-a"), sidebar.row("alpha-d"), "middle");
+  await sidebar.drag(sidebar.row("alpha-a"), sidebar.row("alpha-b"), "middle");
   await expect(sidebar.dropRefusal).toBeVisible();
   expect(await originOf("alpha-a")).toBeNull();
 });
