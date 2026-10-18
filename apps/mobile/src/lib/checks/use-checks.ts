@@ -22,6 +22,7 @@ import {
   rerunFailedPlan,
   rerunOneTarget,
 } from "@band-app/client/checks";
+import type { MergeMethod } from "@band-app/client/merge";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useHubSession } from "../hub-session";
@@ -116,6 +117,18 @@ export function useWorktreeChecks(worktreeId: string, branch: string) {
     }
   }, [rerun, failedPlan]);
 
+  /** Merges the pull request, then reads it again. Rejects with GitHub's message when it refuses. */
+  const mergeReview = useCallback(
+    async (method: MergeMethod) => {
+      try {
+        await client.reviews.merge.mutate({ worktreeId, method });
+      } finally {
+        void queryClient.invalidateQueries({ queryKey: ["reviews.forWorktree", worktreeId] });
+      }
+    },
+    [client, worktreeId, queryClient],
+  );
+
   /** Starts the Fix agent as a chat and returns its id. */
   const startFix = useCallback(async (): Promise<string> => {
     setFixing(true);
@@ -148,5 +161,6 @@ export function useWorktreeChecks(worktreeId: string, branch: string) {
     rerunFailed,
     startFix,
     fixing,
+    mergeReview,
   };
 }

@@ -1,0 +1,22 @@
+# p4 (S5): a blocked pull request shows a disabled Blocked button with the web's hint.
+appId: app.getband.mobile
+name: p4 a blocked pull request cannot merge
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-merge-blocked
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-label
+      text: "Blocked"
+    timeout: 20000
+- assertVisible:
+    id: checks__merge-hint
+    text: "Required reviews or checks are missing."
+- tapOn:
+    id: checks__merge
+- assertNotVisible:
+    id: checks__merge-confirm
+- takeScreenshot: p4-blocked

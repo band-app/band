@@ -1,0 +1,27 @@
+# p5 (S6): GitHub refuses the merge; the error shows and the button is usable again.
+appId: app.getband.mobile
+name: p5 a merge GitHub refuses
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-merge-refused
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-label
+      text: "Squash and merge"
+    timeout: 20000
+- tapOn:
+    id: checks__merge
+- tapOn:
+    id: checks__merge-confirm-button
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-error
+      text: ".*not mergeable.*"
+    timeout: 30000
+- assertVisible:
+    id: checks__merge-label
+    text: "Squash and merge"
+- takeScreenshot: p5-refused

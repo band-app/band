@@ -12,6 +12,9 @@
 import { ghStub } from "../../hub/tests/fixtures/gh-stub.ts";
 import {
   checkRunNode,
+  commentNode,
+  reviewNode,
+  reviewThreadNode,
   FAKE_REPO,
   pullRequestNode,
   reviewQueryData,
@@ -23,7 +26,31 @@ export const CHECKS_BRANCHES = {
   RERUN: "feat/rerun",
   NO_CHECKS: "feat/nochecks",
   NO_PR: "feat/nopr",
+  DISCUSSION: "feat/discussion",
+  MERGE_SQUASH: "feat/merge-squash",
+  MERGE_REBASE: "feat/merge-rebase",
+  MERGE_BLOCKED: "feat/merge-blocked",
+  MERGE_REFUSED: "feat/merge-refused",
 };
+
+/** The `gh pr merge` calls the hub made: `{ number, method }`. */
+export const merges = [];
+const mergedPrs = new Set();
+
+/** A pull request that merges with the `gh pr merge` stub; once merged it reads as MERGED. */
+function mergePr(number, title, extra = {}) {
+  return () =>
+    reviewQueryData({
+      pullRequests: [
+        pullRequestNode({
+          number,
+          title,
+          state: mergedPrs.has(number) ? "MERGED" : "OPEN",
+          ...extra,
+        }),
+      ],
+    });
+}
 
 const state = { buildDone: false, restarted: new Set() };
 /** The `gh run rerun` calls the hub made: `{ runId, flags }`. */
@@ -121,6 +148,95 @@ export async function startGhStub() {
     reviewQueryData({ pullRequests: [pullRequestNode({ number: 44, title: "Docs only" })] }),
   );
   stub.setReviewQuery(repo, CHECKS_BRANCHES.NO_PR, reviewQueryData({}));
+  stub.setReviewQuery(
+    repo,
+    CHECKS_BRANCHES.DISCUSSION,
+    reviewQueryData({
+      pullRequests: [
+        pullRequestNode({
+          number: 50,
+          title: "Discuss the parser",
+          reviews: [
+            reviewNode({
+              id: "r1",
+              login: "carol",
+              state: "APPROVED",
+              body: "Looks **good** to me.",
+              submittedAt: "2026-01-02T08:45:00Z",
+            }),
+          ],
+          comments: [
+            commentNode({
+              id: "c1",
+              login: "bob",
+              body: "Can you add a test for the `empty` case?",
+              createdAt: "2026-01-02T08:30:00Z",
+            }),
+            commentNode({
+              id: "c2",
+              login: "alice",
+              body: "Added in the last commit.",
+              createdAt: "2026-01-02T08:40:00Z",
+            }),
+          ],
+          reviewThreads: [
+            reviewThreadNode({
+              id: "t1",
+              path: "src/parser.ts",
+              line: 12,
+              comments: [
+                commentNode({ id: "t1a", login: "bob", body: "Why not a `Map` here?" }),
+                commentNode({
+                  id: "t1b",
+                  login: "alice",
+                  body: "A `Map` keeps insertion order.",
+                  createdAt: "2026-01-02T08:50:00Z",
+                }),
+              ],
+            }),
+            reviewThreadNode({
+              id: "t2",
+              path: "src/lexer.ts",
+              line: 3,
+              isResolved: true,
+              comments: [commentNode({ id: "t2a", login: "bob", body: "Typo in the name." })],
+            }),
+            reviewThreadNode({
+              id: "t3",
+              path: "src/old.ts",
+              line: 9,
+              isOutdated: true,
+              comments: [commentNode({ id: "t3a", login: "carol", body: "This moved." })],
+            }),
+          ],
+        }),
+      ],
+    }),
+  );
+  stub.setReviewQuery(repo, CHECKS_BRANCHES.MERGE_SQUASH, mergePr(51, "Merge by squash"));
+  stub.setReviewQuery(repo, CHECKS_BRANCHES.MERGE_REBASE, mergePr(52, "Merge by rebase"));
+  stub.setReviewQuery(
+    repo,
+    CHECKS_BRANCHES.MERGE_BLOCKED,
+    mergePr(53, "Waiting for review", { mergeStateStatus: "BLOCKED" }),
+  );
+  stub.setReviewQuery(repo, CHECKS_BRANCHES.MERGE_REFUSED, mergePr(54, "GitHub says no"));
+  for (const number of [51, 52]) {
+    stub.setPrMerge(number, {
+      onRequest: (r) => {
+        const method = ["squash", "merge", "rebase"].find((m) => r.flags[m] === true);
+        merges.push({ number, method });
+        mergedPrs.add(number);
+      },
+    });
+  }
+  stub.setPrMerge(54, {
+    stderr: "GraphQL: Pull request is not mergeable (mergePullRequest)",
+    onRequest: (r) => {
+      const method = ["squash", "merge", "rebase"].find((m) => r.flags[m] === true);
+      merges.push({ number: 54, method });
+    },
+  });
   stub.setBranchStatusQuery(repo, () => null);
   // `gh run rerun <run> --job <id>` restarts that job; `--failed` restarts every failed one of the run.
   for (const runId of [600, 700, 701]) {
@@ -150,4 +266,18 @@ export function expectRerun(want) {
   );
   if (!hit) throw new Error(`no gh run rerun ${JSON.stringify(want)}; got ${JSON.stringify(reruns)}`);
   return hit;
+}
+
+/** Fails unless `gh pr merge` was called as `want` says: `{ number, method }`. */
+export function expectMerge(want) {
+  const hit = merges.find((m) => m.number === want.number && m.method === want.method);
+  if (!hit) throw new Error(`no gh pr merge ${JSON.stringify(want)}; got ${JSON.stringify(merges)}`);
+  return hit;
+}
+
+/** Fails when `gh pr merge` was called for this pull request. */
+export function expectNoMerge(number) {
+  if (merges.some((m) => m.number === number)) {
+    throw new Error(`gh pr merge #${number} was called: ${JSON.stringify(merges)}`);
+  }
 }

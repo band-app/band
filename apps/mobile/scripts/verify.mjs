@@ -14,7 +14,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { expectRerun, finishBuild, startGhStub } from "./checks.mjs";
+import { expectMerge, expectNoMerge, expectRerun, finishBuild, startGhStub } from "./checks.mjs";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
 import {
   acpRequests,
@@ -309,6 +309,26 @@ function startControlServer(hub, chats, udid, notes) {
         if (subs.length !== want) throw new Error(`the hub holds ${subs.length} subscriptions, expected ${want}`);
       }
       else if (url.pathname === "/checks-finish-build") finishBuild();
+      else if (url.pathname === "/expect-merge") {
+        // `gh pr merge <number> --<method>` was called. The app's request may still be on its way.
+        const want = {
+          number: Number(url.searchParams.get("pr")),
+          method: url.searchParams.get("method"),
+        };
+        const deadline = Date.now() + 10_000;
+        for (;;) {
+          try {
+            expectMerge(want);
+            break;
+          } catch (err) {
+            if (Date.now() > deadline) throw err;
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        }
+        notes.push(`gh pr merge #${want.number} --${want.method} was called`);
+      } else if (url.pathname === "/expect-no-merge") {
+        expectNoMerge(Number(url.searchParams.get("pr")));
+      }
       else if (url.pathname === "/expect-rerun") {
         // `gh run rerun <run>` was called, with `--failed` (`failed=1`) or `--job <id>`.
         const want = {
