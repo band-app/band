@@ -68,30 +68,60 @@ export function setVersion(appJsonPath, version) {
   writeFileSync(appJsonPath, `${JSON.stringify(json, null, 2)}\n`);
 }
 
-/** Runs one eas build to the end and returns its exit code, output and the build page URLs. */
+/** Runs one eas build to the end and returns its exit code, output and the links it printed. */
 function runBuild(args, cwd) {
   const bin = process.env.EAS_BIN || "eas";
   return new Promise((done) => {
     const child = spawn(bin, args, { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
+    let stderr = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
     });
-    child.stderr.on("data", (chunk) => process.stderr.write(chunk));
-    child.on("error", (error) => done({ code: 1, urls: [], output: String(error) }));
-    child.on("close", (code) => done({ code: code ?? 1, urls: buildUrls(stdout), output: stdout }));
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      process.stderr.write(chunk);
+    });
+    const finish = (code) =>
+      done({ code, urls: buildUrls(stdout, stderr), submissions: submissionUrls(stdout, stderr), output: stdout });
+    child.on("error", (error) => done({ code: 1, urls: [], submissions: [], output: String(error) }));
+    child.on("close", (code) => finish(code ?? 1));
   });
 }
 
-/** Reads the `--json` output of `eas build`: an array of builds, each with a details page URL. */
-export function buildUrls(stdout) {
-  try {
-    const start = stdout.indexOf("[");
-    const builds = JSON.parse(stdout.slice(start));
-    return builds.map((build) => build.buildDetailsPageUrl).filter(Boolean);
-  } catch {
-    return [];
+const BUILD_PAGE = /https:\/\/expo\.dev\/accounts\/[^\s"'<>]+\/builds\/[0-9A-Za-z-]+/g;
+const SUBMISSION_PAGE = /https:\/\/expo\.dev\/accounts\/[^\s"'<>]+\/submissions\/[0-9A-Za-z-]+/g;
+
+/** The JSON array of builds that ends `eas build --json` output. Log text before it may hold `[` too. */
+function trailingJsonArray(stdout) {
+  for (let start = stdout.lastIndexOf("["); start !== -1; start = stdout.lastIndexOf("[", start - 1)) {
+    try {
+      const value = JSON.parse(stdout.slice(start).trim());
+      if (Array.isArray(value)) return value;
+    } catch {
+      // Not the start of the array. Try the previous `[`.
+    }
   }
+  return [];
+}
+
+const unique = (list) => [...new Set(list)];
+
+/**
+ * The build page URLs of an `eas build --json` run. Reads `buildDetailsPageUrl` from the JSON array
+ * in stdout, and falls back to the `See logs:` URLs eas prints to stderr.
+ */
+export function buildUrls(stdout, stderr = "") {
+  const fromJson = trailingJsonArray(stdout)
+    .map((build) => build?.buildDetailsPageUrl)
+    .filter((url) => typeof url === "string" && url);
+  if (fromJson.length > 0) return unique(fromJson);
+  return unique(`${stdout}\n${stderr}`.match(BUILD_PAGE) ?? []);
+}
+
+/** The `Submission details:` URLs `--auto-submit` prints. */
+export function submissionUrls(stdout, stderr = "") {
+  return unique(`${stdout}\n${stderr}`.match(SUBMISSION_PAGE) ?? []);
 }
 
 /**
@@ -105,12 +135,20 @@ export async function ship({ version, appDir = APP_DIR }) {
     runBuild(["build", "--platform", "ios", "--profile", "production", "--auto-submit", ...common], appDir),
     runBuild(["build", "--platform", "android", "--profile", "preview", ...common], appDir),
   ]);
-  const line = (label, result) =>
-    `${result.code === 0 ? "ok" : "FAILED"} ${label}: ${result.urls.join(" ") || "no run URL in the eas output"}`;
+  const line = (label, result, extra = []) =>
+    `${result.code === 0 ? "ok" : "FAILED"} ${label}: ${[...result.urls, ...extra].join(" ") || "no run URL in the eas output"}`;
   return {
     ok: ios.code === 0 && android.code === 0,
-    lines: [line("iOS production build and TestFlight submit", ios), line("Android preview build", android)],
-    urls: [...ios.urls, ...android.urls],
+    lines: [
+      line("iOS production build and TestFlight submit", ios, ios.submissions),
+      line("Android preview build", android),
+    ],
+    // release.yml prints each entry as "- <entry>" and splits on whitespace, so a label has none.
+    urls: [
+      ...ios.urls.map((url) => `[iOS](${url})`),
+      ...ios.submissions.map((url) => `[iOS-TestFlight-submission](${url})`),
+      ...android.urls.map((url) => `[Android](${url})`),
+    ],
   };
 }
 
