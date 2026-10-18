@@ -68,5 +68,11 @@ describe("relativeTime", () => {
     const now = Date.parse("2026-01-02T10:00:00Z");
     assert.equal(relativeTime("2026-01-02T09:57:00Z", now), "3 minutes ago");
     assert.equal(relativeTime("2026-01-01T10:00:00Z", now), "yesterday");
+    assert.equal(relativeTime("2026-01-02T09:59:59Z", now), "1 second ago");
+    assert.equal(relativeTime("2026-01-02T08:00:00Z", now), "2 hours ago");
+    assert.equal(relativeTime("2025-11-02T10:00:00Z", now), "2 months ago");
+    assert.equal(relativeTime("2024-01-02T10:00:00Z", now), "2 years ago");
+    assert.equal(relativeTime("2026-01-02T10:00:00Z", now), "now");
+    assert.equal(relativeTime("not a date", now), "not a date");
   });
 });

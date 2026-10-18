@@ -236,7 +236,9 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
           </View>
         </View>
         {shown.length === 0 ? (
-          <Body testID="checks__empty">No checks reported for this pull request.</Body>
+          <View style={styles.emptyRow}>
+            <Body testID="checks__empty">No checks reported for this pull request.</Body>
+          </View>
         ) : (
           shown.map((item) => <View key={item.id}>{renderItem({ item })}</View>)
         )}
@@ -409,6 +411,7 @@ const styles = StyleSheet.create({
   actionText: { color: colors.foreground, fontSize: 14, fontWeight: "500" },
   actionPrimaryText: { color: colors.primaryForeground },
   dim: { opacity: 0.5 },
+  emptyRow: { paddingHorizontal: 16, paddingVertical: 12 },
   summary: { flexDirection: "row", gap: 14, paddingHorizontal: 16, paddingVertical: 10 },
   count: { fontSize: 13, fontWeight: "600" },
   row: {

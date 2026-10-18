@@ -67,21 +67,28 @@ export const REVIEW_LABEL = {
   dismissed: "review dismissed",
 } as const;
 
-/** "3 minutes ago", "yesterday". Falls back to the input for a date it cannot read. */
+/**
+ * "3 minutes ago", "yesterday". Falls back to the input for a date it cannot read.
+ * Written out by hand because Hermes, the mobile app's JS engine, has no `Intl.RelativeTimeFormat`.
+ */
 export function relativeTime(iso: string, now = Date.now()): string {
-  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
-  const units: Array<[number, Intl.RelativeTimeFormatUnit]> = [
-    [60, "second"],
-    [60, "minute"],
-    [24, "hour"],
-    [30, "day"],
-    [12, "month"],
-    [Number.POSITIVE_INFINITY, "year"],
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const seconds = Math.max(0, Math.round((now - then) / 1000));
+  if (seconds < 1) return "now";
+  const units: Array<[number, string, string]> = [
+    [60, "second", ""],
+    [60, "minute", ""],
+    [24, "hour", ""],
+    [30, "day", "yesterday"],
+    [12, "month", "last month"],
+    [Number.POSITIVE_INFINITY, "year", "last year"],
   ];
   let value = seconds;
-  for (const [size, unit] of units) {
+  for (const [size, unit, one] of units) {
     if (value < size) {
-      return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(-value, unit);
+      if (value === 1 && one) return one;
+      return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
     }
     value = Math.floor(value / size);
   }

@@ -102,7 +102,7 @@ export function DiscussionSection({
 function ConversationItem({ item }: { item: Item }) {
   const verb = item.kind === "review" && item.reviewState ? REVIEW_LABEL[item.reviewState] : null;
   return (
-    <View style={styles.message} testID="pr-comments__item">
+    <View style={styles.message} collapsable={false} testID="pr-comments__item">
       <MessageHeader comment={item} verb={verb} />
       {item.body.trim() ? <Markdown text={item.body} /> : null}
     </View>
@@ -118,7 +118,7 @@ function ThreadView({ thread }: { thread: Thread }) {
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${open ? "Collapse" : "Expand"} thread ${location}`}
+        accessibilityLabel={`${open ? "Collapse" : "Expand"} thread ${location}${label ? `, ${label}` : ""}`}
         onPress={() => setOpen((v) => !v)}
         style={styles.threadHeader}
         testID="pr-comments__thread-toggle"
@@ -132,7 +132,7 @@ function ThreadView({ thread }: { thread: Thread }) {
           {location}
         </Text>
         {label ? (
-          <View style={styles.tag}>
+          <View style={styles.tag} collapsable={false}>
             <Text style={styles.tagText} testID="pr-comments__thread-label">
               {label}
             </Text>
@@ -140,9 +140,14 @@ function ThreadView({ thread }: { thread: Thread }) {
         ) : null}
       </Pressable>
       {open ? (
-        <View style={styles.threadBody}>
+        <View style={styles.threadBody} collapsable={false}>
           {thread.comments.map((comment) => (
-            <View key={comment.id} style={styles.reply} testID="pr-comments__message">
+            <View
+              key={comment.id}
+              style={styles.reply}
+              collapsable={false}
+              testID="pr-comments__message"
+            >
               <MessageHeader comment={comment} verb={null} />
               {comment.body.trim() ? <Markdown text={comment.body} /> : null}
             </View>
@@ -156,13 +161,11 @@ function ThreadView({ thread }: { thread: Thread }) {
 
 function MessageHeader({ comment, verb }: { comment: Comment; verb: string | null }) {
   return (
-    <View style={styles.header}>
-      <Text style={styles.author} numberOfLines={1} testID="pr-comments__author">
-        {comment.author.login}
-      </Text>
-      {verb ? <Text style={styles.meta}>{verb}</Text> : null}
-      <Text style={styles.meta} testID="pr-comments__time">
-        {relativeTime(comment.createdAt)}
+    <View style={styles.header} collapsable={false}>
+      <Text style={styles.headerText} numberOfLines={1} testID="pr-comments__author">
+        <Text style={styles.author}>{comment.author.login}</Text>
+        {verb ? ` ${verb}` : ""}
+        {` · ${relativeTime(comment.createdAt)}`}
       </Text>
       {comment.url ? (
         <Pressable
@@ -207,9 +210,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   header: { alignItems: "center", flexDirection: "row", gap: 8 },
-  author: { color: colors.foreground, flexShrink: 1, fontSize: 14, fontWeight: "600" },
+  headerText: { color: colors.mutedForeground, flex: 1, fontSize: 12 },
+  author: { color: colors.foreground, fontSize: 14, fontWeight: "600" },
   meta: { color: colors.mutedForeground, fontSize: 12 },
-  link: { marginLeft: "auto" },
+  link: { marginLeft: 8 },
   thread: {
     borderBottomColor: colors.divider,
     borderBottomWidth: StyleSheet.hairlineWidth,

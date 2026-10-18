@@ -21,13 +21,11 @@ name: p1 the discussion of a pull request
     id: pr-comments__summary
     text: "6, 2 unresolved"
 - assertVisible:
-    text: "bob"
+    text: "bob .*ago"
 - assertVisible:
     text: ".*Can you add a test.*"
 - assertVisible:
-    text: "carol"
-- assertVisible:
-    text: "approved"
+    text: "carol approved .*ago"
 - takeScreenshot: p1-comments
 - scrollUntilVisible:
     element:
@@ -45,9 +43,7 @@ name: p1 the discussion of a pull request
     direction: DOWN
     timeout: 20000
 - assertVisible:
-    text: "Resolved"
+    text: ".*src/lexer.ts:3, Resolved"
 - assertVisible:
-    text: "src/old.ts:9"
-- assertVisible:
-    text: "Outdated"
+    text: ".*src/old.ts:9, Outdated"
 - takeScreenshot: p1-threads
