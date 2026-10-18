@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { colors } from "../../theme";
 import { ChatProvider } from "../chat/chat-context";
-import { Markdown } from "../chat/markdown";
+import { Markdown, PlainTextContext } from "../chat/markdown";
 
 /** The parts of the hub's `ReviewDiscussion` this view reads. */
 interface Comment {
@@ -73,26 +73,28 @@ export function DiscussionSection({
       onToggle={() => {}}
       rowFor={() => undefined}
     >
-      <View style={styles.section} testID="pr-comments">
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Comments</Text>
-          <Text style={styles.sectionSummary} testID="pr-comments__summary">
-            {summary}
-          </Text>
+      <PlainTextContext.Provider value>
+        <View style={styles.section} testID="pr-comments">
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Comments</Text>
+            <Text style={styles.sectionSummary} testID="pr-comments__summary">
+              {summary}
+            </Text>
+          </View>
+          {entries.length === 0 ? (
+            <Text style={styles.empty} testID="pr-comments__empty">
+              No comments yet.
+            </Text>
+          ) : (
+            entries.map((entry) => entry.node)
+          )}
+          {discussion.truncated ? (
+            <Text style={styles.empty} testID="pr-comments__more">
+              Older comments are on GitHub.
+            </Text>
+          ) : null}
         </View>
-        {entries.length === 0 ? (
-          <Text style={styles.empty} testID="pr-comments__empty">
-            No comments yet.
-          </Text>
-        ) : (
-          entries.map((entry) => entry.node)
-        )}
-        {discussion.truncated ? (
-          <Text style={styles.empty} testID="pr-comments__more">
-            Older comments are on GitHub.
-          </Text>
-        ) : null}
-      </View>
+      </PlainTextContext.Provider>
     </ChatProvider>
   );
 }
@@ -130,9 +132,11 @@ function ThreadView({ thread }: { thread: Thread }) {
           {location}
         </Text>
         {label ? (
-          <Text style={styles.tag} testID="pr-comments__thread-label">
-            {label}
-          </Text>
+          <View style={styles.tag}>
+            <Text style={styles.tagText} testID="pr-comments__thread-label">
+              {label}
+            </Text>
+          </View>
         ) : null}
       </Pressable>
       {open ? (
@@ -221,12 +225,10 @@ const styles = StyleSheet.create({
   tag: {
     backgroundColor: colors.card,
     borderRadius: 4,
-    color: colors.mutedForeground,
-    fontSize: 11,
-    overflow: "hidden",
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
+  tagText: { color: colors.mutedForeground, fontSize: 11 },
   threadBody: { paddingLeft: 16 },
   reply: { gap: 4, paddingHorizontal: 16, paddingVertical: 8 },
 });

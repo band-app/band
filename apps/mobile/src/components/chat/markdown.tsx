@@ -1,4 +1,11 @@
-import { type ComponentProps, memo, type ReactNode, useMemo } from "react";
+import {
+  type ComponentProps,
+  createContext,
+  memo,
+  type ReactNode,
+  useContext,
+  useMemo,
+} from "react";
 import { Linking, ScrollView, StyleSheet, Text, type TextStyle, View } from "react-native";
 import { UITextView } from "react-native-uitextview";
 import {
@@ -15,8 +22,15 @@ import { CodeBlock } from "./code-block";
 
 /** Markdown text a person can select by range: a `UITextView` on iOS, plain `Text` elsewhere. */
 function SelectableText(props: ComponentProps<typeof UITextView>) {
-  return <UITextView selectable uiTextView {...props} />;
+  const plain = useContext(PlainTextContext);
+  return <UITextView selectable uiTextView={!plain} {...props} />;
 }
+
+/**
+ * Inside, markdown draws as ordinary React Native `Text`. The pull request comments use it:
+ * a screen of many `UITextView`s in a plain `ScrollView` crashed Fabric's mount diff.
+ */
+export const PlainTextContext = createContext(false);
 
 /** Agent or user markdown as native text. Parsed again only when the text changes. */
 export const Markdown = memo(function Markdown({ text, muted }: { text: string; muted?: boolean }) {
