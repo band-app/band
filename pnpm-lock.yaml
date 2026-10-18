@@ -931,6 +931,9 @@ importers:
 
   plugins/github:
     dependencies:
+      '@band-app/client':
+        specifier: workspace:^
+        version: link:../../packages/client
       '@band-app/plugin-api':
         specifier: workspace:^
         version: link:../../packages/plugin-api

@@ -1,0 +1,34 @@
+# p2 (S3): Squash and merge asks first, then calls the hub, which runs `gh pr merge --squash`;
+# after the refetch the button reads Merged.
+appId: app.getband.mobile
+name: p2 squash and merge a clean pull request
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-merge-squash
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-label
+      text: "Squash and merge"
+    timeout: 20000
+- takeScreenshot: p2-clean
+- tapOn:
+    id: checks__merge
+- assertVisible:
+    id: checks__merge-confirm
+    text: ".*Squash and merge #51\\?.*"
+- takeScreenshot: p2-confirm
+- tapOn:
+    id: checks__merge-confirm-button
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-merge?pr=51&method=squash
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-label
+      text: "Merged"
+    timeout: 30000
+- takeScreenshot: p2-merged

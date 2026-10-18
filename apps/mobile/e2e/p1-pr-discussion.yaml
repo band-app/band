@@ -1,0 +1,53 @@
+# p1 (S1, S2): Checks shows the pull request's conversation comments and review summary, oldest
+# first, and its inline threads with file, line and the resolved or outdated label.
+appId: app.getband.mobile
+name: p1 the discussion of a pull request
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-discussion
+- extendedWaitUntil:
+    visible:
+      id: checks__list
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: pr-comments__summary
+    direction: DOWN
+    timeout: 20000
+- assertVisible:
+    id: pr-comments__summary
+    text: "6, 2 unresolved"
+- assertVisible:
+    text: "bob"
+- assertVisible:
+    text: ".*Can you add a test.*"
+- assertVisible:
+    text: "carol"
+- assertVisible:
+    text: "approved"
+- takeScreenshot: p1-comments
+- scrollUntilVisible:
+    element:
+      id: pr-comments__thread-location
+      text: "src/parser.ts:12"
+    direction: DOWN
+    timeout: 20000
+- assertVisible:
+    text: ".*Why not a.*"
+- assertVisible:
+    text: ".*insertion order.*"
+- scrollUntilVisible:
+    element:
+      text: "src/lexer.ts:3"
+    direction: DOWN
+    timeout: 20000
+- assertVisible:
+    text: "Resolved"
+- assertVisible:
+    text: "src/old.ts:9"
+- assertVisible:
+    text: "Outdated"
+- takeScreenshot: p1-threads

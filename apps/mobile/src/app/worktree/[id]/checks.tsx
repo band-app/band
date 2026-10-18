@@ -22,10 +22,13 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { DiscussionSection } from "../../../components/checks/discussion";
+import { MergeControl } from "../../../components/checks/merge-control";
 import { BackGlyph, Glass, GlassCircle } from "../../../components/glass";
 import { Body, Centered } from "../../../components/ui";
 import { useWorktreeChecks } from "../../../lib/checks/use-checks";
-import { SessionGate } from "../../../lib/hub-session";
+import { SessionGate, useHubSession } from "../../../lib/hub-session";
+
 import { colors, tints, tones } from "../../../theme";
 
 /** The worktree's Checks view: the pull request's CI checks, re-run, and the Fix agent. */
@@ -84,6 +87,7 @@ function openUrl(url: string) {
 function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: string }) {
   const insets = useSafeAreaInsets();
   const checks = useWorktreeChecks(worktreeId, branch);
+  const { hub } = useHubSession();
   const { data, shown, query } = checks;
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -161,7 +165,7 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
         <ActivityIndicator color={colors.mutedForeground} testID="checks__loading" />
       </Centered>
     );
-  } else if (shown.length === 0) {
+  } else if (shown.length === 0 && !review) {
     body = (
       <Centered>
         <Body testID="checks__empty">
@@ -184,6 +188,7 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         ListHeaderComponent={
           <View>
+            {review ? <MergeControl review={review} onMerge={checks.mergeReview} /> : null}
             {failing.length > 0 ? (
               <View style={styles.banner} testID="checks__failing-banner">
                 <Text style={styles.bannerTitle} testID="checks__failing-count">
@@ -243,6 +248,12 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
               ) : null}
             </View>
           </View>
+        }
+        ListEmptyComponent={
+          <Body testID="checks__empty">No checks reported for this pull request.</Body>
+        }
+        ListFooterComponent={
+          review?.discussion ? <DiscussionSection discussion={review.discussion} hub={hub} /> : null
         }
         testID="checks__list"
       />
