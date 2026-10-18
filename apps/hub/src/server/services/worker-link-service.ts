@@ -44,6 +44,7 @@ import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { followService } from "./follow-service";
 import { gitCredentialService } from "./git-credential-service";
 import { placementService } from "./placement-service";
+import { repoService } from "./repo-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { workerCliService } from "./worker-cli-service";
@@ -287,6 +288,10 @@ export class WorkerLinkService {
       log.warn(`could not seed coding agents: ${err instanceof Error ? err.message : err}`);
     }
     this.publish(workerId, "online");
+    // A repo added from a folder that had no remote gets its URL once the folder has one.
+    void repoService.backfillRemotesFromWorker(workerId).catch((err) => {
+      log.warn(`remote backfill on ${workerId}: ${err instanceof Error ? err.message : err}`);
+    });
     // Chats the worker owns or can own, and what other clients asked of them while it was away.
     chatOwnershipService.onConnected(session);
     void ephemeralLifecycleService.onConnected(session);

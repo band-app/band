@@ -144,7 +144,14 @@ beforeAll(async () => {
       workerState,
     ],
     {
-      env: { ...cleanEnv(), ...identity, HOME: workerHome, BAND_HOME: join(workerHome, ".band") },
+      env: {
+        ...cleanEnv(),
+        ...identity,
+        HOME: workerHome,
+        BAND_HOME: join(workerHome, ".band"),
+        // A static worker keeps the machine's helpers, so keep the system gitconfig's keychain helper (macOS) out.
+        GIT_CONFIG_NOSYSTEM: "1",
+      },
       stdio: "ignore",
     },
   );

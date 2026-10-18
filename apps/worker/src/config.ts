@@ -29,6 +29,11 @@ export interface WorkerConfig {
    * An ephemeral worker never owns chats.
    */
   ownChats: boolean;
+  /**
+   * Ignore the machine's git credential helpers, so git asks only the hub. An ephemeral worker
+   * does this always.
+   */
+  hubGitCredentialsOnly: boolean;
 }
 
 export class ConfigError extends Error {
@@ -51,6 +56,9 @@ const USAGE = `Usage: band-worker --hub <url> --token <token> [options]
   --ephemeral          Exit when idle (env BAND_WORKER_EPHEMERAL=1).
   --idle-exit <dur>    Idle time before an ephemeral worker exits, like 90s, 10m or 1h (env BAND_WORKER_IDLE_EXIT).
   --own-chats          Run the chats of this worker's worktrees here and copy them to the hub (env BAND_WORKER_OWN_CHATS=1).
+  --hub-git-credentials-only  Ignore this machine's git credential helpers; git asks only the hub (env BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1).
+                       Without it a static worker tries the machine's helpers first and the hub vault after.
+                       An ephemeral worker always asks only the hub.
 
 Run as a service (systemd user unit on Linux, launchd agent on macOS):
 
@@ -177,6 +185,8 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv = process.env
     ephemeral,
     idleExitMs: idleText === undefined ? DEFAULT_IDLE_EXIT_MS : parseDuration(idleText),
     ownChats,
+    hubGitCredentialsOnly:
+      values["hub-git-credentials-only"] ?? isTruthy(env.BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY),
   };
 }
 
@@ -199,6 +209,7 @@ function parse(argv: string[]) {
       ephemeral: { type: "boolean" },
       "idle-exit": { type: "string" },
       "own-chats": { type: "boolean" },
+      "hub-git-credentials-only": { type: "boolean" },
     },
     strict: true,
   });
