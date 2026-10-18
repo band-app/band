@@ -85,7 +85,9 @@ while IFS='=' read -r key value; do
   esac
 done <"$EXCHANGE"
 rm -f "$EXCHANGE"
-[ -n "$TOKEN" ] && [ -n "$WORKER_ID" ] && [ -n "$RUN_TOKEN" ] || fail "the hub's answer was incomplete"
+if [ -z "$TOKEN" ] || [ -z "$WORKER_ID" ] || [ -z "$RUN_TOKEN" ]; then
+  fail "the hub's answer was incomplete"
+fi
 
 say() { printf '%s\\n' "$*"; }
 
