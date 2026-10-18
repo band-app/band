@@ -200,7 +200,8 @@ function view(state) {
 /** Stops the hub and deletes its temp home and the state file. */
 async function clean() {
   const state = await stop();
-  if (state?.home) rmSync(state.home, { recursive: true, force: true });
+  // The hub's terminal daemon can still be writing its run dir as the hub stops (ENOTEMPTY).
+  if (state?.home) rmSync(state.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   rmSync(STATE_FILE, { force: true });
   return null;
 }

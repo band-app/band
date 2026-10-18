@@ -1,0 +1,22 @@
+# S4 (settings): Agents lists the configured agents with their default, and Refresh models runs
+# models.refresh against the scripted ACP agent and shows the result.
+appId: app.getband.mobile
+name: Agents refresh models
+---
+- runFlow: subflows/pair-admin.yaml
+- runFlow:
+    file: subflows/open-settings-section.yaml
+    env:
+      SECTION: agents
+- extendedWaitUntil:
+    visible:
+      id: settings__refresh-models
+    timeout: 15000
+- takeScreenshot: st4-agents
+- tapOn:
+    id: settings__refresh-models
+- extendedWaitUntil:
+    visible:
+      id: settings__refresh-result
+    timeout: 30000
+- takeScreenshot: st4-agents-refreshed

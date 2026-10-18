@@ -1,0 +1,16 @@
+# From the home screen, opens Settings and then the section named by SECTION (hosts, agents,
+# voice, devices or about).
+appId: app.getband.mobile
+---
+- tapOn:
+    id: home__settings
+- extendedWaitUntil:
+    visible:
+      id: settings__screen
+    timeout: 10000
+- tapOn:
+    id: settings__open-${SECTION}
+- extendedWaitUntil:
+    visible:
+      id: settings__${SECTION}
+    timeout: 10000

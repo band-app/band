@@ -1,0 +1,83 @@
+# S6 (settings): an admin revokes another device (after a confirm) and it leaves the list;
+# revoking the session's own token asks a stronger confirm. Add device shows the pairing link.
+appId: app.getband.mobile
+name: Devices revoke and add
+---
+- runFlow: subflows/pair-admin.yaml
+- runFlow:
+    file: subflows/open-settings-section.yaml
+    env:
+      SECTION: devices
+- extendedWaitUntil:
+    visible:
+      text: tablet
+    timeout: 15000
+- assertVisible:
+    text: ".*this device.*"
+- takeScreenshot: st6-devices
+# Add device shows the pairing link as text, with a copy button.
+- tapOn:
+    id: settings__add-device
+- extendedWaitUntil:
+    visible:
+      id: settings__device-label
+    timeout: 10000
+- tapOn:
+    id: settings__add-device-sheet-confirm
+- extendedWaitUntil:
+    visible:
+      id: settings__pairing-link
+      text: ".*[?]pair=bdp_.*"
+    timeout: 15000
+- assertVisible:
+    id: settings__pairing-copy
+- takeScreenshot: st6-pairing-link
+- tapOn:
+    id: settings__add-device-sheet-confirm
+- assertNotVisible:
+    id: settings__add-device-sheet
+# Revoke the tablet: Cancel keeps it, Revoke removes it.
+- tapOn:
+    id: settings__device-revoke-tablet
+- extendedWaitUntil:
+    visible:
+      id: settings__revoke-confirm
+    timeout: 10000
+- takeScreenshot: st6-revoke-confirm
+- tapOn:
+    id: settings__revoke-confirm-cancel
+- assertNotVisible:
+    id: settings__revoke-confirm
+- assertVisible:
+    text: tablet
+- tapOn:
+    id: settings__device-revoke-tablet
+- extendedWaitUntil:
+    visible:
+      id: settings__revoke-confirm
+    timeout: 10000
+- tapOn:
+    id: settings__revoke-confirm-confirm
+- extendedWaitUntil:
+    notVisible:
+      id: settings__device-revoke-tablet
+    timeout: 15000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: check-device-gone?label=tablet
+- takeScreenshot: st6-tablet-revoked
+# The session's own token asks the stronger confirm, and Cancel keeps it.
+- tapOn:
+    id: settings__device-revoke-mobile-verify-admin
+- extendedWaitUntil:
+    visible:
+      id: settings__revoke-own-confirm
+    timeout: 10000
+- assertVisible:
+    text: ".*signs you out.*"
+- takeScreenshot: st6-revoke-own-confirm
+- tapOn:
+    id: settings__revoke-own-confirm-cancel
+- assertNotVisible:
+    id: settings__revoke-own-confirm

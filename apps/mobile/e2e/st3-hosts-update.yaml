@@ -1,0 +1,67 @@
+# S3 (settings): an admin taps Update on a worker behind the hub, the confirm lists the agents the
+# restart ends, and confirming calls hosts.update; the row shows the update in progress, then the
+# new version once the worker is back. Run against a stand-in worker on the real link protocol.
+appId: app.getband.mobile
+name: Hosts update of a worker behind the hub
+---
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: workers-start
+- runFlow: subflows/pair-admin.yaml
+- runFlow:
+    file: subflows/open-settings-section.yaml
+    env:
+      SECTION: hosts
+- extendedWaitUntil:
+    visible:
+      id: settings__host-update-build-box
+    timeout: 15000
+# edge-box is current, so only the worker behind the hub offers Update.
+- assertNotVisible:
+    id: settings__host-update-edge-box
+- tapOn:
+    id: settings__host-update-build-box
+- extendedWaitUntil:
+    visible:
+      id: settings__update-confirm
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: settings__update-agents
+    timeout: 10000
+- takeScreenshot: st3-update-confirm
+# Cancel sends nothing.
+- tapOn:
+    id: settings__update-confirm-cancel
+- assertNotVisible:
+    id: settings__update-confirm
+- tapOn:
+    id: settings__host-update-build-box
+- extendedWaitUntil:
+    visible:
+      id: settings__update-confirm-confirm
+    timeout: 10000
+- tapOn:
+    id: settings__update-confirm-confirm
+- extendedWaitUntil:
+    visible:
+      id: settings__host-update-progress-build-box
+    timeout: 15000
+- takeScreenshot: st3-update-progress
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-update?name=build-box
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: worker-finish-update?name=build-box
+- extendedWaitUntil:
+    visible:
+      id: settings__host-version-build-box
+      text: "Version 0.50.0"
+    timeout: 20000
+- assertNotVisible:
+    id: settings__host-update-build-box
+- takeScreenshot: st3-update-done
