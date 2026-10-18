@@ -19,6 +19,7 @@ import {
   deleteTerminalLayout,
   removeTerminalFromLayout,
 } from "./_utils/terminal-layout-manager";
+import { agentLoginService } from "./agent-login-service";
 import { clientActivityService } from "./client-activity-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { emit } from "./watcher-service";
@@ -244,7 +245,11 @@ export class TerminalService {
     // behavior); only opt-in callers get the auto-prune. The backend stores the
     // flag on the session and reports it back on the exit event (see
     // `handleExit`), so it holds even when the shell outlives this server.
-    opts?: { cleanupOnExit?: boolean },
+    opts?: {
+      cleanupOnExit?: boolean;
+      /** The agent type this terminal runs, so the Band login that applies goes into its environment. */
+      agentType?: string;
+    },
   ): Promise<TerminalListEntry> {
     // Opening a terminal in a sleeping worktree brings its worker back first.
     await ephemeralLifecycleService.ensureAwake(worktreeId);
@@ -261,11 +266,26 @@ export class TerminalService {
     // A shell on a remote host calls the hub through the worker's relay. The
     // token goes only into this spawn's env, never into the saved layout.
     const grant = await host.relay?.issue({ worktreeId, terminalId });
+    // A Band login for the agent goes into this spawn's environment only, like the relay token.
+    const login = opts?.agentType
+      ? await agentLoginService.resolve({
+          agentType: opts.agentType,
+          repo: worktree.repo.name,
+        })
+      : null;
+    const spawnEnv = { ...options?.env, ...login?.env, ...grant?.env };
     const request = {
       worktreeId,
       terminalId,
       worktreeRoot: root,
-      options: grant ? { ...options, env: { ...options?.env, ...grant.env } } : options,
+      options:
+        grant || login
+          ? {
+              ...options,
+              env: spawnEnv,
+              ...(login?.unsetEnv.length ? { unsetEnv: login.unsetEnv } : {}),
+            }
+          : options,
       cleanupOnExit: opts?.cleanupOnExit,
     };
     const backend = this.ptyOf(host);

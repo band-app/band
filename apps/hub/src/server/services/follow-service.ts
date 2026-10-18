@@ -45,6 +45,7 @@ import { RepoQueries } from "../infra/db/queries/repos";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { hostNamesOf } from "./_utils/repo-host-policy";
+import { agentLoginService } from "./agent-login-service";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { type ChangedFile, checkpointService } from "./checkpoint-service";
@@ -165,7 +166,10 @@ export class FollowService {
     const host = tokenService.listHosts(1000).find((h) => h.id === hostId);
     const reported = host?.report?.agents.find((a) => a.type === def.type);
     if (reported && !reported.installed) return `${def.label} is not installed`;
-    if (reported && reported.loggedIn === false) return `${def.label} is not logged in`;
+    // A Band login supplies the credential, so the worker's own login does not matter.
+    if (reported && reported.loggedIn === false && !agentLoginService.hasUsableLogin(def.type)) {
+      return `${def.label} is not logged in`;
+    }
     return modelRefreshService.launchProblemOn(hostId, def.id);
   }
 

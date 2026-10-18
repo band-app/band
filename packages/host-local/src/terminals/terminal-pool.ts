@@ -369,6 +369,8 @@ export class TerminalPool {
     // Remove PORT so worktree dev servers don't inherit the Band server's port
     delete env.PORT;
 
+    // A Band login removes the variables that would compete with its own.
+    for (const name of options?.unsetEnv ?? []) delete env[name];
     // Merge extra env from spawn options
     if (options?.env) {
       Object.assign(env, options.env);

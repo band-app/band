@@ -114,6 +114,7 @@ export const ADMIN_EXTRA_PROCEDURES: ReadonlySet<string> = new Set([
 const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure.startsWith("tokens.") ||
   procedure.startsWith("vault.") ||
+  procedure.startsWith("agentLogins.") ||
   procedure === "hosts.setTrust" ||
   procedure === "hosts.audit";
 
@@ -630,6 +631,15 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
         ? `${procedure} is not available to agents on a restricted host`
         : `${procedure} is not available to agents`,
     );
+  }
+  // Which account a chat runs on is a person's choice. An agent may not switch its own chat's login.
+  if (
+    procedure === "chats.update" &&
+    input !== null &&
+    typeof input === "object" &&
+    (input as { loginId?: unknown }).loginId !== undefined
+  ) {
+    return deny(403, "chats.update: an agent may not change a chat's login");
   }
   if (procedure.startsWith("settings.")) return checkSettingsCall(procedure, input, ctx);
   if (procedure.startsWith("repos.") && procedure !== "repos.list") {

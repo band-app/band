@@ -11,6 +11,7 @@ import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
 import { describeHostVersion } from "../../services/_utils/host-version";
 import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";
+import { agentLoginService } from "../../services/agent-login-service";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
 import { hostTrustService } from "../../services/host-trust-service";
 import { agentHostView } from "../../services/relay-scope";
@@ -74,7 +75,11 @@ export const hostsRouter = t.router({
           local.report = info.report ?? null;
           local.agents = info.report
             ? info.report.agents
-                .filter((a) => a.installed && a.loggedIn !== false)
+                .filter(
+                  (a) =>
+                    a.installed &&
+                    (a.loggedIn !== false || agentLoginService.hasUsableLogin(a.type)),
+                )
                 .map((a) => a.type)
             : await agentTypesOn(hostRegistry.local);
           local.tools = info.tools;
@@ -114,7 +119,11 @@ export const hostsRouter = t.router({
             .map(([name]) => name);
           view.agents = info.report
             ? info.report.agents
-                .filter((a) => a.installed && a.loggedIn !== false)
+                .filter(
+                  (a) =>
+                    a.installed &&
+                    (a.loggedIn !== false || agentLoginService.hasUsableLogin(a.type)),
+                )
                 .map((a) => a.type)
             : view.agents;
         }

@@ -25,6 +25,7 @@ import {
 } from "../infra/db/queries/tokens";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { decrypt, encrypt, loadKey } from "./_utils/vault-crypto";
+import { agentLoginService } from "./agent-login-service";
 
 const log = createLogger("token-service");
 
@@ -130,7 +131,11 @@ function reportOf(info: Record<string, unknown> | null | undefined): CapabilityR
 function usableAgents(info: Record<string, unknown> | null | undefined): string[] {
   const report = reportOf(info);
   if (report)
-    return report.agents.filter((a) => a.installed && a.loggedIn !== false).map((a) => a.type);
+    return report.agents
+      .filter(
+        (a) => a.installed && (a.loggedIn !== false || agentLoginService.hasUsableLogin(a.type)),
+      )
+      .map((a) => a.type);
   return stringList(info?.agents);
 }
 

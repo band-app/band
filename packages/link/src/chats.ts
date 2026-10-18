@@ -155,6 +155,10 @@ export interface ChatLaunchReply {
   agent: { id: string; type: string; label: string; command?: string; model?: string };
   cwd: string;
   env: Record<string, string>;
+  /** The login's credential variables. The worker applies them to the child and never stores them. */
+  loginEnv?: Record<string, string>;
+  /** Variables removed from the inherited environment before `env` is merged (an agent login). */
+  unsetEnv?: string[];
   /** ACP `McpServer` entries. Passed only to an agent that supports HTTP MCP servers. */
   mcpServers: unknown[];
   additionalDirectories: string[];

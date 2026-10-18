@@ -274,3 +274,23 @@ export class CheckpointError extends Error {
     this.name = "CheckpointError";
   }
 }
+
+/**
+ * Thrown by `AgentLoginService` for input the caller can fix: an unknown agent type or kind, a
+ * vault item that cannot carry a login. `api/agent-logins/router.ts` maps it to 400 `BAD_REQUEST`.
+ * The message never holds a secret.
+ */
+export class AgentLoginInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentLoginInputError";
+  }
+}
+
+/** Thrown by `AgentLoginService` for an unknown login id. Mapped to 404 `NOT_FOUND`. */
+export class AgentLoginNotFoundError extends Error {
+  constructor() {
+    super("Agent login not found");
+    this.name = "AgentLoginNotFoundError";
+  }
+}

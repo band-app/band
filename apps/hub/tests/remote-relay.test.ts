@@ -279,6 +279,9 @@ beforeAll(async () => {
           probe("tokens", "/trpc/tokens.list"),
           probe("settings", "/trpc/settings.get"),
           probe("vault-list", "/trpc/vault.list"),
+          probe("agent-logins-list", "/trpc/agentLogins.list"),
+          // An agent may not switch its own chat's account.
+          post("chat-login-pick", "/trpc/chats.update", { chatId: "any-chat", loginId: "al-x" }),
           // A direct-path token would let the agent call the worker's loopback listener.
           post("direct-access", "/trpc/worktree.directAccess", {
             worktreeId: WT_A,
@@ -523,6 +526,9 @@ describe("the worker relay (S2)", () => {
     expect(by("settings")?.status).toBe(403);
     // The vault, and the OAuth flows it starts, are out of agent reach.
     expect(by("vault-list")?.status).toBe(403);
+    expect(by("agent-logins-list")?.status).toBe(403);
+    expect(by("chat-login-pick")?.status).toBe(403);
+    expect(by("chat-login-pick")?.body).toContain("may not change a chat's login");
     expect(by("vault-oauth")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);

@@ -19,9 +19,12 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { AgentLoginInputError } from "../../errors";
 import { sessionIdSchema } from "../../services/_utils/session-id";
+import { agentLoginService } from "../../services/agent-login-service";
 import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
+import { settingsService } from "../../services/settings-service";
 import { taskService } from "../../services/task-service";
 import { worktreeService } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
@@ -154,12 +157,21 @@ export const chatsRouter = t.router({
         // which made the "clear" path unreachable via tRPC.
         model: z.string().nullable().optional(),
         mode: z.string().nullable().optional(),
+        // The agent login this chat uses (`agentLogins.list`); `null` goes back to the default.
+        loginId: z.string().max(50).nullable().optional(),
         labels: z.record(z.string(), z.string()).optional(),
       }),
     )
     .mutation(({ input }) => {
       const { chatId, ...updates } = input;
       try {
+        if (updates.loginId) {
+          const agentId = updates.agent ?? chatService.get(chatId)?.agent;
+          agentLoginService.assertPickable(
+            updates.loginId,
+            settingsService.getAgentDefinition(agentId).type,
+          );
+        }
         const chat = chatService.update(chatId, updates);
         if (!chat) {
           // Issue #520: `chats.update` previously returned 200 with
@@ -178,7 +190,7 @@ export const chatsRouter = t.router({
         }
         return { chat };
       } catch (err) {
-        if (err instanceof InvalidLabelsError) {
+        if (err instanceof InvalidLabelsError || err instanceof AgentLoginInputError) {
           throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
         }
         throw err;
