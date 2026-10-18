@@ -18,15 +18,59 @@ function run(events: StatusEvent[]) {
 }
 
 describe("applyStatusEvent", () => {
-  it("replaces the agent statuses on a snapshot and empties the branch statuses", () => {
+  it("replaces the agent statuses on a snapshot and keeps the branch statuses", () => {
     const before = run([
       { kind: "snapshot", statuses: [working] },
       { kind: "branch-status", worktreeId: "a-main", ci: { state: "success" } },
+      { kind: "branch-status", worktreeId: "b-main", ci: { state: "failure" } },
     ]);
-    assert.equal(before.branches.size, 1);
     const after = applyStatusEvent(before, { kind: "snapshot", statuses: [waiting] });
     assert.deepEqual([...after.agents.keys()], ["b-main"]);
-    assert.equal(after.branches.size, 0);
+    assert.equal(after.branches.get("a-main")?.ci?.state, "success");
+    assert.equal(after.branches.get("b-main")?.ci?.state, "failure");
+  });
+
+  it("drops a branch status the hub did not re-send after a snapshot", () => {
+    let state = run([
+      { kind: "snapshot", statuses: [working] },
+      { kind: "branch-status", worktreeId: "a-main", ci: { state: "success" } },
+      { kind: "branch-status", worktreeId: "b-main", ci: { state: "failure" } },
+    ]);
+    state = applyStatusEvent(state, { kind: "snapshot", statuses: [working] });
+    state = applyStatusEvent(state, {
+      kind: "branch-status",
+      worktreeId: "a-main",
+      ci: { state: "pending" },
+    });
+    // Never blank for the one that was re-sent, and B stays until the burst ends.
+    assert.equal(state.branches.get("a-main")?.ci?.state, "pending");
+    assert.equal(state.branches.has("b-main"), true);
+    state = applyStatusEvent(state, { kind: "setup-status", worktreeId: "a-main" });
+    assert.equal(state.branches.has("b-main"), false);
+    assert.equal(state.branches.get("a-main")?.ci?.state, "pending");
+  });
+
+  it("keeps the old branch statuses through an agent update or remove that precedes the burst", () => {
+    const before = run([
+      { kind: "snapshot", statuses: [working] },
+      { kind: "branch-status", worktreeId: "a-main", ci: { state: "success" } },
+      { kind: "branch-status", worktreeId: "b-main", ci: { state: "failure" } },
+    ]);
+    const snap = applyStatusEvent(before, { kind: "snapshot", statuses: [working] });
+    // An update for an unrelated worktree ends the replay early: the unsent entries go, which is
+    // the documented rule, and a later branch-status still lands.
+    const afterUpdate = applyStatusEvent(snap, { kind: "update", status: waiting });
+    assert.equal(afterUpdate.branches.size, 0);
+    const late = applyStatusEvent(afterUpdate, {
+      kind: "branch-status",
+      worktreeId: "a-main",
+      ci: { state: "success" },
+    });
+    assert.equal(late.branches.get("a-main")?.ci?.state, "success");
+    // A remove only drops its own worktree and, ending the replay, the stale ones.
+    const afterRemove = applyStatusEvent(snap, { kind: "remove", worktreeId: "b-main" });
+    assert.equal(afterRemove.branches.has("b-main"), false);
+    assert.equal(afterRemove.staleBranches.size, 0);
   });
 
   it("applies an update, a branch status and a removal", () => {
