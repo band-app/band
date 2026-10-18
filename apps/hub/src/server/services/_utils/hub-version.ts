@@ -18,8 +18,16 @@ export const HUB_VERSION: string = isStrictSemver(process.env.BAND_HUB_VERSION)
   ? process.env.BAND_HUB_VERSION
   : PACKAGE_VERSION;
 
-/** True for a hub run from source. It has no release to compare workers against. */
-export const HUB_VERSION_UNRELEASED = HUB_VERSION === UNRELEASED_VERSION;
+/**
+ * True for the unreleased default and for a prerelease stamped on it, such as the nightly build's
+ * `0.1.0-nightly.<date>.<sha>`. Neither has a release to compare workers against.
+ */
+export function isUnreleasedVersion(version: string): boolean {
+  return version === UNRELEASED_VERSION || version.startsWith(`${UNRELEASED_VERSION}-`);
+}
+
+/** True for a hub run from source or built nightly. It has no release to compare workers against. */
+export const HUB_VERSION_UNRELEASED = isUnreleasedVersion(HUB_VERSION);
 
 /** `BAND_INSTALL_METHOD`, set by the compose file, the Kubernetes manifest and the image. Read on every call. */
 export function hubInstallMethod(env: NodeJS.ProcessEnv = process.env): InstallMethod | null {

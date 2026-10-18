@@ -8,8 +8,17 @@ import {
   countChecks,
   isCountingUp,
 } from "@band-app/client/checks";
-import { FlashList } from "@shopify/flash-list";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  type LucideIcon,
+  Minus,
+  X,
+} from "lucide-react-native";
 import { memo, useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -17,15 +26,19 @@ import {
   Linking,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { DiscussionSection } from "../../../components/checks/discussion";
+import { MergeControl } from "../../../components/checks/merge-control";
 import { BackGlyph, Glass, GlassCircle } from "../../../components/glass";
+import { Icon } from "../../../components/icon";
 import { Body, Centered } from "../../../components/ui";
 import { useWorktreeChecks } from "../../../lib/checks/use-checks";
-import { SessionGate } from "../../../lib/hub-session";
+import { SessionGate, useHubSession } from "../../../lib/hub-session";
 import { colors, tints, tones } from "../../../theme";
 
 /** The worktree's Checks view: the pull request's CI checks, re-run, and the Fix agent. */
@@ -49,14 +62,13 @@ const STATE_TONE: Record<CheckState, string | typeof colors.mutedForeground> = {
   skipped: tones.neutral,
 };
 
-const STATE_GLYPH: Record<CheckState, string> = {
-  failure: "✕",
-  running: "↻",
-  pending: "◷",
-  cancelled: "⊘",
-  success: "✓",
-  neutral: "–",
-  skipped: "–",
+const STATE_ICON: Record<Exclude<CheckState, "running">, LucideIcon> = {
+  failure: X,
+  pending: Clock,
+  cancelled: Ban,
+  success: Check,
+  neutral: Minus,
+  skipped: Minus,
 };
 
 function CheckIcon({ state }: { state: CheckState }) {
@@ -69,7 +81,7 @@ function CheckIcon({ state }: { state: CheckState }) {
       {state === "running" ? (
         <ActivityIndicator size="small" color={tones.running} style={styles.iconSpinner} />
       ) : (
-        <Text style={[styles.iconGlyph, { color: STATE_TONE[state] }]}>{STATE_GLYPH[state]}</Text>
+        <Icon icon={STATE_ICON[state]} size="sm" color={STATE_TONE[state]} />
       )}
     </View>
   );
@@ -84,6 +96,7 @@ function openUrl(url: string) {
 function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: string }) {
   const insets = useSafeAreaInsets();
   const checks = useWorktreeChecks(worktreeId, branch);
+  const { hub } = useHubSession();
   const { data, shown, query } = checks;
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -161,7 +174,7 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
         <ActivityIndicator color={colors.mutedForeground} testID="checks__loading" />
       </Centered>
     );
-  } else if (shown.length === 0) {
+  } else if (shown.length === 0 && !review) {
     body = (
       <Centered>
         <Body testID="checks__empty">
@@ -173,79 +186,74 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
     );
   } else {
     body = (
-      <FlashList
-        data={shown}
-        keyExtractor={(c) => c.id}
-        renderItem={renderItem}
-        extraData={{ now, expanded, rerunning: checks.rerunning, errors: checks.rerunErrors }}
+      <ScrollView
         refreshControl={
           <RefreshControl refreshing={query.isRefetching} onRefresh={() => void query.refetch()} />
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-        ListHeaderComponent={
-          <View>
-            {failing.length > 0 ? (
-              <View style={styles.banner} testID="checks__failing-banner">
-                <Text style={styles.bannerTitle} testID="checks__failing-count">
-                  {failing.length} failing {failing.length === 1 ? "check" : "checks"}
-                </Text>
-                <Text style={styles.bannerText}>
-                  {checks.rerunFailedError ?? "Inspect details or start an AI fix pass."}
-                </Text>
-                <View style={styles.bannerActions}>
-                  {checks.canRerunFailed ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={checks.rerunFailedBusy}
-                      onPress={() => void checks.rerunFailed()}
-                      style={[styles.action, checks.rerunFailedBusy && styles.dim]}
-                      testID="checks__rerun-failed"
-                    >
-                      <Text style={styles.actionText}>Re-run failed</Text>
-                    </Pressable>
-                  ) : null}
+        testID="checks__list"
+      >
+        <View>
+          {review ? <MergeControl review={review} onMerge={checks.mergeReview} /> : null}
+          {failing.length > 0 ? (
+            <View style={styles.banner} testID="checks__failing-banner">
+              <Text style={styles.bannerTitle} testID="checks__failing-count">
+                {failing.length} failing {failing.length === 1 ? "check" : "checks"}
+              </Text>
+              <Text style={styles.bannerText}>
+                {checks.rerunFailedError ?? "Inspect details or start an AI fix pass."}
+              </Text>
+              <View style={styles.bannerActions}>
+                {checks.canRerunFailed ? (
                   <Pressable
                     accessibilityRole="button"
-                    disabled={checks.fixing}
-                    onPress={() => void fix()}
-                    style={[styles.action, styles.actionPrimary, checks.fixing && styles.dim]}
-                    testID="checks__fix"
+                    disabled={checks.rerunFailedBusy}
+                    onPress={() => void checks.rerunFailed()}
+                    style={[styles.action, checks.rerunFailedBusy && styles.dim]}
+                    testID="checks__rerun-failed"
                   >
-                    <Text style={[styles.actionText, styles.actionPrimaryText]}>Fix</Text>
+                    <Text style={styles.actionText}>Re-run failed</Text>
                   </Pressable>
-                </View>
+                ) : null}
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={checks.fixing}
+                  onPress={() => void fix()}
+                  style={[styles.action, styles.actionPrimary, checks.fixing && styles.dim]}
+                  testID="checks__fix"
+                >
+                  <Text style={[styles.actionText, styles.actionPrimaryText]}>Fix</Text>
+                </Pressable>
               </View>
-            ) : null}
-            <View style={styles.summary} testID="checks__summary">
-              {counts.passing > 0 ? (
-                <Text
-                  style={[styles.count, { color: tones.success }]}
-                  testID="checks__count-passing"
-                >
-                  {counts.passing} passing
-                </Text>
-              ) : null}
-              {counts.failing > 0 ? (
-                <Text
-                  style={[styles.count, { color: tones.failure }]}
-                  testID="checks__count-failing"
-                >
-                  {counts.failing} failing
-                </Text>
-              ) : null}
-              {counts.pending > 0 ? (
-                <Text
-                  style={[styles.count, { color: tones.pending }]}
-                  testID="checks__count-pending"
-                >
-                  {counts.pending} pending
-                </Text>
-              ) : null}
             </View>
+          ) : null}
+          <View style={styles.summary} testID="checks__summary">
+            {counts.passing > 0 ? (
+              <Text style={[styles.count, { color: tones.success }]} testID="checks__count-passing">
+                {counts.passing} passing
+              </Text>
+            ) : null}
+            {counts.failing > 0 ? (
+              <Text style={[styles.count, { color: tones.failure }]} testID="checks__count-failing">
+                {counts.failing} failing
+              </Text>
+            ) : null}
+            {counts.pending > 0 ? (
+              <Text style={[styles.count, { color: tones.pending }]} testID="checks__count-pending">
+                {counts.pending} pending
+              </Text>
+            ) : null}
           </View>
-        }
-        testID="checks__list"
-      />
+        </View>
+        {shown.length === 0 ? (
+          <View style={styles.emptyRow}>
+            <Body testID="checks__empty">No checks reported for this pull request.</Body>
+          </View>
+        ) : (
+          shown.map((item) => <View key={item.id}>{renderItem({ item })}</View>)
+        )}
+        {review?.discussion ? <DiscussionSection discussion={review.discussion} hub={hub} /> : null}
+      </ScrollView>
     );
   }
 
@@ -314,7 +322,7 @@ const CheckRow = memo(function CheckRow({
             {duration ? ` · ${duration}` : ""}
           </Text>
         </View>
-        <Text style={styles.chevron}>{open ? "⌃" : "⌄"}</Text>
+        <Icon icon={open ? ChevronUp : ChevronDown} color={colors.mutedForeground} />
       </Pressable>
       {open ? (
         <View style={styles.details} testID="checks__details">
@@ -413,6 +421,7 @@ const styles = StyleSheet.create({
   actionText: { color: colors.foreground, fontSize: 14, fontWeight: "500" },
   actionPrimaryText: { color: colors.primaryForeground },
   dim: { opacity: 0.5 },
+  emptyRow: { paddingHorizontal: 16, paddingVertical: 12 },
   summary: { flexDirection: "row", gap: 14, paddingHorizontal: 16, paddingVertical: 10 },
   count: { fontSize: 13, fontWeight: "600" },
   row: {
@@ -430,7 +439,6 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, minWidth: 0 },
   rowName: { color: colors.foreground, fontSize: 16, fontWeight: "500" },
   rowMeta: { color: colors.mutedForeground, fontSize: 13 },
-  chevron: { color: colors.mutedForeground, fontSize: 16 },
   icon: {
     alignItems: "center",
     borderRadius: 11,
@@ -439,7 +447,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 22,
   },
-  iconGlyph: { fontSize: 12, fontWeight: "800" },
   iconSpinner: { transform: [{ scale: 0.6 }] },
   details: { gap: 6, paddingBottom: 12, paddingLeft: 34 },
   detail: { flexDirection: "row", gap: 10 },

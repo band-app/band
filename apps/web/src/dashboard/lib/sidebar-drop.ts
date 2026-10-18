@@ -163,21 +163,20 @@ export function planOriginDrop(
   const activeIsMain = tree.isMain(active) && !tree.hasLiveOrigin(active);
   const currentOrigin = active.worktree.origin?.worktreeId ?? null;
 
-  // The origin that puts `active` under `parent`: none when that is its own repo's main, which is
-  // where work with no origin is listed already.
-  const originUnder = (parent: WorktreeEntry): string | null => {
-    const parentIsMain = tree.isMain(parent) && !tree.hasLiveOrigin(parent);
-    const sameCheckout =
-      parent.repo.name === active.repo.name &&
-      hostIdOf(parent.worktree) === hostIdOf(active.worktree);
-    return parentIsMain && sameCheckout ? null : parent.worktreeId;
-  };
-
   const withParent = (
     parent: WorktreeEntry,
     siblings: WorktreeEntry[],
     insert: { before?: string; after?: string } | "end",
   ): DropPlan => {
+    // A drop onto the main row names it as the origin. A drop in the gap among its children keeps
+    // no origin, which is where work with no origin is listed already.
+    const impliedByMain =
+      insert !== "end" &&
+      tree.isMain(parent) &&
+      !tree.hasLiveOrigin(parent) &&
+      parent.repo.name === active.repo.name &&
+      hostIdOf(parent.worktree) === hostIdOf(active.worktree);
+    const origin = impliedByMain ? null : parent.worktreeId;
     if (activeIsMain) {
       return { type: "refuse", reason: "A repo's main worktree can't be moved under another." };
     }
@@ -197,7 +196,6 @@ export function planOriginDrop(
     }
     const plan = planFromIds(byId, ids, "siblings");
     if (plan.type !== "reorder") return plan;
-    const origin = originUnder(parent);
     if (origin !== currentOrigin) plan.reparent = { ...refOf(active), origin };
     return plan;
   };

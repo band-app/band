@@ -1,0 +1,38 @@
+# S7 (settings): with a non-admin device token Devices shows the admin-only notice and Hosts shows
+# no Update button (the worker behind the hub is listed, but only an admin can update it).
+appId: app.getband.mobile
+name: Non-admin token sees notices and no admin actions
+---
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: workers-start
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-settings-section.yaml
+    env:
+      SECTION: devices
+- extendedWaitUntil:
+    visible:
+      id: settings__devices-denied
+    timeout: 15000
+- takeScreenshot: st7-devices-denied
+# The header's back button is titled with the screen it returns to. Maestro's `back` does nothing on iOS.
+- tapOn:
+    text: Settings
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: settings__screen
+    timeout: 10000
+- tapOn:
+    id: settings__open-hosts
+- extendedWaitUntil:
+    visible:
+      id: settings__host-version-build-box
+    timeout: 15000
+- assertNotVisible:
+    id: settings__host-update-build-box
+- assertVisible:
+    id: settings__hosts-not-admin
+- takeScreenshot: st7-hosts-no-update

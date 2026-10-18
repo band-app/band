@@ -1,0 +1,91 @@
+# S1 (settings): the Settings button on home opens a screen that lists Hosts, Agents, Voice,
+# Devices and About, and each opens its screen.
+appId: app.getband.mobile
+name: Settings lists its sections and each opens
+---
+- runFlow: subflows/pair-admin.yaml
+- tapOn:
+    id: home__settings
+- extendedWaitUntil:
+    visible:
+      id: settings__screen
+    timeout: 10000
+- assertVisible:
+    id: settings__open-hosts
+- assertVisible:
+    id: settings__open-agents
+- assertVisible:
+    id: settings__open-voice
+- assertVisible:
+    id: settings__open-devices
+- assertVisible:
+    id: settings__open-about
+- takeScreenshot: st1-settings-menu
+- tapOn:
+    id: settings__open-hosts
+- extendedWaitUntil:
+    visible:
+      id: settings__hosts
+    timeout: 10000
+- takeScreenshot: st1-hosts
+# The header's back button is titled with the screen it returns to. Maestro's `back` does nothing on iOS.
+- tapOn:
+    text: Settings
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: settings__screen
+    timeout: 10000
+- tapOn:
+    id: settings__open-agents
+- extendedWaitUntil:
+    visible:
+      id: settings__agents
+    timeout: 10000
+# The header's back button is titled with the screen it returns to. Maestro's `back` does nothing on iOS.
+- tapOn:
+    text: Settings
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: settings__screen
+    timeout: 10000
+- tapOn:
+    id: settings__open-voice
+- extendedWaitUntil:
+    visible:
+      id: settings__voice
+    timeout: 10000
+# The header's back button is titled with the screen it returns to. Maestro's `back` does nothing on iOS.
+- tapOn:
+    text: Settings
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: settings__screen
+    timeout: 10000
+- tapOn:
+    id: settings__open-devices
+- extendedWaitUntil:
+    visible:
+      id: settings__devices
+    timeout: 10000
+# The header's back button is titled with the screen it returns to. Maestro's `back` does nothing on iOS.
+- tapOn:
+    text: Settings
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: settings__screen
+    timeout: 10000
+- tapOn:
+    id: settings__open-about
+- extendedWaitUntil:
+    visible:
+      id: settings__about
+    timeout: 10000
+- assertVisible:
+    id: settings__about-hub-version
+- assertVisible:
+    text: "0.50.0"
+- takeScreenshot: st1-about

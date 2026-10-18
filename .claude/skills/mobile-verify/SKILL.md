@@ -120,13 +120,13 @@ Check each tool first and install only what is missing. All of it is user space 
 | `c1-transcript.yaml` | The seeded showcase chat renders every item natively: the prompt's image, thinking, markdown (heading, list, table, file links, highlighted code, a mermaid fence labelled "diagram"), the folded tool calls with a diff and a command, the plan, the turn's end. A file link opens the file viewer on that file (here an error state, because `gamma` has no `src/parser.ts`) and Back returns. |
 | `c2-streaming.yaml` | A streamed turn shows each line as it arrives and the list stays at the bottom; scrolling up stops following and shows Jump to latest, which brings the list back. |
 | `c4-background.yaml` | 30 s in the background mid-turn; on return the turn arrives complete. The flow taps the message menu and `check-transcript` compares the copied text with the hub's, every streamed line exactly once. |
-| `c5-copy.yaml` | The "..." button under a message opens its actions; Copy puts the message text on the simulator's clipboard. |
+| `c5-copy.yaml` | The copy button under a message copies it at once and shows a check; the text lands on the simulator's clipboard. |
 | `c7-select.yaml` | A long press on message text selects a word with the system handles and no action sheet; dragging the end handle widens the range and Copy puts exactly that range on the clipboard. |
 | `c6-history.yaml` | Scrolling to the top of a 24-turn chat loads the 4 turns the hub didn't send on open, and the list keeps its place while they arrive. |
 | `m1-send.yaml` | A message typed on the phone (Return adds a line, only the button sends) reaches the agent, and the reply streams in. |
 | `m2-queue.yaml` | A message sent during a running turn joins the queue above the composer; one is moved up and another deleted; the kept one is delivered when the turn ends and the deleted one never reaches the agent. |
 | `m3-attach.yaml` | A photo from the simulator's library (added with `addMedia`) is attached and sent; the agent receives an image part. |
-| `m9-paste-image.yaml` | An image copied in Photos is pasted from the hint chip above the input and the + menu (disabled with no image on the clipboard) and sent; the agent receives an image part. |
+| `m9-paste-image.yaml` | Text on the clipboard pastes into the field as text with no chip. An image copied in Photos is pasted with long-press > Paste in the field, becomes an attachment chip with no text, and is sent; the agent receives an image part. |
 | `m4-suggest.yaml` | "/" lists the commands the hub reports for the agent, "@" plus text lists matching files, and picking one fills the field. |
 | `m5-session.yaml` | Stop ends a running turn; the model picked in the session sheet (the pill in the focused composer) shows in the pill and in `chats.sessionState`. |
 | `m9-session-history.yaml`, `m10-session-history-empty.yaml` | The History button lists a chat's sessions newest first, switches to the older one, starts a new one, and says so on a chat with none. Uses `gamma-sessions` and `gamma-no-sessions`. |
@@ -147,6 +147,13 @@ Check each tool first and install only what is missing. All of it is user space 
 | `x3-search.yaml` | Name search (fuzzy) and content search; a content match opens the file at its line. |
 | `x4-changes-diff.yaml` | Changes shows the web's sections with counts; a change opens its native diff. |
 | `x5-refresh.yaml` | Pull to refresh picks up a file the control server's `/explorer-change` adds, and Changes re-reads on its own. |
+| `st1-settings-menu.yaml` | Home's Settings button opens a list of Hosts, Agents, Voice, Devices and About; each opens its screen (admin device token). |
+| `st2-hosts-live.yaml` | Hosts lists an online and an offline stand-in worker with state, last seen and version line; dropping a worker updates its row without a reload. |
+| `st3-hosts-update.yaml` | Update on the worker behind the hub: the confirm lists the agents the restart ends, Cancel sends nothing, confirming calls `hosts.update` (the stand-in saw it), the row shows the update, then the new version. Only the worker behind the hub offers Update. |
+| `st4-agents-refresh.yaml` | Agents lists the configured agents and Refresh models runs `models.refresh` and shows the result. |
+| `st5-voice.yaml` | Voice shows its status; an admin's Test connection reaches the speech-to-text stub. |
+| `st6-devices.yaml` | Add device shows the pairing link; Revoke asks first, removes another device, and asks the stronger confirm for the session's own token. |
+| `st7-non-admin.yaml` | With a non-admin device token Devices shows the admin-only notice and Hosts shows no Update button. |
 | `perf-explorer-fling.yaml` | Flings through the open 3,000-file folder; fails when the frame log's longest JS gap is over 100 ms. Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`; `scripts/seed-explorer.mjs` adds the repo `delta` for the Explorer flows: a 3,000-file `bulk` folder, a 1.3 MB file, a binary, a PNG, markdown, a long-line file and one file of each change kind): repos `alpha` and `beta`, the worktrees
@@ -166,7 +173,7 @@ agent work, ask for permission or stop, `stream?wt=<id>` starts the streamed tur
 unless the simulator's clipboard holds `VALUE`, `check-transcript?wt=<id>` compares the copied
 last turn with the hub's, and `note?name=<n>` with `VALUE` adds a line to the report's
 "Measurements and checks". The `w` flows run in number order on purpose: `w4-open.yaml` adds worktrees that push `beta` off the first screen. Shared steps live in `e2e/subflows/` (`pair-link.yaml` pairs
-through the deep link), which `verify.mjs` does not run on its own. Flows get `HUB_URL`, `TOKEN`, `PAIR_LINK`,
+through the deep link), which `verify.mjs` does not run on its own. The `st` flows (Settings) use `scripts/settings-fixtures.mjs`: the hub runs as release 0.50.0 (`BAND_HUB_VERSION`) with a releases stub reporting 9.0.0, a speech-to-text stub is the voice endpoint, and three stand-in workers (build-box on 0.49.0, edge-box current, old-box offline) start with the control call `workers-start`. The regular `deviceToken` is not an admin; `ADMIN_PAIR_LINK` pairs an admin one (`subflows/pair-admin.yaml`). Extra control calls: `worker-drop?name=`, `worker-finish-update?name=`, `expect-update?name=`, `check-device-gone?label=`, `expect-stt`. Flows get `HUB_URL`, `TOKEN`, `PAIR_LINK`, `ADMIN_PAIR_LINK`,
 `CONTROL_URL`, `WRONG_TOKEN`, `HUB_URL_ALT` (the same hub at `localhost`) and `HUB_ID` /
 `HUB_ID_ALT` (the app's ids for the two, used in the Hubs screen's testIDs) as Maestro env
 values. New flows find elements by `testID` (`id:` in Maestro),

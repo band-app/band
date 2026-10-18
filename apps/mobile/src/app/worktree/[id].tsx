@@ -1,4 +1,14 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  GitCompare,
+  ListChecks,
+  MessageSquarePlus,
+  Pencil,
+  X,
+} from "lucide-react-native";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -11,9 +21,11 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { AgentIcon } from "../../components/agent-icon";
 import { ChatView } from "../../components/chat/chat-view";
 import { AgentPicker, closeTab, renameTab, TabSwitcher } from "../../components/chat/tab-switcher";
 import { WorktreeHeader } from "../../components/chat/worktree-header";
+import { Icon } from "../../components/icon";
 import { StateIcon } from "../../components/state-icon";
 import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
@@ -153,25 +165,43 @@ const WorktreeChats = memo(function WorktreeChats({
     {
       key: "checks",
       title: "Checks",
+      icon: ListChecks,
       subtitle: pr ? `PR #${pr.number}` : undefined,
       onPress: afterSheet(() =>
         router.push({ pathname: "/worktree/[id]/checks", params: { id: worktreeId, branch } }),
       ),
     },
-    { key: "explorer", title: "Explorer", onPress: afterSheet(() => openExplorer(worktreeId)) },
-    { key: "changes", title: "Changes", onPress: afterSheet(() => openChanges(worktreeId)) },
+    {
+      key: "explorer",
+      title: "Explorer",
+      icon: FolderOpen,
+      onPress: afterSheet(() => openExplorer(worktreeId)),
+    },
+    {
+      key: "changes",
+      title: "Changes",
+      icon: GitCompare,
+      onPress: afterSheet(() => openChanges(worktreeId)),
+    },
   ];
   const actionItems: ViewsSheetItem[] = [
-    { key: "new-chat", title: "New chat", onPress: afterSheet(() => setPicker(true)) },
+    {
+      key: "new-chat",
+      title: "New chat",
+      icon: MessageSquarePlus,
+      onPress: afterSheet(() => setPicker(true)),
+    },
     {
       key: "rename-chat",
       title: "Rename chat",
+      icon: Pencil,
       disabled: !current || current.kind === "term",
       onPress: afterSheet(() => current && renameTab(current, actions)),
     },
     {
       key: "close-tab",
       title: "Close tab",
+      icon: X,
       destructive: true,
       disabled: !current,
       onPress: afterSheet(() => current && closeTab(actions, current.id)),
@@ -191,6 +221,7 @@ const WorktreeChats = memo(function WorktreeChats({
             testID="worktree__chip-question"
           >
             <StateIcon state="question" />
+            {needsYou.kind === "chat" ? <AgentIcon type={needsYou.agentType} size={14} /> : null}
             <Text style={local.chipText} numberOfLines={1}>
               {needsYou.label}: question
             </Text>
@@ -348,11 +379,14 @@ function NeighbourPage({
   return (
     <View style={[local.neighbour, { width, height }]} testID={`worktree__neighbour-${direction}`}>
       <StateIcon state={tab.shown} />
+      {direction === "prev" ? <Icon icon={ChevronLeft} color={colors.mutedForeground} /> : null}
+      {tab.kind === "chat" ? (
+        <AgentIcon type={tab.agentType} size={16} color={colors.mutedForeground} />
+      ) : null}
       <Text style={local.neighbourText} numberOfLines={1}>
-        {direction === "prev" ? "‹ " : ""}
         {tab.label}
-        {direction === "next" ? " ›" : ""}
       </Text>
+      {direction === "next" ? <Icon icon={ChevronRight} color={colors.mutedForeground} /> : null}
     </View>
   );
 }
