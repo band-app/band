@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { basename, join, posix, resolve } from "node:path";
 import { gitRunner, type Host } from "@band-app/host-api";
+import { createLogger } from "@band-app/logger";
 import type { ContinuedFrom, Divergence } from "@band-app/shared/continuation";
-import { parseRemoteUrl } from "@band-app/shared/remote-url";
+import { parseRemoteUrl, stripUrlCredentials } from "@band-app/shared/remote-url";
 import { checkpointsEnabledFor, isHostAllowed } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { TRPCError } from "@trpc/server";
@@ -39,6 +40,8 @@ import { type SettingsService, settingsService } from "./settings-service";
 import { pruneMissing } from "./sync-service";
 import { tokenService } from "./token-service";
 import { vaultService } from "./vault-service";
+
+const log = createLogger("repo-service");
 
 /** Whether `path` is one of `roots` or inside one. Trailing slashes are ignored, so `/` covers everything. */
 function isInsideRoots(path: string, roots: string[]): boolean {
@@ -674,6 +677,44 @@ export class RepoService {
         }
       } catch {
         // A checkout that is gone or unreadable keeps no remote. Sync reports it.
+      }
+    }
+  }
+
+  /**
+   * Gives a repo its URL when it was added from a worker folder that had no remote and the
+   * folder has one now. Reads `origin` from the worker's folder for each repo placed on it
+   * whose stored URL is empty. Never overwrites a URL and skips one that another repo already
+   * uses. Run on every worker connect.
+   */
+  async backfillRemotesFromWorker(hostId: string): Promise<void> {
+    if (hostId === "local") return;
+    const empty = this.queries
+      .loadAll()
+      .filter((r) => r.kind === "git" && !r.remoteKey)
+      .map((r) => r.name);
+    if (empty.length === 0) return;
+    const host = hostRegistry.hostById(hostId);
+    for (const { repo: name, path } of this.queries.reposOnHost(hostId)) {
+      if (!empty.includes(name)) continue;
+      try {
+        const inspected = await host.repos.inspect(path);
+        const remote = inspected.remoteUrl
+          ? parseRemoteUrl(stripUrlCredentials(inspected.remoteUrl))
+          : null;
+        if (!remote) continue;
+        // The awaits above may have let another change through, so read the rows again.
+        const fresh = this.queries.loadAll();
+        const current = fresh.find((r) => r.name === name);
+        if (!current || current.remoteKey || current.remoteUrl) continue;
+        if (fresh.some((r) => r.remoteKey === remote.key)) continue;
+        this.queries.setRemote(name, remote.url, remote.key);
+        this.queries.setHasOrigin(name, true);
+        log.info(`repo ${name} has the remote ${remote.url}, read from ${hostId}`);
+      } catch (err) {
+        log.warn(
+          `could not read the remote of ${name} on ${hostId}: ${err instanceof Error ? err.message : err}`,
+        );
       }
     }
   }

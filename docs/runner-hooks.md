@@ -127,11 +127,13 @@ The hub and workers use `git` for clones and pushes and `gh` for pull requests, 
 
 | Machine | git | gh |
 | --- | --- | --- |
-| Attached worker (`band-worker --token ...` that you started) | Its own ssh keys or credential helper. The worker adds the hub's git helper, which answers only when the vault has a matching item. | Its own `gh auth login`. The hub sends nothing, unless the worker sets `BAND_WORKER_GH_TOKEN=hub`. |
+| Attached worker (`band-worker --token ...` that you started) | Its own ssh keys or credential helper, tried first. The worker adds the hub's git helper after them, which answers only when the vault has a matching item. `--hub-git-credentials-only` drops the machine's helpers. | Its own `gh auth login`. The hub sends nothing, unless the worker sets `BAND_WORKER_GH_TOKEN=hub`. |
 | Runner-started worker | The vault `git` item, through the helper described above. | `GH_TOKEN` from the same vault item, in the environment of agents and terminals only. |
 | Hub | The vault `git` item, for clones the hub makes through a worker. | The machine's own `gh auth login`. With none, `GH_TOKEN` from the vault `git` item for `github.com`. |
 
 For `gh`, the hub uses the `git` item for `github.com` whose path pattern is broadest (a repo-scoped item wins over a global one). A dedicated `github` item kind does not exist yet. A worker asks with the `gh.token` call on its link every time it starts an agent or a terminal. The token goes into that child's environment only. It is not written to the worker's disk, not kept in the worker's memory between spawns, and not logged on either side. A worker whose own environment has `GH_TOKEN` or `GITHUB_TOKEN` keeps it, and the hub answers only workers it started through a runner or workers that opted in.
+
+A static worker keeps the machine's git credential helpers (the macOS keychain, `gh auth setup-git`, a `store` file) and adds the hub's helper after them, so git asks the machine first and the vault second. Because git calls `store` on every helper after a successful use, a token the hub hands out can end up in the machine's own helper. To keep the machine's helpers out entirely, start the worker with `--hub-git-credentials-only` (`BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1`, also accepted by `install-service`). An ephemeral worker (`--ephemeral`, which every runner hook sets) always resets the helper list and asks only the hub.
 
 Any process of an agent on the worker can read its own environment, so use a fine-grained PAT limited to the repositories the workers need.
 

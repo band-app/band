@@ -37,18 +37,20 @@ export function helperCommand(nodePath: string, scriptPath: string): string {
 
 /**
  * Adds the helper to the git configuration `env` carries (`GIT_CONFIG_COUNT`
- * and its keys). The empty `credential.helper` first resets the helpers the
- * machine configures, so the worker's own is the only one: git would otherwise
- * offer the token to `store` on a keychain or a file.
+ * and its keys). With `resetHelpers`, an empty `credential.helper` first resets
+ * the helpers the machine configures, so the worker's own is the only one: git
+ * would otherwise offer the token to `store` on a keychain or a file. Without
+ * it the machine's helpers run first and the worker's helper is the fallback.
  */
 export function gitCredentialEnv(
   env: NodeJS.ProcessEnv,
   helper: string,
   socketPath: string,
+  options: { resetHelpers: boolean },
 ): NodeJS.ProcessEnv {
   const start = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10) || 0;
   const entries: [string, string][] = [
-    ["credential.helper", ""],
+    ...(options.resetHelpers ? [["credential.helper", ""] as [string, string]] : []),
     ["credential.helper", helper],
     ["credential.useHttpPath", "true"],
   ];

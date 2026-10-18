@@ -284,7 +284,9 @@ export class Worker {
       worker.disposers.push(() => broker.close());
       Object.assign(
         process.env,
-        gitCredentialEnv(process.env, options.gitCredentialHelper, socketPath),
+        gitCredentialEnv(process.env, options.gitCredentialHelper, socketPath, {
+          resetHelpers: config.ephemeral || config.hubGitCredentialsOnly,
+        }),
       );
     }
     worker.wire(ctx);
