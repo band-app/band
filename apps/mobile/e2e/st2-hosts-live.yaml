@@ -1,0 +1,39 @@
+# S2 (settings): Hosts shows one online worker (edge-box) and one offline (old-box) with their
+# state and version line, and a row follows its worker going offline without a reload.
+appId: app.getband.mobile
+name: Hosts shows worker state and follows it live
+---
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: workers-start
+- runFlow: subflows/pair-admin.yaml
+- runFlow:
+    file: subflows/open-settings-section.yaml
+    env:
+      SECTION: hosts
+- extendedWaitUntil:
+    visible:
+      id: settings__host-status-edge-box
+      text: online
+    timeout: 15000
+- assertVisible:
+    id: settings__host-status-old-box
+    text: offline
+- assertVisible:
+    id: settings__host-version-edge-box
+    text: "Version 0.50.0"
+- assertVisible:
+    id: settings__host-version-build-box
+    text: "Version 0.49.0 · behind the hub"
+- takeScreenshot: st2-hosts-before
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: worker-drop?name=edge-box
+- extendedWaitUntil:
+    visible:
+      id: settings__host-status-edge-box
+      text: offline
+    timeout: 15000
+- takeScreenshot: st2-hosts-after-drop

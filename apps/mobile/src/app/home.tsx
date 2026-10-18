@@ -1,5 +1,5 @@
 import { Redirect, router } from "expo-router";
-import { Layers, Tag } from "lucide-react-native";
+import { Layers, Settings as SettingsIcon, Tag } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChevronGlyph, Glass, GlassCircle, PlusGlyph, SearchGlyph } from "../components/glass";
+import { Icon } from "../components/icon";
 import { avatarColor, initials, RepoAvatar } from "../components/repo-avatar";
 import { StartSheet } from "../components/start-sheet";
 import { Button } from "../components/ui";
@@ -254,6 +255,13 @@ function WorktreeList() {
             testID="home__search-toggle"
           >
             <SearchGlyph />
+          </GlassCircle>
+          <GlassCircle
+            label="Settings"
+            onPress={() => router.push("/settings")}
+            testID="home__settings"
+          >
+            <Icon icon={SettingsIcon} />
           </GlassCircle>
           <GlassCircle
             label="New worktree"

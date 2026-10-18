@@ -16,6 +16,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { expectMerge, expectNoMerge, expectRerun, finishBuild, startGhStub } from "./checks.mjs";
 import { cleanHub, restartHub, startHub, stopHub } from "./hub.mjs";
+import { handleSettingsControl, seedSettings, settingsEnv, stopSettingsFixtures } from "./settings-fixtures.mjs";
 import {
   acpRequests,
   addSubscription,
@@ -435,6 +436,8 @@ function startControlServer(hub, chats, udid, notes) {
         if (Boolean(found) !== want) throw new Error(`${repo}/${name} ${found ? "is" : "is not"} in repos.list`);
         const file = url.searchParams.get("file");
         if (file && found && !existsSync(join(found.path, file))) throw new Error(`${file} is gone from ${found.path}`);
+      } else if (await handleSettingsControl(hub, url, notes)) {
+        // Served by settings-fixtures.mjs.
       } else if (url.pathname === "/fill") await fillWorktrees(hub, Number(url.searchParams.get("n") ?? 12));
       else if (url.pathname === "/sleep") {
         await new Promise((r) => setTimeout(r, Number(url.searchParams.get("ms") ?? 1000)));
@@ -508,9 +511,10 @@ async function main() {
   }
 
   const gh = await startGhStub();
-  const hub = await startHub(gh.env);
+  const hub = await startHub({ ...gh.env, ...(await settingsEnv()) });
   console.log(`Hub at ${hub.url} (home ${hub.home})`);
   const chats = await seedHub(hub);
+  const { adminDeviceToken } = await seedSettings(hub);
   const device = pickSimulator();
   const notes = [];
   const control = await startControlServer(hub, chats, device.udid, notes);
@@ -523,10 +527,12 @@ async function main() {
   const since = new Date(Date.now() - 1000).toLocaleString("sv-SE");
   // The token wrong-token.yaml types; the app must not keep it anywhere either.
   const wrongToken = "bdt_this_token_does_not_exist";
-  const tokens = [hub.deviceToken, wrongToken];
+  const tokens = [hub.deviceToken, adminDeviceToken, wrongToken];
   // The same hub under a second origin, so a flow can pair two hubs.
   const altUrl = hub.url.replace("127.0.0.1", "localhost");
   const pairLink = `band://pair?url=${encodeURIComponent(hub.url)}&token=${encodeURIComponent(hub.deviceToken)}`;
+  // The same hub with an admin device token, for the Settings flows that need one.
+  const adminPairLink = `band://pair?url=${encodeURIComponent(hub.url)}&token=${encodeURIComponent(adminDeviceToken)}`;
 
   const results = [];
   for (const flow of flows) {
@@ -549,6 +555,8 @@ async function main() {
         `TOKEN=${hub.deviceToken}`,
         "-e",
         `PAIR_LINK=${pairLink}`,
+        "-e",
+        `ADMIN_PAIR_LINK=${adminPairLink}`,
         "-e",
         `CONTROL_URL=${controlUrl}`,
         "-e",
@@ -574,6 +582,7 @@ async function main() {
   control.close();
   runTmp.remove();
   await gh.stop();
+  await stopSettingsFixtures();
   if (!keepHub) await cleanHub();
 
   const screenshots = readdirSync(out, { recursive: true })
