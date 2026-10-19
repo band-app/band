@@ -56,3 +56,4 @@ supportedArchitectures:
 patchedDependencies:
   "@xterm/addon-search@0.17.0-beta.300": patches/@xterm__addon-search@0.17.0-beta.300.patch
   "@xterm/addon-serialize@0.15.0-beta.300": patches/@xterm__addon-serialize@0.15.0-beta.300.patch
+  react-native-uitextview@2.7.1: patches/react-native-uitextview@2.7.1.patch

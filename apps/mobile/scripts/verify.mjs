@@ -30,6 +30,7 @@ import {
   sessionState,
   sharedTabs,
   startTurn,
+  CUTOFF_PROMPT,
   STREAM_LINES,
   stopTurn,
   termList,
@@ -351,6 +352,7 @@ function startControlServer(hub, chats, udid, notes) {
         }
         notes.push(`gh run rerun ${JSON.stringify(hit)}`);
       }
+      else if (url.pathname === "/cutoff") await startTurn(hub, chats, wt, CUTOFF_PROMPT);
       else if (url.pathname === "/stream") await startTurn(hub, chats, wt, "stream: go");
       else if (url.pathname === "/clipboard") {
         const want = url.searchParams.get("value") ?? "";
