@@ -27,6 +27,7 @@ import {
   writeNestedLayout,
 } from "../lib/terminal-split-registry";
 import { trpc } from "../lib/trpc-client";
+import { trackActivePanelTitle } from "./layout/active-panel-title";
 import { type LayoutPanelProps, LayoutReact, type LayoutTabProps } from "./layout/LayoutView";
 import type { AddPanelOptions, LayoutApi } from "./layout/model";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -520,12 +521,8 @@ export function TerminalSplitLeaf({
       });
       api.onDidAddGroup(refreshSingleClass);
       api.onDidRemoveGroup(refreshSingleClass);
-      api.onDidActivePanelChange(() => {
-        activeTitleDisposerRef.current?.dispose();
-        const p = api.activePanel;
-        if (p) activeTitleDisposerRef.current = p.api.onDidTitleChange(() => pushActiveTitle());
-        pushActiveTitle();
-      });
+      activeTitleDisposerRef.current?.dispose();
+      activeTitleDisposerRef.current = trackActivePanelTitle(api, pushActiveTitle);
 
       // Cold-mount layout catch-up (mirrors the old inner terminal container).
       if (visibleRef.current && containerRef.current) {
