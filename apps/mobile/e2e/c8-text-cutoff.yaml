@@ -12,6 +12,9 @@ name: S1 long messages are never cut off
     visible:
       id: chat__list
     timeout: 15000
+# The one-and-a-half-line message that showed one line and "…" on a phone is a two-line bubble.
+# (Maestro sees the text, not the clipping: the screenshot is the check.)
+- takeScreenshot: c8-short-message
 # The last reply ends with its full last sentence.
 - assertVisible:
     text: ".*bez ikakvog odsecanja.*"

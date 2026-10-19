@@ -1,8 +1,8 @@
 diff --git a/ios/RNUITextView.mm b/ios/RNUITextView.mm
-index 2f76e86a8cda5f8cb4154552f3bf5cead201ee53..4ccf8b025b4434e9b033c52a9c7526cb5894b20d 100644
+index 2f76e86..89bd4f9 100644
 --- a/ios/RNUITextView.mm
 +++ b/ios/RNUITextView.mm
-@@ -227,6 +227,10 @@ - (void)layoutSubviews
+@@ -227,8 +227,37 @@ - (void)layoutSubviews
    // under it (rotation, parent relayout) so the text view resizes and
    // onTextLayout re-fires with the new line wrapping.
    if (!CGRectEqualToRect(_textView.frame, _view.frame)) {
@@ -12,4 +12,39 @@ index 2f76e86a8cda5f8cb4154552f3bf5cead201ee53..4ccf8b025b4434e9b033c52a9c7526cb
 +    _textView.frame = _view.frame;
      [self setNeedsDisplay];
    }
++  [self syncTextContainerLimits];
++}
++
++// A recycled view starts again from the default props, so updateProps sees no change for a
++// prop that is back at its default and leaves the container as the previous text left it. Set
++// the limits from the props at every layout instead, and give the container no height limit of
++// its own. A container shorter than the text, or one limited to a line, truncates the last line
++// with an ellipsis, which is how a bubble showed one line of a two line message.
++- (void)syncTextContainerLimits
++{
++  if (!_props) {
++    return;
++  }
++  const auto &props = *std::static_pointer_cast<RNUITextViewProps const>(_props);
++  NSTextContainer *container = _textView.textContainer;
++  if (container.maximumNumberOfLines != (NSUInteger)props.numberOfLines) {
++    container.maximumNumberOfLines = props.numberOfLines;
++  }
++  const NSLineBreakMode mode = RCTNSLineBreakModeFromEllipsizeMode(props.ellipsizeMode);
++  if (container.lineBreakMode != mode) {
++    container.lineBreakMode = mode;
++  }
++  if (props.numberOfLines == 0 && container.size.height < CGFLOAT_MAX / 2) {
++    container.size = CGSizeMake(container.size.width, CGFLOAT_MAX);
++  }
  }
+ 
+ - (void)drawRect:(CGRect)rect
+@@ -267,6 +296,7 @@ - (void)drawRect:(CGRect)rect
+   if (frameChanged) {
+     _textView.frame = _view.frame;
+   }
++  [self syncTextContainerLimits];
+ 
+   if (_activeHighlightGroup != nil) {
+     [self updatePressHighlight];

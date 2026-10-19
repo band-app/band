@@ -150,6 +150,9 @@ function streamSteps() {
 export const CUTOFF_PROMPT =
   "Kako bi objasnio razliku izmedju responsibility i accountability? Zanima me kako to izgleda u timu, kada neko preuzme zadatak, a odgovornost za ishod ostane šefu. Šta se desi kad se rok pomeri, a ždrebe ostane bez ždrijebeta?";
 
+/** The message that was cut off on a phone: one and a half lines, so two lines tall. */
+export const CUTOFF_SHORT = "Kako bi objasnio razliku izmedju responsibility i accauntability?";
+
 /** The cutoff chat's reply: paragraphs with bold and italic text and š and ž. */
 export const CUTOFF_REPLY = [
   "Ukratko: **responsibility** je odgovornost za *izvršenje* posla, a **accountability** je odgovornost za ishod i za to što se desi kasnije.",
@@ -448,6 +451,7 @@ export async function seedHub(state) {
   for (let i = 0; i < 6; i++) {
     await seedTurn(state, chats, WORKTREES.GAMMA_CUTOFF, CUTOFF_PROMPT);
   }
+  await seedTurn(state, chats, WORKTREES.GAMMA_CUTOFF, CUTOFF_SHORT);
   for (let i = 1; i <= TAB_TURNS; i++) {
     await seedTurn(state, chats, WORKTREES.GAMMA_TABS, `parser turn ${String(i).padStart(2, "0")}`);
   }
