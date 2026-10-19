@@ -254,7 +254,7 @@ html[data-band-layout-dragging] webview {
   > .band-layout-group
   > .band-layout-header
   .band-layout-tab[data-selected="false"]:hover {
-  background: color-mix(in oklch, var(--accent) 50%, var(--background));
+  background: color-mix(in oklab, var(--accent) 50%, var(--background));
   color: var(--foreground);
   box-shadow: inset 0 0 0 1px var(--border);
 }
@@ -354,7 +354,7 @@ html[data-band-layout-dragging] webview {
   background: transparent;
 }
 .band-layout--split .band-layout-tab:hover {
-  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 .band-layout--split .band-layout-tab:active {
   cursor: grabbing;
