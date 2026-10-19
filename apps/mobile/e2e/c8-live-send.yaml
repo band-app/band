@@ -1,0 +1,73 @@
+# S1 and S2 on the live path: the message is typed in the composer and the reply streams in, at a
+# larger Dynamic Type size, the way it was cut off on a phone. Maestro reads the text of a view, not
+# its clipping (a clipped line is still in the view's text), so the check compares pictures: the
+# transcript as it was drawn live must equal the transcript after the chat is opened again and
+# every row is laid out from scratch. Before the fix a reply lost its last line live and showed it
+# after a reload.
+appId: app.getband.mobile
+name: S1 a sent message and its streamed reply are never cut off
+---
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: content-size?size=extra-large
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- extendedWaitUntil:
+    visible:
+      id: composer__input
+    timeout: 15000
+- tapOn:
+    id: composer__input
+- inputText: "Kako bi objasnio razliku izmedju responsibility i accauntability?"
+- takeScreenshot: c8-live-typed
+- tapOn:
+    id: composer__send
+- takeScreenshot: c8-live-sent
+- extendedWaitUntil:
+    visible:
+      text: ".*Ukratko.*"
+    timeout: 20000
+- takeScreenshot: c8-live-streaming-1
+- extendedWaitUntil:
+    visible:
+      text: ".*Primer iz tima.*"
+    timeout: 20000
+- takeScreenshot: c8-live-streaming-2
+- extendedWaitUntil:
+    visible:
+      text: ".*bez ikakvog odsecanja.*"
+    timeout: 30000
+# The turn is over: no spinner, then the keyboard goes away so the list is the same size twice.
+- extendedWaitUntil:
+    notVisible: "Thinking..."
+    timeout: 30000
+- hideKeyboard
+- takeScreenshot:
+    path: c8-live-drawn
+    cropOn:
+      id: chat__list
+# Leave the chat and open it again: every row is laid out from scratch.
+- tapOn:
+    id: worktree__back
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+- takeScreenshot: c8-live-reopened
+- assertScreenshot:
+    path: c8-live-drawn
+    cropOn:
+      id: chat__list
+    thresholdPercentage: 99.9
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: content-size?size=large

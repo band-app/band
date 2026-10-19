@@ -296,6 +296,9 @@ function startControlServer(hub, chats, udid, notes) {
         if (live.length !== want || listed.length !== want) {
           throw new Error(`${live.length} live terminals and ${listed.length} terminal tabs, expected ${want}`);
         }
+      } else if (url.pathname === "/content-size") {
+        // The simulator's Dynamic Type size, e.g. large (the default) or extra-large.
+        execFileSync("xcrun", ["simctl", "ui", udid, "content_size", url.searchParams.get("size") ?? "large"]);
       } else if (url.pathname === "/appearance") {
         // The simulator's system appearance: light or dark.
         const mode = url.searchParams.get("mode") === "dark" ? "dark" : "light";
