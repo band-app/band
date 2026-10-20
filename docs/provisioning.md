@@ -45,8 +45,11 @@ The script downloads the tarball, unpacks it under `~/.band/provision/repo`, and
 | `BAND_WORKER_ID` | The host id the hub reserved. |
 | `BAND_HOST_LABELS` | The labels given when the command was created, as `k=v,k=v`. |
 | `BAND_PROVISION_DIR` | The unpacked repo. |
+| `BAND_WORKER_VERSION` | The worker version Band installs afterwards (the hub's version). Empty when the hub runs from source. |
 
-The start command installs what the machine needs and finishes by running `band-worker install-service`, which reads `BAND_HUB_URL` and `BAND_BOOTSTRAP_TOKEN` itself and accepts `--worker-id "$BAND_WORKER_ID"`. A non-zero exit marks the host failed.
+The start command installs what the machine needs. It must not install or start the worker. When it exits 0, Band installs `@band-app/worker` at the hub's version, runs `band-worker install-service` with the host id, name and labels, and does the root steps, exactly as in the built-in install. A non-zero exit marks the host failed, and Band's worker steps do not run.
+
+A start command that still runs `band-worker install-service` itself keeps working. If the service file names this host id and `band-worker status` reports it running when the start command exits, Band skips its own install and service steps and writes that to the log. A service for another host id does not count.
 
 ### Example layout with mise and chezmoi
 
@@ -70,11 +73,6 @@ if ! command -v chezmoi >/dev/null 2>&1; then
   sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
 fi
 chezmoi init --apply --source "$BAND_PROVISION_DIR"
-
-# Node comes from mise (declared in dot_config/mise/config.toml).
-eval "$(mise activate sh)"
-npm install --global --prefix "$HOME/.band/npm" @band-app/worker
-"$HOME/.band/npm/bin/band-worker" install-service --worker-id "$BAND_WORKER_ID"
 ```
 
 `run_onchange_after_install-tools.sh.tmpl`:
