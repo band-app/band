@@ -176,7 +176,8 @@ worker_service_running() {
     return 1
   fi
   # shellcheck disable=SC2086
-  $CHECK status >/dev/null 2>&1
+  $CHECK status >/dev/null 2>&1 || return 1
+  WORKER="$CHECK"
 }
 
 custom_install() {
@@ -194,6 +195,7 @@ custom_install() {
   ( cd "$DEST/repo" && "./$START_COMMAND" )
   if worker_service_running; then
     say "The worker service for $WORKER_ID is already installed and running: skipping Band's worker install and service steps."
+    root_steps
     return 0
   fi
   say "Installing the worker\${WORKER_VERSION:+ $WORKER_VERSION}"

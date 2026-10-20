@@ -449,6 +449,51 @@ esac
   }, 90_000);
 });
 
+describe("root steps after a skipped install", () => {
+  it("still enables lingering when the repo installed the service itself", async () => {
+    const out = tmp("band-provision-linger-out-");
+    const repo = makeRepo(
+      base,
+      "linger",
+      `#!/bin/sh
+OUT="${out}"
+mkdir -p "$OUT/root"
+${startWorkerLine}
+`,
+    );
+    await api.m("provisioning.updateSettings", {
+      repoUrl: `file://${repo.bare}`,
+      branch: "main",
+      command: "band/provision.sh",
+    });
+    const made = await create("linger");
+    const machine = makeMachine();
+    // The root steps run on Linux only, so pose as Linux with a fake uname, and give the machine
+    // a sudo that works without a password and records what it was asked to run.
+    const bin = join(machine.home, "fake-bin");
+    mkdirSync(bin);
+    const sudoLog = join(machine.home, "sudo-calls");
+    writeFileSync(
+      join(bin, "uname"),
+      '#!/bin/sh\n[ "$1" = -s ] && echo Linux || /usr/bin/uname "$@"\n',
+    );
+    writeFileSync(
+      join(bin, "sudo"),
+      `#!/bin/sh\n[ "$2" = true ] && exit 0\necho "$*" >>"${sudoLog}"\n`,
+    );
+    chmodSync(join(bin, "uname"), 0o755);
+    chmodSync(join(bin, "sudo"), 0o755);
+    machine.env.PATH = `${bin}:${machine.env.PATH}`;
+    machine.env.BAND_PROVISION_ROOT_STEPS = "on";
+    const result = await run(machine, made.command);
+    expect(result.code).toBe(0);
+    pids.push(Number(readFileSync(join(out, "worker.pid"), "utf8").trim()));
+    expect(existsSync(join(machine.home, "wrapper-calls"))).toBe(false);
+    expect(readFileSync(sudoLog, "utf8")).toMatch(/^-n loginctl enable-linger /m);
+    await waitOnline((await status(made.id)).hostId as string);
+  }, 90_000);
+});
+
 describe("a private provisioning repo (S4)", () => {
   it("fetches it with the vault credential on a machine that has none", async () => {
     const out = tmp("band-provision-private-out-");
