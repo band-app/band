@@ -145,13 +145,39 @@ root_steps() {
   done || true
 }
 
-default_install() {
-  say "No provisioning repo: installing the worker."
+install_and_start_worker() {
   install_worker
   export BAND_HUB_URL="$HUB_URL" BAND_WORKER_TOKEN="$TOKEN"
   # shellcheck disable=SC2086
   $WORKER install-service --worker-id "$WORKER_ID" \${HOST_NAME:+--name "$HOST_NAME"} \${LABELS:+--labels "$LABELS"}
   root_steps
+}
+
+default_install() {
+  say "No provisioning repo: installing the worker."
+  install_and_start_worker
+}
+
+# True when a worker service for this worker id is installed and running. The service file must
+# name the id, and the worker's own status command must report it running.
+worker_service_running() {
+  case "$OS" in
+    linux) SERVICE_FILE="$HOME/.band/worker-service/worker.env" ;;
+    *) SERVICE_FILE="$HOME/Library/LaunchAgents/app.band.worker.plist" ;;
+  esac
+  { [ -f "$SERVICE_FILE" ] && grep -qF "$WORKER_ID" "$SERVICE_FILE"; } || return 1
+  if [ -n "\${BAND_WORKER_CMD:-}" ]; then
+    CHECK="$BAND_WORKER_CMD"
+  elif command -v band-worker >/dev/null 2>&1; then
+    CHECK="$(command -v band-worker)"
+  elif [ -x "$HOME/.band/npm/bin/band-worker" ]; then
+    CHECK="$HOME/.band/npm/bin/band-worker"
+  else
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  $CHECK status >/dev/null 2>&1 || return 1
+  WORKER="$CHECK"
 }
 
 custom_install() {
@@ -164,10 +190,16 @@ custom_install() {
   [ -f "$DEST/repo/$START_COMMAND" ] || fail "the provisioning repo has no $START_COMMAND"
   chmod u+x "$DEST/repo/$START_COMMAND"
   export BAND_HUB_URL="$HUB_URL" BAND_BOOTSTRAP_TOKEN="$TOKEN" BAND_WORKER_ID="$WORKER_ID"
-  export BAND_HOST_LABELS="$LABELS" BAND_PROVISION_DIR="$DEST/repo"
+  export BAND_HOST_LABELS="$LABELS" BAND_PROVISION_DIR="$DEST/repo" BAND_WORKER_VERSION="$WORKER_VERSION"
   say "Running $START_COMMAND"
-  cd "$DEST/repo"
-  "./$START_COMMAND"
+  ( cd "$DEST/repo" && "./$START_COMMAND" )
+  if worker_service_running; then
+    say "The worker service for $WORKER_ID is already installed and running: skipping Band's worker install and service steps."
+    root_steps
+    return 0
+  fi
+  say "Installing the worker\${WORKER_VERSION:+ $WORKER_VERSION}"
+  install_and_start_worker
 }
 
 steps() {

@@ -111,6 +111,10 @@ case "$1" in
     nohup "${process.execPath}" "${WORKER_BIN}" --hub "$BAND_HUB_URL" --token "$BAND_WORKER_TOKEN" \\
       --root "${root}" --state-dir "${state}" >"${home}/worker.log" 2>&1 </dev/null &
     echo $! >"${home}/worker.pid"
+    echo install-service >>"${home}/wrapper-calls"
+    ;;
+  status)
+    [ -f "${home}/worker.pid" ] && kill -0 "$(cat "${home}/worker.pid")" 2>/dev/null
     ;;
 esac
 `,
@@ -169,7 +173,11 @@ function makeRepo(base: string, name: string, body: string): { bare: string; wor
 }
 
 const startWorkerLine = `nohup "${process.execPath}" "${WORKER_BIN}" --hub "$BAND_HUB_URL" --token "$BAND_BOOTSTRAP_TOKEN" --root "$OUT/root" --state-dir "$OUT/state" >"$OUT/worker.log" 2>&1 </dev/null &
-echo $! >"$OUT/worker.pid"`;
+echo $! >"$OUT/worker.pid"
+cp "$OUT/worker.pid" "$HOME/worker.pid"
+mkdir -p "$HOME/.band/worker-service" "$HOME/Library/LaunchAgents"
+echo "BAND_WORKER_ID=\\"$BAND_WORKER_ID\\"" >"$HOME/.band/worker-service/worker.env"
+echo "<string>$BAND_WORKER_ID</string>" >"$HOME/Library/LaunchAgents/app.band.worker.plist"`;
 
 let server: ServerHandle;
 let api: ReturnType<typeof call>;
@@ -329,6 +337,160 @@ ${startWorkerLine}
     const view = await status(made.id);
     expect(view.commitSha).toBe(pinned);
     await waitOnline(view.hostId as string);
+  }, 90_000);
+});
+
+describe("the pinned worker after a provisioning repo (S1, S2)", () => {
+  it("installs the hub's worker version after a start command that only writes a marker", async () => {
+    const pinned = await makeServer("band-provision-pinned-", { BAND_HUB_VERSION: "0.1.1" });
+    try {
+      const pinnedApi = call(pinned.url);
+      const out = tmp("band-provision-pinned-out-");
+      const repo = makeRepo(
+        base,
+        "marker",
+        `#!/bin/sh
+OUT="${out}"
+echo marker >"$OUT/marker"
+env | grep -E '^BAND_(WORKER_VERSION|WORKER_ID)=' >"$OUT/env"
+`,
+      );
+      await pinnedApi.m("provisioning.updateSettings", {
+        repoUrl: `file://${repo.bare}`,
+        branch: "main",
+        command: "band/provision.sh",
+      });
+      const made = await pinnedApi.m<Command>("provisioning.createCommand", {
+        hubUrl: pinned.url,
+      });
+      const machine = makeMachine();
+      // Install through npm like a real machine, with an npm that records what it was asked for.
+      delete machine.env.BAND_WORKER_CMD;
+      const bin = join(machine.home, "fake-bin");
+      mkdirSync(bin);
+      const npmLog = join(machine.home, "npm-args");
+      writeFileSync(
+        join(bin, "npm"),
+        `#!/bin/sh
+echo "$*" >"${npmLog}"
+PREFIX=""
+while [ $# -gt 0 ]; do [ "$1" = --prefix ] && PREFIX="$2"; shift; done
+mkdir -p "$PREFIX/bin"
+cp "${join(machine.home, "band-worker-wrapper.sh")}" "$PREFIX/bin/band-worker"
+`,
+      );
+      chmodSync(join(bin, "npm"), 0o755);
+      machine.env.PATH = `${bin}:${machine.env.PATH}`;
+      const result = await run(machine, made.command);
+      expect(result.code).toBe(0);
+      expect(existsSync(join(out, "marker"))).toBe(true);
+      const names = readFileSync(join(out, "env"), "utf8");
+      expect(names).toContain("BAND_WORKER_VERSION=0.1.1");
+      expect(readFileSync(npmLog, "utf8")).toContain("@band-app/worker@0.1.1");
+      const view = (await pinnedApi.q<{ commands: View[] }>("provisioning.status", { id: made.id }))
+        .commands[0];
+      expect(view.log).toContain("Installing the worker 0.1.1");
+      await waitFor(
+        async () =>
+          (
+            await pinnedApi.q<{
+              hosts: Array<{ id: string; status: string; workerVersion?: string }>;
+            }>("hosts.list")
+          ).hosts.find((h) => h.id === view.hostId && h.status === "online"),
+        { label: "pinned host online", timeoutMs: 45_000 },
+      );
+      expect(readFileSync(join(machine.home, "wrapper-calls"), "utf8").trim()).toBe(
+        "install-service",
+      );
+    } finally {
+      await pinned.close();
+    }
+  }, 90_000);
+});
+
+describe("a start command that installs the service itself (S3)", () => {
+  it("skips Band's own install and leaves one service", async () => {
+    const out = tmp("band-provision-self-out-");
+    const repo = makeRepo(
+      base,
+      "self",
+      `#!/bin/sh
+OUT="${out}"
+mkdir -p "$OUT/root" "$HOME/.band/worker-service"
+echo "BAND_WORKER_ID="$BAND_WORKER_ID"" >"$HOME/.band/worker-service/worker.env"
+${startWorkerLine}
+`,
+    );
+    await api.m("provisioning.updateSettings", {
+      repoUrl: `file://${repo.bare}`,
+      branch: "main",
+      command: "band/provision.sh",
+    });
+    const made = await create("self");
+    const machine = makeMachine();
+    // The start command starts the worker itself, so the machine's status reports it running.
+    const wrapper = machine.env.BAND_WORKER_CMD;
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh
+case "$1" in
+  status) kill -0 "$(cat "${out}/worker.pid")" 2>/dev/null ;;
+  *) echo "$*" >>"${machine.home}/wrapper-calls" ;;
+esac
+`,
+    );
+    const result = await run(machine, made.command);
+    expect(result.code).toBe(0);
+    pids.push(Number(readFileSync(join(out, "worker.pid"), "utf8").trim()));
+    expect(existsSync(join(machine.home, "wrapper-calls"))).toBe(false);
+    const view = await status(made.id);
+    expect(view.log).toContain("already installed and running: skipping Band's worker install");
+    await waitOnline(view.hostId as string);
+  }, 90_000);
+});
+
+describe("root steps after a skipped install", () => {
+  it("still enables lingering when the repo installed the service itself", async () => {
+    const out = tmp("band-provision-linger-out-");
+    const repo = makeRepo(
+      base,
+      "linger",
+      `#!/bin/sh
+OUT="${out}"
+mkdir -p "$OUT/root"
+${startWorkerLine}
+`,
+    );
+    await api.m("provisioning.updateSettings", {
+      repoUrl: `file://${repo.bare}`,
+      branch: "main",
+      command: "band/provision.sh",
+    });
+    const made = await create("linger");
+    const machine = makeMachine();
+    // The root steps run on Linux only, so pose as Linux with a fake uname, and give the machine
+    // a sudo that works without a password and records what it was asked to run.
+    const bin = join(machine.home, "fake-bin");
+    mkdirSync(bin);
+    const sudoLog = join(machine.home, "sudo-calls");
+    writeFileSync(
+      join(bin, "uname"),
+      '#!/bin/sh\n[ "$1" = -s ] && echo Linux || /usr/bin/uname "$@"\n',
+    );
+    writeFileSync(
+      join(bin, "sudo"),
+      `#!/bin/sh\n[ "$2" = true ] && exit 0\necho "$*" >>"${sudoLog}"\n`,
+    );
+    chmodSync(join(bin, "uname"), 0o755);
+    chmodSync(join(bin, "sudo"), 0o755);
+    machine.env.PATH = `${bin}:${machine.env.PATH}`;
+    machine.env.BAND_PROVISION_ROOT_STEPS = "on";
+    const result = await run(machine, made.command);
+    expect(result.code).toBe(0);
+    pids.push(Number(readFileSync(join(out, "worker.pid"), "utf8").trim()));
+    expect(existsSync(join(machine.home, "wrapper-calls"))).toBe(false);
+    expect(readFileSync(sudoLog, "utf8")).toMatch(/^-n loginctl enable-linger /m);
+    await waitOnline((await status(made.id)).hostId as string);
   }, 90_000);
 });
 
