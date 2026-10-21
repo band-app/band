@@ -193,7 +193,11 @@ export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
     <>
       <RepoRow
         label="File"
-        description={<span className="break-all font-mono">{data.source}</span>}
+        description={
+          <span className="font-mono" title={data.source}>
+            .band/environment.json
+          </span>
+        }
         readOnly
       >
         {data.issues.length > 0 ? (
