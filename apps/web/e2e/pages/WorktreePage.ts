@@ -5066,8 +5066,25 @@ export class WorktreePage {
     text: string,
     modifiers: Array<"Meta" | "Control" | "Shift"> = [],
   ): Promise<void> {
+    await this.clickTerminalLinkInRow(text, modifiers, "exact");
+  }
+
+  /** Click the link on the terminal row whose text contains `token`, for a link that
+   *  wraps over several rows. `token` must appear on one row only. */
+  async clickTerminalRowContaining(
+    token: string,
+    modifiers: Array<"Meta" | "Control" | "Shift"> = [],
+  ): Promise<void> {
+    await this.clickTerminalLinkInRow(token, modifiers, "contains");
+  }
+
+  private async clickTerminalLinkInRow(
+    text: string,
+    modifiers: Array<"Meta" | "Control" | "Shift">,
+    match: "exact" | "contains",
+  ): Promise<void> {
     await test.step(`Click terminal link "${text}"`, async () => {
-      const rect = await this.waitForTerminalRowRect(text);
+      const rect = await this.waitForTerminalRowRect(text, match);
       const y = rect.y + rect.height / 2;
       // xterm paints the link to a surface with no per-link DOM node, so we
       // hover the row to make its linkifier resolve the link, then click.
@@ -5127,18 +5144,26 @@ export class WorktreePage {
    *  is painted, returning its viewport rectangle. */
   private async waitForTerminalRowRect(
     text: string,
+    match: "exact" | "contains" = "exact",
   ): Promise<{ x: number; y: number; width: number; height: number }> {
     let rect: { x: number; y: number; width: number; height: number } | null = null;
     await expect
       .poll(
         async () => {
-          rect = await this.page.evaluate((target) => {
-            const rows = Array.from(document.querySelectorAll<HTMLElement>(".xterm-rows > div"));
-            const row = rows.find((r) => (r.textContent ?? "").trim() === target);
-            if (!row) return null;
-            const r = row.getBoundingClientRect();
-            return { x: r.x, y: r.y, width: r.width, height: r.height };
-          }, text);
+          rect = await this.page.evaluate(
+            ({ target, mode }) => {
+              const rows = Array.from(document.querySelectorAll<HTMLElement>(".xterm-rows > div"));
+              const row = rows.find((r) =>
+                mode === "exact"
+                  ? (r.textContent ?? "").trim() === target
+                  : (r.textContent ?? "").includes(target),
+              );
+              if (!row) return null;
+              const r = row.getBoundingClientRect();
+              return { x: r.x, y: r.y, width: r.width, height: r.height };
+            },
+            { target: text, mode: match },
+          );
           return rect;
         },
         { timeout: 15_000 },

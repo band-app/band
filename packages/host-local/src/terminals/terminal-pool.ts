@@ -366,6 +366,9 @@ export class TerminalPool {
     // terminal supports DEC 2026 synchronized output, which xterm.js does,
     // and unlocks the scroll regions. Claude ignores it inside tmux.
     env.CLAUDE_CODE_FORCE_SYNC_OUTPUT = "1";
+    // Programs that check supports-hyperlinks (Claude Code, npm, gh) then emit OSC 8 links
+    // whose target is the whole URL on every wrapped row. xterm.js renders OSC 8.
+    env.FORCE_HYPERLINK = "1";
     // Remove PORT so worktree dev servers don't inherit the Band server's port
     delete env.PORT;
 

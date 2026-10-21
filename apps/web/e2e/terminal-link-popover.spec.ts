@@ -13,7 +13,7 @@
  * so the printed URL is locatable text.
  */
 
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -44,6 +44,7 @@ let workdir: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdir = realpathSync(mkdtempSync(join(tmpdir(), "band-term-link-popover-")));
+  writeFileSync(join(workdir, "wrap.sh"), WRAP_SCRIPT);
   seedState(tmpHome, {
     repos: [
       {
@@ -57,6 +58,35 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, { tokenSecret: TOKEN, useWebGLTerminalRenderer: false });
   server = await startServer({ tmpHome });
 });
+
+// Prints link text for the wrap tests at the terminal's real width. `fill N` is N letters.
+// hard: Ink-style rows, each hard-newlined and indented by two spaces, the URL running to
+// the right edge and a ")" after it. soft: one long line xterm wraps itself.
+const WRAP_SCRIPT = String.raw`
+cols=$(stty size | cut -d' ' -f2)
+fill() { printf '%*s' "$1" '' | tr ' ' a; }
+len() { printf %s "$1" | wc -c | tr -d ' '; }
+mode=$1; tag=$2; out=$3
+case $mode in
+  hard)
+    pre="  Authorize ("
+    t1="https://example.test/$tag-k1x-"; t2="$tag-k2x-"; t3="$tag-k3x-"; t4="$tag-k4x-end"
+    f1=$(fill $((cols - $(len "$pre$t1"))))
+    f2=$(fill $((cols - 2 - $(len "$t2"))))
+    f3=$(fill $((cols - 2 - $(len "$t3"))))
+    printf '%s' "$t1$f1$t2$f2$t3$f3$t4" > "$out"
+    printf '%s\n  %s\n  %s\n  %s)\n' "$pre$t1$f1" "$t2$f2" "$t3$f3" "$t4"
+    ;;
+  soft)
+    u="https://example.test/$(fill $((cols + 5)))$tag-k2x-end"
+    printf '%s' "$u" > "$out"
+    printf '%s\n' "$u"
+    ;;
+  osc)
+    printf '\033]8;;https://osc.test/target?x=1\033\\%s\033]8;;\033\\\n' "$(fill $((cols + 3)))$tag-k2x-end"
+    ;;
+esac
+`;
 
 test.afterAll(async () => {
   await server.close();
@@ -135,5 +165,74 @@ test.describe("Terminal link menu", () => {
     await worktreePage.clickTerminalFileLink(URL_TEXT, [MOD]);
     await request;
     await expect(menu.popover).toBeHidden();
+  });
+
+  test("a URL an agent hard-wrapped over several rows opens whole from any row", async ({
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const { worktreePage, menu } = await printLink(page);
+    const urlFile = join(workdir, "hard.url");
+    await worktreePage.runInTerminal(`sh wrap.sh hard hardA ${urlFile}`);
+
+    await worktreePage.clickTerminalRowContaining("hardA-k3x-");
+
+    await expect(menu.popover).toBeVisible();
+    const full = readFileSync(urlFile, "utf8");
+    expect(full).toContain("hardA-k4x-end");
+    await expect(menu.url).toHaveText(full);
+    await menu.copy();
+    expect(await menu.readClipboard()).toBe(full);
+  });
+
+  test("a URL that ends mid-row is not extended by the next row", async ({ page }) => {
+    test.setTimeout(120_000);
+    const { worktreePage, menu } = await printLink(page);
+    await worktreePage.runInTerminal("printf 'see https://a.test/x\\nnext line\\n'");
+
+    await worktreePage.clickTerminalFileLink("see https://a.test/x");
+
+    await expect(menu.popover).toBeVisible();
+    await expect(menu.url).toHaveText("https://a.test/x");
+  });
+
+  test("a URL xterm soft-wrapped still opens whole", async ({ page }) => {
+    test.setTimeout(120_000);
+    const { worktreePage, menu } = await printLink(page);
+    const urlFile = join(workdir, "soft.url");
+    await worktreePage.runInTerminal(`sh wrap.sh soft softB ${urlFile}`);
+
+    await worktreePage.clickTerminalRowContaining("softB-k2x-");
+
+    await expect(menu.popover).toBeVisible();
+    await expect(menu.url).toHaveText(readFileSync(urlFile, "utf8"));
+  });
+
+  test("an OSC 8 hyperlink that wraps opens its target from any row", async ({ page, context }) => {
+    test.setTimeout(120_000);
+    const { worktreePage, menu } = await printLink(page);
+    await worktreePage.runInTerminal("sh wrap.sh osc oscC /dev/null");
+
+    await worktreePage.clickTerminalRowContaining("oscC-k2x-");
+    await expect(menu.popover).toBeVisible();
+    await expect(menu.url).toHaveText("https://osc.test/target?x=1");
+    await menu.dismissWithEscape();
+
+    const request = context.waitForEvent(
+      "request",
+      (r) => r.url() === "https://osc.test/target?x=1",
+    );
+    await worktreePage.clickTerminalRowContaining("oscC-k2x-", [MOD]);
+    await request;
+    await expect(menu.popover).toBeHidden();
+  });
+
+  test("a new pane asks programs for OSC 8 hyperlinks", async ({ page }) => {
+    test.setTimeout(120_000);
+    const { worktreePage } = await printLink(page);
+    await worktreePage.runInTerminal("echo force-hyperlink=$FORCE_HYPERLINK");
+    await worktreePage.waitForTerminalOutput("force-hyperlink=1");
   });
 });
