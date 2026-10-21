@@ -83,7 +83,7 @@ describe("lease and fencing", () => {
 
   it("starts nothing in a folder another host owns, even with a live lease", async () => {
     await renew(60_000, [repo]);
-    await assert.rejects(spawn("t4"), /continued on another host/);
+    await assert.rejects(spawn("t4"), /continued on another worker/);
     await renew(60_000, []);
     await spawn("t5");
   });

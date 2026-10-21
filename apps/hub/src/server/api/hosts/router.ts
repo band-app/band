@@ -60,7 +60,7 @@ export const hostsRouter = t.router({
     )
     .query(async ({ input, ctx }) => {
       const all = tokenService.listHosts(input.limit);
-      // With `BAND_LOCAL_HOST=off` the hub's own machine takes no work, so the list leaves it out.
+      // With `BAND_LOCAL_WORKER=off` the hub's own machine takes no work, so the list leaves it out.
       // It stays a host inside the hub.
       const hosts = all.filter((h) => h.id !== "local" || h.usable);
       // The local row has no hello, so describe this machine live.
@@ -209,7 +209,7 @@ export const hostsRouter = t.router({
     .input(z.object({ hostId: z.string().min(1), trust: z.enum(HOST_TRUST_LEVELS) }))
     .mutation(({ input }) => {
       if (!hostTrustService.setTrust(input.hostId, input.trust)) {
-        throw new TRPCError({ code: "NOT_FOUND", message: `No host "${input.hostId}"` });
+        throw new TRPCError({ code: "NOT_FOUND", message: `No worker "${input.hostId}"` });
       }
       emit({ kind: "host-status-changed", hostId: input.hostId });
       return { hostId: input.hostId, trust: input.trust };

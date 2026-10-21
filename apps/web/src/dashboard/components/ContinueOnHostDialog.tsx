@@ -43,7 +43,7 @@ export function ContinuePromptHost() {
       offer={answer.offer}
       chatId={chatId}
       blockedMessage={answer.code === "CONTINUE_NOT_POSSIBLE" ? answer.error : undefined}
-      title="Host is offline"
+      title="Worker is offline"
       onClose={request.resolve}
     />
   );
@@ -68,7 +68,7 @@ export function ContinueOnHostDialog({
   offer,
   chatId,
   blockedMessage,
-  title = "Open on another host",
+  title = "Open on another worker",
   onClose,
 }: ContinueOnHostDialogProps) {
   const queryClient = useQueryClient();

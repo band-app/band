@@ -1,4 +1,4 @@
-/** IPC for "this computer as a worker" (the first-run prompt and Settings > Hosts). */
+/** IPC for "this computer as a worker" (the first-run prompt and Settings > Workers). */
 
 import { Channels } from "../../shared/ipc-channels.js";
 import type { ThisComputerAddArgs, ThisComputerResult } from "../../shared/types.js";

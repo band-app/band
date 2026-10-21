@@ -29,15 +29,15 @@ describe("worktreeDisplay", () => {
 
   it("falls back without the raw host id when the worktree or host is unknown", () => {
     const d = worktreeDisplay("other-x@h-aaaaaaaaaaaa", repos, hosts);
-    assert.equal(d.label, "other-x on unknown host");
+    assert.equal(d.label, "other-x on unknown worker");
   });
 });
 
 describe("hostDisplay", () => {
   it("never returns an unknown id", () => {
-    assert.equal(hostDisplay("h-123456789abc", hosts), "unknown host");
+    assert.equal(hostDisplay("h-123456789abc", hosts), "unknown worker");
     assert.equal(hostDisplay("h-2e22f90bef5f", hosts), "mac");
     assert.equal(hostDisplay(undefined, hosts), "This hub");
-    assert.equal(hostDisplay("h-123456789abc", undefined), "unknown host");
+    assert.equal(hostDisplay("h-123456789abc", undefined), "unknown worker");
   });
 });

@@ -2,7 +2,7 @@
 
 A repository can say what its worktrees need by committing `.band/environment.json`. Band reads it when it sets up a worktree and shows it in the Environment section of the repo's page in Settings > Repos. It is the repo's answer to "what has to be installed and running before an agent can work here".
 
-This page covers the file format, how it relates to `.devcontainer/devcontainer.json` and `.band/config.json`, and how Band builds and caches an image from it. Choosing a host for a worktree and booting the image in a container are later steps. Today Band parses the file, validates it, runs its commands, compares `requires` with the tools a host reports and builds the image.
+This page covers the file format, how it relates to `.devcontainer/devcontainer.json` and `.band/config.json`, and how Band builds and caches an image from it. Choosing a worker for a worktree and booting the image in a container are later steps. Today Band parses the file, validates it, runs its commands, compares `requires` with the tools a worker reports and builds the image.
 
 ## The three layers
 
@@ -12,7 +12,7 @@ This page covers the file format, how it relates to `.devcontainer/devcontainer.
 | 2. Repo toolchain | Node 24 and pnpm, Python and uv, Go, Postgres client, Playwright browsers | The repo: a devcontainer, or `build` in `environment.json` |
 | 3. Worktree setup | `pnpm install`, migrations, seed data, dev servers | The repo: `install`, `start`, `terminals` and `teardown` in `environment.json` |
 
-`environment.json` describes layers 2 and 3. Layer 1 belongs to the host.
+`environment.json` describes layers 2 and 3. Layer 1 belongs to the worker.
 
 ## Example
 
@@ -54,7 +54,7 @@ When a worktree is created, Band runs `install` and then `start` in a terminal t
 
 On removal, Band runs `teardown` and waits for it, as it does for `teardown` in `config.json`.
 
-The commands run on the host that owns the worktree, so a worktree on a worker runs them on the worker. Band reads the file from the worktree's worktree first and from the repo checkout second, so an untracked or ignored `environment.json` in the main checkout also works.
+The commands run on the worker that owns the worktree, so a worktree on a worker runs them on the worker. Band reads the file from the worktree's worktree first and from the repo checkout second, so an untracked or ignored `environment.json` in the main checkout also works.
 
 ## Relation to `.band/config.json`
 
@@ -72,13 +72,13 @@ Use `.devcontainer/devcontainer.json` for the toolchain when you can. It is a st
 
 Band does not build these yet. It checks that the file exists and nothing more.
 
-## Requires and host tools
+## Requires and worker tools
 
-`requires` maps a tool name to a version range. Band compares it with the versions a host reports. A worker reports its tools in its hello message and `hosts.list` returns them as `tools`. The tools are `node`, `python` (from `python3`), `go`, `pnpm`, `uv`, `docker` and `git`, and a tool that is not installed is left out. `python3` is accepted as a name in `requires`.
+`requires` maps a tool name to a version range. Band compares it with the versions a worker reports. A worker reports its tools in its hello message and `workers.list` returns them as `tools`. The tools are `node`, `python` (from `python3`), `go`, `pnpm`, `uv`, `docker` and `git`, and a tool that is not installed is left out. `python3` is accepted as a name in `requires`.
 
 A range can be `>=24`, `>24`, `<=3`, `^3.12`, `~1.22.1`, `24` or `24.x`. Space separated comparators combine (`>=20 <23`), and `||` joins alternatives (`18 || >=20`). Pre-release tags are ignored.
 
-The Environment section of the repo's page in Settings > Repos lists each worker and, for one that does not meet `requires`, what is missing and the version it has. Nothing blocks a worktree on an unmet requirement yet. Choosing hosts by `requires` comes with placement.
+The Environment section of the repo's page in Settings > Repos lists each worker and, for one that does not meet `requires`, what is missing and the version it has. Nothing blocks a worktree on an unmet requirement yet. Choosing workers by `requires` comes with placement.
 
 ## Checking a file
 
@@ -95,7 +95,7 @@ It prints `OK <file>` and exits 0, or prints each problem as `<key path>: <messa
   isolation: must be one of "worktree", "container", "vm" (got "docker")
 ```
 
-The hub reads the file, so the path must exist on the hub's machine. The same check is available as `environment.validate` over tRPC, and `environment.forRepo` returns a repo's environment with the host check.
+The hub reads the file, so the path must exist on the hub's machine. The same check is available as `environment.validate` over tRPC, and `environment.forRepo` returns a repo's environment with the worker check.
 
 ## Environment images
 
@@ -110,14 +110,14 @@ The same section shows it too: the current image, the status and log of the late
 
 ### What goes into an image
 
-The builder reads the repository from git, at the tip of `origin/<default branch>` (the local branch when the repo has no remote). Uncommitted files do not count. It exports that commit to a temporary directory on the builder host, then:
+The builder reads the repository from git, at the tip of `origin/<default branch>` (the local branch when the repo has no remote). Uncommitted files do not count. It exports that commit to a temporary directory on the builder worker, then:
 
-1. Builds layer 2 from `build`. A `dockerfile` is built with `docker build`, using the Dockerfile's own directory as the context. A `devcontainer` is built with `devcontainer build` (the devcontainers CLI, `npm install -g @devcontainers/cli`, must be on the builder host). An `image` is pulled.
+1. Builds layer 2 from `build`. A `dockerfile` is built with `docker build`, using the Dockerfile's own directory as the context. A `devcontainer` is built with `devcontainer build` (the devcontainers CLI, `npm install -g @devcontainers/cli`, must be on the builder worker). An `image` is pulled.
 2. Adds layer 1. A final stage copies the worker (`/opt/band-worker`) and the Node binary from the worker base image into `/opt/band`, and installs a `band-worker` command in `/usr/local/bin`. The toolchain needs no Node of its own. The worker base image is `band-worker:latest` (build it with `docker build -f docker/worker.Dockerfile -t band-worker .`) or the image named by `environmentBuilder.workerImage`. It is built on Debian, so the toolchain image should be glibc based.
 3. Runs `install` in a container of that image, with the default-branch snapshot copied to `/workspace`, and commits the result. The snapshot has no `.git`. The image carries the labels `band.environment.key` and `band.environment.commit`. With no `install`, this step only tags the image.
 4. Pushes the image when `environmentBuilder.registry` is set.
 
-The image is tagged `band-env/<repo>:<first 16 characters of the key>`, under the registry prefix when there is one. The intermediate tags are removed after the build, and older `band-env/<repo>` images stay on the host until you prune them.
+The image is tagged `band-env/<repo>:<first 16 characters of the key>`, under the registry prefix when there is one. The intermediate tags are removed after the build, and older `band-env/<repo>` images stay on the worker until you prune them.
 
 ### When an image rebuilds
 
@@ -127,9 +127,9 @@ The key is a SHA-256 over:
 - the object hash of the Dockerfile or `devcontainer.json`, and of the directory next to it (a Dockerfile at the repository root counts only itself and `.dockerignore`, because its context would otherwise be the whole repository);
 - the object hash of each lockfile and version file at the repository root: `pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock`, `bun.lockb`, `uv.lock`, `poetry.lock`, `Pipfile.lock`, `requirements.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `composer.lock`, `mise.toml`, `.tool-versions`, `.nvmrc`, `.node-version` and `.python-version`;
 - the image name of a `build.image`;
-- the ID of the worker base image on the builder host.
+- the ID of the worker base image on the builder worker.
 
-A build for a key that already has a ready image on the builder host does nothing and reports a cache hit. If someone removed that image from the host, the build runs again. `band env build --force` builds even on a cache hit. Changes outside this list, such as source files, do not rebuild the image, because a runner checks out its branch over the snapshot and runs `install` again only when the lockfile differs.
+A build for a key that already has a ready image on the builder worker does nothing and reports a cache hit. If someone removed that image from the worker, the build runs again. `band env build --force` builds even on a cache hit. Changes outside this list, such as source files, do not rebuild the image, because a runner checks out its branch over the snapshot and runs `install` again only when the lockfile differs.
 
 A failed build is recorded with its log and never replaces the last ready image. The current image of a repo is its newest ready build. A key that failed is not retried automatically. Change a file in the key, or run `band env build`.
 
@@ -137,7 +137,7 @@ Builds start in three ways. `band env build` and the button start one by hand. T
 
 ### Where it builds
 
-Builds run on the builder host: the hub's own machine, or a worker with Docker. Set it in `~/.band/settings.json` (or with `settings.update`):
+Builds run on the builder worker: the hub's own machine, or a worker with Docker. Set it in `~/.band/settings.json` (or with `settings.update`):
 
 ```json
 {
@@ -149,6 +149,6 @@ Builds run on the builder host: the hub's own machine, or a worker with Docker. 
 }
 ```
 
-`hostId` defaults to `local`. The repo needs a checkout on that host. `registry` is optional, and without it the image stays on the builder host. Every command goes through the host's `exec` with each credential-like variable (names with TOKEN, SECRET, PASSWORD, KEY and the like) and every `BAND_*` variable of the hub's environment blanked, because a build runs commands from the repository. Do not point `hostId` at a machine whose environment holds secrets you would not run a repository's scripts next to.
+`hostId` defaults to `local`. The repo needs a checkout on that worker. `registry` is optional, and without it the image stays on the builder worker. Every command goes through the worker's `exec` with each credential-like variable (names with TOKEN, SECRET, PASSWORD, KEY and the like) and every `BAND_*` variable of the hub's environment blanked, because a build runs commands from the repository. Do not point `hostId` at a machine whose environment holds secrets you would not run a repository's scripts next to.
 
 The `docker` runner hook boots the current image (`docs/runner-hooks.md`). Not done yet: snapshots, and a settings page for `environmentBuilder`.

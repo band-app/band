@@ -108,7 +108,7 @@ class VoiceService {
       try {
         host = hostRegistry.hostById(hostId);
       } catch {
-        throw new SpeechError("host_offline", `Host ${hostId} is not registered.`);
+        throw new SpeechError("host_offline", `Worker ${hostId} is not registered.`);
       }
       let result: Awaited<ReturnType<typeof host.speech.transcribe>>;
       try {
@@ -118,12 +118,12 @@ class VoiceService {
         );
       } catch (err) {
         if (err instanceof HostOfflineError) {
-          throw new SpeechError("host_offline", `Host ${hostId} is offline.`);
+          throw new SpeechError("host_offline", `Worker ${hostId} is offline.`);
         }
         if (err instanceof SpeechError) throw err;
         throw new SpeechError(
           "unreachable",
-          `Host ${hostId} could not transcribe: ${scrubSecrets(String((err as Error)?.message ?? err), apiKey)}`,
+          `Worker ${hostId} could not transcribe: ${scrubSecrets(String((err as Error)?.message ?? err), apiKey)}`,
         );
       }
       if (result.error) {
@@ -165,7 +165,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new SpeechError("timeout", "The host did not answer in time.")),
+      () => reject(new SpeechError("timeout", "The worker did not answer in time.")),
       ms,
     );
   });

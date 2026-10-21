@@ -181,7 +181,7 @@ export function OfflineWorktreeNotice({
           data-testid="offline-notice__open-elsewhere"
           onClick={() => setDialogOpen(true)}
         >
-          Open on another host
+          Open on another worker
         </Button>
       ) : null}
       {leaseLeftMs !== null && leaseLeftMs > 0 ? (
@@ -206,7 +206,7 @@ export function OfflineSidepanelPlaceholder({ worktreeId }: { worktreeId: string
       data-testid="offline-sidepanel"
       className="flex h-full flex-col items-start gap-2 p-3 text-xs text-muted-foreground"
     >
-      <p>The host is offline, so its files and changes are not available.</p>
+      <p>The worker is offline, so its files and changes are not available.</p>
       {checkpointAt !== null ? (
         <button
           type="button"

@@ -27,12 +27,13 @@ git config --global init.defaultBranch main >/dev/null 2>&1 || true
 # A ready-to-use sample repo on the persisted volume. A registered repo
 # whose directory doesn't exist on disk fails to spawn terminals, so we always
 # provide at least one valid one.
-# With BAND_LOCAL_HOST=off (the image default) worktrees run on workers, so the
+# With BAND_LOCAL_WORKER=off (the image default) worktrees run on workers, so the
 # sample repo would land in the container and is skipped.
-export BAND_LOCAL_HOST="${BAND_LOCAL_HOST:-off}"
+# BAND_LOCAL_HOST is the older name of BAND_LOCAL_WORKER.
+export BAND_LOCAL_WORKER="${BAND_LOCAL_WORKER:-${BAND_LOCAL_HOST:-off}}"
 SAMPLE="$HOME/repos/sample"
 LOCAL_WORKTREES=true
-case "$(printf '%s' "$BAND_LOCAL_HOST" | tr '[:upper:]' '[:lower:]')" in
+case "$(printf '%s' "$BAND_LOCAL_WORKER" | tr '[:upper:]' '[:lower:]')" in
   off|false|0) LOCAL_WORKTREES=false ;;
 esac
 if [ "$LOCAL_WORKTREES" = true ] && [ ! -d "$SAMPLE/.git" ]; then
@@ -52,7 +53,7 @@ echo " State: ${BAND_DIR} (mounted volume)"
 if [ "$LOCAL_WORKTREES" = true ]; then
   echo " Sample repo: ${SAMPLE} (auto-registered once the server is up)"
 else
-  echo " Local worktrees are off (BAND_LOCAL_HOST=off): add a worker to run worktrees"
+  echo " Local worktrees are off (BAND_LOCAL_WORKER=off): add a worker to run worktrees"
 fi
 echo "──────────────────────────────────────────────────────────────"
 

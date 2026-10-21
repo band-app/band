@@ -38,10 +38,10 @@ describe("doctor host checks", () => {
     assert.equal(
       out,
       [
-        "WARN host         no swap and 7.8 GiB of memory: builds that agents run at once can be killed for running out of memory",
+        "WARN worker       no swap and 7.8 GiB of memory: builds that agents run at once can be killed for running out of memory",
         "       fix: sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile",
         "       fix: grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab",
-        "WARN host         fs.inotify.max_user_watches is 61656: agents that watch files fail with ENOSPC",
+        "WARN worker       fs.inotify.max_user_watches is 61656: agents that watch files fail with ENOSPC",
         "       fix: echo 'fs.inotify.max_user_watches=524288' | sudo tee /etc/sysctl.d/60-band-inotify.conf",
         "       fix: sudo sysctl --system",
         "",

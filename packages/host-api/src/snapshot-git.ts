@@ -120,7 +120,7 @@ export async function checkoutSnapshot(
       if (!ancestor && options.onDivergentTip) await options.onDivergentTip(tip);
       else if (!ancestor) {
         throw new Error(
-          `Branch ${snapshot.branch} on this host has commits that the checkpoint does not contain.`,
+          `Branch ${snapshot.branch} on this worker has commits that the checkpoint does not contain.`,
         );
       }
     }

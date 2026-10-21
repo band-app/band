@@ -67,7 +67,7 @@ export type GroupBy = "repo" | "origin" | "host";
 export const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: "repo", label: "Repo" },
   { value: "origin", label: "Origin" },
-  { value: "host", label: "Host" },
+  { value: "host", label: "Worker" },
 ];
 
 export function parseGroupBy(raw: string | null): GroupBy {

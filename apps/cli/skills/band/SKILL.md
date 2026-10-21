@@ -45,7 +45,7 @@ band schema "worktrees create"
 band repos list
 ```
 
-Text output is a table with the columns `NAME`, `PATH`, `WORKTREES`, `KIND`, `URL` and `CLONES`. `URL` is the remote the repo is identified by (`-` for a plain folder or a repo with no remote). `CLONES` lists `host:folder` for each host that holds the repo. `PATH` is the folder on the hub's own machine and is empty when the hub holds no checkout.
+Text output is a table with the columns `NAME`, `PATH`, `WORKTREES`, `KIND`, `URL` and `CLONES`. `URL` is the remote the repo is identified by (`-` for a plain folder or a repo with no remote). `CLONES` lists `worker:folder` for each worker that holds the repo. `PATH` is the folder on the hub's own machine and is empty when the hub holds no checkout.
 JSON output: `{"repos": [{"name": "...", "path": "...", "kind": "git", "worktreeCount": N, "remoteUrl": "..." | null, "clones": [{"hostId": "...", "path": "..."}]}]}`
 
 ### Register an existing repository as a repo
@@ -53,27 +53,27 @@ JSON output: `{"repos": [{"name": "...", "path": "...", "kind": "git", "worktree
 ```sh
 band repos add <path> [--label <string>]
 band repos add --url <url> [--branch <branch>] [--label <string>]
-band repos add --from <host> <path> [--add-root] [--label <string>]
+band repos add --from <worker> <path> [--add-root] [--label <string>]
 ```
 
 A repo is identified by its remote URL and default branch. The hub keeps no path of its own for a repo, and each worker maps the URL to a folder.
 
 - `<path>` registers a git repository on the hub's machine and reads its `origin` URL and default branch. Returns the repo name.
 - `--url` registers a repo by its remote URL. A worker clones it to `~/band/repos/<owner>/<name>` the first time a worktree for it lands there. Without `--branch` the hub asks the remote for its default branch.
-- `--from <host> <path>` registers the repo that a folder on a host holds (host ids are in `band hosts list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
+- `--from <worker> <path>` registers the repo that a folder on a worker holds (worker ids are in `band workers list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
 
-A folder with no remote is registered without a URL and can only run on the host that holds it.
+A folder with no remote is registered without a URL and can only run on the worker that holds it.
 
 ### Change a repo's settings
 
 ```sh
-band repos set <name> --hosts mac,contabo|all --primary mac
+band repos set <name> --workers mac,contabo|all --primary mac
 band repos set <name> --checkpoints on|off|default
 ```
 
-`--checkpoints` sets whether the hub keeps checkpoints of the repo's worktrees on workers. `default` is on for a repo available on every host and off for one limited with `--hosts`. Needs an admin token. `band repos list` shows the effective value in the `CHECKPOINTS` column.
+`--checkpoints` sets whether the hub keeps checkpoints of the repo's worktrees on workers. `default` is on for a repo available on every worker and off for one limited with `--workers`. Needs an admin token. `band repos list` shows the effective value in the `CHECKPOINTS` column.
 
-`--hosts` limits the repo to those hosts (ids or names from `band hosts list`, or `all`). It is a hard rule: a worktree, clone or placement on another host fails with `<repo> is only available on <hosts>`, whether it comes from the CLI, the UI, the `worktrees_create` MCP tool or automatic placement. `--primary` names the host that lists the repo's default-branch worktree (`auto` lets the hub pick). A branch has a Band worktree on one host only: creating it on a second host fails with `<branch> is already on <host>` and the existing worktree id. Both flags need an admin token.
+`--workers` limits the repo to those workers (ids or names from `band workers list`, or `all`). It is a hard rule: a worktree, clone or placement on another worker fails with `<repo> is only available on <workers>`, whether it comes from the CLI, the UI, the `worktrees_create` MCP tool or automatic placement. `--primary` names the worker that lists the repo's default-branch worktree (`auto` lets the hub pick). A branch has a Band worktree on one worker only: creating it on a second worker fails with `<branch> is already on <worker>` and the existing worktree id. Both flags need an admin token.
 
 ### Unregister a repo
 
@@ -83,7 +83,7 @@ band repos remove <name>
 
 Removes the repo from Band's registry (does not delete the repository).
 
-An agent running on a worker may use `repos add`, `repos set` and `repos remove` like a person. The only refusal is a repo limited to hosts that do not include the agent's own host (`band repos set <name> --hosts ...`), and adding a repo limited to hosts that exclude the host its folder is on.
+An agent running on a worker may use `repos add`, `repos set` and `repos remove` like a person. The only refusal is a repo limited to workers that do not include the agent's own worker (`band repos set <name> --workers ...`), and adding a repo limited to workers that exclude the worker its folder is on.
 
 ### List worktrees, optionally filtered by repo
 
@@ -97,7 +97,7 @@ JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "worktreeId": "...
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-repo-path <string>] [--host <host>] [--origin <worktree id> | --no-origin]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-worker] [--isolation worktree|container|vm] [--worker-repo-path <string>] [--worker <worker>] [--origin <worktree id> | --no-origin]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -130,9 +130,9 @@ When to omit `--prompt` (rare — user explicitly wants no task):
 band worktrees create my-app feat/experiment
 ```
 
-**Another host (`--host`).** `--host <id or name>` creates the worktree on that host (ids and names are in `band hosts list`). An agent on a worker may do this when the hub setting "Agents may start worktrees on other hosts" is on, the host is an online static worker and the repo allows it; the new worktree records the caller's worktree and chat as its origin. A refusal names the reason. It cannot be combined with `--labels`, `--requires`, `--any-host` or `--isolation`, and without it the worktree is created where the caller runs.
+**Another worker (`--worker`).** `--worker <id or name>` creates the worktree on that worker (ids and names are in `band workers list`). An agent on a worker may do this when the hub setting "Agents may start worktrees on other workers" is on, the worker is an online static worker and the repo allows it; the new worktree records the caller's worktree and chat as its origin. A refusal names the reason. It cannot be combined with `--labels`, `--requires`, `--any-worker` or `--isolation`, and without it the worktree is created where the caller runs.
 
-**Placement (`--labels`, `--requires`, `--any-host`, `--isolation`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the worktree appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that worktree, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--host-repo-path` says where the repository is on the chosen host the first time the repo is used there.
+**Placement (`--labels`, `--requires`, `--any-worker`, `--isolation`).** These pick the worker by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online worker carrying every label. `--requires node=>=24 --requires os=linux` needs worker facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded worker that fits. When none fits, the command prints `provisioning (worker request <id>)` and the JSON output has `provisioning.requestId`: the worktree appears once a runner starts a matching worker, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that worktree, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--worker-repo-path` says where the repository is on the chosen worker the first time the repo is used there.
 
 **Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.
 
@@ -140,25 +140,25 @@ band worktrees create my-app feat/experiment
 
 ```sh
 band worktrees checkpoints <id> [--take]
-band worktrees move <id> --to <host> [--add-host]
-band worktrees restore <id> --to <host> [--checkpoint <checkpointId>] [--add-host]
+band worktrees move <id> --to <worker> [--add-worker]
+band worktrees restore <id> --to <worker> [--checkpoint <checkpointId>] [--add-worker]
 ```
 
-The hub keeps recent checkpoints of worktrees on workers: uncommitted and untracked changes plus the agent session. Ignored files and running processes are not included. `checkpoints` lists them (`--take` makes one now). `move` works while the worktree's host is online: it takes a fresh checkpoint, restores it on the target and removes the source only after the target has the same files. `restore` works when the host is offline and leaves the old copy on disk, listed as superseded in `band worktrees list`; remove it with `band worktrees remove`. A target the repo is not allowed on is refused unless `--add-host` is given (admin token). `<id>` is the worktree id from `band worktrees list`; `--to` takes a host id or name.
+The hub keeps recent checkpoints of worktrees on workers: uncommitted and untracked changes plus the agent session. Ignored files and running processes are not included. `checkpoints` lists them (`--take` makes one now). `move` works while the worktree's worker is online: it takes a fresh checkpoint, restores it on the target and removes the source only after the target has the same files. `restore` works when the worker is offline and leaves the old copy on disk, listed as superseded in `band worktrees list`; remove it with `band worktrees remove`. A target the repo is not allowed on is refused unless `--add-worker` is given (admin token). `<id>` is the worktree id from `band worktrees list`; `--to` takes a worker id or name.
 
-### Continue on another host when a host is offline
+### Continue on another worker when a worker is offline
 
 ```sh
-band worktrees continue <id> [--to <host>]
+band worktrees continue <id> [--to <worker>]
 band repos set <repo> --auto-continue on|off
 ```
 
-When the host of a worktree is offline, the hub can continue the work on another host the repo may run on, from its latest checkpoint: the branch, uncommitted and untracked files, the agent sessions and the chats. The repo's setup runs on the new copy. `continue` does it on request (the hub picks the target unless `--to` names one). A chat message, a new terminal or an agent launch for such a worktree is refused with the same offer, unless the repo has `--auto-continue on` and the checkpoint is younger than 30 minutes (`BAND_AUTO_CONTINUE_MAX_AGE_MS`), in which case it continues by itself. Reading the worktree (changes, files, chat history) never triggers it. The command fails with a reason when the host is online (use `move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is missing on every other host. The old copy is never deleted: it is listed as superseded, and when its host returns the UI flags it diverged if it holds changes the checkpoint lacks. Ignored files and running processes are not carried over.
+When the worker of a worktree is offline, the hub can continue the work on another worker the repo may run on, from its latest checkpoint: the branch, uncommitted and untracked files, the agent sessions and the chats. The repo's setup runs on the new copy. `continue` does it on request (the hub picks the target unless `--to` names one). A chat message, a new terminal or an agent launch for such a worktree is refused with the same offer, unless the repo has `--auto-continue on` and the checkpoint is younger than 30 minutes (`BAND_AUTO_CONTINUE_MAX_AGE_MS`), in which case it continues by itself. Reading the worktree (changes, files, chat history) never triggers it. The command fails with a reason when the worker is online (use `move`), the repo is limited to the offline worker, checkpoints are off, no allowed worker is online or the agent is missing on every other worker. The old copy is never deleted: it is listed as superseded, and when its worker returns the UI flags it diverged if it holds changes the checkpoint lacks. Ignored files and running processes are not carried over.
 
 ### Set or remove a worktree's parent
 
 ```sh
-band worktrees set-origin <repo> <name> [--host <host>] (--origin <worktree id> | --none)
+band worktrees set-origin <repo> <name> [--worker <worker>] (--origin <worktree id> | --none)
 ```
 
 The parent is the worktree this one was started from. The sidebar shows it in Group by: Origin. `--origin` sets a parent by hand (no chat or terminal is recorded), `--none` removes it. The hub refuses the worktree itself and any of its descendants as the parent, and an unknown worktree id.
@@ -166,10 +166,10 @@ The parent is the worktree this one was started from. The sidebar shows it in Gr
 ### Remove a worktree (git worktree + state cleanup)
 
 ```sh
-band worktrees remove <repo> <name> [--host <hostId>]
+band worktrees remove <repo> <name> [--worker <workerId>]
 ```
 
-`<name>` is the worktree's stable identity — the branch it was created on (unchanged even if the git branch was later switched). `--host` picks the host when the same repo and name exist on more than one (ids from `band hosts`); without it the local worktree, or the only one of that name, is removed.
+`<name>` is the worktree's stable identity — the branch it was created on (unchanged even if the git branch was later switched). `--worker` picks the worker when the same repo and name exist on more than one (ids from `band workers`); without it the local worktree, or the only one of that name, is removed.
 
 Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files.
 
@@ -248,45 +248,45 @@ band tunnel stop
 
 Stops the remote tunnel.
 
-### List the hosts worktrees can run on
+### List the workers worktrees can run on
 
 ```sh
-band hosts list
+band workers list
 ```
 
-Shows each host's id, name, status (`online`, `offline`, `lost`, `disposed`), trust level (`restricted`, `standard`, `admin`), Band version, labels, agents, roots and last contact. The version is followed by `(behind)` when the worker runs an older Band than the hub, `(update)` when it never reported one, and `(update required)` when the hub refused its link for being more than one minor version away. The local host is always listed. With `--output json` it is `{"hosts": [...]}`, and each host also carries `capabilities`, `home`, `workerVersion`, `versionState` (`current`, `behind`, `ahead`, `unknown` or `refused`) and `updateTarget`. Updating a worker is a click on Settings > Hosts, or `npm i -g @band-app/worker@<version>` on the worker. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
+Shows each worker's id, name, status (`online`, `offline`, `lost`, `disposed`), trust level (`restricted`, `standard`, `admin`), Band version, labels, agents, roots and last contact. The version is followed by `(behind)` when the worker runs an older Band than the hub, `(update)` when it never reported one, and `(update required)` when the hub refused its link for being more than one minor version away. The local worker is always listed. With `--output json` it is `{"hosts": [...]}`, and each worker also carries `capabilities`, `home`, `workerVersion`, `versionState` (`current`, `behind`, `ahead`, `unknown` or `refused`) and `updateTarget`. Updating a worker is a click on Settings > Workers, or `npm i -g @band-app/worker@<version>` on the worker. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
 
-### Set a host's trust level
+### Set a worker's trust level
 
 ```sh
-band hosts trust <host> restricted|standard|admin
+band workers trust <worker> restricted|standard|admin
 ```
 
-Sets how far the agents on a host reach through the relay. `restricted` keeps them to their own worktrees (no worktree creation, repo changes or cronjobs). `standard` is the default for a static host: its own host, plus worktrees on other hosts when Settings > Agents allows it. `admin` lets them work on any host (chats, terminals, worktrees, cronjobs), change hub settings and manage repos; tokens, the vault and trust levels stay out of every agent's reach. A runner-started or ephemeral host starts at `restricted`. Needs a person's admin token, never an agent's.
+Sets how far the agents on a worker reach through the relay. `restricted` keeps them to their own worktrees (no worktree creation, repo changes or cronjobs). `standard` is the default for a static worker: its own worker, plus worktrees on other workers when Settings > Agents allows it. `admin` lets them work on any worker (chats, terminals, worktrees, cronjobs), change hub settings and manage repos; tokens, the vault and trust levels stay out of every agent's reach. A runner-started or ephemeral worker starts at `restricted`. Needs a person's admin token, never an agent's.
 
-### Show what admin hosts did
+### Show what admin workers did
 
 ```sh
-band hosts audit [--limit <n>]
+band workers audit [--limit <n>]
 ```
 
-Lists the newest cross-host and admin-only calls agents made: when, the calling host, the call and the target host and worktree. Needs an admin token.
+Lists the newest cross-worker and admin-only calls agents made: when, the calling worker, the call and the target worker and worktree. Needs an admin token.
 
-### Move every worktree off a host
+### Move every worktree off a worker
 
 ```sh
-band hosts evacuate <host> --to <host> [--add-host]
+band workers evacuate <worker> --to <worker> [--add-worker]
 ```
 
-Moves the host's worktrees to another host one after the other and prints one line per worktree. An online host moves them (fresh checkpoint, target confirms, source removed). An offline host restores them from their last checkpoints and leaves its copies superseded. The exit code is non-zero if any worktree failed. Needs an admin token. `--add-host` adds the target to the allowed hosts of repos that lack it.
+Moves the worker's worktrees to another worker one after the other and prints one line per worktree. An online worker moves them (fresh checkpoint, target confirms, source removed). An offline worker restores them from their last checkpoints and leaves its copies superseded. The exit code is non-zero if any worktree failed. Needs an admin token. `--add-worker` adds the target to the allowed workers of repos that lack it.
 
-### Remove a worker host
+### Remove a worker
 
 ```sh
-band hosts remove <id>
+band workers remove <id>
 ```
 
-Removes an offline worker host that has no worktrees and revokes its tokens, so the worker cannot dial in again. Needs an admin token. The local host, an online or lost host, and a host with worktrees are refused.
+Removes an offline worker that has no worktrees and revokes its tokens, so the worker cannot dial in again. Needs an admin token. The local worker, an online or lost worker, and a worker with worktrees are refused.
 
 ### List the runners and read their logs
 
@@ -295,7 +295,7 @@ band runners list
 band runners log <request-id>
 ```
 
-A runner is a pair of scripts the hub runs to start a worker when `band worktrees create --labels ...` finds no host. `list` shows each runner's id, spawn script, labels, running count against its limit and timeout, and any entry of `runners` in `settings.json` that the hub skips as invalid. `log` prints what the hooks printed for one host request (the id comes from the provisioning result), with tokens removed. Runners are set up in `settings.json`; see `docs/runner-hooks.md` in the Band repository.
+A runner is a pair of scripts the hub runs to start a worker when `band worktrees create --labels ...` finds no worker. `list` shows each runner's id, spawn script, labels, running count against its limit and timeout, and any entry of `runners` in `settings.json` that the hub skips as invalid. `log` prints what the hooks printed for one worker request (the id comes from the provisioning result), with tokens removed. Runners are set up in `settings.json`; see `docs/runner-hooks.md` in the Band repository.
 
 ### Validate a repository's environment file
 
@@ -312,7 +312,7 @@ band env build <repo> [--force] [--no-wait]
 band env status <repo>
 ```
 
-Builds the image for the repo's `.band/environment.json` at the default branch: the worker base, the toolchain from `build`, then the result of `install`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused and reported as a cache hit. `build` follows the log and exits 0 for a ready image or a cache hit, 1 for a failed build. `--no-wait` returns once the build has started. `status` prints the current image (the newest ready build; a failed build never replaces it) and the latest build with its log. The hub builds on its builder host (settings `environmentBuilder.hostId`, default the hub's machine). `build` needs an admin token.
+Builds the image for the repo's `.band/environment.json` at the default branch: the worker base, the toolchain from `build`, then the result of `install`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused and reported as a cache hit. `build` follows the log and exits 0 for a ready image or a cache hit, 1 for a failed build. `--no-wait` returns once the build has started. `status` prints the current image (the newest ready build; a failed build never replaces it) and the latest build with its log. The hub builds on its builder worker (settings `environmentBuilder.hostId`, default the hub's machine). `build` needs an admin token.
 
 ### List, create and revoke the hub's tokens
 
@@ -507,7 +507,7 @@ band repos add --from w-1a2b3c4d5e6f /home/me/code/my-app
 band repos list
 
 # Build a repo on one machine only
-band repos set epic --hosts mac --primary mac
+band repos set epic --workers mac --primary mac
 
 # Remove a repo
 band repos remove my-app

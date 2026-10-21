@@ -9,7 +9,7 @@ export default function Settings() {
       <SettingsScreen title="Settings" testID="settings__screen">
         <Group>
           <LinkRow
-            title="Hosts"
+            title="Workers"
             detail="Workers and their versions"
             icon={Server}
             href="/settings/hosts"

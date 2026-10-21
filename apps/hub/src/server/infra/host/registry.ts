@@ -30,7 +30,7 @@ export class HostRegistry {
 
   hostById(hostId: string): Host {
     const host = this.hosts.get(hostId);
-    if (!host) throw new Error(`Unknown host "${hostId}"`);
+    if (!host) throw new Error(`Unknown worker "${hostId}"`);
     return host;
   }
 

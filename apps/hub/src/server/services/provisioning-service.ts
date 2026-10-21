@@ -202,7 +202,7 @@ export class ProvisioningService {
     const id = randomUUID();
     const code = newSecret("bpc_");
     const at = this.now();
-    const hostName = input.hostName?.trim() || `host-${id.slice(0, 6)}`;
+    const hostName = input.hostName?.trim() || `worker-${id.slice(0, 6)}`;
     let commitSha: string | null = null;
     if (settings.repoUrl) {
       commitSha = await this.buildBundle(id, settings);

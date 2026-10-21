@@ -102,7 +102,6 @@ RUN chmod +x /usr/local/bin/band-entrypoint.sh
 # prints it once, or takes BAND_ADMIN_TOKEN from the environment.
 ENV NODE_ENV=production \
     PORT=3456 \
-    BAND_LOCAL_HOST=off \
     BAND_CLI_PATH=/opt/band/binaries/band \
     HOME=/data \
     BAND_INSTALL_METHOD=docker

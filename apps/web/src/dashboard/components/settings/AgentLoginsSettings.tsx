@@ -86,7 +86,7 @@ function AddLoginForm({ agentType, onAdded }: { agentType: string; onAdded: () =
           className="text-xs text-muted-foreground"
           data-testid="settings-agent-logins__codex-note"
         >
-          Used only on hosts with no Codex login of their own. Isolating CODEX_HOME comes later.
+          Used only on workers with no Codex login of their own. Isolating CODEX_HOME comes later.
         </p>
       ) : null}
       {kind?.note ? (

@@ -12,7 +12,7 @@ const repoQueries = new RepoQueries();
 /** The display name of each host id, falling back to the id for a host the hub no longer lists. */
 export function hostNamesOf(ids: readonly string[]): string[] {
   const names = new Map(tokenService.listHosts(1000).map((h) => [h.id, h.name]));
-  return ids.map((id) => names.get(id) || (id === "local" ? "This hub" : "unknown host"));
+  return ids.map((id) => names.get(id) || (id === "local" ? "This hub" : "unknown worker"));
 }
 
 /** The hosts a repo is limited to, or null when it may run anywhere (or does not exist). */

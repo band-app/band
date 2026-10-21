@@ -367,6 +367,6 @@ describe("when it is not possible (S3)", () => {
     const answer = offlineAnswer(sent.body);
     expect(answer.code).toBe("CONTINUE_NOT_POSSIBLE");
     expect(answer.offer.blocked?.reason).toBe("agent-unavailable");
-    expect(answer.error).toMatch(/agent for this work is not available on any other host/);
+    expect(answer.error).toMatch(/agent for this work is not available on any other worker/);
   }, 240_000);
 });

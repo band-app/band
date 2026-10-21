@@ -13,7 +13,7 @@ import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { useWorktreeDisplay } from "../../hooks/use-worktree-display";
 
-type Hosts = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
+type Hosts = Awaited<ReturnType<typeof trpc.workers.list.query>>["hosts"];
 type Summary = Awaited<ReturnType<typeof trpc.checkpoints.evacuate.mutate>>;
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -79,7 +79,7 @@ export function EvacuateHostDialog({
           <DialogTitle>Move all worktrees on {from.name}</DialogTitle>
           <DialogDescription>
             {from.status === "online"
-              ? "Each worktree gets a fresh checkpoint, is recreated on the target host, and is then removed here. One at a time."
+              ? "Each worktree gets a fresh checkpoint, is recreated on the target worker, and is then removed here. One at a time."
               : `${from.name} is offline, so each worktree is restored from its last checkpoint. The copies on ${from.name} stay untouched and are listed as superseded when it comes back.`}
           </DialogDescription>
         </DialogHeader>
@@ -118,7 +118,7 @@ export function EvacuateHostDialog({
               <p className="text-sm text-muted-foreground">No other worker is online.</p>
             ) : (
               <div className="space-y-1.5">
-                <Label htmlFor="evacuate-target">Target host</Label>
+                <Label htmlFor="evacuate-target">Target worker</Label>
                 <select
                   id="evacuate-target"
                   data-testid="evacuate__target"
@@ -143,7 +143,7 @@ export function EvacuateHostDialog({
                 data-testid="evacuate__add-host"
                 onChange={(e) => setAddHost(e.target.checked)}
               />
-              Add the target host to the allowed hosts of repos that need it
+              Add the target worker to the allowed workers of repos that need it
             </label>
             {error ? (
               <p role="alert" className="text-xs text-destructive" data-testid="evacuate__error">

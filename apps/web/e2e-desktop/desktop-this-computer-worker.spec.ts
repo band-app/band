@@ -141,7 +141,7 @@ test.afterEach(async () => {
 });
 
 test.describe("Desktop app: this computer as a worker", () => {
-  test("S1: connecting to a remote hub asks, and Yes adds a host that goes online", async () => {
+  test("S1: connecting to a remote hub asks, and Yes adds a worker that goes online", async () => {
     const { home, page, app } = await launch({ remote: true });
 
     await expect(page.prompt).toBeVisible({ timeout: 30_000 });
@@ -193,7 +193,7 @@ test.describe("Desktop app: this computer as a worker", () => {
     await expect(page.prompt).toBeHidden();
   });
 
-  test("S4: Remove this computer uninstalls the service and the host leaves the hub", async () => {
+  test("S4: Remove this computer uninstalls the service and the worker leaves the hub", async () => {
     const { page, home } = await launch({ remote: true });
     await expect(page.prompt).toBeVisible({ timeout: 30_000 });
     await page.promptNotNow.click();

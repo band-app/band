@@ -10,14 +10,14 @@ docker compose up -d
 docker compose logs band  # find the admin token
 ```
 
-Compose pulls `ghcr.io/band-app/band-hub:latest`. Set `BAND_VERSION` to pin a release. For settings, copy `deploy/compose/.env.example` to `.env` next to `compose.yml`. To build the image from a checkout instead, run `docker compose -f compose.yml -f compose.build.yml up -d --build` in `deploy/compose`. The hub listens on `127.0.0.1:3456` of the host. Set `BAND_BIND=0.0.0.0` in `.env` to publish it on all interfaces, and only do that on a trusted network.
+Compose pulls `ghcr.io/band-app/band-hub:latest`. Set `BAND_VERSION` to pin a release. For settings, copy `deploy/compose/.env.example` to `.env` next to `compose.yml`. To build the image from a checkout instead, run `docker compose -f compose.yml -f compose.build.yml up -d --build` in `deploy/compose`. The hub listens on `127.0.0.1:3456` of the worker. Set `BAND_BIND=0.0.0.0` in `.env` to publish it on all interfaces, and only do that on a trusted network.
 
 ### The admin token
 
 - With `BAND_ADMIN_TOKEN` empty, the first run creates an admin token and prints it once in the log. Later starts print nothing. If you lose it, set `BAND_ADMIN_TOKEN` in `.env` and run `docker compose up -d`. The hub replaces the stored token with that value.
 - With `BAND_ADMIN_TOKEN` set, the hub uses that value and never prints it.
 
-The admin token can create more tokens (Settings > Devices, or `band tokens create-device`). Give each device its own token and revoke it when you lose the device. Worker tokens are in Settings > Hosts.
+The admin token can create more tokens (Settings > Devices, or `band tokens create-device`). Give each device its own token and revoke it when you lose the device. Worker tokens are in Settings > Workers.
 
 ### Check it works
 
@@ -81,9 +81,9 @@ The desktop app has its own copy of the UI, so it needs neither setting.
 
 ## Worktrees run on workers
 
-The image sets `BAND_LOCAL_HOST=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a host in Settings > Hosts or in any host picker, and `worktrees.create` for the `local` host is refused.
+The image sets `BAND_LOCAL_WORKER=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a worker in Settings > Workers or in any worker picker, and `worktrees.create` for the `local` worker is refused.
 
-A worktree created with no host goes to the worker named by `BAND_DEFAULT_HOST`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Hosts and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_HOST=on` to run worktrees in the container again.
+A worktree created with no worker goes to the worker named by `BAND_DEFAULT_WORKER`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Workers and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_WORKER=on` to run worktrees in the container again.
 
 ## Add a repo
 
@@ -100,14 +100,14 @@ Without `--branch` the hub reads the default branch with `git ls-remote --symref
 **From a worker.** When a worker already has a checkout, pick it on that worker. In the UI, choose Add repo in the sidebar's Repos panel and then From a worker, and browse the worker's home directory. The hub reads the folder's `origin` URL and default branch, and the worker keeps the folder in its own mapping, so it never clones it again. A folder outside the directories the worker serves is added as a root after you confirm. The CLI does the same:
 
 ```sh
-band repos add --from <host id> /home/me/code/myrepo --add-root
+band repos add --from <worker id> /home/me/code/myrepo --add-root
 ```
 
 A folder with no git remote is added without a URL and stays on that one worker. A worktree for it can only run there.
 
-`band repos list` shows each repo's URL and the folder it is cloned to on each host.
+`band repos list` shows each repo's URL and the folder it is cloned to on each worker.
 
-The image has no coding agent installed. With `BAND_LOCAL_HOST=on`, the hub's own machine is a host too, with its own mapping: mount a repository into the container and register its container path with `band repos add /repos/myrepo`.
+The image has no coding agent installed. With `BAND_LOCAL_WORKER=on`, the hub's own machine is a worker too, with its own mapping: mount a repository into the container and register its container path with `band repos add /repos/myrepo`.
 
 ## Upgrade
 
@@ -137,12 +137,12 @@ The volume name starts with the Compose repo name, which is the directory name (
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `BAND_ADMIN_TOKEN` | empty | Sets the admin token. Empty makes the first run create and print one. |
-| `BAND_LOCAL_HOST` | `off` | `on` allows worktrees on the hub's own machine and creates the sample repo. |
-| `BAND_DEFAULT_HOST` | empty | Worker id used when a worktree names no host. Empty uses the only online worker. |
+| `BAND_LOCAL_WORKER` | `off` | `on` allows worktrees on the hub's own machine and creates the sample repo. |
+| `BAND_DEFAULT_WORKER` | empty | Worker id used when a worktree names no worker. Empty uses the only online worker. `BAND_LOCAL_HOST` and `BAND_DEFAULT_HOST` are still read, and the new names win. |
 | `BAND_CLI_PATH` | `/opt/band/binaries/band` | The `band` CLI the hub serves to workers of its own platform. |
 | `BAND_CLI_BINARIES_DIR` | empty | Directory with `band-<platform>-<arch>` files (for example `band-linux-arm64`), served to workers of other platforms. Mount it into the container and set the variable. |
 | `BAND_SERVE_UI` | `true` | `false` serves the API only. |
 | `BAND_ALLOWED_ORIGINS` | empty | Origins of a UI hosted elsewhere. |
-| `BAND_PORT` | `3456` | Host port. |
-| `BAND_BIND` | `127.0.0.1` | Host address the port binds to. |
+| `BAND_PORT` | `3456` | Worker port. |
+| `BAND_BIND` | `127.0.0.1` | Worker address the port binds to. |
 | `BAND_DOMAIN` | empty | Hostname for the `tls` profile. |

@@ -91,7 +91,7 @@ export interface HostView {
   home: string | null;
   /** Toolchain versions on the host (`node`, `python`, `go`, ...), checked against a repo's `requires`. Empty before the worker has connected. */
   tools: Record<string, string>;
-  /** False for the hub's own machine when `BAND_LOCAL_HOST=off`. */
+  /** False for the hub's own machine when `BAND_LOCAL_WORKER=off`. */
   usable: boolean;
   /** How far the host's agents reach through the relay (the stored level, else the default for the host). */
   trust: HostTrust;
@@ -420,9 +420,9 @@ export class TokenService {
     ttlMs: number = DEFAULT_BOOTSTRAP_TTL_MS,
   ): { token: string; hostId: string; view: TokenView } {
     const host = this.queries.findHost(hostId);
-    if (!host) throw new Error(`No host "${hostId}"`);
+    if (!host) throw new Error(`No worker "${hostId}"`);
     if (host.status === "online" || host.status === "lost") {
-      throw new Error(`Host "${hostId}" is ${host.status}`);
+      throw new Error(`Worker "${hostId}" is ${host.status}`);
     }
     this.revokeHostTokens(hostId);
     const ttl = Math.min(Math.max(ttlMs, 1000), MAX_BOOTSTRAP_TTL_MS);
@@ -580,19 +580,19 @@ export class TokenService {
    */
   removeHost(id: string): string {
     const host = this.queries.findHost(id);
-    if (!host) throw new HostRemoveError("not-found", `No host "${id}"`);
-    if (id === "local") throw new HostRemoveError("local", "The local host cannot be removed");
+    if (!host) throw new HostRemoveError("not-found", `No worker "${id}"`);
+    if (id === "local") throw new HostRemoveError("local", "The local worker cannot be removed");
     if (host.status === "online" || host.status === "lost") {
       throw new HostRemoveError(
         "online",
-        `Host "${host.name}" is ${host.status}. Stop its worker and wait until it is offline before removing it.`,
+        `Worker "${host.name}" is ${host.status}. Stop its worker and wait until it is offline before removing it.`,
       );
     }
     const worktrees = this.queries.countWorktreesOnHost(id);
     if (worktrees > 0) {
       throw new HostRemoveError(
         "has-worktrees",
-        `Host "${host.name}" still has ${worktrees} worktree${worktrees === 1 ? "" : "s"}. Remove them first.`,
+        `Worker "${host.name}" still has ${worktrees} worktree${worktrees === 1 ? "" : "s"}. Remove them first.`,
       );
     }
     this.revokeHostTokens(id);

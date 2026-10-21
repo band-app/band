@@ -312,7 +312,7 @@ export class CheckpointService {
       return "checkpoints are off for this repo";
     }
     const session = this.sessions.get(hostId);
-    if (!session?.attached) return "host offline";
+    if (!session?.attached) return "worker offline";
     if (session.hello.mode === "ephemeral") return "ephemeral workers sleep instead";
     return null;
   }
@@ -390,7 +390,7 @@ export class CheckpointService {
     if (!session?.attached) {
       throw new CheckpointError(
         "offline",
-        `Host ${hostId} is offline, so it cannot be checkpointed.`,
+        `Worker ${hostId} is offline, so it cannot be checkpointed.`,
       );
     }
     this.assertOwner(worktreeId, hostId, session);
@@ -400,7 +400,7 @@ export class CheckpointService {
     if (!root)
       throw new CheckpointError(
         "invalid",
-        `${hostNamesOf([hostId])[0] ?? "unknown host"} serves no directory.`,
+        `${hostNamesOf([hostId])[0] ?? "unknown worker"} serves no directory.`,
       );
     const wipDir = posix.join(root, WIP_DIR);
     const cwd = found.worktree.path;
@@ -869,7 +869,7 @@ export class CheckpointService {
     if (fromHostId === toHostId) {
       throw new CheckpointError(
         "invalid",
-        `${worktreeId} is already on ${hostNamesOf([toHostId])[0] ?? "unknown host"}.`,
+        `${worktreeId} is already on ${hostNamesOf([toHostId])[0] ?? "unknown worker"}.`,
       );
     }
     if (toHostId === LOCAL_HOST_ID) {
@@ -901,7 +901,7 @@ export class CheckpointService {
     if (!target?.attached) {
       throw new CheckpointError(
         "offline",
-        `Host ${toHostId} is offline, so it cannot take the worktree.`,
+        `Worker ${toHostId} is offline, so it cannot take the worktree.`,
       );
     }
     // The hard rule: the repo must be allowed on the target. The caller may add the host.
@@ -943,7 +943,7 @@ export class CheckpointService {
     if (onTarget && !onTarget.supersededBy && !isRoot) {
       throw new CheckpointError(
         "conflict",
-        `Host ${toHostId} already has a worktree ${worktree.name} of ${repo.name}. Remove it first.`,
+        `Worker ${toHostId} already has a worktree ${worktree.name} of ${repo.name}. Remove it first.`,
       );
     }
 
@@ -966,7 +966,7 @@ export class CheckpointService {
       if (!root)
         throw new CheckpointError(
           "invalid",
-          `${hostNamesOf([toHostId])[0] ?? "unknown host"} serves no directory.`,
+          `${hostNamesOf([toHostId])[0] ?? "unknown worker"} serves no directory.`,
         );
       const wipDir = posix.join(root, WIP_DIR);
       await host.fs.mkdir(wipDir, { recursive: true });
@@ -1038,7 +1038,7 @@ export class CheckpointService {
       await git(["cat-file", "-e", `${row.snapshotSha}^{commit}`]).catch(() => {
         throw new CheckpointError(
           "no-checkpoint",
-          `Host ${toHostId} cannot get the commits of the checkpoint: its copy of ${repo.name} lacks them.`,
+          `Worker ${toHostId} cannot get the commits of the checkpoint: its copy of ${repo.name} lacks them.`,
         );
       });
 
@@ -1142,7 +1142,7 @@ export class CheckpointService {
       const chatIds = chatService.reassignWorktree(worktreeId, newId);
       log.info(
         { worktreeId, newId, checkpoint: row.id, isMove, backups },
-        "worktree restored on another host",
+        "worktree restored on another worker",
       );
       restored = true;
       return {
@@ -1222,7 +1222,7 @@ export class CheckpointService {
     if (!this.sessions.get(fromHostId)?.attached) {
       throw new CheckpointError(
         "offline",
-        `Host ${fromHostId} is offline. Restore ${worktreeId} from its last checkpoint instead.`,
+        `Worker ${fromHostId} is offline. Restore ${worktreeId} from its last checkpoint instead.`,
       );
     }
     const isRoot = found.worktree.name === found.repo.defaultBranch;
@@ -1291,7 +1291,7 @@ export class CheckpointService {
   }): Promise<EvacuateResult> {
     const { fromHostId, toHostId } = input;
     if (fromHostId === toHostId)
-      throw new CheckpointError("invalid", "Choose another host to move to.");
+      throw new CheckpointError("invalid", "Choose another worker to move to.");
     const online = this.sessions.get(fromHostId)?.attached === true;
     const results: EvacuateResult["results"] = [];
     for (const wt of this.evacuable(fromHostId)) {

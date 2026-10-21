@@ -333,7 +333,7 @@ export class McpProxyService {
     if (transport === "stdio") {
       if (input.url || input.vaultItemId || input.headerName || input.headerPrefix) {
         throw new McpProxyInputError(
-          "A stdio server takes a host, a command and env, not a URL or a header credential.",
+          "A stdio server takes a worker, a command and env, not a URL or a header credential.",
         );
       }
       row = {
@@ -353,7 +353,7 @@ export class McpProxyService {
       if (!input.url) throw new McpProxyInputError("An HTTP server needs a URL.");
       if (input.hostId || input.command || input.args || input.env || input.cwd) {
         throw new McpProxyInputError(
-          "Only a stdio server takes a host, command, args, env or cwd.",
+          "Only a stdio server takes a worker, command, args, env or cwd.",
         );
       }
       row = {
@@ -386,7 +386,7 @@ export class McpProxyService {
       throw new McpProxyInputError(
         stdio
           ? "A stdio server has no URL or header credential."
-          : "Only a stdio server has a host, command, args, env or cwd.",
+          : "Only a stdio server has a worker, command, args, env or cwd.",
       );
     }
     if (patch.url !== undefined) next.url = checkUrl(patch.url);
@@ -441,11 +441,11 @@ export class McpProxyService {
   }
 
   private checkHost(hostId: string | undefined): string {
-    if (!hostId?.trim()) throw new McpProxyInputError("A stdio server needs a host id.");
+    if (!hostId?.trim()) throw new McpProxyInputError("A stdio server needs a worker id.");
     try {
       hostRegistry.hostById(hostId);
     } catch {
-      throw new McpProxyInputError(`No host with the id "${hostId}".`);
+      throw new McpProxyInputError(`No worker with the id "${hostId}".`);
     }
     return hostId;
   }

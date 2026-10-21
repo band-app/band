@@ -99,7 +99,7 @@ export function MoveWorktreeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]" data-testid="move-worktree__dialog">
         <DialogHeader>
-          <DialogTitle>Open on another host</DialogTitle>
+          <DialogTitle>Open on another worker</DialogTitle>
           <DialogDescription>
             Takes a fresh checkpoint of {worktree.name}, recreates it on the chosen host with its
             uncommitted files and agent sessions, then removes the copy on {hostName(currentHost)}.
@@ -140,7 +140,7 @@ export function MoveWorktreeDialog({
               </p>
             ) : (
               <div className="space-y-1.5">
-                <Label htmlFor="move-worktree-host">Target host</Label>
+                <Label htmlFor="move-worktree-host">Target worker</Label>
                 <select
                   id="move-worktree-host"
                   data-testid="move-worktree__host"
@@ -179,7 +179,7 @@ export function MoveWorktreeDialog({
                 </label>
                 {admin ? null : (
                   <p className="text-xs text-muted-foreground">
-                    Adding a host needs an admin token.
+                    Adding a worker needs an admin token.
                   </p>
                 )}
               </div>
@@ -204,7 +204,7 @@ export function MoveWorktreeDialog({
                 onClick={() => void run()}
               >
                 {busy ? <Spinner className="size-3" /> : null}
-                Open on another host
+                Open on another worker
               </Button>
             </div>
           </div>

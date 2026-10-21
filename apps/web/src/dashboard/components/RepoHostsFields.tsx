@@ -52,7 +52,7 @@ export function RepoHostsFields({ hosts, value, onChange, idPrefix, disabled }: 
             checked={!only}
             onChange={() => onChange({ ...value, allowedHostIds: null })}
           />
-          All hosts
+          All workers
         </label>
         <label className="flex items-center gap-1.5">
           <input
@@ -75,7 +75,7 @@ export function RepoHostsFields({ hosts, value, onChange, idPrefix, disabled }: 
         </label>
       </div>
       {only ? (
-        <ul className="space-y-1" aria-label="Allowed hosts">
+        <ul className="space-y-1" aria-label="Allowed workers">
           {hosts.map((h) => (
             <li key={h.id}>
               <label className="flex items-center gap-1.5 text-sm">
@@ -94,11 +94,11 @@ export function RepoHostsFields({ hosts, value, onChange, idPrefix, disabled }: 
       ) : null}
       {only && value.allowedHostIds?.length === 0 ? (
         <p className="text-xs text-destructive" data-testid="repo-hosts__empty">
-          Choose at least one host.
+          Choose at least one worker.
         </p>
       ) : null}
       <div className="space-y-1">
-        <Label htmlFor={`${idPrefix}-primary`}>Primary host</Label>
+        <Label htmlFor={`${idPrefix}-primary`}>Primary worker</Label>
         <select
           id={`${idPrefix}-primary`}
           data-testid="repo-hosts__primary"
@@ -106,7 +106,7 @@ export function RepoHostsFields({ hosts, value, onChange, idPrefix, disabled }: 
           onChange={(e) => onChange({ ...value, primaryHostId: e.target.value })}
           className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
         >
-          <option value="">Automatic (the first host that clones it)</option>
+          <option value="">Automatic (the first worker that clones it)</option>
           {primaryChoices.map((h) => (
             <option key={h.id} value={h.id}>
               {h.name}
@@ -114,8 +114,8 @@ export function RepoHostsFields({ hosts, value, onChange, idPrefix, disabled }: 
           ))}
         </select>
         <p className="text-xs text-muted-foreground">
-          Only the primary host lists the repo's default-branch worktree. Other hosts keep a hidden
-          clone that new worktrees are made from.
+          Only the primary worker lists the repo's default-branch worktree. Other workers keep a
+          hidden clone that new worktrees are made from.
         </p>
       </div>
     </fieldset>

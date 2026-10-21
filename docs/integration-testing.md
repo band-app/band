@@ -838,18 +838,18 @@ Conventional tags:
 
 ---
 
-## 13a. Host modes: `BAND_TEST_HOST=local|remote-loopback`
+## 13a. Worker modes: `BAND_TEST_HOST=local|remote-loopback`
 
-The hub suite under `apps/hub/tests/` runs in two modes. `local` (the default) puts worktrees on the hub's own machine. With `BAND_TEST_HOST=remote-loopback`, `startServer` (`tests/helpers/server.ts`) also starts the real `apps/worker/bin/band-worker.mjs` against the test server, registers it through `tokens.issueWorkerBootstrap`, waits for `hosts.list` to show it online, and moves every worktree row and repo path in the test's database onto that host (`tests/helpers/test-host.ts`). The same assertions then run through `RemoteHost`, the link and the worker. The worker shares the machine's disk, so its root is the OS temp dir and the test can still read what the worker wrote. The hub must not, because on a real worker that disk is another machine. `startServer` preloads `tests/helpers/worker-fs-guard.mjs` into the hub process (`NODE_OPTIONS=--import`). The guard throws on any `node:fs` call or child process `cwd` under a worktree the worker owns and under the worker's `.band-worktrees`, `.band-uploads` and `.band-shared`, and records the call in a violations file. `close()` fails the test if that file is not empty, so a service that catches the error still fails. A worktree at a repo's root stays readable, since that path is also the hub's own copy of the repo. A hub service that needs a remote worktree's files goes through `worktree.host`. It gets the test's `env` and the hub's `HOME`, so a stub agent or a seeded `~/.claude` behaves the same on both sides.
+The hub suite under `apps/hub/tests/` runs in two modes. `local` (the default) puts worktrees on the hub's own machine. With `BAND_TEST_HOST=remote-loopback`, `startServer` (`tests/helpers/server.ts`) also starts the real `apps/worker/bin/band-worker.mjs` against the test server, registers it through `tokens.issueWorkerBootstrap`, waits for `workers.list` to show it online, and moves every worktree row and repo path in the test's database onto that worker (`tests/helpers/test-host.ts`). The same assertions then run through `RemoteHost`, the link and the worker. The worker shares the machine's disk, so its root is the OS temp dir and the test can still read what the worker wrote. The hub must not, because on a real worker that disk is another machine. `startServer` preloads `tests/helpers/worker-fs-guard.mjs` into the hub process (`NODE_OPTIONS=--import`). The guard throws on any `node:fs` call or child process `cwd` under a worktree the worker owns and under the worker's `.band-worktrees`, `.band-uploads` and `.band-shared`, and records the call in a violations file. `close()` fails the test if that file is not empty, so a service that catches the error still fails. A worktree at a repo's root stays readable, since that path is also the hub's own copy of the repo. A hub service that needs a remote worktree's files goes through `worktree.host`. It gets the test's `env` and the hub's `HOME`, so a stub agent or a seeded `~/.claude` behaves the same on both sides.
 
 ```sh
 pnpm --filter @band-app/server build
 BAND_TEST_HOST=remote-loopback pnpm --filter @band-app/server exec vitest run
 ```
 
-CI runs the second command as the job "Test (remote-loopback)". The host contract suite itself (`packages/host-local`, `apps/worker/tests/host-remote-contract.test.ts`) already runs against `LocalHost` and `RemoteHost`.
+CI runs the second command as the job "Test (remote-loopback)". The worker contract suite itself (`packages/host-local`, `apps/worker/tests/host-remote-contract.test.ts`) already runs against `LocalHost` and `RemoteHost`.
 
-In this mode the loopback worker has the fixed host id `h-loopback`, and a worktree id names its host (`<repo>-<branch>@h-loopback`). A test never writes an id by hand: it calls `testWorktreeId(repo, branch)` from `apps/hub/tests/helpers/test-host.ts`, which gives the local id in `local` mode and the loopback id here. Pass `false` as the third argument for a worktree that stays on the hub: one a test makes through `worktrees.create` without a host, or any worktree of a server started with `remoteHost: false`. A URL path that holds an id needs `encodeURIComponent`, because `@` is encoded as `%40`.
+In this mode the loopback worker has the fixed worker id `h-loopback`, and a worktree id names its worker (`<repo>-<branch>@h-loopback`). A test never writes an id by hand: it calls `testWorktreeId(repo, branch)` from `apps/hub/tests/helpers/test-host.ts`, which gives the local id in `local` mode and the loopback id here. Pass `false` as the third argument for a worktree that stays on the hub: one a test makes through `worktrees.create` without a worker, or any worktree of a server started with `remoteHost: false`. A URL path that holds an id needs `encodeURIComponent`, because `@` is encoded as `%40`.
 
 A test that cannot run on a worker passes `remoteHost: false` to `startServer`. The current list:
 
@@ -857,8 +857,8 @@ A test that cannot run on a worker passes `remoteHost: false` to `startServer`. 
 - `worktree-remove-locked` and `worktree-sync-half-created-worktree` restart the hub and watch its boot-time worktree sync. On loopback the hub and the worker see the same repository path, so the hub's local sync adds a second row for a worktree that is already registered on the worker. A real worker has its own checkout path.
 - `remote-relay` keeps the hub's own worktree local and starts its own workers.
 - `host-capabilities` starts its own worker with a different `HOME`, and needs the hub's own machine to lack an agent that the worker has.
-- `tokens-auth` counts the hub's host rows, and the worker adds one.
-- `cronjobs-worktree-migration` seeds the hub's own checkouts into the database before the boot and expects the migrated job on the local host's worktree id.
+- `tokens-auth` counts the hub's worker rows, and the worker adds one.
+- `cronjobs-worktree-migration` seeds the hub's own checkouts into the database before the boot and expects the migrated job on the local worker's worktree id.
 - The "disabled GitHub plugin" cases in `pr-checks` and `branch-status-pr` count calls to the `gh` stub. A worker probes `gh --version` itself when it starts.
 
 Test files that start the server with their own inline helper, instead of `helpers/server.ts`, always run local. That is about 40 files, most of them the older ones. New tests use the shared helper.

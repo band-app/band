@@ -1,4 +1,4 @@
-# S7 (settings): with a non-admin device token Devices shows the admin-only notice and Hosts shows
+# S7 (settings): with a non-admin device token Devices shows the admin-only notice and Workers shows
 # no Update button (the worker behind the hub is listed, but only an admin can update it).
 appId: app.getband.mobile
 name: Non-admin token sees notices and no admin actions

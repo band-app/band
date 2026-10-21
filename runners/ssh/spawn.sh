@@ -43,7 +43,7 @@ mkdir -p "\$base/home/.band" "\$base/state" "\$base/work"
 chmod 700 "\$base"
 if [ -n $(q "$repo") ]; then
   if [ -z $(q "${BAND_CLONE_BY_HUB:-}") ]; then git clone --quiet -- $(q "$repo") "\$base/work/$name"; fi
-  echo "BAND_HOST_REPO_PATH=\$base/work/$name"
+  echo "BAND_WORKER_REPO_PATH=\$base/work/$name"
 fi
 export BAND_HUB_URL=$(q "$BAND_HUB_URL")
 export BAND_WORKER_ID=$(q "$BAND_WORKER_ID")

@@ -156,7 +156,7 @@ export function describeFailure(
     case "auth":
       return {
         headline: `${f.agent} isn't logged in on ${hostLabel}`,
-        line: "The agent was refused (401 or an invalid key). Log in on that host, then retry.",
+        line: "The agent was refused (401 or an invalid key). Log in on that worker, then retry.",
       };
     case "limit":
       return {
@@ -168,7 +168,7 @@ export function describeFailure(
     case "disconnected":
       return {
         headline: `Lost the connection to ${hostLabel}`,
-        line: "The worker went offline mid-turn. The agent may still be running there; Band reconnects when the host is back.",
+        line: "The worker went offline mid-turn. The agent may still be running there; Band reconnects when the worker is back.",
       };
     case "timeout":
       return {

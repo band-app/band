@@ -96,7 +96,7 @@ export class ModelRefreshService {
    */
   async hostForAgent(def: CodingAgentDefinition, hostId?: string): Promise<Host> {
     if (hostId) return hostRegistry.hostById(hostId);
-    // `BAND_LOCAL_HOST=off` keeps work off the hub's own machine, agents included.
+    // `BAND_LOCAL_WORKER=off` keeps work off the hub's own machine, agents included.
     const candidates = [
       ...(isLocalHostEnabled() ? [hostRegistry.local] : []),
       ...hostRegistry.all().filter((h) => h.id !== "local"),
@@ -135,7 +135,7 @@ export class ModelRefreshService {
       const perHost = await Promise.all(
         hosts.map(async ({ host, name, up }): Promise<HostAgentAvailability> => {
           if (!up)
-            return { hostId: host.id, hostName: name, available: false, reason: "host offline" };
+            return { hostId: host.id, hostName: name, available: false, reason: "worker offline" };
           const reason = await launchProblem(host, def);
           return reason === null
             ? { hostId: host.id, hostName: name, available: true }

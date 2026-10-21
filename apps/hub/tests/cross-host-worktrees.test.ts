@@ -383,7 +383,7 @@ describe("worktrees an agent starts on another host", () => {
       hostId: "h-000000000000",
     });
     expect(unknown.status).toBe(403);
-    expect(unknown.body).toContain("No host");
+    expect(unknown.body).toContain("No worker");
     const hub = await shell.call("trpc", "/trpc/worktrees.create", {
       repo: "proj",
       branch: "on-hub",
@@ -447,7 +447,7 @@ describe("worktrees an agent starts on another host", () => {
         hostId: b.hostId,
       });
       expect(res.status).toBe(403);
-      expect(res.body).toContain("Agents may not start worktrees on other hosts");
+      expect(res.body).toContain("Agents may not start worktrees on other workers");
       expect(await worktreeOf(wt("proj", "setting-off", b))).toBeUndefined();
       // The calling worker stays allowed.
       const own = await shell.call("trpc", "/trpc/worktrees.create", {

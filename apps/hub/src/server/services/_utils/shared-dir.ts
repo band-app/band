@@ -30,7 +30,7 @@ export async function openSharedDir(worktreeId: string): Promise<SharedDir> {
     };
   }
   const dirs = (await host.info()).dirs;
-  if (!dirs) throw new Error(`Host ${host.id} has no directory for shared files`);
+  if (!dirs) throw new Error(`Worker ${host.id} has no directory for shared files`);
   const path = join(dirs.shared, worktreeId);
   await host.fs.mkdir(path, { recursive: true });
   return {

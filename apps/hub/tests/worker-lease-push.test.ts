@@ -14,7 +14,7 @@ let b: Worker;
 
 const refusal = async (worktreeId: string) => {
   const res = await w.mFail("terminal.create", { worktreeId, id: randomUUID() });
-  return res.status >= 400 && res.body.includes("continued on another host");
+  return res.status >= 400 && res.body.includes("continued on another worker");
 };
 const startsOn = async (worktreeId: string) => {
   const id = randomUUID();
@@ -91,7 +91,7 @@ describe("discarding the old default-branch copy", () => {
       await waitFor(
         async () => {
           const res = await world.mFail("terminal.create", { worktreeId: mainA, id: randomUUID() });
-          return res.status >= 400 && res.body.includes("continued on another host")
+          return res.status >= 400 && res.body.includes("continued on another worker")
             ? true
             : undefined;
         },

@@ -395,7 +395,7 @@ function SectionHeader({
       {first ? (
         <View style={styles.sectionRow}>
           <Text style={styles.sectionLabel}>
-            {groupLabel === "Host" ? "Hosts" : groupLabel === "Origin" ? "Origin" : "Repos"}
+            {groupLabel === "Worker" ? "Workers" : groupLabel === "Origin" ? "Origin" : "Repos"}
           </Text>
           <View style={styles.controls}>
             {labelName !== null ? (

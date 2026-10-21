@@ -27,7 +27,7 @@ const createInput = z.object({
     .min(1)
     .optional()
     .describe(
-      'Host to create it on. Defaults to the host this chat runs on. A chat on a worker may name another online, static worker that the repo allows, when the hub setting "Agents may start worktrees on other hosts" is on. See band_hosts_list.',
+      'Worker to create it on. Defaults to the worker this chat runs on. A chat on a worker may name another online, static worker that the repo allows, when the hub setting "Agents may start worktrees on other workers" is on. See band_workers_forAgents.',
     ),
   prompt: z
     .string()
@@ -67,7 +67,7 @@ function createServer(chatId: string): McpServer {
         const input = createInput.parse(args);
         const chat = chatService.get(chatId);
         if (!chat) return jsonText({ error: "This chat no longer exists" }, true);
-        // A chat on a worker acts for that worker. Another host is the hub's call to make, not the worker's.
+        // A chat on a worker acts for that worker. Another worker is the hub's call to make, not the worker's.
         const callerHost = hostRegistry.hostIdOfScope(chat.worktreeId) ?? hostRegistry.local.id;
         if (callerHost !== hostRegistry.local.id) {
           const restricted = restrictedHostRefusal(callerHost);

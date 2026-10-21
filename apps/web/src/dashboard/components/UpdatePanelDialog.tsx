@@ -127,7 +127,7 @@ function HostUpdateError({ hostId, message }: { hostId: string; message: string 
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => void trpc.hosts.dismissUpdate.mutate({ hostId })}
+        onClick={() => void trpc.workers.dismissUpdate.mutate({ hostId })}
       >
         Dismiss
       </Button>

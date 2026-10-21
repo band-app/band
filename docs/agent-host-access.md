@@ -1,34 +1,34 @@
-# What agents can do across hosts
+# What agents can do across workers
 
-An agent in a chat or terminal on a worker reaches the hub through the worker's relay. The relay limits what it may do (`apps/hub/src/server/services/relay-scope.ts`). This page covers the three things an agent may do beyond its own host, and how the hub keeps its admin token out of an agent's reach.
+An agent in a chat or terminal on a worker reaches the hub through the worker's relay. The relay limits what it may do (`apps/hub/src/server/services/relay-scope.ts`). This page covers the three things an agent may do beyond its own worker, and how the hub keeps its admin token out of an agent's reach.
 
 ## Trust levels
 
-Each host has a trust level that an admin person sets in Settings > Hosts (or `band hosts trust <host> <level>`, `hosts.setTrust`). The hub reads it on every relay call, so lowering it takes effect on the next call. A new static host is `standard`, and every host that existed before trust levels was made `standard` by the migration. A host started by a runner is `restricted`, and so is an ephemeral worker that nobody set a level for.
+Each worker has a trust level that an admin person sets in Settings > Workers (or `band workers trust <worker> <level>`, `workers.setTrust`). The hub reads it on every relay call, so lowering it takes effect on the next call. A new static worker is `standard`, and every worker that existed before trust levels was made `standard` by the migration. A worker started by a runner is `restricted`, and so is an ephemeral worker that nobody set a level for.
 
-| Level | Agents on that host may |
+| Level | Agents on that worker may |
 | --- | --- |
-| `restricted` | Use their own worktrees only: chats, tasks, terminals, browsers, the queue and worktree-scoped subscriptions. No `worktrees.create` or `remove`, no `repos.*` writes, no cronjobs, and `hosts.forAgents` instead of `hosts.list`. A refusal names the level. |
-| `standard` | Everything this page describes below: the own-host rule, and `worktrees.create` on another host when the setting allows it. |
-| `admin` | Everything `standard` allows, on any host: list, send to and stop chats, tasks, terminals and browsers in worktrees on other hosts; `worktrees.create` and `remove` on any online static host (the setting does not apply; the repo's allowed hosts still do); cronjobs on worktrees of any host it may reach; `repos.*` writes; `settings.get` and `settings.update`; `hosts.list` with full detail and `repos.list` for every host. |
+| `restricted` | Use their own worktrees only: chats, tasks, terminals, browsers, the queue and worktree-scoped subscriptions. No `worktrees.create` or `remove`, no `repos.*` writes, no cronjobs, and `workers.forAgents` instead of `workers.list`. A refusal names the level. |
+| `standard` | Everything this page describes below: the own-worker rule, and `worktrees.create` on another worker when the setting allows it. |
+| `admin` | Everything `standard` allows, on any worker: list, send to and stop chats, tasks, terminals and browsers in worktrees on other workers; `worktrees.create` and `remove` on any online static worker (the setting does not apply; the repo's allowed workers still do); cronjobs on worktrees of any worker it may reach; `repos.*` writes; `settings.get` and `settings.update`; `workers.list` with full detail and `repos.list` for every worker. |
 
-Never available to an agent, whatever the level: `tokens.*`, the vault, `hosts.setTrust` and `hosts.audit`. `settings.update` from an admin host accepts only an allow-list of display and agent-behaviour keys (`agents`, `labels`, `notifications`, `defaultCodingAgent`, `theme` and a few more, `AGENT_SETTABLE_SETTINGS`). Credentials, agent commands, runners, CORS origins, the port and the tunnel need a person's token, and so do keys the list does not know. `settings.*` is refused over `/mcp`, `settings.get` over `/trpc` returns only those same keys (the full reply holds runner `env`, agent commands, CORS origins and the voice endpoint), and `repos.addFromWorker` with `addRoot` is refused at every level because widening a worker's roots needs a person's confirmation. No level reaches the hub's own machine (`local`): its chats, terminals, browsers, worktrees and cronjobs stay out of agent reach, because a shell there can read the hub's tokens and vault key. The relay token does not become a hub credential: the hub still answers a relay call as "an agent on host X", with the wider rules for an admin host. Every check of the own-host rule (`UNSCOPED_KEYS`, batching, chosen ids) stays in force at every level. The call that comes from a worktree must itself be on the caller's host.
+Never available to an agent, whatever the level: `tokens.*`, the vault, `workers.setTrust` and `workers.audit`. `settings.update` from an admin worker accepts only an allow-list of display and agent-behaviour keys (`agents`, `labels`, `notifications`, `defaultCodingAgent`, `theme` and a few more, `AGENT_SETTABLE_SETTINGS`). Credentials, agent commands, runners, CORS origins, the port and the tunnel need a person's token, and so do keys the list does not know. `settings.*` is refused over `/mcp`, `settings.get` over `/trpc` returns only those same keys (the full reply holds runner `env`, agent commands, CORS origins and the voice endpoint), and `repos.addFromWorker` with `addRoot` is refused at every level because widening a worker's roots needs a person's confirmation. No level reaches the hub's own machine (`local`): its chats, terminals, browsers, worktrees and cronjobs stay out of agent reach, because a shell there can read the hub's tokens and vault key. The relay token does not become a hub credential: the hub still answers a relay call as "an agent on worker X", with the wider rules for an admin worker. Every check of the own-worker rule (`UNSCOPED_KEYS`, batching, chosen ids) stays in force at every level. The call that comes from a worktree must itself be on the caller's worker.
 
-Cross-host calls an admin host makes, and its admin-only calls (`settings.update`, repo writes, cronjobs on other hosts), go in the audit log (`host_audit`, kept 90 days): time, calling host, chat, procedure and target host and worktree. Admins read it in Settings > Hosts (Cross-host activity) or with `band hosts audit`.
+Cross-worker calls an admin worker makes, and its admin-only calls (`settings.update`, repo writes, cronjobs on other workers), go in the audit log (`host_audit`, kept 90 days): time, calling worker, chat, procedure and target worker and worktree. Admins read it in Settings > Workers (Cross-worker activity) or with `band workers audit`.
 
-## Starting a worktree on another host
+## Starting a worktree on another worker
 
-`band worktrees create <repo> <branch> --host <host>` and the `worktrees_create` MCP tool (`hostId`) accept a host other than the one the agent runs on. Without a host, the worktree goes where the caller runs, as before. The hub accepts an explicit host when all of these hold, and refuses with the reason otherwise:
+`band worktrees create <repo> <branch> --worker <worker>` and the `worktrees_create` MCP tool (`hostId`) accept a worker other than the one the agent runs on. Without a worker, the worktree goes where the caller runs, as before. The hub accepts an explicit worker when all of these hold, and refuses with the reason otherwise:
 
-1. The setting "Agents may start worktrees on other hosts" is on (Settings > Agents, `agents.crossHostWorktrees` in `~/.band/settings.json`). It is on by default. With it off, an agent can create worktrees on its own worker only.
-2. The target is an online, static worker. A host that is offline, lost, ephemeral, or started by a runner is refused, and so is the hub's own machine. Placement by `--labels`, `--requires` or `--isolation` is unchanged and never starts a runner machine on an agent's say-so.
-3. The repo allows the host (`band repos set --hosts`, see `repo-hosts.md`).
+1. The setting "Agents may start worktrees on other workers" is on (Settings > Agents, `agents.crossHostWorktrees` in `~/.band/settings.json`). It is on by default. With it off, an agent can create worktrees on its own worker only.
+2. The target is an online, static worker. A worker that is offline, lost, ephemeral, or started by a runner is refused, and so is the hub's own machine. Placement by `--labels`, `--requires` or `--isolation` is unchanged and never starts a runner machine on an agent's say-so.
+3. The repo allows the worker (`band repos set --workers`, see `repo-hosts.md`).
 
-The one branch per repo rule still applies. The new worktree records the caller's worktree and chat (or terminal) as its origin (see `origin-links.md`), and an `--origin` must be a worktree on the caller's host. Refusals read like `worktrees.create: Host "mac" is offline`, `<repo> is only available on <hosts>` or `Agents may not start worktrees on other hosts. An admin can turn this on in Settings > Agents.`
+The one branch per repo rule still applies. The new worktree records the caller's worktree and chat (or terminal) as its origin (see `origin-links.md`), and an `--origin` must be a worktree on the caller's worker. Refusals read like `worktrees.create: Worker "mac" is offline`, `<repo> is only available on <workers>` or `Agents may not start worktrees on other workers. An admin can turn this on in Settings > Agents.`
 
-## Seeing the hosts
+## Seeing the workers
 
-`band hosts list` and the `band_hosts_forAgents` MCP tool work for agents. The hub cuts the answer down to id, name, status, mode, OS, architecture, coding agents, capabilities (including `desktop`) and labels. Roots, home directories, tool versions, capability reports, last-seen times and runner settings are left out. `band runners list`, `band hosts remove` and the other host and runner commands stay admin only.
+`band workers list` and the `band_hosts_forAgents` MCP tool work for agents. The hub cuts the answer down to id, name, status, mode, OS, architecture, coding agents, capabilities (including `desktop`) and labels. Roots, home directories, tool versions, capability reports, last-seen times and runner settings are left out. `band runners list`, `band workers remove` and the other worker and runner commands stay admin only.
 
 ## Where the admin token lives
 

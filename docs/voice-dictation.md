@@ -12,7 +12,7 @@ Band does not run speech models. The hub sends each recording to one OpenAI-comp
 3. The hub makes one non-streaming request, `POST <base URL>/audio/transcriptions`, with the multipart fields `file`, `model`, `response_format=json` and, when set, `language`. The API key goes in an `Authorization: Bearer` header. The hub reads the key from its credential vault, and no client, log line or error message holds it.
 4. The hub returns `{ "text": "..." }`.
 
-With **Run on** set to a host, step 3 happens on that machine. The hub sends the clip, the endpoint settings and the key to that host's worker over its existing link, and the worker makes the HTTP call to the base URL from its own network. This is how a hub on a server uses a speech server that listens only on the Mac's `127.0.0.1`. If the host is offline, the client gets "Host X is offline" and nothing is sent anywhere else.
+With **Run on** set to a worker, step 3 happens on that machine. The hub sends the clip, the endpoint settings and the key to that worker's worker over its existing link, and the worker makes the HTTP call to the base URL from its own network. This is how a hub on a server uses a speech server that listens only on the Mac's `127.0.0.1`. If the worker is offline, the client gets "Worker X is offline" and nothing is sent anywhere else.
 
 A clip is at most 25 MB (OpenAI's limit) and 10 minutes. The app stops the recording at 10 minutes, and the hub refuses a larger upload. The provider call times out after 2 minutes.
 
@@ -27,7 +27,7 @@ Open Settings > Voice (an admin device token is needed). Fill in:
 | Model | The model name the server expects. |
 | Language | Optional ISO-639-1 code such as `en`. Empty lets the provider detect it. |
 | API key | A key stored in Settings > Credentials (kind API key). Local servers need none. |
-| Run on | The hub, or a host whose worker calls the endpoint for the hub. |
+| Run on | The hub, or a worker whose worker calls the endpoint for the hub. |
 
 Press **Test connection** before saving. It sends one second of silence with the form's values and reports success, or a plain error: a refused key, an unreachable URL, an unknown model. The error never contains the key.
 
@@ -76,7 +76,7 @@ Use `:latest-cuda` and `--gpus=all` with an NVIDIA GPU. Then:
 
 - Base URL `http://127.0.0.1:8000/v1`
 - Model `Systran/faster-whisper-small`
-- Run on: the Linux host, if it is not the hub.
+- Run on: the Linux worker, if it is not the hub.
 
 Other servers that implement `/v1/audio/transcriptions` (LocalAI, WhisperKit's `serve`, Mistral's Voxtral API) work with the same fields.
 
@@ -92,7 +92,7 @@ Other servers that implement `/v1/audio/transcriptions` (LocalAI, WhisperKit's `
 
 **"Microphone access is blocked".** The browser or the system refused the microphone. In a browser, allow it from the lock icon in the address bar. In the desktop app, allow Band in System Settings > Privacy & Security > Microphone. In the Expo app, turn it on in Settings > Band > Microphone. Then tap the mic again.
 
-**"Could not reach host:port".** The base URL is wrong or the server is not running. For a local server, check that the Run on host is the machine where the server listens on `127.0.0.1`.
+**"Could not reach worker:port".** The base URL is wrong or the server is not running. For a local server, check that the Run on worker is the machine where the server listens on `127.0.0.1`.
 
 **"The speech-to-text server refused the API key".** Pick the right key, or check it at the provider.
 

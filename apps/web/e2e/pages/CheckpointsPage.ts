@@ -1,6 +1,6 @@
 /**
  * Page object for the checkpoint surfaces: the "Checkpoints on the hub" switch on a repo's
- * page in Settings > Repos, the offline icon and superseded badge on a worktree card, its "Open on another host…"
+ * page in Settings > Repos, the offline icon and superseded badge on a worktree card, its "Open on another worker…"
  * menu item, the offline notice, and the read-only Explorer and Changes of the newest checkpoint. Locators use the test ids set in
  * `RepoControls.tsx`, `WorktreeCard.tsx` and `OfflineCheckpoint.tsx`.
  */
@@ -42,7 +42,7 @@ export class CheckpointsPage {
     return this.card(worktreeId).getByTestId("worktree-card__offline");
   }
 
-  /** The tooltip with the host's last seen time and the checkpoint age. */
+  /** The tooltip with the worker's last seen time and the checkpoint age. */
   get offlineDetails(): Locator {
     return this.page.getByTestId("worktree-card__offline-details");
   }
@@ -55,7 +55,7 @@ export class CheckpointsPage {
     return this.card(worktreeId).getByTestId("worktree-card__superseded");
   }
 
-  /** The "Open on another host…" item of a card's context menu. */
+  /** The "Open on another worker…" item of a card's context menu. */
   moveItem(): Locator {
     return this.page.getByTestId("worktree-card__move");
   }
@@ -66,7 +66,7 @@ export class CheckpointsPage {
     });
   }
 
-  /** The reason a disabled "Open on another host…" item gives. */
+  /** The reason a disabled "Open on another worker…" item gives. */
   moveReason(): Locator {
     return this.page.getByTestId("worktree-card__move-reason");
   }
@@ -100,7 +100,7 @@ export class CheckpointsPage {
     return this.page.getByTestId("offline-sidepanel");
   }
 
-  /** The time left before the old host's lease ends and the button turns on. */
+  /** The time left before the old worker's lease ends and the button turns on. */
   get leaseCountdown(): Locator {
     return this.notice.getByTestId("offline-notice__countdown");
   }

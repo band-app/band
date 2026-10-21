@@ -44,6 +44,7 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("follow.") ||
       path.startsWith("mcp.") ||
       (path.startsWith("hosts.") && path !== "hosts.forAgents") ||
+      (path.startsWith("workers.") && path !== "workers.forAgents") ||
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.") ||
       path.startsWith("accountUsage.") ||

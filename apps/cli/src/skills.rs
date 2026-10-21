@@ -193,7 +193,7 @@ fn render_install_text(
     if targets.is_empty() {
         let _ = writeln!(
             text,
-            "  symlinks: no supported coding agents detected on host"
+            "  symlinks: no supported coding agents detected on this machine"
         );
     } else {
         let _ = writeln!(

@@ -1,6 +1,6 @@
 /**
  * Page object for "this computer as a worker" in the desktop app: the first-run prompt and the
- * "This computer" section of Settings > Hosts.
+ * "This computer" section of Settings > Workers.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -35,7 +35,7 @@ export class ThisComputerPage {
   }
 
   async openHostsSettings(): Promise<void> {
-    await test.step("Open Settings > Hosts", async () => {
+    await test.step("Open Settings > Workers", async () => {
       // The global exists once the dashboard has mounted, so ask again until the dialog is up.
       await expect(async () => {
         await this.page.evaluate(() => {

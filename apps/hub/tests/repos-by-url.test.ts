@@ -1,5 +1,5 @@
 // Integration tests for repos defined by remote URL (worker-owned clone mapping). A real hub
-// (production bundle, temp BAND_HOME, BAND_LOCAL_HOST=off so it holds no checkout of its own)
+// (production bundle, temp BAND_HOME, BAND_LOCAL_WORKER=off so it holds no checkout of its own)
 // and a real `band-worker` process with its own temp HOME. Remotes are local bare repos.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";

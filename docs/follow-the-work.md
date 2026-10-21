@@ -1,10 +1,10 @@
 # Follow the work
 
-When a worktree's host is offline and someone needs a live host, Band offers to continue the worktree on another allowed host from the hub's latest [checkpoint](checkpoints.md). A repo can opt in to doing it without asking. When the original host comes back, its copy is kept and compared with the checkpoint, so nothing it did while it was away is lost.
+When a worktree's worker is offline and someone needs a live worker, Band offers to continue the worktree on another allowed worker from the hub's latest [checkpoint](checkpoints.md). A repo can opt in to doing it without asking. When the original worker comes back, its copy is kept and compared with the checkpoint, so nothing it did while it was away is lost.
 
 ## What triggers it
 
-An action that needs a live host on a worktree whose host is offline:
+An action that needs a live worker on a worktree whose worker is offline:
 
 - sending a chat message,
 - opening a terminal,
@@ -12,13 +12,13 @@ An action that needs a live host on a worktree whose host is offline:
 
 Reading never triggers it. The diff, the files and the chat history of an offline worktree come from the hub's checkpoint, as [offline worktrees](checkpoints.md#offline-worktrees) describe. A worktree on an ephemeral worker is not offered a continuation, because it sleeps and wakes (see [ephemeral workers](ephemeral-workers.md)).
 
-## The old host's lease
+## The old worker's lease
 
 A worker holds a lease from the hub, 5 minutes by default (`BAND_WORKER_LEASE_MS` on the hub). While its link is up the hub renews the lease every fifth of that time. A worker whose lease runs out stops its agents, terminals, run scripts and language servers, and starts nothing new until the hub renews. It cannot tell "the hub is down" from "my network is down", so both stop it.
 
-Once everything has stopped, the worker snapshots every worktree on it into a local commit under `refs/band/fenced/<folder>` (and lists them in `<state dir>/fenced.json`). The snapshot is never uploaded and never stored as a checkpoint, so a checkpoint on the hub always comes from a worktree's current owner. Files on disk are not touched, so the check below still sees everything when the host is back.
+Once everything has stopped, the worker snapshots every worktree on it into a local commit under `refs/band/fenced/<folder>` (and lists them in `<state dir>/fenced.json`). The snapshot is never uploaded and never stored as a checkpoint, so a checkpoint on the hub always comes from a worktree's current owner. Files on disk are not touched, so the check below still sees everything when the worker is back.
 
-The hub offers "Open on another host", and continues by itself for a repo that opted in, only after the lease it could last have granted to the offline worker is over. Until then the offer is blocked (`lease-active`), the button in the worktree's notice is disabled with a countdown, and `follow.continue`, `checkpoints.restore` and `band worktrees continue | restore` refuse with the time left. This holds when the hub itself was down: after a restart the bound comes from the last acknowledged renewal (`hosts.last_seen_at`) plus one renewal interval. Each renewal carries the folders on that host that a continuation superseded, and the worker starts nothing in them. The hub does not wait for the timer when that list changes: a restore, move, continuation or discard sends the affected hosts a renewal at once, so a chat or terminal started right after is allowed or refused by the current state. A worker that is too old to know leases (it answers `lease.renew` with "method not found") is not held back.
+The hub offers "Open on another worker", and continues by itself for a repo that opted in, only after the lease it could last have granted to the offline worker is over. Until then the offer is blocked (`lease-active`), the button in the worktree's notice is disabled with a countdown, and `follow.continue`, `checkpoints.restore` and `band worktrees continue | restore` refuse with the time left. This holds when the hub itself was down: after a restart the bound comes from the last acknowledged renewal (`workers.last_seen_at`) plus one renewal interval. Each renewal carries the folders on that worker that a continuation superseded, and the worker starts nothing in them. The hub does not wait for the timer when that list changes: a restore, move, continuation or discard sends the affected workers a renewal at once, so a chat or terminal started right after is allowed or refused by the current state. A worker that is too old to know leases (it answers `lease.renew` with "method not found") is not held back.
 
 When the worker returns, the hub's first renewal lists the folders that were continued elsewhere. The worker starts nothing in them, so a superseded copy stays stopped. The other worktrees on it start again.
 
@@ -26,9 +26,9 @@ When the worker returns, the hub's first renewal lists the folders that were con
 
 The chat shows a dialog:
 
-> `<host>` is offline. Continue on `<target>` from the checkpoint taken `<age>` ago?
+> `<worker>` is offline. Continue on `<target>` from the checkpoint taken `<age>` ago?
 
-The target list holds the online workers the repo may run on. The hub recommends one: a host that already has a clone of the repo first, then a host where the agent the chat uses is installed and logged in (from the host's capability report and a live launch check), then the host with the fewest worktrees. A host where the agent cannot start is listed with the reason and cannot be chosen.
+The target list holds the online workers the repo may run on. The hub recommends one: a worker that already has a clone of the repo first, then a worker where the agent the chat uses is installed and logged in (from the worker's capability report and a live launch check), then the worker with the fewest worktrees. A worker where the agent cannot start is listed with the reason and cannot be chosen.
 
 The dialog also says what does not carry over and what runs:
 
@@ -40,17 +40,17 @@ Accepting calls `follow.continue`. The chat then sends the message again to the 
 
 ## What happens when you accept
 
-The restore is the same as [Restore on another host](checkpoints.md#restore-on-another-host): the branch, the uncommitted and untracked files, the agent sessions and the chats, terminal records, tasks and subscriptions move to the new worktree id `<repo>-<branch>@<host>`. Then:
+The restore is the same as [Restore on another worker](checkpoints.md#restore-on-another-worker): the branch, the uncommitted and untracked files, the agent sessions and the chats, terminal records, tasks and subscriptions move to the new worktree id `<repo>-<branch>@<worker>`. Then:
 
-1. The move is recorded on the new copy: the host it came from, the host it runs on, the reason (`manual` or `auto`), the checkpoint id and its time. The sidebar card shows it as an icon whose tooltip reads "Continued from `<host>`". Cards show state as icons with tooltips, not text, and carry the host's name as a small label when the hub has more than one host.
+1. The move is recorded on the new copy: the worker it came from, the worker it runs on, the reason (`manual` or `auto`), the checkpoint id and its time. The sidebar card shows it as an icon whose tooltip reads "Continued from `<worker>`". Cards show state as icons with tooltips, not text, and carry the worker's name as a small label when the hub has more than one worker.
 2. The repo's setup runs on the new copy, the way it does for a new worktree.
 3. The old copy stays where it is, marked superseded.
 
-`band worktrees continue <id> [--to <host>]` does the same from the CLI, and prints the new worktree id.
+`band worktrees continue <id> [--to <worker>]` does the same from the CLI, and prints the new worktree id.
 
 ## Continue automatically
 
-"Continue on another host automatically" in Settings > Repos, or `band repos set <repo> --auto-continue on|off`. It is an admin setting and is off by default.
+"Continue on another worker automatically" in Settings > Repos, or `band repos set <repo> --auto-continue on|off`. It is an admin setting and is off by default.
 
 With it on, the action goes through without a prompt when the checkpoint is younger than the age limit, and the chat shows a notice and the header records the move as `auto`. An older checkpoint always asks. The limit is 30 minutes. `BAND_AUTO_CONTINUE_MAX_AGE_MS` in the hub's environment changes it.
 
@@ -60,49 +60,49 @@ The dialog and the API answer with a reason and no target choice:
 
 | Reason | Message starts with | What to do |
 | --- | --- | --- |
-| The repo is limited to the offline host | `<repo> is only available on <host>` | Bring the host back, or allow another host in Settings > Repos. |
-| Checkpoints are off for the repo | `Checkpoints are off for <repo>` | Bring the host back, or turn checkpoints on. |
-| The hub has no checkpoint yet | `The hub has no checkpoint of <id>` | Bring the host back. |
-| No other allowed host is online | `<host> is offline and no other host that <repo> may run on is online` | Bring a host online. |
-| The old host's lease is still running | `<host> may still be running <id>. It stops all work when its lease ends, in ...` | Wait. The button shows the countdown. |
-| The agent is missing on every other host | `... the agent for this work is not available on any other host` | Install and log in the agent on another host, for example Codex that is installed only on the offline one. |
+| The repo is limited to the offline worker | `<repo> is only available on <worker>` | Bring the worker back, or allow another worker in Settings > Repos. |
+| Checkpoints are off for the repo | `Checkpoints are off for <repo>` | Bring the worker back, or turn checkpoints on. |
+| The hub has no checkpoint yet | `The hub has no checkpoint of <id>` | Bring the worker back. |
+| No other allowed worker is online | `<worker> is offline and no other worker that <repo> may run on is online` | Bring a worker online. |
+| The old worker's lease is still running | `<worker> may still be running <id>. It stops all work when its lease ends, in ...` | Wait. The button shows the countdown. |
+| The agent is missing on every other worker | `... the agent for this work is not available on any other worker` | Install and log in the agent on another worker, for example Codex that is installed only on the offline one. |
 
-`band worktrees continue` prints the same text. A worktree whose host is online is refused with a pointer to `band worktrees move`, which is the way to move work while the source is up.
+`band worktrees continue` prints the same text. A worktree whose worker is online is refused with a pointer to `band worktrees move`, which is the way to move work while the source is up.
 
 ## When the target already has a copy
 
-The checkpoint wins. If the target host holds an older superseded copy of the worktree, a checkout of the branch, or (for the default branch) its own checkout of the repo with local changes, the continuation replaces it with the checkpoint's files. What the target held is saved first:
+The checkpoint wins. If the target worker holds an older superseded copy of the worktree, a checkout of the branch, or (for the default branch) its own checkout of the repo with local changes, the continuation replaces it with the checkpoint's files. What the target held is saved first:
 
 - `refs/band/backup/<new worktree id>/<time>` in the target's repository is a commit of the folder as it was, with uncommitted and untracked files.
 - `refs/band/backup/<new worktree id>/<time>-branch` keeps the tip of the target's branch when it had commits the checkpoint lacks.
 
-The result lists them as `backupRefs`. Nothing else is deleted. A live worktree of the same branch on the target is not replaced ("Host X already has a worktree ...").
+The result lists them as `backupRefs`. Nothing else is deleted. A live worktree of the same branch on the target is not replaced ("Worker X already has a worktree ...").
 
 ## The default branch
 
-The default-branch worktree of a host is the repo's own folder, and other worktrees depend on it. It can be opened on another host when its host is offline, or moved while its host is online and the folder is idle. On the target the repo's checkout is backed up as above, put on the checkpoint's commit, and given the checkpoint's changes. A move refuses while it has a running agent, a queued message or a terminal, and leaves the source folder in place, superseded and untouched. Discarding the old copy does not remove the folder: it resets the default branch to the latest of its remote (local changes and untracked files dropped, ignored files kept) and the folder is the repo's checkout again.
+The default-branch worktree of a worker is the repo's own folder, and other worktrees depend on it. It can be opened on another worker when its worker is offline, or moved while its worker is online and the folder is idle. On the target the repo's checkout is backed up as above, put on the checkpoint's commit, and given the checkpoint's changes. A move refuses while it has a running agent, a queued message or a terminal, and leaves the source folder in place, superseded and untouched. Discarding the old copy does not remove the folder: it resets the default branch to the latest of its remote (local changes and untracked files dropped, ignored files kept) and the folder is the repo's checkout again.
 
-## When the original host comes back
+## When the original worker comes back
 
 When the worker connects, the hub compares the working tree of each copy it holds that a continuation superseded with the checkpoint the continuation used. If the tree differs, the copy is flagged `diverged` in `repos.list` and its card.
 
 The panel of a diverged copy (`follow.divergence`) lists the files that differ and the diff of each one. Two actions settle it:
 
 - **Bring these changes over** (`follow.bringOver`) builds a patch of what the old copy changed since the checkpoint and applies it to the new copy. A patch that does not apply cleanly changes nothing and comes back with the conflicting files, so you can resolve them by hand. A clean apply marks the old copy `resolved`.
-- **Discard old copy** (`follow.discardOld`) removes the old worktree and its files on the old host. It needs `confirm: true`, and the UI asks first. A diverged copy is refused unless the call also passes `discardChanges: true`: the refusal names how many files would be lost, and the UI shows the diff and asks a second time with that count. A copy whose changes were brought over counts as resolved and needs only `confirm`, until it changes again. Nothing else in this feature deletes files on any host. If the old host is offline, the removal runs when it next connects.
+- **Discard old copy** (`follow.discardOld`) removes the old worktree and its files on the old worker. It needs `confirm: true`, and the UI asks first. A diverged copy is refused unless the call also passes `discardChanges: true`: the refusal names how many files would be lost, and the UI shows the diff and asks a second time with that count. A copy whose changes were brought over counts as resolved and needs only `confirm`, until it changes again. Nothing else in this feature deletes files on any worker. If the old worker is offline, the removal runs when it next connects.
 
 Until a person settles it, the old copy stays on disk and takes no checkpoints.
 
 ## Limits
 
-- Work since the last checkpoint is lost with the offline host, unless the host comes back and a person brings it over. A host that stops cleanly takes a checkpoint first (`shutdown` trigger).
-- The local host (the hub's own machine) is never a source or a target.
-- A continuation needs the target to have the repo. For a repo with a remote URL the hub clones it there. A repo with no remote can only continue on a host that already holds it.
+- Work since the last checkpoint is lost with the offline worker, unless the worker comes back and a person brings it over. A worker that stops cleanly takes a checkpoint first (`shutdown` trigger).
+- The local worker (the hub's own machine) is never a source or a target.
+- A continuation needs the target to have the repo. For a repo with a remote URL the hub clones it there. A repo with no remote can only continue on a worker that already holds it.
 - Ignored files and running processes are not carried over. A per-repo include list for ignored files such as `.env*`, with a size limit, is a separate piece of work.
-- Edits made on the old host's disk outside Band, after its lease ran out, are caught by the check when the host returns, not prevented.
+- Edits made on the old worker's disk outside Band, after its lease ran out, are caught by the check when the worker returns, not prevented.
 - A worktree on the hub's own machine is out of scope: when that machine is down the whole UI is.
 - `follow.*` is not offered to agents: the MCP endpoint and the worker relay leave it out.
 
 ## Where it lives
 
-`apps/hub/src/server/services/follow-service.ts` holds the offer, the gate, the continuation and the divergence checks. The chat route (`api/chat-submit.ts`), `terminals.create` and `agentSessions.launch` call `followService.gate` before they use the host. Types shared with the UI are in `packages/shared/src/continuation.ts`. Tests: `apps/hub/tests/follow-the-work.test.ts` (two real workers and a scripted ACP agent) and `apps/web/e2e/follow-the-work.spec.ts`.
+`apps/hub/src/server/services/follow-service.ts` holds the offer, the gate, the continuation and the divergence checks. The chat route (`api/chat-submit.ts`), `terminals.create` and `agentSessions.launch` call `followService.gate` before they use the worker. Types shared with the UI are in `packages/shared/src/continuation.ts`. Tests: `apps/hub/tests/follow-the-work.test.ts` (two real workers and a scripted ACP agent) and `apps/web/e2e/follow-the-work.spec.ts`.

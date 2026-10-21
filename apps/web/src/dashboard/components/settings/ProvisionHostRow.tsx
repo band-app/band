@@ -28,7 +28,7 @@ function copy(text: string) {
 }
 
 /**
- * "Add a host": one command to paste on a blank Linux or macOS machine, with the optional
+ * "Add a host": one command to paste on a blank Linux or macOS computer, with the optional
  * provisioning repo it runs first, the live status and the log.
  * Admin only. Manual install stays in the row below.
  */
@@ -130,15 +130,15 @@ export function ProvisionHostRow() {
   return (
     <SettingsRow
       variant="stacked"
-      label="Add a host"
-      description="Paste one command on a blank Linux or macOS machine. It works once and expires in an hour."
+      label="Add a worker"
+      description="Paste one command on a blank Linux or macOS computer. It works once and expires in an hour."
     >
       <div className="space-y-2" data-testid="settings__provision">
         <details>
           <summary className="cursor-pointer text-xs font-medium">Provisioning repo</summary>
           <div className="mt-2 space-y-2">
             <p className="text-xs text-muted-foreground">
-              Optional. The hub fetches this repo with its git credential and the machine runs the
+              Optional. The hub fetches this repo with its git credential and the computer runs the
               start command from it before the worker starts. Leave it empty for the built-in
               install.
             </p>
@@ -238,8 +238,8 @@ export function ProvisionHostRow() {
         ) : (
           <div className="flex gap-2">
             <Input
-              aria-label="Name for the provisioned machine"
-              placeholder="Host name (optional)"
+              aria-label="Name for the new worker"
+              placeholder="Worker name (optional)"
               value={hostName}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHostName(e.target.value)}
               className="h-8 text-sm"

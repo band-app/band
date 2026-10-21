@@ -72,6 +72,8 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "repos.remove",
   "hosts.list",
   "hosts.forAgents",
+  "workers.list",
+  "workers.forAgents",
   "cronjobs.list",
   "cronjobs.create",
   "cronjobs.update",
@@ -95,6 +97,7 @@ export const RESTRICTED_PROCEDURES: ReadonlySet<string> = new Set(
         p === "worktrees.create" ||
         p === "worktrees.remove" ||
         p === "hosts.list" ||
+        p === "workers.list" ||
         p.startsWith("cronjobs.") ||
         (p.startsWith("repos.") && p !== "repos.list")
       ),
@@ -117,7 +120,9 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure.startsWith("provisioning.") ||
   procedure.startsWith("agentLogins.") ||
   procedure === "hosts.setTrust" ||
-  procedure === "hosts.audit";
+  procedure === "hosts.audit" ||
+  procedure === "workers.setTrust" ||
+  procedure === "workers.audit";
 
 /**
  * The settings an admin host may change, by allow-list. Everything else (credentials, agent
@@ -153,6 +158,7 @@ const UNBATCHABLE = new Set([
   "settings.get",
   "repos.list",
   "hosts.list",
+  "workers.list",
   "worktrees.create",
   "worktrees.remove",
   "statuses.notify",
@@ -238,6 +244,8 @@ const SCOPE_FROM_HEADERS = new Set([
   "repos.list",
   "hosts.list",
   "hosts.forAgents",
+  "workers.list",
+  "workers.forAgents",
 ]);
 
 const MCP_PROXY_ROUTE = /^\/mcp-proxy\/[^/]+\/?$/;
@@ -472,7 +480,7 @@ function checkNamed(
     unscoped: false,
   };
   collect(input, named, workerId);
-  const outside = deny(403, "That worktree is not on this host");
+  const outside = deny(403, "That worktree is not on this worker");
   if (named.unscoped) return deny(403, "That call names a target the relay cannot check");
   const wide = ctx.trust === "admin";
   const crossHosts: Array<{ hostId: string; target: string }> = [];
@@ -542,7 +550,7 @@ const REPO_BY_NAME_PROCEDURES = new Set([
 
 /**
  * Repo management from a worker. The one limit is a repo's allowed hosts: an agent may not act on a
- * repo limited to hosts that exclude its own, nor add a repo limited to hosts that exclude the host
+ * repo limited to workers that exclude its own, nor add a repo limited to hosts that exclude the host
  * the folder is on. These calls name a repo or a host, not a worktree, so they skip `checkNamed`.
  * An admin host is not held to the first limit, and its writes go in the audit log.
  */
@@ -576,7 +584,7 @@ function checkRepoCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdic
     if (Array.isArray(allowedHostIds) && !allowedHostIds.includes(hostId)) {
       return deny(
         403,
-        `${procedure}: The repo would be limited to hosts that exclude ${hostId}, where the folder is`,
+        `${procedure}: The repo would be limited to workers that exclude ${hostId}, where the folder is`,
       );
     }
     // An existing repo named by the call is checked here. One found by the folder's remote is
@@ -623,13 +631,16 @@ function checkAdminCronjob(procedure: string, key: string, ctx: Ctx): RelayVerdi
 function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
   const { workerId, lookups, trust } = ctx;
   if (NEVER_FOR_AGENTS(procedure)) {
-    return deny(403, `${procedure} is not available to agents, whatever their host's trust level`);
+    return deny(
+      403,
+      `${procedure} is not available to agents, whatever their worker's trust level`,
+    );
   }
   if (!allowedFor(trust).has(procedure)) {
     return deny(
       403,
       trust === "restricted" && RELAY_PROCEDURES.has(procedure)
-        ? `${procedure} is not available to agents on a restricted host`
+        ? `${procedure} is not available to agents on a restricted worker`
         : `${procedure} is not available to agents`,
     );
   }
@@ -683,7 +694,7 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
         originHost === null ||
         (originHost !== workerId && (!admin || originHost === HUB_HOST_ID))
       ) {
-        return deny(403, `${procedure}: The origin is not a worktree on this host`);
+        return deny(403, `${procedure}: The origin is not a worktree on this worker`);
       }
     }
     if (hostId !== undefined && hostId !== workerId) {
@@ -694,7 +705,7 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
       if (hostRepoPath !== undefined || placement !== undefined) {
         return deny(
           403,
-          `${procedure}: hostRepoPath and placement cannot be set for another host from a worker`,
+          `${procedure}: hostRepoPath and placement cannot be set for another worker from a worker`,
         );
       }
       if (admin) {
@@ -709,7 +720,7 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
       if (!admin) {
         return deny(
           403,
-          `${procedure}: A worktree on another host cannot be removed from a worker`,
+          `${procedure}: A worktree on another worker cannot be removed from a worker`,
         );
       }
       if (typeof hostId !== "string") return deny(400, `${procedure}: hostId must be a string`);
@@ -735,7 +746,7 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
     const owner = lookups.worktreeOfSubscription(id);
     const ownerHost = owner === null ? null : lookups.hostOfWorktree(owner);
     if (ownerHost === null || (ownerHost !== workerId && (!admin || ownerHost === HUB_HOST_ID))) {
-      return deny(403, `${procedure}: That subscription is not on this host`);
+      return deny(403, `${procedure}: That subscription is not on this worker`);
     }
     if (ownerHost !== workerId) {
       ctx.audit.push({ procedure, targetHostId: ownerHost, target: owner });
@@ -745,7 +756,7 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
   const verdict = checkNamed(named, ctx);
   if (!verdict.ok) return deny(verdict.status, `${procedure}: ${verdict.reason}`);
   if (verdict.named === 0 && !SCOPE_FROM_HEADERS.has(procedure)) {
-    return deny(403, `${procedure} must name a worktree on this host`);
+    return deny(403, `${procedure} must name a worktree on this worker`);
   }
   for (const c of verdict.crossHosts ?? []) {
     ctx.audit.push({ procedure, targetHostId: c.hostId, target: c.target });
@@ -847,7 +858,7 @@ export function checkRelayRequest(
   const trust = trustFor(workerId, lookups);
   const verdict = checkRelay(request, { workerId, trust, lookups, audit: [] });
   if (!verdict.ok && trust === "restricted") {
-    return { ...verdict, reason: `${verdict.reason} (this host's trust level is restricted)` };
+    return { ...verdict, reason: `${verdict.reason} (this worker's trust level is restricted)` };
   }
   // The level the check used goes with the verdict, so the relay shapes the call and the reply by it.
   return verdict.ok ? { ...verdict, trust } : verdict;
@@ -862,7 +873,7 @@ function checkRelay(request: RelayHttpRequest, ctx: Ctx): RelayVerdict {
   );
   if (!scope.ok) return scope;
   if (lookups.hostOfWorktree(request.scope.worktreeId) !== workerId) {
-    return deny(403, "That worktree is not on this host");
+    return deny(403, "That worktree is not on this worker");
   }
 
   let url: URL;

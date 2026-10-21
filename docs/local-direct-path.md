@@ -44,7 +44,7 @@ The listener (`apps/worker/src/direct.ts`) binds `127.0.0.1` only, on a port the
 - The token is registered and not expired (401 otherwise). A hub device token is no credential here.
 - The call names the token's worktree (403 otherwise). A terminal must also belong to that worktree.
 
-File, diff and search calls then run the same service classes the hub runs (`@band-app/worktree-ops`), over a host whose calls go through the worker's own method handlers (`Registrar.invoke`). So the path policy that keeps a link call inside the worker's roots applies unchanged, and a refused path fails with the same message on both paths.
+File, diff and search calls then run the same service classes the hub runs (`@band-app/worktree-ops`), over a worker whose calls go through the worker's own method handlers (`Registrar.invoke`). So the path policy that keeps a link call inside the worker's roots applies unchanged, and a refused path fails with the same message on both paths.
 
 ## Falling back
 

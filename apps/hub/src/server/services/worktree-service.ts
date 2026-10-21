@@ -403,16 +403,16 @@ export function expandHome(given: string, home: string | undefined, hostId: stri
   if (path === "~" || path.startsWith("~/")) {
     if (!home) {
       throw new Error(
-        `Host "${hostId}" did not report its home directory, so "${path}" cannot be expanded. Use an absolute path.`,
+        `Worker "${hostId}" did not report its home directory, so "${path}" cannot be expanded. Use an absolute path.`,
       );
     }
     return path === "~" ? home : posix.join(home, path.slice(2));
   }
   if (path.startsWith("~")) {
-    throw new Error(`"${path}" is not supported. Use an absolute path on host "${hostId}".`);
+    throw new Error(`"${path}" is not supported. Use an absolute path on worker "${hostId}".`);
   }
   if (!posix.isAbsolute(path) && !/^[A-Za-z]:[\\/]/.test(path)) {
-    throw new Error(`"${path}" is relative. Use an absolute path on host "${hostId}".`);
+    throw new Error(`"${path}" is relative. Use an absolute path on worker "${hostId}".`);
   }
   return path;
 }
@@ -491,9 +491,9 @@ export class WorktreeService {
       const path = expandHome(given, info.home, host.id);
       const resolved = await host.fs.realpath(path).catch((err: unknown) => {
         if (err instanceof HostPathDeniedError) {
-          throw new Error(`${path} is outside the directories host "${host.id}" serves.${where}`);
+          throw new Error(`${path} is outside the directories worker "${host.id}" serves.${where}`);
         }
-        throw new Error(`Host "${host.id}" has no directory ${path}.${where}`);
+        throw new Error(`Worker "${host.id}" has no directory ${path}.${where}`);
       });
       hostRegistry.setRepoPathOn(repo.name, host.id, resolved);
       if (repo.remoteUrl) await host.repos.map(repo.remoteUrl, resolved);
@@ -511,9 +511,9 @@ export class WorktreeService {
     if (!repo.remoteUrl) {
       const holders = [...(this.repoQueries.allHostPaths().get(repo.name)?.keys() ?? [])];
       throw new Error(
-        `Repo "${repo.name}" has no remote URL, so it can only run on the host that holds it${
+        `Repo "${repo.name}" has no remote URL, so it can only run on the worker that holds it${
           holders.length > 0 ? ` (${holders.join(", ")})` : ""
-        }. Host "${host.id}" does not.`,
+        }. Worker "${host.id}" does not.`,
       );
     }
     // The hub's own machine never gets a clone when it is turned off.
@@ -542,7 +542,7 @@ export class WorktreeService {
   /** Where a remote host keeps the worktrees of Band worktrees: under its first root. */
   private async remoteWorktreesDir(host: Host): Promise<string> {
     const [root] = (await host.info()).roots;
-    if (!root) throw new Error(`Host "${host.id}" serves no directory to put worktrees in`);
+    if (!root) throw new Error(`Worker "${host.id}" serves no directory to put worktrees in`);
     return posix.join(root, ".band-worktrees");
   }
 
@@ -990,7 +990,7 @@ export class WorktreeService {
       if (wtHostId !== hostRegistry.local.id && err instanceof HostOfflineError) {
         log.info(
           { worktreeId, hostId: wtHostId },
-          "host offline; removal will finish on reconnect",
+          "worker offline; removal will finish on reconnect",
         );
         return this.removeNow(input, worktreeId, wtRow.path, currentBranch, currentBranch, true);
       }
@@ -1010,7 +1010,7 @@ export class WorktreeService {
     if (!match || folderGone) {
       // The folder is gone, or git no longer lists it (an external tool removed it). Drop the
       // record and prune git's metadata. No files and no branch are deleted.
-      log.info({ worktreeId }, "worktree is gone from its host; dropping the record");
+      log.info({ worktreeId }, "worktree is gone from its worker; dropping the record");
       return this.removeNow(
         input,
         worktreeId,
@@ -1236,7 +1236,7 @@ export class WorktreeService {
             // The host dropped after the worktree left the hub. The worker finishes the job on reconnect.
             log.info(
               { worktreeId, hostId: host.id },
-              "host went offline; cleanup will finish on reconnect",
+              "worker went offline; cleanup will finish on reconnect",
             );
             this.pendingRemovals.add({
               hostId: host.id,
@@ -1476,7 +1476,7 @@ export class WorktreeService {
   }
 
   /**
-   * Boot step for a hub with its own machine turned off (`BAND_LOCAL_HOST=off`): forgets the
+   * Boot step for a hub with its own machine turned off (`BAND_LOCAL_WORKER=off`): forgets the
    * worktrees recorded on the local host and the hub's checkout of each git repo, with their
    * chats and statuses. No file is deleted and git is not asked to remove anything.
    */

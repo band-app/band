@@ -116,7 +116,7 @@ describe("hetzner hook", () => {
     expect(stub.servers).toHaveLength(1);
     const server = stub.servers[0];
     expect(res.stdout).toContain(`BAND_MACHINE_HANDLE=${server.id}\n`);
-    expect(res.stdout).toContain("BAND_HOST_REPO_PATH=/home/band/work/proj\n");
+    expect(res.stdout).toContain("BAND_WORKER_REPO_PATH=/home/band/work/proj\n");
     expect(server).toMatchObject({
       name: "band-h-0123456789ab",
       server_type: "cx32",
@@ -276,7 +276,7 @@ describe("hetzner hook", () => {
       expect(server.labels["band.worker"]).toBe("h-0123456789ab");
       expect(res.stdout).toContain(`BAND_MACHINE_HANDLE=${server.id}\n`);
       // The repository is on the snapshot's disk already.
-      expect(res.stdout).not.toContain("BAND_HOST_REPO_PATH");
+      expect(res.stdout).not.toContain("BAND_WORKER_REPO_PATH");
 
       const cfg = parseCloudConfig(server.user_data);
       expect(file(cfg, "/etc/band-worker.env").content).toContain(
@@ -343,7 +343,7 @@ describe("hetzner hook", () => {
       dir,
     );
     expect(res.status, res.stderr).toBe(0);
-    expect(res.stdout).toContain("BAND_HOST_REPO_PATH=/work/proj\n");
+    expect(res.stdout).toContain("BAND_WORKER_REPO_PATH=/work/proj\n");
     const cfg = parseCloudConfig(stub.servers[0].user_data);
     expect(file(cfg, "/etc/systemd/system/band-worker.service").content).toContain(
       "ghcr.io/example/band-worker:1",

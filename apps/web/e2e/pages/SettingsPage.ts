@@ -229,9 +229,9 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: "Code intelligence (LSP)" });
   }
 
-  /** Settings > Agents: whether an agent on a worker may start worktrees on other hosts. */
+  /** Settings > Agents: whether an agent on a worker may start worktrees on other workers. */
   crossHostWorktreesSwitch(): Locator {
-    return this.dialog.getByRole("switch", { name: "Agents may start worktrees on other hosts" });
+    return this.dialog.getByRole("switch", { name: "Agents may start worktrees on other workers" });
   }
 
   /** Browser CDP experimental toggle. */
@@ -264,7 +264,7 @@ export class SettingsPage {
     return this.page.getByTestId("hooks-banner__dismiss");
   }
 
-  /** The Agent hooks row of one host (`AgentHooksSettings.tsx`). Its `data-state` is
+  /** The Agent hooks row of one worker (`AgentHooksSettings.tsx`). Its `data-state` is
    *  `installed`, `outdated`, `not_installed` or `offline`. */
   hooksHostRow(hostId: string): Locator {
     return this.dialog
@@ -272,12 +272,12 @@ export class SettingsPage {
       .and(this.page.locator(`[data-host-id="${hostId}"]`));
   }
 
-  /** Install or Reinstall on a host's Agent hooks row. */
+  /** Install or Reinstall on a worker's Agent hooks row. */
   hooksInstallButton(hostId: string): Locator {
     return this.hooksHostRow(hostId).getByTestId("settings__hooks-install");
   }
 
-  /** Remove on a host's Agent hooks row. */
+  /** Remove on a worker's Agent hooks row. */
   hooksRemoveButton(hostId: string): Locator {
     return this.hooksHostRow(hostId).getByTestId("settings__hooks-remove");
   }
@@ -482,30 +482,30 @@ export class SettingsPage {
     });
   }
 
-  /** One row per host in the Hosts section, the local one included.
+  /** One row per worker in the Workers section, the local one included.
    *  `data-testid` set in `HostsSettings.tsx`. */
   hostRows(): Locator {
     return this.dialog.getByTestId("settings__host");
   }
 
-  /** The row of one host by id, matched on the id the row prints. */
+  /** The row of one worker by id, matched on the id the row prints. */
   hostRow(hostId: string): Locator {
     return this.hostRows().filter({
       has: this.page.getByTestId("settings__host-id").getByText(hostId, { exact: true }),
     });
   }
 
-  /** The trust level selector of a host row (admin tokens). Set in `HostsSettings.tsx`. */
+  /** The trust level selector of a worker row (admin tokens). Set in `HostsSettings.tsx`. */
   hostTrustSelect(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-trust-select");
   }
 
-  /** The trust level badge of a host row (tokens without the admin flag). */
+  /** The trust level badge of a worker row (tokens without the admin flag). */
   hostTrustBadge(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-trust");
   }
 
-  /** Picks a trust level for a host in its row. */
+  /** Picks a trust level for a worker in its row. */
   async chooseHostTrust(hostId: string, level: "restricted" | "standard" | "admin"): Promise<void> {
     await test.step(`Set ${hostId} to ${level}`, async () => {
       await this.hostTrustSelect(hostId).selectOption(level);
@@ -860,29 +860,29 @@ export class SettingsPage {
     });
   }
 
-  /** The agents line of a host row. `data-testid` set in `HostsSettings.tsx`. */
+  /** The agents line of a worker row. `data-testid` set in `HostsSettings.tsx`. */
   hostAgents(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-agents");
   }
 
-  /** The roots line of a host row. */
+  /** The roots line of a worker row. */
   hostRoots(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-roots");
   }
 
-  /** Clicks Remove on a host row. */
+  /** Clicks Remove on a worker row. */
   async removeHost(hostId: string): Promise<void> {
-    await test.step(`Remove host ${hostId}`, async () => {
+    await test.step(`Remove worker ${hostId}`, async () => {
       await this.hostRow(hostId).getByTestId("settings__host-remove").click();
     });
   }
 
-  /** The Remove button of a host row. */
+  /** The Remove button of a worker row. */
   hostRemoveButton(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-remove");
   }
 
-  /** One row per token in the Hosts section's Tokens list. */
+  /** One row per token in the Workers section's Tokens list. */
   tokenRows(): Locator {
     return this.dialog.getByTestId("settings__token");
   }
@@ -1051,7 +1051,7 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-agent-logins__note");
   }
 
-  /** The line under the Codex Add login form about hosts that already have a Codex login. */
+  /** The line under the Codex Add login form about workers that already have a Codex login. */
   agentLoginCodexNote(): Locator {
     return this.dialog.getByTestId("settings-agent-logins__codex-note");
   }
@@ -1156,7 +1156,7 @@ export class SettingsPage {
     });
   }
 
-  /** Opens the add form and fills a stdio server: a process on a host, with one vault-backed env variable. */
+  /** Opens the add form and fills a stdio server: a process on a worker, with one vault-backed env variable. */
   async startMcpStdioServer(opts: {
     name: string;
     hostId: string;
@@ -1171,9 +1171,9 @@ export class SettingsPage {
       await this.dialog.getByRole("textbox", { name: "MCP server name" }).fill(opts.name);
       await this.dialog
         .getByRole("combobox", { name: "MCP transport" })
-        .selectOption({ label: "Process on a host (stdio)" });
+        .selectOption({ label: "Process on a worker (stdio)" });
       await this.dialog
-        .getByRole("combobox", { name: "MCP host" })
+        .getByRole("combobox", { name: "MCP worker" })
         .selectOption({ value: opts.hostId });
       await this.dialog.getByRole("textbox", { name: "MCP command" }).fill(opts.command);
       await this.dialog.getByRole("textbox", { name: "MCP arguments" }).fill(opts.args.join("\n"));
@@ -1325,7 +1325,7 @@ export class SettingsPage {
     });
   }
 
-  /** Clicks "Get provisioning command" in the Hosts section's "Add a host" row. */
+  /** Clicks "Get provisioning command" in the Workers section's "Add a worker" row. */
   async getProvisioningCommand(): Promise<void> {
     await test.step("Get the provisioning command", async () => {
       await this.dialog.getByTestId("settings__provision-create").click();
@@ -1354,7 +1354,7 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__provision-copy-cloud-init");
   }
 
-  /** The "Add worker" button in the Hosts section, before the form opens. */
+  /** The "Add worker" button in the Workers section, before the form opens. */
   addWorkerButton(): Locator {
     return this.dialog.getByTestId("settings__add-worker");
   }
@@ -1364,7 +1364,7 @@ export class SettingsPage {
     await test.step(`Add worker "${hostName}"`, async () => {
       await this.expectRowVisible(this.addWorkerButton());
       await this.addWorkerButton().click();
-      await this.dialog.getByRole("textbox", { name: "Host name" }).fill(hostName);
+      await this.dialog.getByRole("textbox", { name: "Worker name" }).fill(hostName);
       await this.dialog.getByRole("textbox", { name: "Labels" }).fill(labels);
       await this.dialog.getByRole("button", { name: "Create token" }).click();
     });
@@ -1657,7 +1657,7 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-repo__environment-summary");
   }
 
-  /** One row per host in the open repo page's environment's worker check. `data-meets`
+  /** One row per worker in the open repo page's environment's worker check. `data-meets`
    *  is `true` or `false`. */
   environmentHosts(): Locator {
     return this.dialog.getByTestId("settings-repo__environment-host");

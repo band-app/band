@@ -83,7 +83,7 @@ describe("k8s runner hook: spawn", () => {
     );
     expect(res.code, res.stderr).toBe(0);
     expect(res.stdout).toContain("BAND_MACHINE_HANDLE=band-workers/band-h-0123456789ab");
-    expect(res.stdout).toContain("BAND_HOST_REPO_PATH=/work/my-repo");
+    expect(res.stdout).toContain("BAND_WORKER_REPO_PATH=/work/my-repo");
 
     const [pod, secret] = created();
     expect(pod).toMatchObject({

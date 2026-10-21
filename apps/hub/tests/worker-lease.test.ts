@@ -35,7 +35,7 @@ afterAll(async () => {
 });
 
 describe("the old owner's lease", () => {
-  it("holds back Open on another host until the offline worker's lease is over", async () => {
+  it("holds back Open on another worker until the offline worker's lease is over", async () => {
     const killedAt = Date.now();
     await w.killWorker(a, "SIGKILL", { waitForLease: false });
 
@@ -80,7 +80,7 @@ describe("the old owner's lease", () => {
     await waitFor(
       async () => {
         const res = await w.mFail("terminal.create", { worktreeId: aId, id: randomUUID() });
-        return res.status >= 400 && res.body.includes("continued on another host")
+        return res.status >= 400 && res.body.includes("continued on another worker")
           ? true
           : undefined;
       },

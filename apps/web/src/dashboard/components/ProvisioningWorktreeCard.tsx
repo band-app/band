@@ -10,8 +10,8 @@ export interface ProvisioningRequest {
 }
 
 const STATUS_TEXT: Record<ProvisioningRequest["status"], string> = {
-  pending: "Waiting for a host",
-  leased: "Starting a host",
+  pending: "Waiting for a worker",
+  leased: "Starting a worker",
   fulfilled: "Setting up the worktree",
   failed: "Failed",
   cancelled: "Cancelled",

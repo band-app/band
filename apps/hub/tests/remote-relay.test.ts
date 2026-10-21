@@ -690,7 +690,9 @@ describe("what an agent may call, and which ids it may take", () => {
       worktreeOfSubscription: () => null,
       crossHostRefusal: () => null,
       repoHostRefusal: (repo, host) =>
-        limited[repo] && !limited[repo].includes(host) ? `${repo} is limited to other hosts` : null,
+        limited[repo] && !limited[repo].includes(host)
+          ? `${repo} is limited to other workers`
+          : null,
     };
     const call = (host: string, procedure: string, input: object) =>
       checkRelayRequest(post(`/trpc/${procedure}`, input), host, {
@@ -734,7 +736,7 @@ describe("what an agent may call, and which ids it may take", () => {
         allowedHostIds: ["h-a", "h-b"],
       }).ok,
     ).toBe(true);
-    // A re-add that names a repo limited to other hosts is refused.
+    // A re-add that names a repo limited to other workers is refused.
     expect(
       call("h-a", "repos.addFromWorker", { hostId: "h-a", path: "/x", name: "only_b" }).ok,
     ).toBe(false);
@@ -848,7 +850,7 @@ describe("the band CLI through the relay (S2)", () => {
     )?.path as string;
     expect(await ok("repos", "list", "--output", "json")).toContain("proj");
     // The host list an agent gets has no roots, home or tools.
-    const hostList = await ok("hosts", "list", "--output", "json");
+    const hostList = await ok("workers", "list", "--output", "json");
     expect(hostList).toContain(b.hostId);
     expect(hostList).not.toContain('"roots"');
     expect(hostList).not.toContain('"home"');
@@ -1103,7 +1105,7 @@ describe("the band CLI through the relay (S2)", () => {
         const refused = await run(...args);
         expect(refused.code, refused.out).not.toBe(0);
         expect(refused.out).toContain("agent-added-b");
-        expect(refused.out).toContain("limited to other hosts");
+        expect(refused.out).toContain("limited to other workers");
       }
       expect(
         (await q<{ repos: Array<{ name: string }> }>("repos.list")).repos.map((r) => r.name),

@@ -15,7 +15,7 @@ export function DesktopViewerDialog() {
   const contentRef = useRef<HTMLDivElement>(null);
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
     enabled: hostId !== null,
   });
   const hostName = hosts.data?.find((h) => h.id === hostId)?.name ?? hostId ?? "";

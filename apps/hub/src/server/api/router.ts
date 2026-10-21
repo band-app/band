@@ -108,6 +108,8 @@ export const appRouter = t.router({
   accountUsage: accountUsageRouter,
   hooks: hooksRouter,
   host: hostRouter,
+  workers: hostsRouter,
+  // Old name, kept for desktop, mobile and CLI builds that still call it.
   hosts: hostsRouter,
   environment: environmentRouter,
   hostRequests: hostRequestsRouter,

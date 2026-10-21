@@ -328,6 +328,7 @@ ${startWorkerLine}
       "BAND_HUB_URL",
       "BAND_BOOTSTRAP_TOKEN",
       "BAND_WORKER_ID",
+      "BAND_WORKER_LABELS",
       "BAND_HOST_LABELS",
       "BAND_PROVISION_DIR",
     ]) {

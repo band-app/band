@@ -89,7 +89,7 @@ describe("a host request that nobody meets", () => {
       },
       { label: "request times out", timeoutMs: 15_000 },
     );
-    expect(failed.error).toMatch(/No host matched the placement within \d+s/);
+    expect(failed.error).toMatch(/No worker matched the placement within \d+s/);
 
     // A failed request can no longer be leased, and dismissing it removes it from the list.
     const lease = await m<{ request: unknown }>("hostRequests.lease", { runnerId: "r" });

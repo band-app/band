@@ -23,7 +23,7 @@ export interface WorktreeDisplay {
   label: string;
 }
 
-/** The name of a host. An unknown host id reads "unknown host", never the raw id. */
+/** The name of a host. An unknown host id reads "unknown worker", never the raw id. */
 export function hostDisplay(
   hostId: string | null | undefined,
   hosts: readonly DisplayHost[] | undefined,
@@ -31,7 +31,7 @@ export function hostDisplay(
   if (!hostId || hostId === LOCAL_HOST_ID) {
     return hosts?.find((h) => h.id === LOCAL_HOST_ID)?.name?.trim() || "This hub";
   }
-  return hosts?.find((h) => h.id === hostId)?.name?.trim() || "unknown host";
+  return hosts?.find((h) => h.id === hostId)?.name?.trim() || "unknown worker";
 }
 
 /**

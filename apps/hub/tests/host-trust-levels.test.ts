@@ -334,7 +334,7 @@ describe("trust levels", () => {
         "GET",
       );
       expect(list.status).toBe(403);
-      expect(message(list)).toContain("is not on this host");
+      expect(message(list)).toContain("is not on this worker");
       const out = await shell.call(
         "trpc",
         query("terminal.output", { terminalId: termB }),
@@ -361,7 +361,7 @@ describe("trust levels", () => {
         cronExpression: "0 0 1 1 *",
       });
       expect(job.status).toBe(403);
-      expect(message(job)).toContain("is not on this host");
+      expect(message(job)).toContain("is not on this worker");
     });
   });
 

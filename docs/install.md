@@ -43,21 +43,21 @@ docker compose -f compose.yml -f compose.build.yml up -d --build
 
 HTTPS, the admin token and connecting a browser, the desktop app or the CLI are in [Run the hub on a server](run-the-hub-on-a-server.md).
 
-In the desktop app, choose the remote hub in Settings > Hub. A hub with no local host (the default for the image) runs every worktree on a worker, so continue with the next section.
+In the desktop app, choose the remote hub in Settings > Hub. A hub with no local worker (the default for the image) runs every worktree on a worker, so continue with the next section.
 
 ## 3. Workers and runners
 
-A worker dials the hub, so it needs no inbound port. Open Settings > Hosts, choose Add worker, give it a name and copy the command from the tab you want. The token in it works once and expires in an hour.
+A worker dials the hub, so it needs no inbound port. Open Settings > Workers, choose Add worker, give it a name and copy the command from the tab you want. The token in it works once and expires in an hour.
 
 ### This Mac, from the desktop app
 
-On a Mac the desktop app is the main way to add a worker. When the app connects to a remote hub (Settings > Hub), it asks "Use this Mac as a worker?" once for that hub. Yes asks the hub for a one-time token, installs the launchd agent `app.band.worker` and waits until the host shows online. The name defaults to the macOS computer name and can be changed. Folders the worker may use start empty, and a repo added later through the folder picker adds its folder. Not now is remembered for that hub. The app with its own local hub never asks, because the hub's local host already covers the machine.
+On a Mac the desktop app is the main way to add a worker. When the app connects to a remote hub (Settings > Hub), it asks "Use this Mac as a worker?" once for that hub. Yes asks the hub for a one-time token, installs the launchd agent `app.band.worker` and waits until the worker shows online. The name defaults to the macOS computer name and can be changed. Folders the worker may use start empty, and a repo added later through the folder picker adds its folder. Not now is remembered for that hub. The app with its own local hub never asks, because the hub's local worker already covers the machine.
 
-The same action stays in Settings > Hosts under This computer. It shows the host's status and the worker version, which is the app version. Remove this computer uninstalls the service, ends the terminals' daemon and removes the host from the hub once it is offline. A host that still has worktrees stays on the hub, and the section says so.
+The same action stays in Settings > Workers under This computer. It shows the worker's status and the worker version, which is the app version. Remove this computer uninstalls the service, ends the terminals' daemon and removes the worker from the hub once it is offline. A worker that still has worktrees stays on the hub, and the section says so.
 
 The service runs the worker inside the app (`Band.app/Contents/Resources/worker`) with the app's own executable (`ELECTRON_RUN_AS_NODE=1`), so the Mac needs no Node or npm. An app update replaces the files and the app restarts the service with `launchctl kickstart -k` the first time it starts after the update. The service keeps running when you quit the app. The token never appears in the UI or the logs. It is in the plist (mode 0600), as with the npm install.
 
-When `app.band.worker` was installed from npm, Settings > Hosts offers Switch to the worker in this app. The switch keeps the worker id, name, roots and state directory, so the host and its worktrees stay.
+When `app.band.worker` was installed from npm, Settings > Workers offers Switch to the worker in this app. The switch keeps the worker id, name, roots and state directory, so the worker and its worktrees stay.
 
 The npm path below stays for Linux and servers.
 
@@ -118,37 +118,37 @@ FAIL gh           -      not installed
 It checks `claude`, `codex`, `opencode`, `gemini` and `cursor-agent`, then `git` and `gh`, and prints the command that fixes each gap. It exits 1 when `git` is missing or no agent is usable. On Linux it also warns, with the fix commands, when the machine has no swap and less than 16 GiB of memory, or when `fs.inotify.max_user_watches` is below 262144. It changes nothing itself, and these warnings do not change the exit code:
 
 ```
-WARN host         no swap and 7.8 GiB of memory: builds that agents run at once can be killed for running out of memory
+WARN worker       no swap and 7.8 GiB of memory: builds that agents run at once can be killed for running out of memory
        fix: sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
        fix: grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-WARN host         fs.inotify.max_user_watches is 61656: agents that watch files fail with ENOSPC
+WARN worker       fs.inotify.max_user_watches is 61656: agents that watch files fail with ENOSPC
        fix: echo 'fs.inotify.max_user_watches=524288' | sudo tee /etc/sysctl.d/60-band-inotify.conf
        fix: sudo sysctl --system
 ```
 
 `BAND_AGENT_BIN_DIRS` (a PATH-style list) names extra directories to search first, for CLIs that sit outside the service's PATH.
 
-A connected worker sends the same report to the hub on connect and every few minutes (`BAND_CAPABILITY_REFRESH_MS`, default 3 minutes). Settings > Hosts shows it for each worker (installed, version, logged in), instead of the agents in your settings.
+A connected worker sends the same report to the hub on connect and every few minutes (`BAND_CAPABILITY_REFRESH_MS`, default 3 minutes). Settings > Workers shows it for each worker (installed, version, logged in), instead of the agents in your settings.
 
 ### Repos on a worker
 
-A worker owns a table from remote URL to folder (`repos.json` in its state directory). The first worktree of a repo on a worker clones it to `~/band/repos/<owner>/<name>`. Run the worker with `--repos-dir <dir>` (or `BAND_REPOS_DIR`) to clone elsewhere, and the worker serves that directory as a root. To use a checkout that already exists, add the repo from the worker's folder picker or with `band repos add --from <host id> <path>`. See [Add a repo](run-the-hub-on-a-server.md#add-a-repo).
+A worker owns a table from remote URL to folder (`repos.json` in its state directory). The first worktree of a repo on a worker clones it to `~/band/repos/<owner>/<name>`. Run the worker with `--repos-dir <dir>` (or `BAND_REPOS_DIR`) to clone elsewhere, and the worker serves that directory as a root. To use a checkout that already exists, add the repo from the worker's folder picker or with `band repos add --from <worker id> <path>`. See [Add a repo](run-the-hub-on-a-server.md#add-a-repo).
 
 ### Runners
 
-A runner starts workers on demand when a worktree asks for a host that does not exist yet (a Docker container, a Kubernetes Pod, a cloud VM, an SSH machine). The hooks and their settings are in [Runner hooks](runner-hooks.md), and sleeping workers in [Ephemeral workers](ephemeral-workers.md).
+A runner starts workers on demand when a worktree asks for a worker that does not exist yet (a Docker container, a Kubernetes Pod, a cloud VM, an SSH machine). The hooks and their settings are in [Runner hooks](runner-hooks.md), and sleeping workers in [Ephemeral workers](ephemeral-workers.md).
 
 ## Updating
 
-Settings > Hosts shows the Band version each host runs, and marks a worker that is behind the hub. Once a day the hub asks GitHub for the latest release (`BAND_UPDATE_CHECK=off` turns that off for an air-gapped hub). When a newer one exists, the sidebar footer shows an "update available" badge. It opens a panel that lists the hub and every worker with their version and the version to move to.
+Settings > Workers shows the Band version each worker runs, and marks a worker that is behind the hub. Once a day the hub asks GitHub for the latest release (`BAND_UPDATE_CHECK=off` turns that off for an air-gapped hub). When a newer one exists, the sidebar footer shows an "update available" badge. It opens a panel that lists the hub and every worker with their version and the version to move to.
 
 Update the workers first and the hub last, so the hub is never older than its workers.
 
-- **A worker under launchd (`app.band.worker`) or a systemd user unit (`band-worker`)**: an admin clicks Update. A dialog lists the agents on that host, because the restart ends them. On confirm, the worker runs `npm i -g @band-app/worker@<version>` and restarts through its service manager. If the install fails, the worker keeps running as it was and the error shows on the host. A worker with the target version is the hub's own when the worker is behind it, otherwise the latest release (when it stays within a minor of the hub).
+- **A worker under launchd (`app.band.worker`) or a systemd user unit (`band-worker`)**: an admin clicks Update. A dialog lists the agents on that worker, because the restart ends them. On confirm, the worker runs `npm i -g @band-app/worker@<version>` and restarts through its service manager. If the install fails, the worker keeps running as it was and the error shows on the worker. A worker with the target version is the hub's own when the worker is behind it, otherwise the latest release (when it stays within a minor of the hub).
 - **Any other worker** shows the command to run by hand (`npm i -g @band-app/worker@<version>`, then restart it).
 - **The hub** only shows the command; it never updates itself. The command follows `BAND_INSTALL_METHOD`, which the compose file (`compose`), the Kubernetes manifest (`k8s`, or `helm` for a chart) and the image default (`docker`) set. With none set the panel says to pull `ghcr.io/band-app/band-hub:<version>` and recreate the container.
 
-A hub run from source reports the unreleased version `0.1.0` and accepts every worker (it logs that it skipped the check). A worker whose version differs from a released hub's by more than one minor version (`0.47.0` against `0.50.0`) is refused with a message that says what to do. The worker logs it, waits five minutes (`BAND_WORKER_VERSION_RETRY_MS`) and exits instead of redialing, and its host shows "update required". A worker from before version reporting is accepted and shown with an unknown version. `band hosts list` has a VERSION column with the same marks.
+A hub run from source reports the unreleased version `0.1.0` and accepts every worker (it logs that it skipped the check). A worker whose version differs from a released hub's by more than one minor version (`0.47.0` against `0.50.0`) is refused with a message that says what to do. The worker logs it, waits five minutes (`BAND_WORKER_VERSION_RETRY_MS`) and exits instead of redialing, and its worker shows "update required". A worker from before version reporting is accepted and shown with an unknown version. `band workers list` has a VERSION column with the same marks.
 
 ## Releases
 
