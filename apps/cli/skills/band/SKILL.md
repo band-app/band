@@ -67,14 +67,11 @@ A folder with no remote is registered without a URL and can only run on the host
 ### Change a repo's settings
 
 ```sh
-band repos set <name> --meta true|false
 band repos set <name> --hosts mac,contabo|all --primary mac
 band repos set <name> --checkpoints on|off|default
 ```
 
 `--checkpoints` sets whether the hub keeps checkpoints of the repo's worktrees on workers. `default` is on for a repo available on every host and off for one limited with `--hosts`. Needs an admin token. `band repos list` shows the effective value in the `CHECKPOINTS` column.
-
-`--meta true` marks the repo as a meta repo, one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults. `band repos list` shows it in the `META` column.
 
 `--hosts` limits the repo to those hosts (ids or names from `band hosts list`, or `all`). It is a hard rule: a worktree, clone or placement on another host fails with `<repo> is only available on <hosts>`, whether it comes from the CLI, the UI, the `worktrees_create` MCP tool or automatic placement. `--primary` names the host that lists the repo's default-branch worktree (`auto` lets the hub pick). A branch has a Band worktree on one host only: creating it on a second host fails with `<branch> is already on <host>` and the existing worktree id. Both flags need an admin token.
 
@@ -508,9 +505,6 @@ band repos add --from w-1a2b3c4d5e6f /home/me/code/my-app
 
 # List all repos
 band repos list
-
-# Mark a repo as a meta repo
-band repos set my-notes --meta true
 
 # Build a repo on one machine only
 band repos set epic --hosts mac --primary mac

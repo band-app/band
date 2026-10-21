@@ -1,4 +1,4 @@
-// Integration test for origin links and meta repos on the hub's own machine (plan section 15, step O.2). A real
+// Integration test for origin links on the hub's own machine (plan section 15, step O.2). A real
 // hub (the production bundle on a random port, temp BAND_HOME) with two git repos. The worker-side paths, where the
 // origin comes from a chat or terminal identity, are in `origin-links-relay.test.ts`.
 
@@ -48,7 +48,6 @@ function makeRepo(dir: string): void {
 interface Listed {
   repos: Array<{
     name: string;
-    meta: boolean;
     worktrees: Array<{
       worktreeId: string;
       origin: { worktreeId: string; removed: boolean; repo?: string; branch?: string } | null;
@@ -104,7 +103,7 @@ afterAll(async () => {
 describe("auth", () => {
   it("refuses the new mutations without a token", async () => {
     for (const [procedure, body] of [
-      ["repos.update", { name: "borko", meta: true }],
+      ["repos.update", { name: "borko", autoContinue: true }],
       ["worktrees.create", { repo: "svc", branch: "no-token", origin: "borko-main" }],
     ] as const) {
       const res = await fetch(`${server.url}/trpc/${procedure}`, {
@@ -114,34 +113,6 @@ describe("auth", () => {
       });
       expect(res.status).toBe(401);
     }
-  });
-});
-
-describe("meta repos (S5)", () => {
-  it("persists the flag, returns it from repos.list, and keeps it when the repo list is rewritten", async () => {
-    expect((await list()).repos.map((r) => [r.name, r.meta])).toEqual([
-      ["borko", false],
-      ["svc", false],
-    ]);
-    await m("repos.update", { name: "borko", meta: true });
-    expect((await list()).repos.find((r) => r.name === "borko")?.meta).toBe(true);
-
-    // `repos.reorder` and `worktrees.create` rewrite the whole repo tree. The flag survives both.
-    await m("repos.reorder", { names: ["svc", "borko"] });
-    await m("worktrees.create", { repo: "svc", branch: "meta-check" });
-    const after = (await list()).repos;
-    expect(after.map((r) => [r.name, r.meta])).toEqual([
-      ["svc", false],
-      ["borko", true],
-    ]);
-
-    await m("repos.update", { name: "borko", meta: false });
-    expect((await list()).repos.find((r) => r.name === "borko")?.meta).toBe(false);
-  });
-
-  it("refuses an unknown repo", async () => {
-    const res = await trpcMutate(server.url, "repos.update", { name: "nope", meta: true }, TOKEN);
-    expect(res.status).toBe(400);
   });
 });
 

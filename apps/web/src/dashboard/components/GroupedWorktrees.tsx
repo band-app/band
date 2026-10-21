@@ -112,7 +112,6 @@ export function WorktreeRowView({
               onTogglePinned={onTogglePinned}
             />
           </div>
-          {entry.repo.meta && mode === "origin" && <MetaBadge repoName={entry.repo.name} />}
         </div>
         {row.parentRemoved && (
           <span
@@ -235,16 +234,5 @@ export function GroupedWorktrees({
         );
       })}
     </div>
-  );
-}
-
-export function MetaBadge({ repoName }: { repoName: string }) {
-  return (
-    <span
-      data-testid={`repo-list__meta-badge--${repoName}`}
-      className="ml-1 shrink-0 rounded border border-border px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
-    >
-      meta
-    </span>
   );
 }

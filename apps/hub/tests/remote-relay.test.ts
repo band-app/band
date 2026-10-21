@@ -1110,7 +1110,7 @@ describe("the band CLI through the relay (S2)", () => {
       ).toContain("agent-added-b");
 
       // A repo open to every host can be changed and removed from any host.
-      await ok("repos", "set", "agent-added-a", "--meta", "true");
+      await ok("repos", "set", "agent-added-a", "--hosts", "all");
       await ok("repos", "remove", "agent-added-a");
       await m("repos.remove", { name: "agent-added-b" });
     },
