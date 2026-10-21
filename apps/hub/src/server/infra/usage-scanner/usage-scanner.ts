@@ -3,6 +3,7 @@ import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { RepoQueries } from "../db/queries/repos";
 import { SettingsQueries } from "../db/queries/settings";
+import { TokenQueries } from "../db/queries/tokens";
 import { UsageEventQueries } from "../db/queries/usage-events";
 import { UsageScanStateQueries } from "../db/queries/usage-scan-state";
 import { hostRegistry } from "../host/registry";
@@ -528,7 +529,10 @@ function defaultGetUsageReader(
   hostId?: string,
 ): Promise<UsageReader | undefined> {
   const host = hostId ? hostRegistry.hostById(hostId) : hostRegistry.local;
-  return host.agentEnv.usageReader(agent);
+  return host.agentEnv.usageReader({
+    ...agent,
+    command: new TokenQueries().findHost(host.id)?.agentCommands?.[agent.agentId] || agent.command,
+  });
 }
 
 /**

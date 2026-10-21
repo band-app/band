@@ -286,6 +286,15 @@ band workers trust <worker> restricted|standard|admin
 
 Sets how far the agents on a worker reach through the relay. `restricted` keeps them to their own worktrees (no worktree creation, repo changes or cronjobs). `standard` is the default for a static worker: its own worker, plus worktrees on other workers when Settings > Agents allows it. `admin` lets them work on any worker (chats, terminals, worktrees, cronjobs), change hub settings and manage repos; tokens, the vault and trust levels stay out of every agent's reach. A runner-started or ephemeral worker starts at `restricted`. Needs a person's admin token, never an agent's.
 
+### Set the command an agent runs as on a worker
+
+```sh
+band workers set-agent-command <worker> <agentId> <command>
+band workers set-agent-command <worker> <agentId> --clear
+```
+
+Replaces the agent's global command on one worker, for chats, terminal sessions, cronjobs and usage readers. `<command>` is a binary name or an absolute path with no arguments (put arguments in a wrapper script). `--clear` goes back to the global command. `band workers list --output json` returns `agentCommands` and, per agent, `agentCommandStates` with `effective` and `found` (false when the worker has no such binary on its PATH). Needs a person's admin token, never an agent's.
+
 ### Show what admin workers did
 
 ```sh

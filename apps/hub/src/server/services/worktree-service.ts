@@ -26,6 +26,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
+import { commandFor } from "./_utils/agent-command";
 import { forgetCheckpoints } from "./_utils/checkpoint-store";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { placementInput } from "./_utils/placement-input";
@@ -916,7 +917,7 @@ export class WorktreeService {
 
     const agentDef = settingsService.getAgentDefinition(chat.agent);
     const invocation = resumeCliInvocation(agentDef.type, chat.activeSessionId, {
-      command: agentDef.command,
+      command: commandFor(worktree.host.id, agentDef),
     });
     if (invocation.unsupported) {
       return { ok: false, code: "BAD_REQUEST", message: invocation.reason };

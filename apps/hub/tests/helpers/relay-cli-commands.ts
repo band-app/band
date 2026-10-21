@@ -77,6 +77,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "worktrees checkpoints": "reads the hub's checkpoints, which a worker has no need to see",
   "workers evacuate": "admin only, moves every worktree off a worker",
   "workers trust": "no agent may change a worker's trust level, whatever its own",
+  "workers set-agent-command": "no agent may change the command an agent runs as on a worker",
   "workers audit": "the audit log is for a person's admin token",
   "runners list": "reads the hub's runner settings, which name its scripts and machines",
   "runners log": "reads what the hub's runner scripts printed",
