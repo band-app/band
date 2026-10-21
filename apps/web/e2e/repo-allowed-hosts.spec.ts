@@ -175,19 +175,16 @@ test("a repo added from a worker is limited to it, and Settings > Repos changes 
   expect(added?.primaryHostId).toBe(a.id);
   const repoName = REPO;
 
-  // Settings > Repos shows the same, and the user makes the repo available everywhere.
-  await settings.openDialog("repos");
-  const hosts = settings.repoHosts(repoName);
-  await hosts.expectOnly([a.id], a.id);
-  await hosts.chooseAllHosts();
-  await settings.saveRepoHosts(repoName);
-  await expect.poll(async () => (await repoRow(repoName))?.allowedHostIds).toBeNull();
+  // The repo's page in Settings > Repos shows the same, and the user makes the repo available everywhere.
+  await settings.openRepoSettings(repoName);
+  await expect(settings.repoAllowedMode(repoName)).toHaveValue("only");
+  await expect(settings.repoWorkerRows(repoName)).toHaveCount(1);
+  await expect(settings.repoClone(repoName, a.id)).toHaveAttribute("data-primary", "true");
+  // A limited repo keeps at least one worker.
+  await expect(settings.repoRemoveWorkerButton(repoName, a.id)).toBeDisabled();
 
-  // The Save button refuses a limit with no host.
-  await hosts.chooseOnly([]);
-  await expect(settings.repoHostsEmptyNotice(repoName)).toBeVisible();
-  await expect(settings.repoHostsSaveButton(repoName)).toBeDisabled();
-  await hosts.chooseAllHosts();
+  await settings.setRepoAllowedMode(repoName, "all");
+  await expect.poll(async () => (await repoRow(repoName))?.allowedHostIds).toBeNull();
 });
 
 test("a repo added by URL is available everywhere unless the user limits it (S2)", async ({
@@ -284,9 +281,8 @@ test("only the primary host's default-branch worktree is listed in every groupin
   }
 
   // Making B the primary switches which one is listed. Nothing moves on disk.
-  await settings.openDialog("repos");
-  await settings.repoHosts(repoName).choosePrimary(b.id);
-  await settings.saveRepoHosts(repoName);
+  await settings.openRepoSettings(repoName);
+  await settings.makeRepoPrimary(repoName, b.id);
   await expect.poll(async () => (await repoRow(repoName))?.primaryHostId).toBe(b.id);
   await settings.closeDialog();
   for (const mode of ["repo", "origin", "host"] as const) {
@@ -319,4 +315,13 @@ test("worktrees on a host that stopped being allowed are flagged and still open 
   ).toMatchObject({
     hostNotAllowed: true,
   });
+
+  // The repo's settings page still lists A with its worktree, marked not allowed and with no controls.
+  // Settings opens over the worktree, whose live streams never let the network go idle for `goto`.
+  const settings = new SettingsPage(page, server.url, TOKEN);
+  await settings.openRepoSettings(repoName);
+  await expect(settings.repoClone(repoName, a.id)).toHaveAttribute("data-allowed", "false");
+  await expect(settings.repoClone(repoName, a.id)).toHaveAttribute("data-worktrees", "1");
+  await expect(settings.repoPrimarySwitch(repoName, a.id)).toHaveCount(0);
+  await expect(settings.repoRemoveWorkerButton(repoName, a.id)).toHaveCount(0);
 });

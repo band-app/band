@@ -115,15 +115,7 @@ export class FollowPage {
     });
   }
 
-  // ---- Settings > Repos ----------------------------------------------------------------
-
   get targets(): Locator {
     return this.dialog.getByTestId("continue-dialog__target");
-  }
-
-  autoContinueSwitch(repo: string): Locator {
-    return this.page
-      .locator(`[data-testid="settings-repos__row"][data-repo="${repo}"]`)
-      .getByTestId("settings-repos__auto-continue-switch");
   }
 }

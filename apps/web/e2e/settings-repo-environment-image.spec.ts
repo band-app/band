@@ -1,7 +1,8 @@
 /**
- * Settings > Environment > Image: a repo whose environment has a `build`
+ * The image in the Environment section of a repo's page in Settings > Repos:
+ * a repo whose environment has a `build`
  * shows its current image, the status and log of its latest build and a
- * "Build image" button, driven through the real Settings dialog against the
+ * "Build now" button, driven through the real Settings dialog against the
  * real server.
  *
  * Docker is the external service. The server runs the docker stub
@@ -84,8 +85,7 @@ test.afterAll(async () => {
 test("building an image shows the log and makes it the current image", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("environment");
-  await settingsPage.expandEnvironment("img-ok");
+  await settingsPage.openRepoSettings("img-ok");
 
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-current", "");
   await settingsPage.buildEnvironmentImage();
@@ -95,6 +95,9 @@ test("building an image shows the log and makes it the current image", async ({ 
     /band-env\/img-ok:[0-9a-f]{16}/,
   );
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-status", "ready");
+  // The builder is the hub's own machine unless settings name another worker.
+  await expect(settingsPage.environmentImage()).toHaveAttribute("data-built-on", "local");
+  await settingsPage.openEnvironmentImageLog();
   await expect(settingsPage.environmentImageLog()).toContainText("docker build");
   await expect(settingsPage.environmentImageLog()).toContainText("Done: band-env/img-ok");
 });
@@ -102,13 +105,15 @@ test("building an image shows the log and makes it the current image", async ({ 
 test("a failed build shows its error and leaves no current image", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("environment");
-  await settingsPage.expandEnvironment("img-fail");
+  await settingsPage.openRepoSettings("img-fail");
 
   await settingsPage.buildEnvironmentImage();
 
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-status", "failed");
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-current", "");
+  // The build's error shows on the line that opens the log.
+  await expect(settingsPage.environmentImageLogToggle()).toHaveAttribute("data-error", "true");
+  await settingsPage.openEnvironmentImageLog();
   await expect(settingsPage.environmentImageLog()).toContainText("FAIL_BUILD");
   await expect(settingsPage.environmentImageError()).toBeHidden();
 });

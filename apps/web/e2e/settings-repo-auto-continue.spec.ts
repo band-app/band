@@ -1,5 +1,5 @@
 /**
- * Settings > Repos: the "Continue on another host automatically" switch. It is off until someone
+ * Settings > Repos: the "Continue automatically" switch. It is off until someone
  * turns it on, and the choice is stored on the hub (`repos.autoContinue`).
  *
  * Real production hub with a temp BAND_HOME. The repo is a seeded row; no worker is needed.
@@ -16,7 +16,6 @@ import {
   startServer,
 } from "./helpers/server";
 import { trpcQuery } from "./helpers/trpc";
-import { FollowPage } from "./pages/FollowPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-repo-auto-continue-token";
@@ -53,16 +52,19 @@ test.afterAll(async () => {
 
 test("the switch is off by default and a choice sticks (S2)", async ({ page }) => {
   const settings = new SettingsPage(page, server.url, TOKEN);
-  const follow = new FollowPage(page);
   await settings.goto();
-  await settings.openDialog("repos");
+  await settings.openRepoSettings("everywhere");
 
-  await expect(follow.autoContinueSwitch("everywhere")).not.toBeChecked();
-  await follow.autoContinueSwitch("everywhere").click();
-  await expect(follow.autoContinueSwitch("everywhere")).toBeChecked();
+  await expect(settings.autoContinueSwitch("everywhere")).not.toBeChecked();
+  await settings.autoContinueSwitch("everywhere").click();
+  await expect(settings.autoContinueSwitch("everywhere")).toBeChecked();
   await expect.poll(() => autoContinue("everywhere")).toBe(true);
 
-  await follow.autoContinueSwitch("everywhere").click();
-  await expect(follow.autoContinueSwitch("everywhere")).not.toBeChecked();
+  await settings.goto();
+  await settings.openRepoSettings("everywhere");
+  await expect(settings.autoContinueSwitch("everywhere")).toBeChecked();
+
+  await settings.autoContinueSwitch("everywhere").click();
+  await expect(settings.autoContinueSwitch("everywhere")).not.toBeChecked();
   await expect.poll(() => autoContinue("everywhere")).toBe(false);
 });

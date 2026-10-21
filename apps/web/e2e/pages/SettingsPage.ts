@@ -33,7 +33,6 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { AGENT_MODE_KEY } from "@/dashboard";
-import { RepoHostsFieldsPage } from "./RepoHostsFieldsPage";
 
 /** Ids of the pages in the settings sidebar (`SETTINGS_SECTIONS` in `SettingsPage.tsx`). */
 export type SettingsNavId =
@@ -51,7 +50,6 @@ export type SettingsNavId =
   | "agent-hooks"
   | "context"
   | "runners"
-  | "environment"
   | "labels"
   | "agents"
   | "usage"
@@ -143,8 +141,23 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-page__nav").locator("[data-testid^='settings__nav-']");
   }
 
+  /** The group headings of the settings sidebar. `data-group` holds the group's name. */
+  navGroups(): Locator {
+    return this.dialog.getByTestId("settings-page__nav-group");
+  }
+
   navEntry(section: SettingsNavId): Locator {
     return this.dialog.getByTestId(`settings__nav-${section}`);
+  }
+
+  /** A sidebar entry by its id, including ids that are no longer settings pages. */
+  navEntryById(id: string): Locator {
+    return this.dialog.getByTestId(`settings__nav-${id}`);
+  }
+
+  /** The sidebar group heading named `name`. */
+  navGroup(name: string): Locator {
+    return this.navGroups().and(this.dialog.locator(`[data-group="${name}"]`));
   }
 
   /** Bounding box of the sidebar. */
@@ -512,19 +525,167 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-page__title");
   }
 
-  /** A repo's row in Settings > Repos. `data-in-use` says whether Remove is allowed. */
+  /** The Settings > Repos overview: the filters and the table of repos. */
+  reposOverview(): Locator {
+    return this.dialog.getByTestId("settings-repos");
+  }
+
+  /** A repo's row in the Settings > Repos overview table. */
   repoRow(name: string): Locator {
     return this.dialog.locator(`[data-testid="settings-repos__row"][data-repo="${name}"]`);
   }
 
-  /** The remote URL line of a repo row. */
-  repoUrl(name: string): Locator {
+  /** Every row of the overview table, in order. */
+  repoRows(): Locator {
+    return this.dialog.getByTestId("settings-repos__row");
+  }
+
+  /** The overview's filter box. It has focus when the overview opens. */
+  repoFilter(): Locator {
+    return this.dialog.getByTestId("settings-repos__filter");
+  }
+
+  /** Replaces the overview's filter text. */
+  async filterRepos(text: string): Promise<void> {
+    await test.step(`Filter repos by "${text}"`, async () => {
+      await this.repoFilter().fill(text);
+    });
+  }
+
+  /** Types into the overview's filter and presses Enter, which opens the first match. */
+  async filterReposAndOpen(text: string): Promise<void> {
+    await test.step(`Filter repos by "${text}" and press Enter`, async () => {
+      await this.page.keyboard.type(text);
+      await this.page.keyboard.press("Enter");
+    });
+  }
+
+  /** Picks a worker in the overview's worker filter. An empty id shows every repo. */
+  async filterReposByWorker(hostId: string): Promise<void> {
+    await test.step(`Filter repos by worker ${hostId || "(all)"}`, async () => {
+      await this.dialog.getByTestId("settings-repos__worker-filter").selectOption(hostId);
+    });
+  }
+
+  /** Picks a label in the overview's label filter. An empty id shows every repo. */
+  async filterReposByLabel(labelId: string): Promise<void> {
+    await test.step(`Filter repos by label ${labelId || "(any)"}`, async () => {
+      await this.dialog.getByTestId("settings-repos__label-filter").selectOption(labelId);
+    });
+  }
+
+  /** The remote shown under a repo's name in the overview. */
+  repoRowUrl(name: string): Locator {
     return this.repoRow(name).getByTestId("settings-repos__url");
   }
 
-  /** The default branch line of a repo row. */
+  /** The "<workers> only" mark of a limited repo's overview row. Absent for an unlimited repo. */
+  repoRowLimited(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__limited");
+  }
+
+  /** The repo count beside "Repos" in the settings sidebar. */
+  reposNavCount(): Locator {
+    return this.dialog.getByTestId("settings-page__repos-count");
+  }
+
+  /** The repo page of `name`, opened from the overview. */
+  repoPage(name: string): Locator {
+    return this.dialog.locator(`[data-testid="settings-repo"][data-repo="${name}"]`);
+  }
+
+  /** Opens a repo's page from its overview row. Settings > Repos must be open. */
+  async openRepo(name: string): Promise<void> {
+    await test.step(`Open the settings page of ${name}`, async () => {
+      await this.repoRow(name).click();
+      await expect(this.repoPage(name)).toBeVisible();
+    });
+  }
+
+  /** Opens Settings on the Repos page, then the page of `name`. */
+  async openRepoSettings(name: string): Promise<void> {
+    await this.openDialog("repos");
+    await this.openRepo(name);
+  }
+
+  /** Follows the repo page's breadcrumb back to the overview. */
+  async backToRepos(): Promise<void> {
+    await test.step("Go back to the Repos overview", async () => {
+      await this.dialog.getByTestId("settings-repo__back").click();
+      await expect(this.reposOverview()).toBeVisible();
+    });
+  }
+
+  /** The remote URL on a repo page. */
+  repoUrl(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__url");
+  }
+
+  /** The default branch on a repo page. */
   repoBranch(name: string): Locator {
-    return this.repoRow(name).getByTestId("settings-repos__branch");
+    return this.repoPage(name).getByTestId("settings-repo__branch");
+  }
+
+  /** The label picker on a repo page. Its value is the label id. */
+  repoLabelSelect(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__label");
+  }
+
+  async setRepoLabel(name: string, labelId: string): Promise<void> {
+    await test.step(`Set the label of ${name} to ${labelId || "none"}`, async () => {
+      await this.repoLabelSelect(name).selectOption(labelId);
+    });
+  }
+
+  /** The workers listed on a repo page, each with `data-host` and `data-primary`. */
+  repoWorkerRows(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__clone");
+  }
+
+  /** One row of a repo page's worker list, with `data-host`, `data-primary` and `data-worktrees`. */
+  repoClone(name: string, hostId: string): Locator {
+    return this.repoPage(name).locator(
+      `[data-testid="settings-repo__clone"][data-host="${hostId}"]`,
+    );
+  }
+
+  /** The note a repo limited to some workers shows at the top of its page. */
+  repoLimitedNote(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__limited-note");
+  }
+
+  /** The MCP servers listed on a repo page, each with `data-server`. */
+  repoMcpServers(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__mcp-server");
+  }
+
+  /** The cronjobs listed on a repo page, each with `data-cronjob`. */
+  repoCronjobs(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__cronjob");
+  }
+
+  /** One cronjob listed on a repo page, by its id. */
+  repoCronjob(name: string, cronjobId: string): Locator {
+    return this.repoCronjobs(name).and(this.page.locator(`[data-cronjob="${cronjobId}"]`));
+  }
+
+  /** One MCP server listed on a repo page. */
+  repoMcpServer(name: string, server: string): Locator {
+    return this.repoMcpServers(name).and(this.page.locator(`[data-server="${server}"]`));
+  }
+
+  /** Clicks "Open in MCP" on a server of a repo page. */
+  async openMcpFromRepo(name: string, server: string): Promise<void> {
+    await test.step(`Open ${server} in MCP from ${name}'s page`, async () => {
+      await this.repoMcpServer(name, server).getByTestId("settings-repo__open-mcp").click();
+    });
+  }
+
+  /** Clicks "Open in Cronjobs" on a cronjob of a repo page. */
+  async openCronjobsFromRepo(name: string, cronjobId: string): Promise<void> {
+    await test.step(`Open cronjob ${cronjobId} in Cronjobs from ${name}'s page`, async () => {
+      await this.repoCronjob(name, cronjobId).getByTestId("settings-repo__open-cronjobs").click();
+    });
   }
 
   /** Closes the Settings dialog with Escape. */
@@ -533,39 +694,169 @@ export class SettingsPage {
     await expect(this.dialog).toBeHidden();
   }
 
-  /** The "Available on" and "Primary host" fields of a repo row in Settings > Repos. */
-  repoHosts(name: string): RepoHostsFieldsPage {
-    return new RepoHostsFieldsPage(this.repoRow(name));
+  /** The "Allowed workers" select of a repo page: `all` or `only`. */
+  repoAllowedMode(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__allowed-mode");
   }
 
-  /** Saves the hosts edited in a repo row. The refusal, if there is one, shows in `repoHostsError`. */
-  async saveRepoHosts(name: string): Promise<void> {
-    await test.step(`Save the hosts of ${name}`, async () => {
-      await this.repoRow(name).getByTestId("settings-repos__hosts-save").click();
+  /** Picks "All workers" (`all`) or "Only these" (`only`). It saves at once. */
+  async setRepoAllowedMode(name: string, mode: "all" | "only"): Promise<void> {
+    await test.step(`Allow ${name} on ${mode === "all" ? "all workers" : "only chosen workers"}`, async () => {
+      await this.repoAllowedMode(name).selectOption(mode);
     });
   }
 
-  repoHostsEmptyNotice(name: string): Locator {
-    return this.repoRow(name).getByTestId("repo-hosts__empty");
+  /** The dialog that asks before "Only these" limits a repo whose checkpoints follow the default. */
+  confirmLimitDialog(): Locator {
+    return this.page.getByTestId("settings-repo__confirm-limit-dialog");
   }
 
-  repoHostsSaveButton(name: string): Locator {
-    return this.repoRow(name).getByTestId("settings-repos__hosts-save");
+  /** Answers the limit dialog: keep the checkpoints (turned on for good) or let them go. */
+  async confirmLimit(keepCheckpoints: boolean): Promise<void> {
+    await test.step(`Limit the repo and ${keepCheckpoints ? "keep" : "drop"} its checkpoints`, async () => {
+      await this.confirmLimitDialog()
+        .getByTestId(`settings-repo__confirm-limit-${keepCheckpoints ? "keep" : "drop"}`)
+        .click();
+      await expect(this.confirmLimitDialog()).toBeHidden();
+    });
   }
 
-  repoHostsError(name: string): Locator {
-    return this.repoRow(name).getByTestId("settings-repos__hosts-error");
+  /** Closes the limit dialog with Escape, which limits nothing and leaves Settings open. */
+  async cancelLimit(): Promise<void> {
+    await test.step("Cancel limiting the repo", async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.confirmLimitDialog()).toBeHidden();
+      await expect(this.dialog).toBeVisible();
+    });
+  }
+
+  /** The "Add worker…" button, shown for a repo limited to chosen workers. */
+  repoAddWorkerButton(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__add-worker");
+  }
+
+  /** The "Add a worker" dialog. */
+  addWorkerDialog(): Locator {
+    return this.page.getByTestId("settings-repo__add-worker-dialog");
+  }
+
+  /** One worker in the "Add a worker" dialog, with `data-host` and `data-added`. */
+  addWorkerOption(hostId: string): Locator {
+    return this.addWorkerDialog().locator(
+      `[data-testid="settings-repo__add-worker-option"][data-host="${hostId}"]`,
+    );
+  }
+
+  /** Every worker the "Add a worker" dialog lists after its filter. */
+  addWorkerOptions(): Locator {
+    return this.addWorkerDialog().getByTestId("settings-repo__add-worker-option");
+  }
+
+  /** The filter box of the "Add a worker" dialog. */
+  addWorkerFilter(): Locator {
+    return this.addWorkerDialog().getByTestId("settings-repo__add-worker-filter");
+  }
+
+  /** Opens "Add worker…" and types `filter` into the dialog's filter box, which has focus. */
+  async openAddWorker(name: string, filter = ""): Promise<void> {
+    await test.step(`Open Add worker for ${name}`, async () => {
+      await this.repoAddWorkerButton(name).click();
+      await expect(this.addWorkerDialog()).toBeVisible();
+      await expect(this.addWorkerFilter()).toBeFocused();
+      if (filter) await this.page.keyboard.type(filter);
+    });
+  }
+
+  /** Closes the "Add a worker" dialog with Escape, which leaves Settings open. */
+  async closeAddWorker(): Promise<void> {
+    await test.step("Close Add worker", async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.addWorkerDialog()).toBeHidden();
+      await expect(this.dialog).toBeVisible();
+    });
+  }
+
+  /**
+   * Adds a worker to a limited repo with the keyboard: opens "Add a worker", types `filter` and
+   * presses Enter, which adds the highlighted worker. It saves at once.
+   */
+  async addRepoWorkerByFilter(name: string, filter: string): Promise<void> {
+    await test.step(`Add the worker matching "${filter}" to ${name}`, async () => {
+      await this.openAddWorker(name, filter);
+      await this.page.keyboard.press("Enter");
+      await expect(this.addWorkerDialog()).toBeHidden();
+    });
+  }
+
+  /** The Remove button of a worker in a limited repo's list. */
+  repoRemoveWorkerButton(name: string, hostId: string): Locator {
+    return this.repoClone(name, hostId).getByTestId("settings-repo__remove-worker");
+  }
+
+  /** Removes a worker from a limited repo. It saves at once. */
+  async removeRepoWorker(name: string, hostId: string): Promise<void> {
+    await test.step(`Remove worker ${hostId} from ${name}`, async () => {
+      await this.repoRemoveWorkerButton(name, hostId).click();
+    });
+  }
+
+  /** The "Continue automatically" switch on a repo page. */
+  autoContinueSwitch(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__auto-continue-switch");
+  }
+
+  /** The "Unavailable" hint beside auto-continue on a repo with one allowed worker. */
+  autoContinueUnavailable(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__auto-continue-unavailable");
+  }
+
+  /** The Agents row of one agent type on a repo page. */
+  repoLoginRow(agentType: string, name: string): Locator {
+    return this.repoPage(name).locator(
+      `[data-testid="settings-repo__login-row"][data-agent="${agentType}"]`,
+    );
+  }
+
+  /** The wrapper of a worker's Remove button, whose `title` says why Remove is disabled. */
+  repoRemoveWorkerReason(name: string, hostId: string): Locator {
+    return this.repoClone(name, hostId).getByTestId("settings-repo__remove-worker-reason");
+  }
+
+  /** The "override" chip beside an agent's login picker on a repo page. */
+  repoLoginOverrideChip(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__login-override-chip");
+  }
+
+  /** The Primary switch of a worker in a repo page's list. */
+  repoPrimarySwitch(name: string, hostId: string): Locator {
+    return this.repoClone(name, hostId).getByTestId("settings-repo__primary-switch");
+  }
+
+  /** Makes `hostId` the repo's primary worker. It saves at once, and it is then the only one on. */
+  async makeRepoPrimary(name: string, hostId: string): Promise<void> {
+    await test.step(`Make ${hostId} the primary worker of ${name}`, async () => {
+      await this.repoPrimarySwitch(name, hostId).click();
+      await expect(this.repoClone(name, hostId)).toHaveAttribute("data-primary", "true");
+      await expect(
+        this.repoWorkerRows(name).and(this.page.locator('[data-primary="true"]')),
+      ).toHaveCount(1);
+    });
+  }
+
+  /** The error under a repo page's worker list, when a change was refused. */
+  repoWorkersError(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__workers-error");
   }
 
   repoRemoveButton(name: string): Locator {
-    return this.repoRow(name).getByTestId("settings-repos__remove");
+    return this.repoPage(name).getByTestId("settings-repo__remove");
   }
 
-  /** Removes a repo that has no worktrees, through the row's confirmation. */
+  /** Removes a repo that has no worktrees from its page, through the confirmation. */
   async removeRepo(name: string): Promise<void> {
     await test.step(`Remove the repo ${name}`, async () => {
       await this.repoRemoveButton(name).click();
-      await this.repoRow(name).getByTestId("settings-repos__remove-confirm").click();
+      await this.repoPage(name).getByTestId("settings-repo__remove-confirm").click();
     });
   }
 
@@ -839,10 +1130,10 @@ export class SettingsPage {
     );
   }
 
-  /** A repo's login override picker in Settings > Repos. */
+  /** A repo's login override picker on its repo page. */
   repoLoginOverride(agentType: string, repoName: string): Locator {
     return this.dialog
-      .getByTestId("settings-repos__login-override")
+      .getByTestId("settings-repo__login-override")
       .and(this.page.locator(`[data-agent="${agentType}"][data-repo="${repoName}"]`));
   }
 
@@ -1277,41 +1568,15 @@ export class SettingsPage {
     return this.dialog.getByRole("button", { name: `Delete browser profile ${profileName}` });
   }
 
-  /** Trigger of the "Repo defaults" accordion in the Browser section,
-   *  collapsed by default. `data-testid` set in `BrowserProfilesSettings.tsx`. */
-  repoDefaultsTrigger(): Locator {
-    return this.dialog.getByTestId("settings__repo-defaults-trigger");
-  }
-
-  /** One row per repo inside the "Repo defaults" accordion.
-   *  `data-testid` set in `BrowserProfilesSettings.tsx`. */
-  repoBrowserProfileRows(): Locator {
-    return this.dialog.getByTestId("settings__repo-browser-profile");
-  }
-
-  /** Per-repo default profile dropdown, inside the "Repo defaults"
-   *  accordion. `aria-label="Browser profile for <repo name>"` is set
-   *  explicitly in `BrowserProfilesSettings.tsx`. Tests assert its shown
-   *  value by option name ("Default" or a seeded profile name), under the
-   *  same carve-out as the theme names above: "Default" is the fixed name
-   *  of the built-in profile, not product copy. */
+  /** A repo's default profile dropdown on its repo page. `aria-label="Browser profile for <repo
+   *  name>"` is set explicitly in `BrowserProfilesSettings.tsx`. Tests assert its shown value by
+   *  option name ("Default" or a seeded profile name), under the same carve-out as the theme names
+   *  above: "Default" is the fixed name of the built-in profile, not product copy. */
   repoBrowserProfileSelect(repoName: string): Locator {
     return this.dialog.getByRole("combobox", { name: `Browser profile for ${repoName}` });
   }
 
-  /** Open the "Repo defaults" accordion and wait for its rows to show. */
-  async expandRepoDefaults(): Promise<void> {
-    await test.step("Expand Repo defaults", async () => {
-      const trigger = this.repoDefaultsTrigger();
-      await trigger.scrollIntoViewIfNeeded();
-      await trigger.click();
-      await expect(trigger).toHaveAttribute("aria-expanded", "true");
-      await expect(this.repoBrowserProfileRows().first()).toBeVisible();
-    });
-  }
-
-  /** Pick a repo's default browser profile. Applies immediately. The
-   *  "Repo defaults" accordion must be expanded first. */
+  /** Pick a repo's default browser profile on its repo page. Applies immediately. */
   async selectRepoBrowserProfile(repoName: string, profileName: string): Promise<void> {
     await test.step(`Set ${repoName}'s browser profile to "${profileName}"`, async () => {
       const trigger = this.repoBrowserProfileSelect(repoName);
@@ -1371,73 +1636,70 @@ export class SettingsPage {
     });
   }
 
-  /** Trigger of a repo's entry in the Environment section, collapsed by
-   *  default. `data-testid` set in `EnvironmentSettings.tsx`. */
-  environmentTrigger(repoName: string): Locator {
-    return this.dialog.getByTestId(`settings__environment-trigger-${repoName}`);
-  }
-
-  /** Open a repo's entry in the Environment section. */
-  async expandEnvironment(repoName: string): Promise<void> {
-    await test.step(`Expand ${repoName}'s environment`, async () => {
-      const trigger = this.environmentTrigger(repoName);
-      await trigger.scrollIntoViewIfNeeded();
-      await trigger.click();
-      await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    });
-  }
-
-  /** The list of validation problems of the open environment. `data-testid`
-   *  set in `EnvironmentSettings.tsx`. */
+  /** The list of validation problems of the open repo page's environment. `data-testid`
+   *  set in `RepoEnvironment.tsx`. */
   environmentIssues(): Locator {
-    return this.dialog.getByTestId("settings__environment-issues");
+    return this.dialog.getByTestId("settings-repo__environment-issues");
   }
 
-  /** Shown instead of the issues when the open environment is valid. */
+  /** Shown instead of the issues when the open repo page's environment is valid. */
   environmentValid(): Locator {
-    return this.dialog.getByTestId("settings__environment-valid");
+    return this.dialog.getByTestId("settings-repo__environment-valid");
   }
 
   /** Shown when the open repo has no `.band/environment.json`. */
   environmentNone(): Locator {
-    return this.dialog.getByTestId("settings__environment-none");
+    return this.dialog.getByTestId("settings-repo__environment-none");
   }
 
-  /** The parsed fields of the open environment. */
+  /** The parsed fields of the open repo page's environment. */
   environmentSummary(): Locator {
-    return this.dialog.getByTestId("settings__environment-summary");
+    return this.dialog.getByTestId("settings-repo__environment-summary");
   }
 
-  /** One row per host in the open environment's host check. `data-meets`
+  /** One row per host in the open repo page's environment's worker check. `data-meets`
    *  is `true` or `false`. */
   environmentHosts(): Locator {
-    return this.dialog.getByTestId("settings__environment-host");
+    return this.dialog.getByTestId("settings-repo__environment-host");
   }
 
-  /** The image section of the open environment. `data-testid` set in
-   *  `EnvironmentSettings.tsx`. Present only when the file has a `build`. */
+  /** The image section of the open repo page's environment. `data-testid` set in
+   *  `RepoEnvironment.tsx`. Present only when the file has a `build`. */
   environmentImage(): Locator {
-    return this.dialog.getByTestId("settings__environment-image");
+    return this.dialog.getByTestId("settings-repo__environment-image-state");
   }
 
-  /** Click "Build image" in the open environment, and wait for the build to finish. */
+  /** Click "Build now" in the open repo page's environment, and wait for the build to finish. */
   async buildEnvironmentImage(): Promise<void> {
     await test.step("Build the environment image", async () => {
-      const button = this.dialog.getByTestId("settings__environment-image-build");
+      const button = this.dialog.getByTestId("settings-repo__environment-image-build");
       await button.click();
       await expect(button).toBeEnabled({ timeout: 30_000 });
       await expect(this.environmentImage()).not.toHaveAttribute("data-status", "building");
     });
   }
 
+  /** Expands the collapsed log of the latest image build. */
+  async openEnvironmentImageLog(): Promise<void> {
+    await test.step("Open the log of the last image build", async () => {
+      await this.environmentImageLogToggle().click();
+      await expect(this.environmentImageLog()).toBeVisible();
+    });
+  }
+
+  /** The summary line that opens the build log, with `data-error` when the build failed. */
+  environmentImageLogToggle(): Locator {
+    return this.dialog.getByTestId("settings-repo__environment-image-log-toggle");
+  }
+
   /** The log of the latest image build. */
   environmentImageLog(): Locator {
-    return this.dialog.getByTestId("settings__environment-image-log");
+    return this.dialog.getByTestId("settings-repo__environment-image-log");
   }
 
   /** An error from starting an image build. */
   environmentImageError(): Locator {
-    return this.dialog.getByTestId("settings__environment-image-error");
+    return this.dialog.getByTestId("settings-repo__environment-image-error");
   }
 
   /** Click Save. */

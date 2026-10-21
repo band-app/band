@@ -63,21 +63,37 @@ test("the switch follows the default and a choice sticks (S5)", async ({ page })
   const settings = new SettingsPage(page, server.url, TOKEN);
   const checkpoints = new CheckpointsPage(page);
   await settings.goto();
-  await settings.openDialog("repos");
+  await settings.openRepoSettings("everywhere");
 
   // Available everywhere: on by default.
   await expect(checkpoints.checkpointsSwitch("everywhere")).toBeChecked();
-  await expect(checkpoints.checkpointsNote("everywhere")).toContainText("available on all hosts");
-  // Limited to chosen hosts: off by default.
+  await expect(checkpoints.checkpointsNote("everywhere")).toHaveAttribute(
+    "data-default",
+    "all-workers",
+  );
+
+  // Limited to chosen workers: off by default.
+  await settings.backToRepos();
+  await settings.openRepo("limited");
   await expect(checkpoints.checkpointsSwitch("limited")).not.toBeChecked();
-  await expect(checkpoints.checkpointsNote("limited")).toContainText("limited to chosen hosts");
+  await expect(checkpoints.checkpointsNote("limited")).toHaveAttribute("data-default", "limited");
 
   await checkpoints.toggleCheckpoints("limited");
   await expect(checkpoints.checkpointsSwitch("limited")).toBeChecked();
   await expect.poll(async () => (await repoRow("limited"))?.checkpointsSetting).toBe(true);
-  await expect(checkpoints.checkpointsNote("limited")).not.toContainText("by default");
+  await expect(checkpoints.checkpointsNote("limited")).toHaveAttribute("data-default", "stored");
 
+  await settings.backToRepos();
+  await settings.openRepo("everywhere");
   await checkpoints.toggleCheckpoints("everywhere");
   await expect(checkpoints.checkpointsSwitch("everywhere")).not.toBeChecked();
   await expect.poll(async () => (await repoRow("everywhere"))?.checkpointsEnabled).toBe(false);
+
+  // Both choices show after a reload.
+  await settings.goto();
+  await settings.openRepoSettings("limited");
+  await expect(checkpoints.checkpointsSwitch("limited")).toBeChecked();
+  await settings.backToRepos();
+  await settings.openRepo("everywhere");
+  await expect(checkpoints.checkpointsSwitch("everywhere")).not.toBeChecked();
 });
