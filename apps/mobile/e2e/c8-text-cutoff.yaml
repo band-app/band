@@ -1,0 +1,54 @@
+# S1-S3: long user messages and replies with š and ž, bold and italic text show all of their text,
+# also after scrolling up past old messages and back down (list recycling).
+appId: app.getband.mobile
+name: S1 long messages are never cut off
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-cutoff
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+# The one-and-a-half-line message that showed one line and "…" on a phone is a two-line bubble.
+# (Maestro sees the text, not the clipping: the screenshot is the check.)
+- takeScreenshot: c8-short-message
+# The last reply ends with its full last sentence.
+- assertVisible:
+    text: ".*bez ikakvog odsecanja.*"
+- takeScreenshot: c8-bottom
+- assertNotVisible:
+    text: "Kako bi objasnio.*…"
+# A turn sent while the screen is open: the user message and the streamed reply grow live.
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: cutoff?wt=gamma-cutoff
+- takeScreenshot: c8-streaming-1
+- extendedWaitUntil:
+    visible:
+      text: ".*Primer iz tima.*"
+    timeout: 20000
+- takeScreenshot: c8-streaming-2
+- extendedWaitUntil:
+    visible:
+      text: ".*bez ikakvog odsecanja.*"
+    timeout: 20000
+- takeScreenshot: c8-streamed
+- scrollUntilVisible:
+    element:
+      text: "Kako bi objasnio razliku.*"
+    direction: UP
+    speed: 40
+    timeout: 60000
+- takeScreenshot: c8-scrolled-up
+- assertNotVisible:
+    text: "Kako bi objasnio.*…"
+- scroll
+- scroll
+- scroll
+- takeScreenshot: c8-scrolled-back
+- assertNotVisible:
+    text: "Kako bi objasnio.*…"

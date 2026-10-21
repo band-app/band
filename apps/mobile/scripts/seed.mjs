@@ -146,6 +146,22 @@ function streamSteps() {
     { say: "END of the stream.", messageId },
   ];
 }
+/** The user message of the cutoff chat: several lines, with š and ž. */
+export const CUTOFF_PROMPT =
+  "Kako bi objasnio razliku izmedju responsibility i accountability? Zanima me kako to izgleda u timu, kada neko preuzme zadatak, a odgovornost za ishod ostane šefu. Šta se desi kad se rok pomeri, a ždrebe ostane bez ždrijebeta?";
+
+/** The message that was cut off on a phone: one and a half lines, so two lines tall. */
+export const CUTOFF_SHORT = "Kako bi objasnio razliku izmedju responsibility i accauntability?";
+
+/** The cutoff chat's reply: paragraphs with bold and italic text and š and ž. */
+export const CUTOFF_REPLY = [
+  "Ukratko: **responsibility** je odgovornost za *izvršenje* posla, a **accountability** je odgovornost za ishod i za to što se desi kasnije.",
+  "",
+  "Primer iz tima: *Šef* dodeli zadatak, a **developer** ga izvrši. Ako rok pukne, šef i dalje odgovara klijentu, jer je njegova odgovornost ostala, čak i kad je posao prebačen na drugog.",
+  "",
+  "Zato se kaže da se *responsibility* može delegirati, a **accountability** ne može. Poslednja rečenica ovog odgovora mora da se vidi cela, do kraja, bez ikakvog odsecanja.",
+].join("\n");
+
 /** What the "permit" turn asks: the three kinds of option the web shows. */
 const PERMIT_OPTIONS = [
   { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
@@ -253,6 +269,7 @@ export const SCENARIO = {
     { match: "^showcase", steps: showcaseSteps() },
     { match: "^long", steps: longSteps() },
     { match: "^stream", steps: streamSteps() },
+    { match: "^Kako", steps: [{ say: CUTOFF_REPLY, chunks: 12, delayMs: 500 }] },
     { steps: [{ say: "Done." }] },
   ],
 };
@@ -294,6 +311,8 @@ export const WORKTREES = {
   GAMMA_LISTEN: "gamma-listen",
   /** More turns than the hub sends on open, so the oldest load on scroll-back (c6). */
   GAMMA_HISTORY: "gamma-history",
+  /** Long messages with š and ž, bold and italic text, for the text cutoff flow (c8). */
+  GAMMA_CUTOFF: "gamma-cutoff",
   /** The files, search and changes flows: a repo with a big folder and a dirty working tree (`seed-explorer.mjs`). */
   DELTA_MAIN: "delta-main",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
@@ -396,7 +415,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "cutoff", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -429,6 +448,10 @@ export async function seedHub(state) {
     const n = String(i).padStart(2, "0");
     await seedTurn(state, chats, WORKTREES.GAMMA_HISTORY, `turn ${n}: say done`);
   }
+  for (let i = 0; i < 6; i++) {
+    await seedTurn(state, chats, WORKTREES.GAMMA_CUTOFF, CUTOFF_PROMPT);
+  }
+  await seedTurn(state, chats, WORKTREES.GAMMA_CUTOFF, CUTOFF_SHORT);
   for (let i = 1; i <= TAB_TURNS; i++) {
     await seedTurn(state, chats, WORKTREES.GAMMA_TABS, `parser turn ${String(i).padStart(2, "0")}`);
   }
