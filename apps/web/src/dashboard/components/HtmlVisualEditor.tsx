@@ -70,10 +70,17 @@ export function HtmlVisualEditor({
   const pageEditingRef = useRef(false);
   const reloadPendingRef = useRef(false);
   const firstContentRef = useRef(true);
+  // The file this editor just saved. The page already shows it, so the change
+  // it causes on disk must not reload the page.
+  const selfSavedRef = useRef<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: diskContent is the reload trigger
   useEffect(() => {
     if (firstContentRef.current) {
       firstContentRef.current = false;
+      return;
+    }
+    if (selfSavedRef.current === diskContent) {
+      selfSavedRef.current = null;
       return;
     }
     if (pageEditingRef.current) reloadPendingRef.current = true;
@@ -177,8 +184,22 @@ export function HtmlVisualEditor({
                 return;
               }
               setNotice(null);
+              selfSavedRef.current = result.text;
+              // Move the page's ranges along with the file, so the next edit lines up.
+              frameRef.current?.contentWindow?.postMessage(
+                {
+                  type: VISUAL_EDIT_MESSAGE.applied,
+                  nonce,
+                  start: commit.start,
+                  end: commit.end,
+                  delta: result.delta,
+                  text: result.shownText,
+                },
+                "*",
+              );
               await onApplyRef.current(result.text);
             } catch {
+              selfSavedRef.current = null;
               setNotice("The change could not be saved.");
               setLoadCount((n) => n + 1);
             }

@@ -101,4 +101,17 @@ export class HtmlVisualPage {
     const src = await this.frameElement.getAttribute("src");
     return src ? new URL(src, "http://x").searchParams.get("band-edit") : null;
   }
+
+  /** Set a flag on the page's window, to tell later whether the page was reloaded. */
+  async markPage(): Promise<void> {
+    await this.frame.locator("body").evaluate(() => {
+      (window as unknown as { __bandMarked: boolean }).__bandMarked = true;
+    });
+  }
+
+  async pageIsMarked(): Promise<boolean> {
+    return this.frame
+      .locator("body")
+      .evaluate(() => (window as unknown as { __bandMarked?: boolean }).__bandMarked === true);
+  }
 }

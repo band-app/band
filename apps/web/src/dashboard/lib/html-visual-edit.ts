@@ -6,6 +6,7 @@ export const VISUAL_EDIT_MESSAGE = {
   editing: "band-visual-edit:editing",
   unavailable: "band-visual-edit:unavailable",
   mode: "band-visual-edit:mode",
+  applied: "band-visual-edit:applied",
 } as const;
 
 export interface VisualEditCommit {
@@ -36,7 +37,17 @@ export function encodeHtmlText(text: string): string {
     .replace(/ /g, "&nbsp;");
 }
 
-export type PatchResult = { ok: true; text: string } | { ok: false };
+export type PatchResult =
+  | {
+      ok: true;
+      /** The whole file after the edit. */
+      text: string;
+      /** How much longer (or shorter) the edited range became. */
+      delta: number;
+      /** What a browser shows for the new range, for the page to put in the element. */
+      shownText: string;
+    }
+  | { ok: false };
 
 /**
  * Replace the text node at `start:end` of `source` with `newText`. Refuses
@@ -58,5 +69,10 @@ export function patchHtmlText(source: string, commit: VisualEditCommit): PatchRe
   const encoded = encodeHtmlText(core);
   const eol = raw.includes("\r\n") ? "\r\n" : "\n";
   const replacement = lead + (eol === "\n" ? encoded : encoded.replace(/\n/g, eol)) + trail;
-  return { ok: true, text: source.slice(0, start) + replacement + source.slice(end) };
+  return {
+    ok: true,
+    text: source.slice(0, start) + replacement + source.slice(end),
+    delta: replacement.length - raw.length,
+    shownText: decodeHtmlText(replacement),
+  };
 }

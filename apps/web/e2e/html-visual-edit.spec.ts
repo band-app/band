@@ -173,6 +173,32 @@ test.describe("HTML Visual mode", () => {
     await expect(visual.frame.getByRole("heading", { name: "Theirs" })).toBeVisible();
   });
 
+  test("a saved edit does not reload the page, and a later edit still lands", async ({ page }) => {
+    const visual = await openVisual(page);
+    await visual.markPage();
+
+    // A longer heading moves every range after it, and the second edit is checked against the file.
+    await visual.replaceText(visual.frame.getByRole("heading"), "Annual summary of the year");
+    const afterFirst = SLIDES_HTML.replace("Quarterly review", "Annual summary of the year");
+    await expect.poll(readSlides).toBe(afterFirst);
+    await visual.replaceText(visual.frame.getByText("Second slide"), "Second slide, edited");
+
+    await expect
+      .poll(readSlides)
+      .toBe(afterFirst.replace("Second   slide", "Second slide, edited"));
+    await expect(visual.notice).toHaveCount(0);
+    expect(await visual.pageIsMarked()).toBe(true);
+    // The same element can be edited again, whitespace around its text stays.
+    await visual.replaceText(visual.frame.getByRole("heading"), "Final");
+    await expect
+      .poll(readSlides)
+      .toBe(
+        afterFirst
+          .replace("Second   slide", "Second slide, edited")
+          .replace("Annual summary of the year", "Final"),
+      );
+  });
+
   test("S6: Escape reverts the text and leaves the file alone", async ({ page }) => {
     const visual = await openVisual(page);
     const heading = visual.frame.getByRole("heading");

@@ -175,9 +175,18 @@ window.addEventListener("scroll",function(){
  if(raf)return;
  raf=requestAnimationFrame(function(){raf=0;post({type:"band-visual-edit:scroll",x:window.scrollX,y:window.scrollY});});
 },{passive:true});
+function applied(d){
+ var els=document.querySelectorAll("[data-band-src]");
+ for(var i=0;i<els.length;i++){
+  var el=els[i],r=el.getAttribute("data-band-src").split(":"),s=Number(r[0]),e=Number(r[1]);
+  if(s===d.start&&e===d.end){if(el!==editing)el.textContent=d.text;el.setAttribute("data-band-src",s+":"+(e+d.delta));}
+  else if(s>=d.end)el.setAttribute("data-band-src",(s+d.delta)+":"+(e+d.delta));
+ }
+}
 window.addEventListener("message",function(e){
  if(e.source!==window.parent)return;
  var d=e.data;
+ if(d&&d.nonce===NONCE&&d.type==="band-visual-edit:applied"){applied(d);return;}
  if(!d||d.nonce!==NONCE||d.type!=="band-visual-edit:mode")return;
  enabled=d.enabled===true;
  if(!enabled){cancel();clearHover();}
