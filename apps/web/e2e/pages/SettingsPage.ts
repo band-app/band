@@ -726,11 +726,17 @@ export class SettingsPage {
     return this.addWorkerDialog().getByTestId("settings-repo__add-worker-option");
   }
 
+  /** The filter box of the "Add a worker" dialog. */
+  addWorkerFilter(): Locator {
+    return this.addWorkerDialog().getByTestId("settings-repo__add-worker-filter");
+  }
+
   /** Opens "Add worker…" and types `filter` into the dialog's filter box, which has focus. */
   async openAddWorker(name: string, filter = ""): Promise<void> {
     await test.step(`Open Add worker for ${name}`, async () => {
       await this.repoAddWorkerButton(name).click();
       await expect(this.addWorkerDialog()).toBeVisible();
+      await expect(this.addWorkerFilter()).toBeFocused();
       if (filter) await this.page.keyboard.type(filter);
     });
   }
@@ -744,11 +750,14 @@ export class SettingsPage {
     });
   }
 
-  /** Adds `hostId` to a limited repo through the "Add a worker" dialog. It saves at once. */
-  async addRepoWorker(name: string, hostId: string): Promise<void> {
-    await test.step(`Add worker ${hostId} to ${name}`, async () => {
-      await this.openAddWorker(name);
-      await this.addWorkerOption(hostId).click();
+  /**
+   * Adds a worker to a limited repo with the keyboard: opens "Add a worker", types `filter` and
+   * presses Enter, which adds the highlighted worker. It saves at once.
+   */
+  async addRepoWorkerByFilter(name: string, filter: string): Promise<void> {
+    await test.step(`Add the worker matching "${filter}" to ${name}`, async () => {
+      await this.openAddWorker(name, filter);
+      await this.page.keyboard.press("Enter");
       await expect(this.addWorkerDialog()).toBeHidden();
     });
   }
@@ -770,6 +779,16 @@ export class SettingsPage {
     return this.repoPage(name).getByTestId("settings-repo__auto-continue-switch");
   }
 
+  /** The "Unavailable" hint beside auto-continue on a repo with one allowed worker. */
+  autoContinueUnavailable(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__auto-continue-unavailable");
+  }
+
+  /** One row per agent that takes a login on a repo page's Agents section. */
+  repoLoginRows(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__login-row");
+  }
+
   /** The "override" chip beside an agent's login picker on a repo page. */
   repoLoginOverrideChip(name: string): Locator {
     return this.repoPage(name).getByTestId("settings-repo__login-override-chip");
@@ -780,16 +799,15 @@ export class SettingsPage {
     return this.repoClone(name, hostId).getByTestId("settings-repo__primary-switch");
   }
 
-  /** Makes `hostId` the repo's primary worker. It saves at once. */
+  /** Makes `hostId` the repo's primary worker. It saves at once, and it is then the only one on. */
   async makeRepoPrimary(name: string, hostId: string): Promise<void> {
     await test.step(`Make ${hostId} the primary worker of ${name}`, async () => {
       await this.repoPrimarySwitch(name, hostId).click();
       await expect(this.repoClone(name, hostId)).toHaveAttribute("data-primary", "true");
+      await expect(
+        this.repoWorkerRows(name).and(this.page.locator('[data-primary="true"]')),
+      ).toHaveCount(1);
     });
-  }
-
-  repoHostsError(name: string): Locator {
-    return this.repoPage(name).getByTestId("settings-repo__hosts-error");
   }
 
   repoRemoveButton(name: string): Locator {
@@ -1613,13 +1631,21 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-repo__environment-image-state");
   }
 
-  /** Click "Build image" in the open repo page's environment, and wait for the build to finish. */
+  /** Click "Build now" in the open repo page's environment, and wait for the build to finish. */
   async buildEnvironmentImage(): Promise<void> {
     await test.step("Build the environment image", async () => {
       const button = this.dialog.getByTestId("settings-repo__environment-image-build");
       await button.click();
       await expect(button).toBeEnabled({ timeout: 30_000 });
       await expect(this.environmentImage()).not.toHaveAttribute("data-status", "building");
+    });
+  }
+
+  /** Expands the collapsed log of the latest image build. */
+  async openEnvironmentImageLog(): Promise<void> {
+    await test.step("Open the log of the last image build", async () => {
+      await this.dialog.getByTestId("settings-repo__environment-image-log-toggle").click();
+      await expect(this.environmentImageLog()).toBeVisible();
     });
   }
 

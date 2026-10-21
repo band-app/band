@@ -4,9 +4,7 @@ import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import type { RepoInfo } from "../../types";
 import { useIsAdmin } from "./DevicesSettings";
-import { Hint, RepoRow } from "./repo-page-ui";
-
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+import { errorText, Hint, RepoRow } from "./repo-page-ui";
 
 /** Saves one continuity field through `repos.update` and refreshes the repo list. */
 function useRepoSwitch(repoName: string, field: "checkpointsEnabled" | "autoContinue") {

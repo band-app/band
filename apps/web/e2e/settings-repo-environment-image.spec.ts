@@ -2,7 +2,7 @@
  * The image in the Environment section of a repo's page in Settings > Repos:
  * a repo whose environment has a `build`
  * shows its current image, the status and log of its latest build and a
- * "Build image" button, driven through the real Settings dialog against the
+ * "Build now" button, driven through the real Settings dialog against the
  * real server.
  *
  * Docker is the external service. The server runs the docker stub
@@ -95,6 +95,9 @@ test("building an image shows the log and makes it the current image", async ({ 
     /band-env\/img-ok:[0-9a-f]{16}/,
   );
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-status", "ready");
+  // The builder is the hub's own machine unless settings name another worker.
+  await expect(settingsPage.environmentImage()).toHaveAttribute("data-built-on", "local");
+  await settingsPage.openEnvironmentImageLog();
   await expect(settingsPage.environmentImageLog()).toContainText("docker build");
   await expect(settingsPage.environmentImageLog()).toContainText("Done: band-env/img-ok");
 });
@@ -108,6 +111,7 @@ test("a failed build shows its error and leaves no current image", async ({ page
 
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-status", "failed");
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-current", "");
+  await settingsPage.openEnvironmentImageLog();
   await expect(settingsPage.environmentImageLog()).toContainText("FAIL_BUILD");
   await expect(settingsPage.environmentImageError()).toBeHidden();
 });

@@ -15,9 +15,7 @@ import { AutoContinueSwitch, CheckpointsSwitch } from "./RepoControls";
 import { RepoEnvironmentDetails } from "./RepoEnvironment";
 import { repoWorktreeCount } from "./ReposOverview";
 import { RepoWorkers } from "./RepoWorkers";
-import { Chip, Hint, RepoRow, RepoSection, SELECT_CLASS } from "./repo-page-ui";
-
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+import { Chip, errorText, Hint, RepoRow, RepoSection, SELECT_CLASS } from "./repo-page-ui";
 
 /** The repo's one label, picked from the labels made in Settings > Labels. */
 function RepoLabelSelect({ repo }: { repo: RepoInfo }) {

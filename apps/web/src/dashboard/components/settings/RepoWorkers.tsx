@@ -16,9 +16,7 @@ import { trpc } from "../../../lib/trpc-client";
 import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
 import { useIsAdmin } from "./DevicesSettings";
-import { Chip, Hint, RepoRow, SELECT_CLASS } from "./repo-page-ui";
-
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+import { Chip, errorText, Hint, RepoRow, SELECT_CLASS } from "./repo-page-ui";
 
 type HostList = NonNullable<ReturnType<typeof useHostsList>["data"]>;
 type Host = HostList[number];
@@ -35,17 +33,17 @@ function worktreesPerWorker(repo: RepoInfo): Map<string, number> {
 }
 
 /**
- * The workers the list shows. A repo limited to workers lists exactly those. A repo allowed
- * everywhere lists every usable worker, so any of them can be made primary, plus any other worker
- * that still holds a clone or a worktree of it.
+ * The workers the list shows. A repo limited to workers lists those first. A repo allowed
+ * everywhere lists every usable worker, so any of them can be made primary. Both also list any
+ * other worker that still holds a clone or a worktree of it, so a worker the repo is no longer
+ * allowed on keeps showing its folder and worktrees.
  */
 function listedWorkers(repo: RepoInfo, counts: Map<string, number>, usable: string[]): string[] {
-  if (repo.allowedHostIds) return repo.allowedHostIds;
   const ids = [
-    ...usable,
+    ...(repo.allowedHostIds ?? usable),
     ...(repo.clones ?? []).map((c) => c.hostId),
     ...counts.keys(),
-    ...(repo.primaryHostId ? [repo.primaryHostId] : []),
+    ...(!repo.allowedHostIds && repo.primaryHostId ? [repo.primaryHostId] : []),
   ];
   return [...new Set(ids)];
 }
@@ -82,22 +80,19 @@ function AddWorkerDialog({
   const addable = shown.filter((h) => !allowed.includes(h.id));
   const activeId = addable[Math.min(active, addable.length - 1)]?.id;
 
+  // Every way out (Escape, the overlay, Cancel, adding) clears the filter for the next open.
+  const close = () => {
+    setQuery("");
+    setActive(0);
+    onOpenChange(false);
+  };
   const add = (hostId: string) => {
     onAdd(hostId);
-    onOpenChange(false);
+    close();
   };
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next: boolean) => {
-        if (!next) {
-          setQuery("");
-          setActive(0);
-        }
-        onOpenChange(next);
-      }}
-    >
+    <Dialog open={open} onOpenChange={(next: boolean) => (next ? onOpenChange(true) : close())}>
       <DialogContent className="gap-3 sm:max-w-md" data-testid="settings-repo__add-worker-dialog">
         <DialogHeader>
           <DialogTitle>Add a worker</DialogTitle>
@@ -172,7 +167,7 @@ function AddWorkerDialog({
           <span className="text-[11px] text-muted-foreground">
             ↑↓ to move · Enter to add · Esc to close
           </span>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" size="sm" onClick={close}>
             Cancel
           </Button>
         </DialogFooter>
@@ -217,10 +212,11 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
     }
   };
 
+  // "Only these" starts from one worker: the primary, else one that holds a clone, else any usable one.
+  const firstWorker = primary ?? (repo.clones ?? [])[0]?.hostId ?? usable[0]?.id;
   const chooseMode = (mode: string) => {
     if (mode === "all") return void save({ allowedHostIds: null });
-    const first = primary ?? (repo.clones ?? [])[0]?.hostId ?? usable[0]?.id;
-    if (first) void save({ allowedHostIds: [first] });
+    if (firstWorker) void save({ allowedHostIds: [firstWorker] });
   };
 
   const remove = (hostId: string) => {
@@ -249,7 +245,9 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
           onChange={(e) => chooseMode(e.target.value)}
         >
           <option value="all">All workers</option>
-          <option value="only">Only these</option>
+          <option value="only" disabled={!allowed && !firstWorker}>
+            Only these
+          </option>
         </select>
         {allowed ? (
           <Button
@@ -280,6 +278,7 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
               const path = repo.clones?.find((c) => c.hostId === hostId)?.path;
               const count = counts.get(hostId) ?? 0;
               const isPrimary = hostId === primary;
+              const notAllowed = allowed ? !allowed.includes(hostId) : false;
               const name = host?.name?.trim() || hostId;
               return (
                 <li
@@ -289,6 +288,7 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
                   data-host={hostId}
                   data-worktrees={count}
                   data-primary={isPrimary ? "true" : "false"}
+                  data-allowed={notAllowed ? "false" : "true"}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -298,6 +298,7 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
                           {host.status}
                         </Chip>
                       ) : null}
+                      {notAllowed ? <Chip tone="warn">not allowed</Chip> : null}
                     </div>
                     <div className="truncate font-mono text-xs text-muted-foreground">
                       {path ?? "No clone yet"}
@@ -306,35 +307,43 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
                   <Hint>
                     {count} worktree{count === 1 ? "" : "s"}
                   </Hint>
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Switch
-                      id={`settings-repo-${repo.name}-primary-${hostId}`}
-                      checked={isPrimary}
-                      disabled={locked || isPrimary}
-                      aria-label={`Make ${name} the primary worker of ${repo.name}`}
-                      data-testid="settings-repo__primary-switch"
-                      onCheckedChange={(on: boolean) => {
-                        if (on) void save({ primaryHostId: hostId });
-                      }}
-                    />
-                    <label htmlFor={`settings-repo-${repo.name}-primary-${hostId}`}>Primary</label>
-                  </span>
-                  {allowed ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={locked || allowed.length === 1}
+                  {notAllowed ? null : (
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Switch
+                        id={`settings-repo-${repo.name}-primary-${hostId}`}
+                        checked={isPrimary}
+                        disabled={locked || isPrimary}
+                        aria-label={`Make ${name} the primary worker of ${repo.name}`}
+                        data-testid="settings-repo__primary-switch"
+                        onCheckedChange={(on: boolean) => {
+                          if (on) void save({ primaryHostId: hostId });
+                        }}
+                      />
+                      <label htmlFor={`settings-repo-${repo.name}-primary-${hostId}`}>
+                        Primary
+                      </label>
+                    </span>
+                  )}
+                  {allowed && !notAllowed ? (
+                    // A disabled button gets no pointer events, so the tooltip sits on a wrapper.
+                    <span
                       title={
                         allowed.length === 1
                           ? "A limited repo needs at least one worker"
                           : undefined
                       }
-                      aria-label={`Remove ${name} from ${repo.name}`}
-                      data-testid="settings-repo__remove-worker"
-                      onClick={() => remove(hostId)}
                     >
-                      Remove
-                    </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={locked || allowed.length === 1}
+                        aria-label={`Remove ${name} from ${repo.name}`}
+                        data-testid="settings-repo__remove-worker"
+                        onClick={() => remove(hostId)}
+                      >
+                        Remove
+                      </Button>
+                    </span>
                   ) : null}
                 </li>
               );
@@ -345,7 +354,7 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
           <p
             role="alert"
             className="pb-2 text-xs text-destructive"
-            data-testid="settings-repo__hosts-error"
+            data-testid="settings-repo__workers-error"
           >
             {error}
           </p>

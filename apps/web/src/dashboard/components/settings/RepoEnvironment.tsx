@@ -105,6 +105,7 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
         data-testid="settings-repo__environment-image-state"
         data-status={latest?.status ?? "none"}
         data-current={current?.image ?? ""}
+        data-built-on={current?.hostId ?? ""}
       >
         <Hint>
           {building
@@ -143,7 +144,10 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
       ) : null}
       {latest?.log ? (
         <details className="w-full">
-          <summary className="cursor-pointer text-xs text-muted-foreground">
+          <summary
+            className="cursor-pointer text-xs text-muted-foreground"
+            data-testid="settings-repo__environment-image-log-toggle"
+          >
             Log of the last build{latest.error ? `: ${latest.error}` : ""}
           </summary>
           <pre
@@ -210,8 +214,8 @@ export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
           </Chip>
         )}
         {environment ? (
-          <span title={detailsOf(environment)}>
-            <Hint testId="settings-repo__environment-summary">{summaryOf(environment)}</Hint>
+          <span title={detailsOf(environment)} data-testid="settings-repo__environment-summary">
+            <Hint>{summaryOf(environment)}</Hint>
           </span>
         ) : null}
       </RepoRow>

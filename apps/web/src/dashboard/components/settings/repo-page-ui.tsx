@@ -1,6 +1,9 @@
 import { cn } from "@band-app/ui";
 import type { ReactNode } from "react";
 
+/** The message of a failed call, for the error line under a control. */
+export const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 /**
  * A section of a repo's settings page: one card whose header holds the title, a one-line
  * description and, on the right, where the setting used to live ("from Repos"). Rows and lists

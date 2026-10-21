@@ -83,10 +83,10 @@ test("a valid environment shows its fields and the workers that miss requires", 
 
   await expect(settingsPage.environmentValid()).toBeVisible();
   await expect(settingsPage.environmentIssues()).toHaveCount(0);
-  // One line per file, built from the fields the fixture above sets.
-  await expect(settingsPage.environmentSummary()).toHaveText(
-    "install, start, 1 terminal, container isolation, requires node >=99",
-  );
+  // A one-line summary of the file, with its commands in full as the tooltip.
+  await expect(settingsPage.environmentSummary()).toContainText("node >=99");
+  await expect(settingsPage.environmentSummary()).toHaveAttribute("title", /install: pnpm install/);
+  await expect(settingsPage.environmentSummary()).toHaveAttribute("title", /dev: pnpm dev/);
   const local = settingsPage.environmentHosts().first();
   await expect(local).toBeVisible();
   await expect(local).toHaveAttribute("data-meets", "false");

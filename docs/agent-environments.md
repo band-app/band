@@ -106,7 +106,7 @@ band env build api       # build now, or report a cache hit; follows the log
 band env status api      # the current image and the latest build with its log
 ```
 
-The same section shows it too: the current image, the status and log of the latest build, and a "Build image" button. Building needs an admin token.
+The same section shows it too: the current image, the status and log of the latest build, and a "Build now" button. Building needs an admin token.
 
 ### What goes into an image
 

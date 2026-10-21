@@ -1,9 +1,9 @@
 /**
  * Settings > Repos: the overview of every repo and one page per repo. The overview lists each
- * repo's remote, allowed workers, worktree count, checkpoints and login overrides, and its filter
- * has focus so typing a name and pressing Enter opens that repo. A repo page saves its label and
- * workers through the existing procedures, lists the MCP servers and cronjobs that reach the repo,
- * and keeps Remove disabled while the repo has worktrees.
+ * repo's remote and, for a limited repo, its workers, and its filter has focus so typing a name and
+ * pressing Enter opens that repo. A repo page saves its label and workers at once through the
+ * existing procedures (the Repos pages have no Save button), lists the MCP servers and cronjobs
+ * that reach the repo, and keeps Remove disabled while the repo has worktrees.
  *
  * Real production hub with a temp BAND_HOME. The repos are seeded rows (one added by URL with a
  * local bare repo as its remote); the hub's own host is the worker a repo is limited to.
@@ -159,6 +159,8 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await settings.openDialog("repos");
 
   await expect(settings.repoRows()).toHaveCount(3);
+  // Every control on the Repos pages saves at once, so there is no Save footer.
+  await expect(settings.footer).toHaveCount(0);
   await expect(settings.reposNavCount()).toHaveText("3");
   await expect(settings.repoRowUrl(REMOTE)).toHaveText(remoteUrl);
   // Only a repo limited to some workers says which.
@@ -167,7 +169,7 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await expect(settings.repoRow(BUSY)).toHaveAttribute("data-limited", "false");
   await expect(settings.repoRowLimited(BUSY)).toHaveCount(0);
 
-  // The worker and label filters narrow the table.
+  // The worker and label filters narrow the list.
   await settings.filterReposByLabel(LABEL_WORK);
   await expect(settings.repoRows()).toHaveCount(1);
   await expect(settings.repoRow(BUSY)).toBeVisible();
@@ -195,9 +197,15 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await expect(settings.repoPage(REMOTE)).toBeVisible();
   await expect(settings.repoUrl(REMOTE)).toHaveText(remoteUrl);
   await expect(settings.repoBranch(REMOTE)).toHaveText("main");
+  await expect(settings.footer).toHaveCount(0);
 
   await settings.backToRepos();
   await expect(settings.repoRows()).toHaveCount(3);
+
+  // Other sections keep their Save footer.
+  await settings.goto();
+  await settings.openDialog("general");
+  await expect(settings.footer).toBeVisible();
 });
 
 test("the label picked on a repo page is saved and shows after a reload (S3)", async ({ page }) => {
@@ -235,6 +243,7 @@ test("allowed workers and the primary worker save at once and show after a reloa
   // The last allowed worker cannot be removed, and with one worker there is nowhere to continue.
   await expect(settings.repoRemoveWorkerButton(REMOTE, first)).toBeDisabled();
   await expect(settings.autoContinueSwitch(REMOTE)).toBeDisabled();
+  await expect(settings.autoContinueUnavailable(REMOTE)).toBeVisible();
 
   // The dialog's filter has focus, narrows the list, and the allowed worker is greyed out.
   await settings.openAddWorker(REMOTE);
@@ -242,12 +251,18 @@ test("allowed workers and the primary worker save at once and show after a reloa
   await settings.closeAddWorker();
   await settings.openAddWorker(REMOTE, "e2e-offline");
   await expect(settings.addWorkerOptions()).toHaveCount(1);
-  await settings.addWorkerOption(offlineHostId).click();
-  await expect(settings.addWorkerDialog()).toBeHidden();
+  await expect(settings.addWorkerOption(offlineHostId)).toHaveAttribute("data-added", "false");
+  await settings.closeAddWorker();
+  // Enter adds the highlighted worker.
+  await settings.addRepoWorkerByFilter(REMOTE, "e2e-offline");
   await expect
     .poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.slice().sort())
     .toEqual([first, offlineHostId].sort());
   await expect(settings.autoContinueSwitch(REMOTE)).toBeEnabled();
+  // The dialog opens with an empty filter after a worker was added.
+  await settings.openAddWorker(REMOTE);
+  await expect(settings.addWorkerFilter()).toHaveValue("");
+  await settings.closeAddWorker();
 
   // The Primary switch moves the default-branch worktree to another worker.
   await settings.makeRepoPrimary(REMOTE, offlineHostId);
@@ -280,6 +295,7 @@ test("a repo page lists the MCP servers and cronjobs that reach it, with links (
   await expect(settings.repoMcpServer(BUSY, MCP_SCOPED)).toBeVisible();
   await expect(settings.repoCronjobs(BUSY)).toHaveCount(1);
   await expect(settings.repoCronjobs(BUSY)).toHaveAttribute("data-cronjob", cronId);
+  await expect(settings.repoCronjobs(BUSY)).toHaveAttribute("data-enabled", "true");
 
   // On another repo's page the scoped server and the cronjob are absent.
   await settings.backToRepos();

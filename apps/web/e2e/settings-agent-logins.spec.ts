@@ -102,6 +102,9 @@ test("adds, defaults, overrides and removes a login without ever showing its sec
   await settingsPage.openRepoSettings("logins");
   const override = settingsPage.repoLoginOverride("claude-code", "logins");
   await settingsPage.expectRowVisible(override);
+  // Codex takes logins but has none, so its row has no picker, only where to add one.
+  await expect(settingsPage.repoLoginRows("logins")).toHaveCount(2);
+  await expect(settingsPage.repoLoginOverride("codex", "logins")).toHaveCount(0);
   await settingsPage.setRepoLoginOverride("claude-code", "logins", "Spare");
   // The override shows after a reload, marked with a chip.
   await settingsPage.goto();
