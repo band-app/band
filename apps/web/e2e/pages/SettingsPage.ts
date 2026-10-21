@@ -574,14 +574,25 @@ export class SettingsPage {
     return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-not-found`);
   }
 
-  /** The found marker for an agent's overridden command on a worker. */
-  hostAgentCommandFound(hostId: string, agentId: string): Locator {
-    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-found`);
+  /** The status dot of an agent on a worker: `data-state` is found, missing or unknown. */
+  hostAgentCommandStatus(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-status`);
+  }
+
+  /** Opens an agent's row on a worker so its command field shows. */
+  async openHostAgentCommand(hostId: string, agentId: string): Promise<void> {
+    const input = this.hostAgentCommandInput(hostId, agentId);
+    if (await input.isVisible()) return;
+    await this.hostRow(hostId)
+      .getByTestId(`settings__host-agent-command-${agentId}-toggle`)
+      .click();
+    await expect(input).toBeVisible();
   }
 
   /** Types a command for an agent on a worker and saves it. */
   async setHostAgentCommand(hostId: string, agentId: string, command: string): Promise<void> {
     await test.step(`Set ${agentId} on ${hostId} to ${command}`, async () => {
+      await this.openHostAgentCommand(hostId, agentId);
       await this.hostAgentCommandInput(hostId, agentId).fill(command);
       await this.hostRow(hostId)
         .getByTestId(`settings__host-agent-command-${agentId}-save`)
@@ -592,6 +603,7 @@ export class SettingsPage {
   /** Clears an agent's override on a worker. */
   async clearHostAgentCommand(hostId: string, agentId: string): Promise<void> {
     await test.step(`Clear ${agentId} on ${hostId}`, async () => {
+      await this.openHostAgentCommand(hostId, agentId);
       await this.hostRow(hostId)
         .getByTestId(`settings__host-agent-command-${agentId}-clear`)
         .click();

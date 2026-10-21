@@ -24,6 +24,7 @@ export class AgentCommandError extends Error {
 
 export interface AgentCommandState {
   agentId: string;
+  type: string;
   label: string;
   override: string | null;
   effective: string | null;
@@ -84,7 +85,7 @@ export class HostAgentCommandService {
           override && probe && host.status === "online"
             ? await this.found(host.id, def.id, override)
             : null;
-        return { agentId: def.id, label: def.label, override, effective, found };
+        return { agentId: def.id, type: def.type, label: def.label, override, effective, found };
       }),
     );
   }

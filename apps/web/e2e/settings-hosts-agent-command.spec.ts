@@ -52,7 +52,10 @@ test("an admin sets, sees and clears an agent command on a worker", async ({ pag
     "data-effective",
     "sh",
   );
-  await expect(settingsPage.hostAgentCommandFound("local", "claude-code")).toBeVisible();
+  await expect(settingsPage.hostAgentCommandStatus("local", "claude-code")).toHaveAttribute(
+    "data-state",
+    "found",
+  );
 
   await settingsPage.setHostAgentCommand("local", "claude-code", "no-such-claude-binary");
   await expect(settingsPage.hostAgentCommandEffective("local", "claude-code")).toHaveAttribute(
