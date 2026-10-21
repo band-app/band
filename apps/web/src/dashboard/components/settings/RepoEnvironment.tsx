@@ -55,7 +55,7 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
   return (
     <div
       className="space-y-2"
-      data-testid="settings__environment-image"
+      data-testid="settings-repo__environment-image"
       data-status={latest?.status ?? "none"}
       data-current={data?.current?.image ?? ""}
     >
@@ -67,7 +67,7 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
           size="sm"
           disabled={starting || building}
           onClick={build}
-          data-testid="settings__environment-image-build"
+          data-testid="settings-repo__environment-image-build"
         >
           {building ? "Building…" : "Build image"}
         </Button>
@@ -75,13 +75,16 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
       {notice ? (
         <p
           className="text-xs text-muted-foreground"
-          data-testid="settings__environment-image-notice"
+          data-testid="settings-repo__environment-image-notice"
         >
           {notice}
         </p>
       ) : null}
       {error ? (
-        <p className="text-xs text-destructive" data-testid="settings__environment-image-error">
+        <p
+          className="text-xs text-destructive"
+          data-testid="settings-repo__environment-image-error"
+        >
           {error}
         </p>
       ) : null}
@@ -95,7 +98,7 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
       {latest?.log ? (
         <pre
           className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-[11px]"
-          data-testid="settings__environment-image-log"
+          data-testid="settings-repo__environment-image-log"
         >
           {latest.log}
         </pre>
@@ -123,7 +126,7 @@ export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
     return (
       <p
         className="px-4 py-3 text-xs text-muted-foreground"
-        data-testid="settings__environment-none"
+        data-testid="settings-repo__environment-none"
       >
         No .band/environment.json in this repo.
       </p>
@@ -139,7 +142,7 @@ export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
       {data.issues.length > 0 ? (
         <ul
           className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3"
-          data-testid="settings__environment-issues"
+          data-testid="settings-repo__environment-issues"
         >
           {data.issues.map((issue) => (
             <li key={`${issue.path}:${issue.message}`} className="text-xs">
@@ -150,13 +153,13 @@ export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-muted-foreground" data-testid="settings__environment-valid">
+        <p className="text-xs text-muted-foreground" data-testid="settings-repo__environment-valid">
           Valid.
         </p>
       )}
 
       {environment ? (
-        <dl className="space-y-1" data-testid="settings__environment-summary">
+        <dl className="space-y-1" data-testid="settings-repo__environment-summary">
           <Summary label="Build" value={build?.devcontainer ?? build?.dockerfile ?? build?.image} />
           <Summary label="Install" value={environment.install} />
           <Summary label="Start" value={environment.start} />
@@ -200,7 +203,7 @@ export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
               <li
                 key={host.id}
                 className="flex items-start justify-between gap-3 px-3 py-2 text-xs"
-                data-testid="settings__environment-host"
+                data-testid="settings-repo__environment-host"
                 data-meets={host.meets}
               >
                 <span className="min-w-0 truncate">

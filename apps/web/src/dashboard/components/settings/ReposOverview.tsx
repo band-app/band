@@ -1,6 +1,5 @@
 import { Input } from "@band-app/ui";
 import { useEffect, useRef, useState } from "react";
-import { useHostNames } from "../../hooks/use-host-names";
 import { useRepos } from "../../hooks/use-repos";
 import { useSettingsQuery } from "../../hooks/use-settings-query";
 import { useHostsList } from "../../hooks/use-update-status";
@@ -47,7 +46,7 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
     filterRef.current?.focus();
   }, []);
 
-  const workerName = useHostNames();
+  const workerName = (id: string) => hosts.data?.find((h) => h.id === id)?.name ?? id;
   const visible = repos.filter(
     (repo) =>
       matchesQuery(repo, labels, query) &&
@@ -195,12 +194,16 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
                     <td
                       className="px-3 py-2 text-xs"
                       data-testid="settings-repos__logins"
-                      data-overrides={overrides.length}
+                      data-overrides={logins.data ? overrides.length : undefined}
                     >
-                      {logins.isError ? (
+                      {logins.isError || logins.isLoading ? (
                         <span
                           className="text-muted-foreground"
-                          title="Reading login overrides needs an admin token."
+                          title={
+                            logins.isError
+                              ? "Reading login overrides needs an admin token."
+                              : undefined
+                          }
                         >
                           —
                         </span>

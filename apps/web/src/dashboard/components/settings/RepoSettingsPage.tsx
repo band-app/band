@@ -3,7 +3,6 @@ import { Button } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
-import { useHostNames } from "../../hooks/use-host-names";
 import { useUpdateRepoLabel } from "../../hooks/use-repo-mutations";
 import { useRepos } from "../../hooks/use-repos";
 import { useSettingsQuery } from "../../hooks/use-settings-query";
@@ -70,7 +69,6 @@ function RepoLabelSelect({ repo }: { repo: RepoInfo }) {
 /** Each worker that holds the repo or one of its worktrees: its folder and its worktree count. */
 function RepoWorkerList({ repo }: { repo: RepoInfo }) {
   const hosts = useHostsList();
-  const workerName = useHostNames();
   const counts = new Map<string, number>();
   for (const w of repo.worktrees) {
     if (w.path === repo.path) continue;
@@ -105,7 +103,7 @@ function RepoWorkerList({ repo }: { repo: RepoInfo }) {
           >
             <div className="min-w-0">
               <div className="text-sm">
-                {workerName(hostId)}
+                {host?.name ?? hostId}
                 {host ? (
                   <span className="ml-2 text-xs text-muted-foreground">{host.status}</span>
                 ) : null}
@@ -131,6 +129,9 @@ function RepoMcpServers({ repoName, onOpenMcp }: { repoName: string; onOpenMcp: 
     queryFn: () => trpc.mcp.list.query(),
     retry: false,
   });
+  if (servers.isLoading) {
+    return <p className="px-4 py-3 text-xs text-muted-foreground">Loading…</p>;
+  }
   if (servers.isError) {
     return (
       <p className="px-4 py-3 text-xs text-muted-foreground">
@@ -187,6 +188,9 @@ function RepoCronjobs({ repo, onOpenCronjobs }: { repo: RepoInfo; onOpenCronjobs
   const worktreeIds = new Set<string>(
     repo.worktrees.map((w) => toWorktreeId(repo.name, w.name, w.hostId ?? "local")),
   );
+  if (jobs.isLoading) {
+    return <p className="px-4 py-3 text-xs text-muted-foreground">Loading…</p>;
+  }
   const mine = (jobs.data?.jobs ?? []).filter((j) => j.worktreeId && worktreeIds.has(j.worktreeId));
   if (mine.length === 0) {
     return (
@@ -308,7 +312,7 @@ interface Props {
 export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Props) {
   const { repos, isLoading } = useRepos();
   const admin = useIsAdmin();
-  const workerName = useHostNames();
+  const hosts = useHostsList();
   const repo = repos.find((r) => r.name === name);
 
   const crumbs = (
@@ -336,6 +340,7 @@ export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Pr
     );
   }
 
+  const workerName = (id: string) => hosts.data?.find((h) => h.id === id)?.name ?? id;
   const scrollTo = (id: SectionId) =>
     document.getElementById(sectionDomId(id))?.scrollIntoView({ block: "start" });
 

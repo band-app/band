@@ -546,7 +546,6 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-repos__filter");
   }
 
-  /** Types into the overview's filter and presses Enter, which opens the first match. */
   /** Replaces the overview's filter text. */
   async filterRepos(text: string): Promise<void> {
     await test.step(`Filter repos by "${text}"`, async () => {
@@ -554,6 +553,7 @@ export class SettingsPage {
     });
   }
 
+  /** Types into the overview's filter and presses Enter, which opens the first match. */
   async filterReposAndOpen(text: string): Promise<void> {
     await test.step(`Filter repos by "${text}" and press Enter`, async () => {
       await this.page.keyboard.type(text);
@@ -665,11 +665,14 @@ export class SettingsPage {
     });
   }
 
-  /** "Open in Cronjobs" on a cronjob of a repo page. */
-  repoCronjobOpenButton(name: string, cronjobId: string): Locator {
-    return this.repoCronjobs(name)
-      .and(this.page.locator(`[data-cronjob="${cronjobId}"]`))
-      .getByTestId("settings-repo__open-cronjobs");
+  /** Clicks "Open in Cronjobs" on a cronjob of a repo page. */
+  async openCronjobsFromRepo(name: string, cronjobId: string): Promise<void> {
+    await test.step(`Open cronjob ${cronjobId} in Cronjobs from ${name}'s page`, async () => {
+      await this.repoCronjobs(name)
+        .and(this.page.locator(`[data-cronjob="${cronjobId}"]`))
+        .getByTestId("settings-repo__open-cronjobs")
+        .click();
+    });
   }
 
   /** Closes the Settings dialog with Escape. */
@@ -1493,40 +1496,40 @@ export class SettingsPage {
   /** The list of validation problems of the open repo page's environment. `data-testid`
    *  set in `RepoEnvironment.tsx`. */
   environmentIssues(): Locator {
-    return this.dialog.getByTestId("settings__environment-issues");
+    return this.dialog.getByTestId("settings-repo__environment-issues");
   }
 
   /** Shown instead of the issues when the open repo page's environment is valid. */
   environmentValid(): Locator {
-    return this.dialog.getByTestId("settings__environment-valid");
+    return this.dialog.getByTestId("settings-repo__environment-valid");
   }
 
   /** Shown when the open repo has no `.band/environment.json`. */
   environmentNone(): Locator {
-    return this.dialog.getByTestId("settings__environment-none");
+    return this.dialog.getByTestId("settings-repo__environment-none");
   }
 
   /** The parsed fields of the open repo page's environment. */
   environmentSummary(): Locator {
-    return this.dialog.getByTestId("settings__environment-summary");
+    return this.dialog.getByTestId("settings-repo__environment-summary");
   }
 
   /** One row per host in the open repo page's environment's worker check. `data-meets`
    *  is `true` or `false`. */
   environmentHosts(): Locator {
-    return this.dialog.getByTestId("settings__environment-host");
+    return this.dialog.getByTestId("settings-repo__environment-host");
   }
 
   /** The image section of the open repo page's environment. `data-testid` set in
    *  `RepoEnvironment.tsx`. Present only when the file has a `build`. */
   environmentImage(): Locator {
-    return this.dialog.getByTestId("settings__environment-image");
+    return this.dialog.getByTestId("settings-repo__environment-image");
   }
 
   /** Click "Build image" in the open repo page's environment, and wait for the build to finish. */
   async buildEnvironmentImage(): Promise<void> {
     await test.step("Build the environment image", async () => {
-      const button = this.dialog.getByTestId("settings__environment-image-build");
+      const button = this.dialog.getByTestId("settings-repo__environment-image-build");
       await button.click();
       await expect(button).toBeEnabled({ timeout: 30_000 });
       await expect(this.environmentImage()).not.toHaveAttribute("data-status", "building");
@@ -1535,12 +1538,12 @@ export class SettingsPage {
 
   /** The log of the latest image build. */
   environmentImageLog(): Locator {
-    return this.dialog.getByTestId("settings__environment-image-log");
+    return this.dialog.getByTestId("settings-repo__environment-image-log");
   }
 
   /** An error from starting an image build. */
   environmentImageError(): Locator {
-    return this.dialog.getByTestId("settings__environment-image-error");
+    return this.dialog.getByTestId("settings-repo__environment-image-error");
   }
 
   /** Click Save. */

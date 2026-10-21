@@ -265,7 +265,7 @@ test("a repo page lists the MCP servers and cronjobs that reach it, with links (
 
   // "Open in Cronjobs" closes Settings and opens the Cronjobs dialog.
   await settings.openRepoSettings(BUSY);
-  await settings.repoCronjobOpenButton(BUSY, cronId).click();
+  await settings.openCronjobsFromRepo(BUSY, cronId);
   await expect(settings.dialog).toHaveCount(0);
   await expect(new CronjobsDialog(page, server.url, TOKEN).dialog).toBeVisible();
 });
