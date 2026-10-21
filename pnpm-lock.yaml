@@ -491,9 +491,6 @@ importers:
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.300
         version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303)
-      '@xterm/addon-web-links':
-        specifier: 0.13.0-beta.300
-        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303)
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
         version: 6.1.0-beta.303
@@ -4588,11 +4585,6 @@ packages:
 
   '@xterm/addon-unicode11@0.10.0-beta.300':
     resolution: {integrity: sha512-Q678teiannkxiDQtMrr/MtuYAZXc+pou7BWVlL68DTvWdYZqYVrLNjwb1E4PCzO1arEZzO9zaTOhsXfDoiz+gw==}
-    peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.303
-
-  '@xterm/addon-web-links@0.13.0-beta.300':
-    resolution: {integrity: sha512-9RsQJadgK6cRBIC+k3P9MSTbzRB+/mF229K/shxI9vAV6DYmxRSgmxSGtoOY4MHw7nHuPUC0FxH82eK+GKQPEA==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.303
 
@@ -14279,10 +14271,6 @@ snapshots:
       '@xterm/xterm': 6.1.0-beta.303
 
   '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)':
-    dependencies:
-      '@xterm/xterm': 6.1.0-beta.303
-
-  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.303
 
