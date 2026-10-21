@@ -260,8 +260,8 @@ export function HtmlVisualEditor({
           }),
         );
       });
-      setNotice(ok ? "Sent to the agent." : "The comment could not be sent.");
       if (ok) closeComment();
+      else setNotice("The comment could not be sent.");
     } finally {
       setSending(false);
     }
