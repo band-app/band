@@ -16,6 +16,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
+import { isHtmlFile } from "../lib/html-preview";
 import {
   extensionToLanguage,
   filenameToLanguage,
@@ -27,6 +28,7 @@ import { useMarkdownPreviewWidth } from "../lib/markdown-preview-width";
 import type { FileContentResult } from "../types";
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
+import { HtmlVisualEditor } from "./HtmlVisualEditor";
 import { ImagePreview } from "./ImagePreview";
 import { LanguagePickerDialog } from "./LanguagePickerDialog";
 import { PdfPreview } from "./PdfPreview";
@@ -52,6 +54,12 @@ interface FileViewerProps {
    * preview with a preview/source toggle.
    */
   renderMarkdownBlock?: RenderMarkdownBlock;
+  /**
+   * Offers a Visual mode for HTML files: the page in a sandboxed iframe with
+   * click-to-edit text. Shown when `viewMode` is "preview"; the default is the
+   * code view. Needs `adapter.getWorktreePreviewUrl`.
+   */
+  htmlVisual?: boolean;
   /** When true, code files open in an editable editor instead of read-only viewer */
   editable?: boolean;
   /** Called when user clicks the back navigation button */
@@ -157,6 +165,7 @@ interface FileViewerProps {
     saving: boolean;
     save: () => void;
     showMarkdownToggle: boolean;
+    showVisualToggle: boolean;
   }) => void;
   /**
    * Called when the worktree/external loader rejects (typically
@@ -258,6 +267,7 @@ export function FileViewer({
   onEditorView,
   overlay,
   renderMarkdownBlock,
+  htmlVisual,
   editable,
   onGoBack,
   onGoForward,
@@ -497,6 +507,15 @@ export function FileViewer({
       : undefined;
 
   const showMarkdownToggle = previewType === "markdown" && !!renderMarkdownBlock;
+  const showVisualToggle =
+    !!htmlVisual &&
+    previewType === "code" &&
+    isHtmlFile(filePath) &&
+    !external &&
+    !untitled &&
+    !!adapter.getWorktreePreviewUrl;
+  // The code view is the default for HTML, so only an explicit "preview" shows the page.
+  const visualActive = showVisualToggle && controlledViewMode === "preview";
   const [markdownPreviewWidth] = useMarkdownPreviewWidth();
 
   // Options for the editable markdown preview. Relative image paths resolve
@@ -524,7 +543,8 @@ export function FileViewer({
   const onEditedContentChangeRef = useRef(onEditedContentChange);
   onEditedContentChangeRef.current = onEditedContentChange;
 
-  const handleSave = useCallback(async () => {
+  // Resolves to whether the file reached disk (or the save was handed to the Save As dialog).
+  const handleSave = useCallback(async (): Promise<boolean> => {
     // Untitled tabs route through the OS save dialog (`onSaveAs`).
     // We use the *live* editor buffer rather than `editedContentRef`
     // because an empty untitled buffer never sets edited content
@@ -532,7 +552,7 @@ export function FileViewer({
     // legitimately be null even when the user wants to save an
     // empty file from a fresh untitled tab.
     if (untitled) {
-      if (!onSaveAs) return;
+      if (!onSaveAs) return false;
       const content = editorViewRef.current?.state.doc.toString() ?? editedContentRef.current ?? "";
       setSaving(true);
       setSaveError(null);
@@ -550,17 +570,18 @@ export function FileViewer({
         }
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : "Failed to save");
+        return false;
       } finally {
         setSaving(false);
       }
-      return;
+      return true;
     }
-    if (editedContentRef.current === null) return;
+    if (editedContentRef.current === null) return true;
     const save = external
       ? adapter.saveExternalFile && ((c: string) => adapter.saveExternalFile!(filePath, c))
       : adapter.saveWorktreeFile &&
         ((c: string) => adapter.saveWorktreeFile!(worktreeId, filePath, c));
-    if (!save) return;
+    if (!save) return false;
     setSaving(true);
     setSaveError(null);
     try {
@@ -574,12 +595,42 @@ export function FileViewer({
       setEditedContent(null);
       onEditedContentChangeRef.current?.(null);
       window.dispatchEvent(new CustomEvent("band:dirty-change"));
+      return true;
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save");
+      return false;
     } finally {
       setSaving(false);
     }
   }, [adapter, worktreeId, filePath, external, untitled, onSaveAs]);
+
+  // What a Visual mode edit is checked against: unsaved text if any, else a
+  // fresh read of the file, so an edit never lands on a file that has changed
+  // since the page loaded, whether or not the watcher has reported it yet.
+  const getVisualSource = useCallback(async (): Promise<string | null> => {
+    if (editedContentRef.current !== null) return editedContentRef.current;
+    if (!adapter.getWorktreeFile) return null;
+    const fresh = await adapter.getWorktreeFile(worktreeId, filePath);
+    return fresh.content ?? null;
+  }, [adapter, worktreeId, filePath]);
+
+  const getVisualPreviewUrl = useCallback(
+    (id: string, path: string) => {
+      if (!adapter.getWorktreePreviewUrl) return Promise.reject(new Error("No preview URL"));
+      return adapter.getWorktreePreviewUrl(id, path);
+    },
+    [adapter],
+  );
+
+  // A text edit made in the Visual mode: the patched file becomes the buffer
+  // and goes through the same save as a keystroke edit.
+  const applyVisualEdit = useCallback(async (text: string) => {
+    editedContentRef.current = text;
+    setEditedContent(text);
+    onEditedContentChangeRef.current?.(text);
+    window.dispatchEvent(new CustomEvent("band:dirty-change"));
+    if (!(await handleSaveRef.current())) throw new Error("Failed to save");
+  }, []);
 
   // Report title-bar action state to a host that renders its own chrome (the
   // center `file` leaf lifts Save + the markdown toggle into the group header).
@@ -592,10 +643,11 @@ export function FileViewer({
       isDirty,
       canSave,
       saving,
-      save: () => handleSaveRef.current(),
+      save: () => void handleSaveRef.current(),
       showMarkdownToggle,
+      showVisualToggle,
     });
-  }, [isDirty, canSave, saving, showMarkdownToggle]);
+  }, [isDirty, canSave, saving, showMarkdownToggle, showVisualToggle]);
 
   /**
    * Format the editor buffer in-place via Prettier.
@@ -1153,12 +1205,26 @@ export function FileViewer({
             </div>
           )}
 
+        {/* HTML Visual mode: the page in a sandboxed iframe. */}
+        {!loading && !error && visualActive && data?.content !== undefined && (
+          <HtmlVisualEditor
+            worktreeId={worktreeId}
+            filePath={filePath}
+            getSource={getVisualSource}
+            diskContent={data.content}
+            canEdit={!!canEdit && canSave}
+            getPreviewUrl={getVisualPreviewUrl}
+            onApply={applyVisualEdit}
+          />
+        )}
+
         {/* Source view: editable editor or read-only viewer.
              Same undefined-check as the markdown branch — empty files
              are still valid and must surface the editor. */}
         {!loading &&
           !error &&
           data?.content !== undefined &&
+          !visualActive &&
           (previewType === "code" ||
             (previewType === "markdown" && (!renderMarkdownBlock || viewMode === "source"))) &&
           (canEdit ? (

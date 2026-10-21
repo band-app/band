@@ -69,6 +69,13 @@ import {
   stopUsageScanner,
 } from "./src/server/infra/usage-scanner/usage-scanner.ts";
 import { openHostedFile } from "./src/server/services/_utils/hosted-file.ts";
+import {
+  annotateHtmlForEdit,
+  isValidVisualEditNonce,
+  MAX_ANNOTATED_BYTES,
+  markHtmlUnavailable,
+  VISUAL_EDIT_PARAM,
+} from "./src/server/services/_utils/html-visual-edit.ts";
 import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
 import {
@@ -471,6 +478,7 @@ async function serveWorktreeFile(
   worktreeId: string,
   rawPath: string,
   extraHeaders: Record<string, string> = {},
+  visualEditNonce?: string,
 ): Promise<void> {
   const worktree = worktreeService.resolve(worktreeId);
   if (!worktree) {
@@ -504,9 +512,26 @@ async function serveWorktreeFile(
     const fileStat = await fs.stat(target, { followSymlinks: true });
     const contentType = mimeTypeFromFilename(basename(target));
     const isHtml = contentType.startsWith("text/html");
+    // Edit mode (only the signed preview route passes a nonce): the previewed
+    // page gets source ranges on its text elements and the edit script. A file
+    // above the cap is streamed as it is, followed by a script that tells the
+    // parent edit mode is unavailable.
+    const editHtml = isHtml && visualEditNonce !== undefined && fileStat.kind === "file";
+    let body: Buffer | undefined;
+    let trailer: Buffer | undefined;
+    if (editHtml) {
+      if (fileStat.size > MAX_ANNOTATED_BYTES) {
+        trailer = Buffer.from(markHtmlUnavailable("", visualEditNonce));
+      } else {
+        const source = new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+          await fs.readFile(target),
+        );
+        body = Buffer.from(annotateHtmlForEdit(source, visualEditNonce), "utf8");
+      }
+    }
     res.writeHead(200, {
       "Content-Type": contentType,
-      "Content-Length": fileStat.size.toString(),
+      "Content-Length": (body?.byteLength ?? fileStat.size + (trailer?.byteLength ?? 0)).toString(),
       "Cache-Control": "private, no-cache",
       // HTML from a repo must not run with the hub's origin.
       ...(isHtml
@@ -517,11 +542,21 @@ async function serveWorktreeFile(
         : {}),
       ...extraHeaders,
     });
-    pipeline(
-      Readable.from(fs.readStream(target), { objectMode: false, highWaterMark: 64 * 1024 }),
-      res,
-      () => {},
-    );
+    if (body) {
+      res.end(body);
+      return;
+    }
+    const stream = Readable.from(fs.readStream(target), {
+      objectMode: false,
+      highWaterMark: 64 * 1024,
+    });
+    if (trailer) {
+      stream.on("end", () => res.end(trailer));
+      stream.on("error", () => res.destroy());
+      stream.pipe(res, { end: false });
+    } else {
+      pipeline(stream, res, () => {});
+    }
   } catch {
     res.writeHead(404);
     res.end("Not found");
@@ -530,7 +565,7 @@ async function serveWorktreeFile(
 
 /** `GET /api/worktree-preview/<worktreeId>/<grant>/<path>`: a worktree file behind a signed grant. */
 async function handleWorktreePreview(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const rest = (req.url ?? "").slice(WORKTREE_PREVIEW_PREFIX.length).split("?")[0];
+  const [rest, query = ""] = (req.url ?? "").slice(WORKTREE_PREVIEW_PREFIX.length).split("?");
   const [rawId, grant, ...pathParts] = rest.split("/");
   let wId: string;
   let filePath: string;
@@ -552,17 +587,24 @@ async function handleWorktreePreview(req: IncomingMessage, res: ServerResponse):
     res.end("Forbidden");
     return;
   }
-  await serveWorktreeFile(res, wId, filePath, {
-    // The page runs repo-controlled scripts on the hub's origin. `sandbox`
-    // without `allow-same-origin` gives it an opaque origin, so it cannot use
-    // the hub's cookies, storage or tRPC. Its own assets are plain GETs under
-    // the grant, and the wildcard CORS header lets scripts fetch them.
-    "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-modals",
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-    "Access-Control-Allow-Origin": "*",
-    "Cache-Control": "private, no-store",
-  });
+  const nonce = new URLSearchParams(query).get(VISUAL_EDIT_PARAM);
+  await serveWorktreeFile(
+    res,
+    wId,
+    filePath,
+    {
+      // The page runs repo-controlled scripts on the hub's origin. `sandbox`
+      // without `allow-same-origin` gives it an opaque origin, so it cannot use
+      // the hub's cookies, storage or tRPC. Its own assets are plain GETs under
+      // the grant, and the wildcard CORS header lets scripts fetch them.
+      "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-modals",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "private, no-store",
+    },
+    isValidVisualEditNonce(nonce) ? nonce : undefined,
+  );
 }
 
 // ---------------------------------------------------------------------------

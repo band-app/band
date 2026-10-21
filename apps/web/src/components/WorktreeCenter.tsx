@@ -1275,6 +1275,7 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
     saving: boolean;
     save: () => void;
     showMarkdownToggle: boolean;
+    showVisualToggle: boolean;
   } | null>(null);
 
   // Another device's copy of this file's unsaved text (last save wins). With
@@ -1470,7 +1471,7 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
     worktreeIdRaw && filePathRaw
       ? () => (
           <div className="flex items-center gap-0.5">
-            {fileActions?.showMarkdownToggle && (
+            {(fileActions?.showMarkdownToggle || fileActions?.showVisualToggle) && (
               <>
                 <button
                   type="button"
@@ -1478,10 +1479,12 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
                     setViewMode("preview");
                     updateFileTabState(worktreeIdRaw, filePathRaw, { viewMode: "preview" });
                   }}
-                  title="Preview"
+                  title={fileActions?.showVisualToggle ? "Visual" : "Preview"}
                   data-testid="center-file-leaf__view--preview"
                   className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
-                    viewMode !== "source" ? "bg-accent text-foreground" : "text-muted-foreground"
+                    (fileActions?.showVisualToggle ? viewMode === "preview" : viewMode !== "source")
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground"
                   }`}
                 >
                   <Eye className="size-3.5" />
@@ -1495,12 +1498,16 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
                   title="Source"
                   data-testid="center-file-leaf__view--source"
                   className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
-                    viewMode === "source" ? "bg-accent text-foreground" : "text-muted-foreground"
+                    (fileActions?.showVisualToggle ? viewMode !== "preview" : viewMode === "source")
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground"
                   }`}
                 >
                   <Code className="size-3.5" />
                 </button>
-                {viewMode !== "source" && <MarkdownWidthToggle />}
+                {fileActions?.showMarkdownToggle && viewMode !== "source" && (
+                  <MarkdownWidthToggle />
+                )}
               </>
             )}
             {isDesktop && !external && !untitled && isHtmlFile(filePathRaw) && (
@@ -1640,6 +1647,7 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
         // preview/source toggle; tables, frontmatter and mermaid blocks render
         // through Streamdown.
         renderMarkdownBlock={renderMarkdownBlock}
+        htmlVisual
         onEditorView={handleEditorView}
         overlay={searchBar}
         // Cursor selection + scroll restore: seeded from the per-tab store;

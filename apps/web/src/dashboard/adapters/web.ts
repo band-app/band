@@ -549,6 +549,13 @@ export class WebDashboardAdapter implements DashboardAdapter {
     );
   }
 
+  async getWorktreePreviewUrl(worktreeId: string, path: string): Promise<string> {
+    const { url } = (await this.trpc.worktree.previewUrl.query({ worktreeId, path })) as {
+      url: string;
+    };
+    return hubUrl(url);
+  }
+
   async searchWorktreeFiles(
     worktreeId: string,
     query: string,

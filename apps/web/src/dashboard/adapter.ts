@@ -316,6 +316,13 @@ export interface DashboardAdapter {
   /** Get a URL for raw file content (images, PDFs, etc.) */
   getWorktreeFileUrl?(worktreeId: string, path: string): string;
 
+  /**
+   * A signed, expiring URL that loads a worktree file without the hub's auth
+   * header, with the relative URLs inside the page resolving under it. The
+   * HTML visual editor loads it in a sandboxed iframe.
+   */
+  getWorktreePreviewUrl?(worktreeId: string, path: string): Promise<string>;
+
   // Search (optional)
   searchWorktreeFiles?(
     worktreeId: string,
