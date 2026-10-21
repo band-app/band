@@ -24,7 +24,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { trpcMutate, trpcQuery } from "./helpers/trpc";
+import { trpcMutate, trpcMutateData, trpcQuery } from "./helpers/trpc";
 import { CronjobsDialog } from "./pages/CronjobsDialog";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -44,6 +44,7 @@ let tmpHome: string;
 let remotesDir: string;
 let remoteUrl: string;
 let cronId: string;
+let offlineHostId: string;
 
 interface RepoRow {
   name: string;
@@ -118,6 +119,14 @@ test.beforeAll(async () => {
     "cronjobs.list",
   );
   cronId = jobs.jobs.find((j) => j.name === CRON_NAME)?.id ?? "";
+  expect(cronId).not.toBe("");
+  // A worker that never connects: only the repos with no host list may run on it.
+  offlineHostId = (
+    await trpcMutateData<{ hostId: string }>(server.url, TOKEN, "tokens.issueWorkerBootstrap", {
+      hostName: "e2e-offline",
+      labels: [],
+    })
+  ).hostId;
 });
 
 test.beforeEach(() => resetClientState(tmpHome));
@@ -137,9 +146,9 @@ test("Repos is the last settings page, under no heading of its own, and Environm
 
   await expect(settings.navEntry("general")).toBeVisible();
   await expect(settings.navEntries().last()).toHaveAttribute("data-testid", "settings__nav-repos");
-  await expect(settings.dialog.getByTestId("settings__nav-environment")).toHaveCount(0);
+  await expect(settings.navEntryById("environment")).toHaveCount(0);
   await expect(settings.navGroups().last()).toHaveAttribute("data-group", "Worktree");
-  await expect(settings.navGroups().and(page.locator('[data-group="Repos"]'))).toHaveCount(0);
+  await expect(settings.navGroup("Repos")).toHaveCount(0);
 });
 
 test("the overview lists every repo, and Enter in the focused filter opens the match (S2)", async ({
@@ -151,12 +160,12 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
 
   await expect(settings.repoRows()).toHaveCount(3);
   await expect(settings.repoCell(REMOTE, "url")).toHaveText(remoteUrl);
-  await expect(settings.repoCell(BUSY, "workers")).toContainText("all workers");
-  await expect(settings.repoCell(LIMITED, "workers")).toContainText("only");
+  await expect(settings.repoCell(BUSY, "workers")).toHaveAttribute("data-allowed", "all");
+  await expect(settings.repoCell(LIMITED, "workers")).toHaveAttribute("data-allowed", "local");
   await expect(settings.repoCell(BUSY, "worktrees")).toHaveText("1");
   await expect(settings.repoCell(BUSY, "checkpoints")).toHaveAttribute("data-enabled", "true");
   await expect(settings.repoCell(LIMITED, "checkpoints")).toHaveAttribute("data-enabled", "false");
-  await expect(settings.repoCell(BUSY, "logins")).toBeVisible();
+  await expect(settings.repoCell(BUSY, "logins")).toHaveAttribute("data-overrides", "0");
 
   // The worker and label filters narrow the table.
   await settings.filterReposByLabel(LABEL_WORK);
@@ -165,7 +174,18 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await settings.filterReposByLabel("");
   await settings.filterReposByWorker("local");
   await expect(settings.repoRows()).toHaveCount(3);
+  await settings.filterReposByWorker(offlineHostId);
+  await expect(settings.repoRows()).toHaveCount(2);
+  await expect(settings.repoRow(LIMITED)).toHaveCount(0);
   await settings.filterReposByWorker("");
+
+  // The text filter matches a label name and a remote URL too.
+  await settings.filterRepos("Work");
+  await expect(settings.repoRows()).toHaveCount(1);
+  await expect(settings.repoRow(BUSY)).toBeVisible();
+  await settings.filterRepos("-remote.git");
+  await expect(settings.repoRows()).toHaveCount(1);
+  await expect(settings.repoRow(REMOTE)).toBeVisible();
 
   // The filter has focus, so typing goes straight into it.
   await settings.goto();
@@ -228,9 +248,7 @@ test("a repo page lists the MCP servers and cronjobs that reach it, with links (
   await settings.openRepoSettings(BUSY);
 
   await expect(settings.repoMcpServers(BUSY)).toHaveCount(2);
-  await expect(
-    settings.repoMcpServers(BUSY).and(page.locator(`[data-server="${MCP_SCOPED}"]`)),
-  ).toBeVisible();
+  await expect(settings.repoMcpServer(BUSY, MCP_SCOPED)).toBeVisible();
   await expect(settings.repoCronjobs(BUSY)).toHaveCount(1);
   await expect(settings.repoCronjobs(BUSY)).toHaveAttribute("data-cronjob", cronId);
 
@@ -238,7 +256,7 @@ test("a repo page lists the MCP servers and cronjobs that reach it, with links (
   await settings.backToRepos();
   await settings.openRepo(LIMITED);
   await expect(settings.repoMcpServers(LIMITED)).toHaveCount(1);
-  await expect(settings.repoMcpServers(LIMITED)).toHaveAttribute("data-server", MCP_ALL);
+  await expect(settings.repoMcpServer(LIMITED, MCP_ALL)).toBeVisible();
   await expect(settings.repoCronjobs(LIMITED)).toHaveCount(0);
 
   // "Open in MCP" goes to Settings > MCP.
@@ -259,4 +277,6 @@ test("Remove is disabled while the repo has worktrees (S6)", async ({ page }) =>
 
   await expect(settings.repoRemoveButton(BUSY)).toBeVisible();
   await expect(settings.repoRemoveButton(BUSY)).toBeDisabled();
+  // The Workers section counts the same worktree on the worker that holds it.
+  await expect(settings.repoClone(BUSY, "local")).toHaveAttribute("data-worktrees", "1");
 });

@@ -1,21 +1,14 @@
 import { Button, Switch } from "@band-app/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
 import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "../RepoHostsFields";
 import { useIsAdmin } from "./DevicesSettings";
 import { SettingsRow } from "./SettingsRow";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
-/** The hub's hosts. Shared with every other `hosts.list` reader through the query key. */
-export function useHostsList() {
-  return useQuery({
-    queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
-  });
-}
 
 /** Where a repo may run and which worker lists its default branch, with a Save button. */
 export function RepoHostsEditor({ repo }: { repo: RepoInfo }) {
@@ -121,7 +114,10 @@ export function CheckpointsSwitch({ repo }: { repo: RepoInfo }) {
       htmlFor={id}
       label="Checkpoints on the hub"
       description={
-        <span data-testid="settings-repo__checkpoints-note">
+        <span
+          data-testid="settings-repo__checkpoints-note"
+          data-default={followsDefault ? (enabled ? "all-workers" : "limited") : "stored"}
+        >
           {enabled
             ? "The hub keeps recent copies of this repo's uncommitted work, so a worktree stays readable when its worker goes offline and can be restored on another worker."
             : "The hub stores nothing for this repo. If a worker goes offline its uncommitted work cannot be restored elsewhere."}

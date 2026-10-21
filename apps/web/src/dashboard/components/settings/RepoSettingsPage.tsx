@@ -3,19 +3,16 @@ import { Button } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useHostNames } from "../../hooks/use-host-names";
 import { useUpdateRepoLabel } from "../../hooks/use-repo-mutations";
 import { useRepos } from "../../hooks/use-repos";
 import { useSettingsQuery } from "../../hooks/use-settings-query";
+import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
 import { RepoLoginOverrides } from "./AgentLoginsSettings";
 import { RepoBrowserProfileSelect } from "./BrowserProfilesSettings";
 import { useIsAdmin } from "./DevicesSettings";
-import {
-  AutoContinueSwitch,
-  CheckpointsSwitch,
-  RepoHostsEditor,
-  useHostsList,
-} from "./RepoControls";
+import { AutoContinueSwitch, CheckpointsSwitch, RepoHostsEditor } from "./RepoControls";
 import { RepoEnvironmentDetails } from "./RepoEnvironment";
 import { repoWorktreeCount } from "./ReposOverview";
 import { SettingsRow } from "./SettingsRow";
@@ -73,6 +70,7 @@ function RepoLabelSelect({ repo }: { repo: RepoInfo }) {
 /** Each worker that holds the repo or one of its worktrees: its folder and its worktree count. */
 function RepoWorkerList({ repo }: { repo: RepoInfo }) {
   const hosts = useHostsList();
+  const workerName = useHostNames();
   const counts = new Map<string, number>();
   for (const w of repo.worktrees) {
     if (w.path === repo.path) continue;
@@ -103,10 +101,11 @@ function RepoWorkerList({ repo }: { repo: RepoInfo }) {
             className="flex items-center justify-between gap-3 px-4 py-2.5"
             data-testid="settings-repo__clone"
             data-host={hostId}
+            data-worktrees={count}
           >
             <div className="min-w-0">
               <div className="text-sm">
-                {host?.name ?? hostId}
+                {workerName(hostId)}
                 {host ? (
                   <span className="ml-2 text-xs text-muted-foreground">{host.status}</span>
                 ) : null}
@@ -309,7 +308,7 @@ interface Props {
 export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Props) {
   const { repos, isLoading } = useRepos();
   const admin = useIsAdmin();
-  const hosts = useHostsList();
+  const workerName = useHostNames();
   const repo = repos.find((r) => r.name === name);
 
   const crumbs = (
@@ -337,7 +336,6 @@ export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Pr
     );
   }
 
-  const workerName = (id: string) => hosts.data?.find((h) => h.id === id)?.name ?? id;
   const scrollTo = (id: SectionId) =>
     document.getElementById(sectionDomId(id))?.scrollIntoView({ block: "start" });
 

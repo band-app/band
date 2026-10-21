@@ -1,10 +1,11 @@
 import { Input } from "@band-app/ui";
 import { useEffect, useRef, useState } from "react";
+import { useHostNames } from "../../hooks/use-host-names";
 import { useRepos } from "../../hooks/use-repos";
 import { useSettingsQuery } from "../../hooks/use-settings-query";
+import { useHostsList } from "../../hooks/use-update-status";
 import type { LabelDefinition, RepoInfo } from "../../types";
 import { useAgentLogins, useLoginAgents } from "./AgentLoginsSettings";
-import { useHostsList } from "./RepoControls";
 
 /** The worktrees a repo counts as in use: every listed worktree but the hub's own checkout. */
 export function repoWorktreeCount(repo: RepoInfo): number {
@@ -46,7 +47,7 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
     filterRef.current?.focus();
   }, []);
 
-  const workerName = (id: string) => hosts.data?.find((h) => h.id === id)?.name ?? id;
+  const workerName = useHostNames();
   const visible = repos.filter(
     (repo) =>
       matchesQuery(repo, labels, query) &&
@@ -172,7 +173,11 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
                     >
                       {repo.remoteUrl ?? "no remote"}
                     </td>
-                    <td className="px-3 py-2 text-xs" data-testid="settings-repos__workers">
+                    <td
+                      className="px-3 py-2 text-xs"
+                      data-testid="settings-repos__workers"
+                      data-allowed={repo.allowedHostIds ? repo.allowedHostIds.join(",") : "all"}
+                    >
                       {repo.allowedHostIds
                         ? `${repo.allowedHostIds.map(workerName).join(", ") || "none"} only`
                         : "all workers"}
@@ -187,8 +192,19 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
                     >
                       {checkpoints ? "on" : "off"}
                     </td>
-                    <td className="px-3 py-2 text-xs" data-testid="settings-repos__logins">
-                      {overrides.length > 0 ? (
+                    <td
+                      className="px-3 py-2 text-xs"
+                      data-testid="settings-repos__logins"
+                      data-overrides={overrides.length}
+                    >
+                      {logins.isError ? (
+                        <span
+                          className="text-muted-foreground"
+                          title="Reading login overrides needs an admin token."
+                        >
+                          —
+                        </span>
+                      ) : overrides.length > 0 ? (
                         overrides.join(", ")
                       ) : (
                         <span className="text-muted-foreground">defaults</span>

@@ -151,6 +151,16 @@ export class SettingsPage {
     return this.dialog.getByTestId(`settings__nav-${section}`);
   }
 
+  /** A sidebar entry by its id, including ids that are no longer settings pages. */
+  navEntryById(id: string): Locator {
+    return this.dialog.getByTestId(`settings__nav-${id}`);
+  }
+
+  /** The sidebar group heading named `name`. */
+  navGroup(name: string): Locator {
+    return this.navGroups().and(this.dialog.locator(`[data-group="${name}"]`));
+  }
+
   /** Bounding box of the sidebar. */
   async navBox(): Promise<{ x: number; y: number; width: number; height: number }> {
     const box = await this.dialog.getByTestId("settings-page__nav").boundingBox();
@@ -537,6 +547,13 @@ export class SettingsPage {
   }
 
   /** Types into the overview's filter and presses Enter, which opens the first match. */
+  /** Replaces the overview's filter text. */
+  async filterRepos(text: string): Promise<void> {
+    await test.step(`Filter repos by "${text}"`, async () => {
+      await this.repoFilter().fill(text);
+    });
+  }
+
   async filterReposAndOpen(text: string): Promise<void> {
     await test.step(`Filter repos by "${text}" and press Enter`, async () => {
       await this.page.keyboard.type(text);
@@ -636,13 +653,15 @@ export class SettingsPage {
     return this.repoPage(name).getByTestId("settings-repo__cronjob");
   }
 
+  /** One MCP server listed on a repo page. */
+  repoMcpServer(name: string, server: string): Locator {
+    return this.repoMcpServers(name).and(this.page.locator(`[data-server="${server}"]`));
+  }
+
   /** Clicks "Open in MCP" on a server of a repo page. */
   async openMcpFromRepo(name: string, server: string): Promise<void> {
     await test.step(`Open ${server} in MCP from ${name}'s page`, async () => {
-      await this.repoMcpServers(name)
-        .and(this.page.locator(`[data-server="${server}"]`))
-        .getByTestId("settings-repo__open-mcp")
-        .click();
+      await this.repoMcpServer(name, server).getByTestId("settings-repo__open-mcp").click();
     });
   }
 

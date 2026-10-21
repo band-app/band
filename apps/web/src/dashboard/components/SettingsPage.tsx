@@ -24,9 +24,9 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { useToolbarOverflow } from "../../components/ToolbarButtons";
 import { useTitleBarOffset } from "../../hooks/useIsFullscreen";
 import { isDesktop } from "../../lib/is-desktop";
+import { useToolbarOverflow } from "../../lib/toolbar-overflow";
 import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
@@ -286,11 +286,15 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const capabilities = useCapabilities();
   const [active, setActive] = useState<SettingsSectionId>(initialSection ?? "general");
+  // The repo whose page Settings > Repos shows, or null for the overview.
+  const [repoPage, setRepoPage] = useState<string | null>(null);
   useEffect(() => {
     if (open && initialSection) setActive(initialSection);
   }, [open, initialSection]);
-  // The repo whose page Settings > Repos shows, or null for the overview.
-  const [repoPage, setRepoPage] = useState<string | null>(null);
+  // Settings opens on the Repos overview, never on the repo page it was closed on.
+  useEffect(() => {
+    if (!open) setRepoPage(null);
+  }, [open]);
   const toolbar = useToolbarOverflow();
   const [navQuery, setNavQuery] = useState("");
   const isAdmin = useIsAdmin();

@@ -13,31 +13,16 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import { Activity, BarChart3, Coffee, Globe, MoreVertical, Timer } from "lucide-react";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useKeepAwake } from "@/hooks/use-keep-awake";
 import { useTunnel } from "@/hooks/use-tunnel";
+import { ToolbarOverflowContext, type ToolbarOverflowContextValue } from "@/lib/toolbar-overflow";
 import { AccountUsagePopover } from "./AccountUsagePopover";
 import { CronjobsPageContent } from "./CronjobsPageContent";
 import { PrereqDialog } from "./PrereqDialog";
 import { ReportsPageContent } from "./ReportsPageContent";
 import { ResourcesPage } from "./ResourcesPage";
 import { TunnelDialog } from "./TunnelDialog";
-
-interface ToolbarOverflowContextValue {
-  openCronjobs: () => void;
-  openReports: () => void;
-  openTunnel: () => void;
-  openResources: () => void;
-  /** Tunnel state hint for the menu item (so we can show running/error coloring). */
-  tunnelStatus: "idle" | "running" | "error";
-}
-
-const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>(null);
-
-/** The overflow dialogs' openers, or null outside a <ToolbarOverflowProvider>. */
-export function useToolbarOverflow(): ToolbarOverflowContextValue | null {
-  return useContext(ToolbarOverflowContext);
-}
 
 /**
  * Owns the dialog state for the toolbar overflow menu (Cronjobs, Usage, Resources, Mobile access).
