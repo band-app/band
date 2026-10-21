@@ -28,7 +28,7 @@ export const PROVISION_PREFIX = "/api/provision/";
 const MAX_EXCHANGE_BODY_BYTES = 4096;
 const MAX_LOG_BODY_BYTES = 128 * 1024;
 export const PROVISION_REFUSED_MESSAGE =
-  "This provisioning command was already used or has expired. Create a new one in Settings > Hosts.";
+  "This provisioning command was already used or has expired. Create a new one in Settings > Workers.";
 
 export function isProvisionRequest(req: IncomingMessage): boolean {
   return (req.url ?? "").split("?")[0].startsWith(PROVISION_PREFIX);

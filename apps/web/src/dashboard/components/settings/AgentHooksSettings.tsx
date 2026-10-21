@@ -8,7 +8,7 @@ const STATE_LABEL: Record<HookState, string> = {
   installed: "Installed",
   outdated: "Outdated",
   not_installed: "Not installed",
-  offline: "Host offline",
+  offline: "Worker offline",
 };
 
 /**

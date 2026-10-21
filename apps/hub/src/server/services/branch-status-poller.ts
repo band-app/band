@@ -130,7 +130,7 @@ function hostFor(repo: string, hostId: string | undefined): Host | null {
 
 function hostOf(ws: Pick<WorktreeInfo, "repo" | "hostId">): Host {
   const host = hostFor(ws.repo, ws.hostId);
-  if (!host) throw new Error(`Unknown host "${ws.hostId}"`);
+  if (!host) throw new Error(`Unknown worker "${ws.hostId}"`);
   return host;
 }
 

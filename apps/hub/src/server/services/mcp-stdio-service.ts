@@ -269,7 +269,7 @@ export class McpStdioService {
   /** Starts a server process for one MCP session. */
   async open(server: StdioTarget, proxySessionId: string): Promise<StdioSession> {
     if (!server.hostId || !server.command) {
-      throw new StdioOpenError(502, "This MCP server has no host or command configured");
+      throw new StdioOpenError(502, "This MCP server has no worker or command configured");
     }
     // Opens in flight count too, because the awaits below would let a burst pass the caps.
     const live = [...this.sessions.values()];
@@ -290,12 +290,15 @@ export class McpStdioService {
   }
 
   private async openReserved(server: StdioTarget, proxySessionId: string): Promise<StdioSession> {
-    if (!server.hostId || !server.command) throw new StdioOpenError(502, "No host or command");
+    if (!server.hostId || !server.command) throw new StdioOpenError(502, "No worker or command");
     let host: ReturnType<typeof hostRegistry.hostById>;
     try {
       host = hostRegistry.hostById(server.hostId);
     } catch {
-      throw new StdioOpenError(503, `The host "${server.hostId}" for this MCP server is not known`);
+      throw new StdioOpenError(
+        503,
+        `The worker "${server.hostId}" for this MCP server is not known`,
+      );
     }
     const env = await this.resolveEnv(server);
     let proc: McpStdio;
@@ -309,7 +312,7 @@ export class McpStdioService {
       });
     } catch (err) {
       if (err instanceof HostOfflineError) {
-        throw new StdioOpenError(503, `The host "${server.hostId}" is offline`);
+        throw new StdioOpenError(503, `The worker "${server.hostId}" is offline`);
       }
       // The error text may quote the command line, so only its name goes in the log.
       log.warn(
@@ -322,7 +325,7 @@ export class McpStdioService {
       );
       throw new StdioOpenError(
         502,
-        `The stdio MCP server could not start on host "${server.hostId}"`,
+        `The stdio MCP server could not start on worker "${server.hostId}"`,
       );
     }
     const session = new StdioSession(server.name, proxySessionId, proc, (s) =>

@@ -93,7 +93,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
   } | null>(null);
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
     enabled: active,
   });
   const hostChoices = (hosts.data ?? []).filter(
@@ -127,7 +127,7 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
 
   const listing = useQuery({
     queryKey: ["hosts.browse", hostId, browsePath],
-    queryFn: () => trpc.hosts.browse.query({ hostId: hostId as string, path: browsePath }),
+    queryFn: () => trpc.workers.browse.query({ hostId: hostId as string, path: browsePath }),
     enabled: active && mode === "worker" && hostId !== null && selected === null,
     retry: false,
   });
@@ -354,8 +354,8 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
             <div className="space-y-1">
               <p className="text-sm font-medium">No worker is online</p>
               <p className="text-sm text-muted-foreground">
-                A worker serves the folders you can add. Add one in Settings &gt; Hosts, or add the
-                repo by its URL.
+                A worker serves the folders you can add. Add one in Settings &gt; Workers, or add
+                the repo by its URL.
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-2">

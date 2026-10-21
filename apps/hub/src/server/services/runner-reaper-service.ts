@@ -218,7 +218,7 @@ export class RunnerReaperService {
     }
 
     if (!host) {
-      await this.destroyNow(machine, "its host is gone");
+      await this.destroyNow(machine, "its worker is gone");
       return;
     }
     if (online) this.machines.update(machine.id, { lastSeenAt: now });
@@ -314,7 +314,7 @@ export class RunnerReaperService {
     }
     const lost = this.unstored(machine.workerId);
     log.error(
-      `HARD DEADLINE: destroying machine ${machine.id} (${reason}) although worktree(s) ${lost.join(", ") || "of its host"} were not stored`,
+      `HARD DEADLINE: destroying machine ${machine.id} (${reason}) although worktree(s) ${lost.join(", ") || "of its worker"} were not stored`,
     );
     await this.destroyNow(
       machine,

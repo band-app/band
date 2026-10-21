@@ -2,7 +2,7 @@
 # restart ends, and confirming calls hosts.update; the row shows the update in progress, then the
 # new version once the worker is back. Run against a stand-in worker on the real link protocol.
 appId: app.getband.mobile
-name: Hosts update of a worker behind the hub
+name: Workers update of a worker behind the hub
 ---
 - runScript:
     file: scripts/hub-control.js

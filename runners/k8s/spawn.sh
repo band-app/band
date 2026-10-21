@@ -82,6 +82,6 @@ if [ -z "$secret_ok" ]; then
   exit 1
 fi
 
-if [ -n "${BAND_REPO_URLS:-}" ]; then echo "BAND_HOST_REPO_PATH=/work/$repo_name"; fi
+if [ -n "${BAND_REPO_URLS:-}" ]; then echo "BAND_WORKER_REPO_PATH=/work/$repo_name"; fi
 echo "BAND_MACHINE_HANDLE=$ns/$name"
 echo "started $resource $ns/$name"

@@ -742,7 +742,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
   const grouped = groupBy !== "repo";
   const hostsQuery = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   const { toggle: togglePinned } = usePinnedWorktrees();
 

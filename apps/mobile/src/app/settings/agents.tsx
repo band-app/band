@@ -89,7 +89,7 @@ function AgentsScreen() {
               testID="settings__refresh-models"
             />
             <Text style={styles.detail}>
-              {hostCount === 1 ? "Runs on 1 host" : `Runs on the default of ${hostCount} hosts`}
+              {hostCount === 1 ? "Runs on 1 worker" : `Runs on the default of ${hostCount} workers`}
             </Text>
           </View>
           {refresh.isSuccess ? (

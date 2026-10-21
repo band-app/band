@@ -613,7 +613,9 @@ export class RunnerService {
         gitCredentialService.expectRemote(issued.hostId, hubClone, row.repo);
         runLog.write("hub", "the hub will clone the repository with a vault git credential");
       }
-      let hostRepoPath: string | undefined;
+      // BAND_WORKER_REPO_PATH wins over the older BAND_HOST_REPO_PATH whatever the line order.
+      let workerRepoPath: string | undefined;
+      let legacyRepoPath: string | undefined;
       if (snapshot) {
         env.BAND_SNAPSHOT_ID = snapshot.snapshotId;
         runLog.write("hub", `restoring snapshot ${snapshot.snapshotId} with the restore hook`);
@@ -629,12 +631,16 @@ export class RunnerService {
         runLog,
         watch: () => this.assertHeld(row, runner),
         onStdout: (line) => {
-          const m = /^BAND_HOST_REPO_PATH=(.+)$/.exec(line.trim());
-          if (m) hostRepoPath = m[1];
+          const m = /^BAND_(WORKER|HOST)_REPO_PATH=(.+)$/.exec(line.trim());
+          if (m) {
+            if (m[1] === "WORKER") workerRepoPath = m[2];
+            else legacyRepoPath = m[2];
+          }
           const h = HANDLE_LINE.exec(line.trim());
           if (h) this.machines.update(machineId, { handle: h[1] });
         },
       });
+      const hostRepoPath = workerRepoPath ?? legacyRepoPath;
       if (code !== 0) throw new Error(`${kind} exited with code ${code}`);
       runLog.write("hub", `${kind} finished; waiting for the worker's hello`);
       const handle = this.machines.get(machineId)?.handle;
@@ -1058,7 +1064,10 @@ export class RunnerService {
       BAND_NODE: process.execPath,
     });
     if (runner.desktop) env.BAND_DESKTOP = "1";
-    if (workerId) env.BAND_WORKER_ID = workerId;
+    if (workerId) {
+      env.BAND_WORKER_ID = workerId;
+      env.BAND_HOST_ID = workerId; // older name, kept for hooks written before the rename
+    }
     if (row) env.BAND_REQUEST_ID = row.id;
     if (handle) env.BAND_MACHINE_HANDLE = handle;
     if (token) env.BAND_BOOTSTRAP_TOKEN = token;

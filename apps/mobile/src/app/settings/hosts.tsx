@@ -46,12 +46,12 @@ function HostsScreen() {
   const [updating, setUpdating] = useState<HostLike | null>(null);
 
   return (
-    <SettingsScreen title="Hosts" testID="settings__hosts">
-      <Notice>Machines that run worktrees. Workers connect to the hub and appear here.</Notice>
+    <SettingsScreen title="Workers" testID="settings__hosts">
+      <Notice>Computers that run worktrees. Workers connect to the hub and appear here.</Notice>
       {hosts.isPending ? <Loading testID="settings__hosts-loading" /> : null}
       {hosts.isError ? (
         <Notice tone="error" testID="settings__hosts-error">
-          {isMissingProcedure(hosts.error) ? errorText(hosts.error) : "Could not load the hosts."}
+          {isMissingProcedure(hosts.error) ? errorText(hosts.error) : "Could not load the workers."}
         </Notice>
       ) : null}
       {hosts.data ? (
@@ -182,7 +182,7 @@ function UpdateConfirm({ host, onClose }: { host: HostLike; onClose: () => void 
       visible
       testID="settings__update-confirm"
       title={`Update ${host.name} to ${host.updateTarget ?? "the latest version"}?`}
-      message="The worker installs the new version and restarts. Restarting ends every agent running on this host, and a turn in progress is lost."
+      message="The worker installs the new version and restarts. Restarting ends every agent running on this worker, and a turn in progress is lost."
       confirmLabel="Update and restart"
       busy={update.isPending}
       disabled={interruptions.isPending || interruptions.isError}
@@ -194,10 +194,10 @@ function UpdateConfirm({ host, onClose }: { host: HostLike; onClose: () => void 
         <Notice testID="settings__update-agents">Checking running agents…</Notice>
       ) : interruptions.isError ? (
         <Notice tone="error" testID="settings__update-agents">
-          Could not check which agents are running on this host.
+          Could not check which agents are running on this worker.
         </Notice>
       ) : lines.length === 0 ? (
-        <Notice testID="settings__update-agents">No agents are running on this host.</Notice>
+        <Notice testID="settings__update-agents">No agents are running on this worker.</Notice>
       ) : (
         <View testID="settings__update-agents">
           <Text style={styles.agentsTitle}>

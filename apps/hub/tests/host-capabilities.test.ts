@@ -271,7 +271,7 @@ describe("the repository path on a remote host", () => {
 
 describe("removing a host", () => {
   it("refuses the local host and an online host", async () => {
-    expect(await mutationError("hosts.remove", { hostId: "local" })).toMatch(/local host/);
+    expect(await mutationError("hosts.remove", { hostId: "local" })).toMatch(/local worker/);
     expect(await mutationError("hosts.remove", { hostId })).toMatch(/online/);
     expect(await hostById(hostId)).toBeDefined();
   });

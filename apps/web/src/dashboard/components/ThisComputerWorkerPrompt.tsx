@@ -53,7 +53,7 @@ export function ThisComputerWorkerPrompt() {
           <DialogDescription>
             The hub can then run worktrees and agents on this computer. Band installs a background
             service that keeps running after you quit the app. You can remove it in Settings &gt;
-            Hosts.
+            Workers.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">

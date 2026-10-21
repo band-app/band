@@ -66,12 +66,13 @@ enum Commands {
         #[command(subcommand)]
         cmd: SubscriptionsCmd,
     },
-    /// List the hosts worktrees can run on
-    Hosts {
+    /// List the workers worktrees can run on
+    #[command(name = "workers", alias = "hosts")]
+    Workers {
         #[command(subcommand)]
         cmd: HostsCmd,
     },
-    /// List the runners that start workers for worktrees waiting on a host
+    /// List the runners that start workers for worktrees waiting on a worker
     Runners {
         #[command(subcommand)]
         cmd: RunnersCmd,
@@ -158,7 +159,7 @@ enum ReposCmd {
     List,
     /// Register a repo from a path on the hub's machine, a remote URL (`--url`) or a folder on a worker (`--from`)
     Add {
-        /// Path to the git repository. With `--from`, the folder on that host
+        /// Path to the git repository. With `--from`, the folder on that worker
         path: Option<String>,
         /// Label for the repo
         #[arg(long)]
@@ -169,7 +170,7 @@ enum ReposCmd {
         /// Default branch for `--url`. Without it the hub asks the remote
         #[arg(long, requires = "url")]
         branch: Option<String>,
-        /// Add the repo a folder on this host holds (host id, see `band hosts list`)
+        /// Add the repo a folder on this worker holds (worker id, see `band workers list`)
         #[arg(long)]
         from: Option<String>,
         /// With `--from`: serve a folder outside the worker's roots after confirming it
@@ -180,16 +181,16 @@ enum ReposCmd {
     Set {
         /// Repo name
         name: String,
-        /// Hosts the repo may run on, as host ids or names separated by commas, or `all`
-        #[arg(long, value_name = "HOSTS|all")]
+        /// Workers the repo may run on, as worker ids or names separated by commas, or `all`
+        #[arg(long = "workers", alias = "hosts", value_name = "WORKERS|all")]
         hosts: Option<String>,
-        /// Host that lists the repo's default-branch worktree (id or name), or `auto`
-        #[arg(long, value_name = "HOST|auto")]
+        /// Worker that lists the repo's default-branch worktree (id or name), or `auto`
+        #[arg(long, value_name = "WORKER|auto")]
         primary: Option<String>,
         /// Whether the hub keeps checkpoints of the repo's worktrees on workers
         #[arg(long, value_name = "on|off|default")]
         checkpoints: Option<String>,
-        /// Whether a worktree on an offline host continues on another host without asking
+        /// Whether a worktree on an offline worker continues on another worker without asking
         #[arg(long, value_name = "on|off")]
         auto_continue: Option<String>,
     },
@@ -237,17 +238,17 @@ enum WorktreesCmd {
         /// `~/.band/settings.json` `cli.defaultVia` → terminal (issue #551)
         #[arg(long)]
         via: Option<String>,
-        /// Place the worktree on an online host with these labels (k=v,
+        /// Place the worktree on an online worker with these labels (k=v,
         /// comma-separated or repeated). With no match, the worktree waits
-        /// as "provisioning" until a runner provides a host.
+        /// as "provisioning" until a runner provides a worker.
         #[arg(long, value_delimiter = ',')]
         labels: Vec<String>,
-        /// Require host facts, e.g. `node=>=24` or `os=linux` (repeatable).
+        /// Require worker facts, e.g. `node=>=24` or `os=linux` (repeatable).
         /// Implies placement.
         #[arg(long)]
         requires: Vec<String>,
-        /// Place on any online host, with no label or requirement.
-        #[arg(long)]
+        /// Place on any online worker, with no label or requirement.
+        #[arg(long = "any-worker", alias = "any-host")]
         any_host: bool,
         /// How strongly the worktree is isolated: `worktree` (a git worktree
         /// on a shared worker, the default), `container` (a worker of its own
@@ -255,15 +256,19 @@ enum WorktreesCmd {
         /// offers that level. Implies placement.
         #[arg(long, value_parser = ["worktree", "container", "vm"])]
         isolation: Option<String>,
-        /// Where the repo's repository is on the chosen host (needed the
+        /// Where the repo's repository is on the chosen worker (needed the
         /// first time the repo is used there).
-        #[arg(long)]
+        #[arg(
+            long = "worker-repo-path",
+            alias = "host-repo-path",
+            value_name = "WORKER_REPO_PATH"
+        )]
         host_repo_path: Option<String>,
-        /// Create it on this host (id or name, see `band hosts list`). Inside
+        /// Create it on this worker (id or name, see `band workers list`). Inside
         /// a worker's agent, only an online, static worker the repo allows,
         /// and only when the hub setting "Agents may start worktrees on other
-        /// hosts" is on. Without it the worktree goes where the caller runs.
-        #[arg(long, conflicts_with_all = ["labels", "requires", "any_host", "isolation"])]
+        /// workers" is on. Without it the worktree goes where the caller runs.
+        #[arg(long = "worker", alias = "host", value_name = "WORKER", conflicts_with_all = ["labels", "requires", "any_host", "isolation"])]
         host: Option<String>,
         /// Worktree id to record as the origin (where this work was started
         /// from). Inside a Band chat or terminal the origin defaults to that
@@ -280,41 +285,41 @@ enum WorktreesCmd {
         repo: String,
         /// Worktree name (the branch it was created on — its stable identity)
         name: String,
-        /// Host the worktree lives on (see `band hosts`). Needed when the same
-        /// repo and name exist on more than one host.
-        #[arg(long)]
+        /// Worker the worktree lives on (see `band workers`). Needed when the same
+        /// repo and name exist on more than one worker.
+        #[arg(long = "worker", alias = "host", value_name = "WORKER")]
         host: Option<String>,
     },
-    /// Move a worktree to another host while its host is online (fresh checkpoint, then the source is removed)
+    /// Move a worktree to another worker while its worker is online (fresh checkpoint, then the source is removed)
     Move {
         /// Worktree ID
         id: String,
-        /// Target host (id or name, see `band hosts list`)
+        /// Target worker (id or name, see `band workers list`)
         #[arg(long)]
         to: String,
-        /// Add the target host to the repo's allowed hosts when it is missing (admin token)
-        #[arg(long)]
+        /// Add the target worker to the repo's allowed workers when it is missing (admin token)
+        #[arg(long = "add-worker", alias = "add-host")]
         add_host: bool,
     },
-    /// Restore a worktree on another host from its latest (or a chosen) checkpoint. The old copy stays, superseded
+    /// Restore a worktree on another worker from its latest (or a chosen) checkpoint. The old copy stays, superseded
     Restore {
         /// Worktree ID
         id: String,
-        /// Target host (id or name, see `band hosts list`)
+        /// Target worker (id or name, see `band workers list`)
         #[arg(long)]
         to: String,
         /// Checkpoint ID (default: the newest)
         #[arg(long)]
         checkpoint: Option<String>,
-        /// Add the target host to the repo's allowed hosts when it is missing (admin token)
-        #[arg(long)]
+        /// Add the target worker to the repo's allowed workers when it is missing (admin token)
+        #[arg(long = "add-worker", alias = "add-host")]
         add_host: bool,
     },
-    /// Continue a worktree on another host from its latest checkpoint when its host is offline. The old copy stays, superseded
+    /// Continue a worktree on another worker from its latest checkpoint when its worker is offline. The old copy stays, superseded
     Continue {
         /// Worktree ID
         id: String,
-        /// Target host (id or name, see `band hosts list`). Default: the host the hub recommends
+        /// Target worker (id or name, see `band workers list`). Default: the worker the hub recommends
         #[arg(long)]
         to: Option<String>,
     },
@@ -324,8 +329,8 @@ enum WorktreesCmd {
         repo: String,
         /// Worktree name (the branch it was created on)
         name: String,
-        /// Host the worktree is on (default: local)
-        #[arg(long)]
+        /// Worker the worktree is on (default: local)
+        #[arg(long = "worker", alias = "host", value_name = "WORKER")]
         host: Option<String>,
         /// Parent worktree ID
         #[arg(long, conflicts_with = "none", required_unless_present = "none")]
@@ -705,37 +710,39 @@ enum SubscriptionsCmd {
 
 #[derive(Subcommand)]
 enum HostsCmd {
-    /// List hosts with their status, labels, agents, roots and last contact
+    /// List workers with their status, labels, agents, roots and last contact
     List,
-    /// Set how far a host's agents reach through the relay (admin token only)
+    /// Set how far a worker's agents reach through the relay (admin token only)
     Trust {
-        /// Host (id or name)
+        /// Worker (id or name)
+        #[arg(value_name = "WORKER")]
         host: String,
-        /// restricted: own worktrees only. standard: own host, plus worktrees on other hosts
-        /// when Settings allows it. admin: any host, settings, repos and cronjobs
+        /// restricted: own worktrees only. standard: own worker, plus worktrees on other workers
+        /// when Settings allows it. admin: any worker, settings, repos and cronjobs
         #[arg(value_parser = ["restricted", "standard", "admin"])]
         level: String,
     },
-    /// Show what admin hosts did across hosts (admin token only)
+    /// Show what admin workers did across workers (admin token only)
     Audit {
         /// How many of the newest entries to show
         #[arg(long, default_value_t = 50)]
         limit: u32,
     },
-    /// Remove an offline worker host that has no worktrees, and revoke its tokens
+    /// Remove an offline worker that has no worktrees, and revoke its tokens
     Remove {
-        /// Host ID (from `band hosts list`)
+        /// Worker ID (from `band workers list`)
         id: String,
     },
-    /// Move every worktree on a host to another host, one after the other
+    /// Move every worktree on a worker to another worker, one after the other
     Evacuate {
-        /// Source host (id or name)
+        /// Source worker (id or name)
+        #[arg(value_name = "WORKER")]
         host: String,
-        /// Target host (id or name)
+        /// Target worker (id or name)
         #[arg(long)]
         to: String,
-        /// Add the target host to the allowed hosts of repos that lack it (admin token)
-        #[arg(long)]
+        /// Add the target worker to the allowed workers of repos that lack it (admin token)
+        #[arg(long = "add-worker", alias = "add-host")]
         add_host: bool,
     },
 }
@@ -744,9 +751,9 @@ enum HostsCmd {
 enum RunnersCmd {
     /// List the configured runners, what they are running and any settings errors
     List,
-    /// Show what a runner's hooks printed for a host request
+    /// Show what a runner's hooks printed for a worker request
     Log {
-        /// Host request ID (from `band worktrees create`'s provisioning result)
+        /// Worker request ID (from `band worktrees create`'s provisioning result)
         request_id: String,
     },
 }
@@ -1221,7 +1228,7 @@ fn main() {
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
         },
         Commands::Env { .. } => unreachable!("handled before the match"),
-        Commands::Hosts { cmd } => match cmd {
+        Commands::Workers { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
             HostsCmd::Trust { host, level } => cmd_hosts_trust(&host, &level),
             HostsCmd::Audit { limit } => cmd_hosts_audit(limit),
@@ -1339,7 +1346,7 @@ fn handle_schema(command: Option<&str>) {
 
 // --- Repos commands ---
 
-/// The HOSTS column: the host ids a repo is limited to, or `all`.
+/// The HOSTS column: the worker ids a repo is limited to, or `all`.
 fn allowed_hosts_text(allowed: &serde_json::Value) -> String {
     allowed.as_array().map_or_else(
         || "all".to_string(),
@@ -1458,7 +1465,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "KIND",
             "URL",
             "CLONES",
-            "HOSTS",
+            "WORKERS",
             "CHECKPOINTS",
         ],
         &rows,
@@ -1495,10 +1502,10 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
         }
         client.trpc_mutate("repos.addByUrl", &input)?
     } else if let Some(host) = args.from {
-        let path = args
-            .path
-            .ok_or("--from needs the folder on that host: band repos add --from <host> <path>")?;
-        validate::validate_name(host, "Host")?;
+        let path = args.path.ok_or(
+            "--from needs the folder on that worker: band repos add --from <worker> <path>",
+        )?;
+        validate::validate_name(host, "Worker")?;
         let mut input = serde_json::json!({"hostId": host, "path": path});
         if args.add_root {
             input["addRoot"] = serde_json::json!(true);
@@ -1518,7 +1525,7 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
     } else {
         let path = args
             .path
-            .ok_or("Pass a path, --url <url> or --from <host> <path>")?;
+            .ok_or("Pass a path, --url <url> or --from <worker> <path>")?;
         validate::validate_path(path, "Path")?;
         let mut input = serde_json::json!({"path": path});
         if let Some(label) = args.label {
@@ -1536,7 +1543,7 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
     })
 }
 
-/// Resolves a host id or name (case-insensitive) from `hosts.list` to its id.
+/// Resolves a worker id or name (case-insensitive) from `workers.list` to its id.
 fn resolve_host_id(hosts: &[serde_json::Value], given: &str) -> Result<String, String> {
     let given = given.trim();
     let text = |host: &serde_json::Value, key: &str| {
@@ -1554,7 +1561,7 @@ fn resolve_host_id(hosts: &[serde_json::Value], given: &str) -> Result<String, S
                 .find(|h| text(h, "name").eq_ignore_ascii_case(given))
         })
         .map(|h| text(h, "id"))
-        .ok_or_else(|| format!("Unknown host \"{given}\". See `band hosts list`."))
+        .ok_or_else(|| format!("Unknown worker \"{given}\". See `band workers list`."))
 }
 
 /// Reads `--checkpoints on|off|default` into the `repos.update` input and the report lines.
@@ -1576,7 +1583,7 @@ fn apply_checkpoints_flag(
         "default" => {
             input["checkpointsEnabled"] = serde_json::Value::Null;
             lines.push(format!(
-                "{name} follows the default (on, unless the repo is limited to chosen hosts)"
+                "{name} follows the default (on, unless the repo is limited to chosen workers)"
             ));
         }
         other => {
@@ -1599,12 +1606,12 @@ fn apply_auto_continue_flag(
         "on" => {
             input["autoContinue"] = serde_json::json!(true);
             lines.push(format!(
-                "{name} continues on another host by itself when its host is offline and the checkpoint is young"
+                "{name} continues on another worker by itself when its worker is offline and the checkpoint is young"
             ));
         }
         "off" => {
             input["autoContinue"] = serde_json::json!(false);
-            lines.push(format!("{name} asks before it continues on another host"));
+            lines.push(format!("{name} asks before it continues on another worker"));
         }
         other => {
             return Err(format!("--auto-continue takes on or off, not \"{other}\""));
@@ -1623,7 +1630,7 @@ fn cmd_repos_set(
     validate::validate_name(name, "Repo name")?;
     if hosts.is_none() && primary.is_none() && checkpoints.is_none() && auto_continue.is_none() {
         return Err(
-            "Nothing to change. Pass --hosts <hosts>|all, --primary <host>, --checkpoints on|off|default or --auto-continue on|off"
+            "Nothing to change. Pass --workers <workers>|all, --primary <worker>, --checkpoints on|off|default or --auto-continue on|off"
                 .to_string(),
         );
     }
@@ -1638,7 +1645,7 @@ fn cmd_repos_set(
         apply_auto_continue_flag(name, value, &mut input, &mut lines)?;
     }
     if hosts.is_some() || primary.is_some() {
-        let listed = client.trpc_query("hosts.list", &serde_json::json!({}))?;
+        let listed = client.trpc_query("workers.list", &serde_json::json!({}))?;
         let known = listed
             .get("hosts")
             .and_then(|v| v.as_array())
@@ -1647,7 +1654,7 @@ fn cmd_repos_set(
         if let Some(hosts) = hosts {
             if hosts.trim().eq_ignore_ascii_case("all") {
                 input["allowedHostIds"] = serde_json::Value::Null;
-                lines.push(format!("{name} is available on all hosts"));
+                lines.push(format!("{name} is available on all workers"));
             } else {
                 let ids = hosts
                     .split(',')
@@ -1655,7 +1662,7 @@ fn cmd_repos_set(
                     .map(|h| resolve_host_id(&known, h))
                     .collect::<Result<Vec<_>, _>>()?;
                 if ids.is_empty() {
-                    return Err("--hosts needs at least one host, or `all`".to_string());
+                    return Err("--workers needs at least one worker, or `all`".to_string());
                 }
                 lines.push(format!("{name} is only available on {}", ids.join(", ")));
                 input["allowedHostIds"] = serde_json::json!(ids);
@@ -1664,7 +1671,7 @@ fn cmd_repos_set(
         if let Some(primary) = primary {
             if primary.trim().eq_ignore_ascii_case("auto") {
                 input["primaryHostId"] = serde_json::Value::Null;
-                lines.push(format!("{name} picks its primary host itself"));
+                lines.push(format!("{name} picks its primary worker itself"));
             } else {
                 let id = resolve_host_id(&known, primary)?;
                 lines.push(format!("{name} lists its default branch from {id}"));
@@ -1790,9 +1797,9 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
     })
 }
 
-/// Turns a target host given by id or name into its id.
+/// Turns a target worker given by id or name into its id.
 fn target_host_id(client: &api::ApiClient, given: &str) -> Result<String, String> {
-    let listed = client.trpc_query("hosts.list", &serde_json::json!({}))?;
+    let listed = client.trpc_query("workers.list", &serde_json::json!({}))?;
     let known = listed
         .get("hosts")
         .and_then(|v| v.as_array())
@@ -1801,9 +1808,11 @@ fn target_host_id(client: &api::ApiClient, given: &str) -> Result<String, String
     resolve_host_id(&known, given)
 }
 
-/// The name of a host for text output, or "unknown host" when the hub does not list it.
+/// The name of a worker for text output, or "unknown worker" when the hub does not list it.
 fn host_display_name(client: &api::ApiClient, host_id: &str) -> String {
-    let listed = client.trpc_query("hosts.list", &serde_json::json!({})).ok();
+    let listed = client
+        .trpc_query("workers.list", &serde_json::json!({}))
+        .ok();
     listed
         .as_ref()
         .and_then(|l| l.get("hosts"))
@@ -1815,13 +1824,13 @@ fn host_display_name(client: &api::ApiClient, host_id: &str) -> String {
         })
         .and_then(|h| h.get("name").and_then(|n| n.as_str()))
         .filter(|n| !n.trim().is_empty())
-        .map_or_else(|| "unknown host".to_string(), str::to_string)
+        .map_or_else(|| "unknown worker".to_string(), str::to_string)
 }
 
-/// Adds the `--add-host` hint to the hub's "only available on" refusal.
+/// Adds the `--add-worker` hint to the hub's "only available on" refusal.
 fn with_add_host_hint(err: String) -> String {
     if err.contains("is only available on") {
-        format!("{err}\nRun again with --add-host to add the target host to the repo's allowed hosts (needs an admin token).")
+        format!("{err}\nRun again with --add-worker to add the target worker to the repo's allowed workers (needs an admin token).")
     } else {
         err
     }
@@ -1852,7 +1861,7 @@ fn cmd_worktrees_continue(id: &str, to: Option<&str>) -> Result<CommandResult, S
     let data = client.trpc_mutate("follow.continue", &input)?;
     let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
     let out = format!(
-        "Continued {id} as {} on {}\nThe copy {id} is left untouched on its host and listed as superseded\n",
+        "Continued {id} as {} on {}\nThe copy {id} is left untouched on its worker and listed as superseded\n",
         text("worktreeId"),
         text("hostName")
     );
@@ -1878,7 +1887,7 @@ fn cmd_worktrees_set_origin(
         "origin": if none { None } else { origin },
     });
     if let Some(host) = host {
-        validate::validate_name(host, "Host id")?;
+        validate::validate_name(host, "Worker id")?;
         input["hostId"] = serde_json::json!(host);
     }
     client.trpc_mutate("worktrees.setOrigin", &input)?;
@@ -1926,7 +1935,7 @@ fn restore_text(client: &api::ApiClient, data: &serde_json::Value, verb: &str, i
     );
     if let Some(old) = data.get("supersededId").and_then(|v| v.as_str()) {
         out.push_str(&format!(
-            "The copy {old} is left untouched on its host and listed as superseded\n"
+            "The copy {old} is left untouched on its worker and listed as superseded\n"
         ));
     }
     if let Some(warning) = data.get("warning").and_then(|v| v.as_str()) {
@@ -2029,14 +2038,14 @@ fn cmd_worktrees_checkpoints(id: &str, take: bool) -> Result<CommandResult, Stri
 }
 
 /// Where `worktrees create` should put the worktree, when the caller gave
-/// criteria instead of a host.
+/// criteria instead of a worker.
 struct Placement<'a> {
     labels: &'a [String],
     requires: &'a [String],
     any_host: bool,
     isolation: Option<&'a str>,
     host_repo_path: Option<&'a str>,
-    /// A host id or name to create on.
+    /// A worker id or name to create on.
     host: Option<&'a str>,
 }
 
@@ -2160,7 +2169,7 @@ fn cmd_worktrees_create(
         .and_then(|r| r.as_str())
     {
         return Ok(CommandResult {
-            text: format!("provisioning (host request {request_id})\n"),
+            text: format!("provisioning (worker request {request_id})\n"),
             json: serde_json::json!({ "provisioning": { "requestId": request_id } }),
         });
     }
@@ -2317,7 +2326,7 @@ fn cmd_worktrees_remove(
         "name": name,
     });
     if let Some(host) = host {
-        validate::validate_name(host, "Host id")?;
+        validate::validate_name(host, "Worker id")?;
         input["hostId"] = serde_json::json!(host);
     }
     client.trpc_mutate("worktrees.remove", &input)?;
@@ -2424,7 +2433,7 @@ fn cmd_chats_create(
     })
 }
 
-/// Parse `key=constraint` host requirements such as `node=>=24`. Only the first
+/// Parse `key=constraint` worker requirements such as `node=>=24`. Only the first
 /// `=` separates the key, so the constraint may start with `>=`.
 fn parse_requirement_pairs(
     pairs: &[String],
@@ -4119,7 +4128,7 @@ fn cmd_subscriptions_remove(id: &str) -> Result<CommandResult, String> {
 
 // --- Hosts commands ---
 
-/// The VERSION column of `hosts list`: the worker's version, and what to do when it is not current.
+/// The VERSION column of `workers list`: the worker's version, and what to do when it is not current.
 fn host_version_cell(host: &serde_json::Value) -> String {
     let version = host
         .get("workerVersion")
@@ -4135,7 +4144,7 @@ fn host_version_cell(host: &serde_json::Value) -> String {
 
 fn cmd_hosts_list() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_query("hosts.list", &serde_json::json!({}))?;
+    let data = client.trpc_query("workers.list", &serde_json::json!({}))?;
     let hosts = data
         .get("hosts")
         .and_then(|v| v.as_array())
@@ -4215,18 +4224,18 @@ fn cmd_hosts_trust(host: &str, level: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let host_id = target_host_id(&client, host)?;
     client.trpc_mutate(
-        "hosts.setTrust",
+        "workers.setTrust",
         &serde_json::json!({"hostId": host_id, "trust": level}),
     )?;
     Ok(CommandResult {
-        text: format!("Host {host_id} is now {level}\n"),
+        text: format!("Worker {host_id} is now {level}\n"),
         json: serde_json::json!({"ok": true, "hostId": host_id, "trust": level}),
     })
 }
 
 fn cmd_hosts_audit(limit: u32) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_query("hosts.audit", &serde_json::json!({"limit": limit}))?;
+    let data = client.trpc_query("workers.audit", &serde_json::json!({"limit": limit}))?;
     let entries = data
         .get("entries")
         .and_then(|v| v.as_array())
@@ -4259,16 +4268,16 @@ fn cmd_hosts_audit(limit: u32) -> Result<CommandResult, String> {
         })
         .collect();
     Ok(CommandResult {
-        text: format_table(&["WHEN", "FROM", "CALL", "TARGET HOST", "TARGET"], &rows),
+        text: format_table(&["WHEN", "FROM", "CALL", "TARGET WORKER", "TARGET"], &rows),
         json: serde_json::json!({"entries": entries}),
     })
 }
 
 fn cmd_hosts_remove(id: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate("hosts.remove", &serde_json::json!({"hostId": id}))?;
+    client.trpc_mutate("workers.remove", &serde_json::json!({"hostId": id}))?;
     Ok(CommandResult {
-        text: format!("Host {id} removed\n"),
+        text: format!("Worker {id} removed\n"),
         json: serde_json::json!({"ok": true, "id": id}),
     })
 }
@@ -5332,20 +5341,23 @@ fn notify_forward(agent: Option<&str>) {
     // Who sent the hook, so the server reads it with that agent's rules and
     // keeps one status per agent session. `BAND_DISPATCH` is `chat` inside a
     // chat pane's agent and `terminal` inside a Band terminal, which also
-    // sets `BAND_TERMINAL_ID`. `BAND_HOST_ID` names the host when it is set;
+    // sets `BAND_TERMINAL_ID`. `BAND_WORKER_ID` (or the older `BAND_HOST_ID`) names the worker when it is set;
     // a worker's relay writes it in either way.
     if let Some(agent) = agent {
         body["agent"] = serde_json::json!(agent);
     }
-    for (env_var, field) in [
-        ("BAND_DISPATCH", "dispatch"),
-        ("BAND_TERMINAL_ID", "terminalId"),
-        ("BAND_HOST_ID", "hostId"),
+    for (env_vars, field) in [
+        (&["BAND_DISPATCH"][..], "dispatch"),
+        (&["BAND_TERMINAL_ID"][..], "terminalId"),
+        // The new name wins when both are set.
+        (&["BAND_WORKER_ID", "BAND_HOST_ID"][..], "hostId"),
     ] {
-        if let Ok(value) = std::env::var(env_var) {
-            if !value.is_empty() {
-                body[field] = serde_json::json!(value);
-            }
+        let value = env_vars
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .find(|value| !value.is_empty());
+        if let Some(value) = value {
+            body[field] = serde_json::json!(value);
         }
     }
 
@@ -5425,12 +5437,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Change a repo's settings",
             "parameters": [
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Repo name"},
-                {"name": "--hosts", "type": "string", "required": false, "description": "Hosts the repo may run on (ids or names, comma separated), or `all`"},
-                {"name": "--primary", "type": "string", "required": false, "description": "Host that lists the repo's default-branch worktree (id or name), or `auto`"},
+                {"name": "--workers", "type": "string", "required": false, "description": "Workers the repo may run on (ids or names, comma separated), or `all`"},
+                {"name": "--primary", "type": "string", "required": false, "description": "Worker that lists the repo's default-branch worktree (id or name), or `auto`"},
                 {"name": "--checkpoints", "type": "string", "required": false, "description": "Whether the hub keeps checkpoints of the repo's worktrees: on, off or default"},
-                {"name": "--auto-continue", "type": "string", "required": false, "description": "Whether a worktree on an offline host continues on another host without asking: on or off"},
+                {"name": "--auto-continue", "type": "string", "required": false, "description": "Whether a worktree on an offline worker continues on another worker without asking: on or off"},
             ],
-            "notes": "`--hosts` is a hard rule: creating a worktree, cloning or placing the repo on any other host fails with `<repo> is only available on <hosts>`. Needs an admin token. A branch exists as a worktree on one host only, and the repo lists its default-branch worktree from its primary host."
+            "notes": "`--workers` is a hard rule: creating a worktree, cloning or placing the repo on any other worker fails with `<repo> is only available on <workers>`. Needs an admin token. A branch exists as a worktree on one worker only, and the repo lists its default-branch worktree from its primary worker."
         }),
         serde_json::json!({
             "name": "repos remove",
@@ -5471,39 +5483,39 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Worktree name (the branch it was created on — its stable identity)"},
-                {"name": "--host", "type": "string", "required": false, "description": "Host the worktree lives on (see `band hosts`). Needed when the same repo and name exist on more than one host."},
+                {"name": "--worker", "type": "string", "required": false, "description": "Worker the worktree lives on (see `band workers`). Needed when the same repo and name exist on more than one worker."},
             ],
             "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files."
         }),
         serde_json::json!({
             "name": "worktrees move",
-            "description": "Move a worktree to another host while its host is online",
+            "description": "Move a worktree to another worker while its worker is online",
             "parameters": [
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
-                {"name": "--to", "type": "string", "required": true, "description": "Target host (id or name)"},
-                {"name": "--add-host", "type": "boolean", "required": false, "description": "Add the target host to the repo's allowed hosts if missing (admin token)"},
+                {"name": "--to", "type": "string", "required": true, "description": "Target worker (id or name)"},
+                {"name": "--add-worker", "type": "boolean", "required": false, "description": "Add the target worker to the repo's allowed workers if missing (admin token)"},
             ],
             "notes": "Takes a fresh checkpoint, restores it on the target (branch, uncommitted and untracked files, agent session, chats), and removes the source worktree only after the target has the same files. Running processes and ignored files are not carried."
         }),
         serde_json::json!({
             "name": "worktrees restore",
-            "description": "Restore a worktree on another host from a checkpoint",
+            "description": "Restore a worktree on another worker from a checkpoint",
             "parameters": [
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
-                {"name": "--to", "type": "string", "required": true, "description": "Target host (id or name)"},
+                {"name": "--to", "type": "string", "required": true, "description": "Target worker (id or name)"},
                 {"name": "--checkpoint", "type": "string", "required": false, "description": "Checkpoint ID (default: the newest)"},
-                {"name": "--add-host", "type": "boolean", "required": false, "description": "Add the target host to the repo's allowed hosts if missing (admin token)"},
+                {"name": "--add-worker", "type": "boolean", "required": false, "description": "Add the target worker to the repo's allowed workers if missing (admin token)"},
             ],
-            "notes": "Works when the old host is offline. The old copy is never touched: it is listed as superseded and a person removes it with `band worktrees remove`."
+            "notes": "Works when the old worker is offline. The old copy is never touched: it is listed as superseded and a person removes it with `band worktrees remove`."
         }),
         serde_json::json!({
             "name": "worktrees continue",
-            "description": "Continue a worktree on another host when its host is offline",
+            "description": "Continue a worktree on another worker when its worker is offline",
             "parameters": [
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
-                {"name": "--to", "type": "string", "required": false, "description": "Target host (id or name). Default: the host the hub recommends"},
+                {"name": "--to", "type": "string", "required": false, "description": "Target worker (id or name). Default: the worker the hub recommends"},
             ],
-            "notes": "Restores the worktree from the hub's latest checkpoint on an online host the repo may run on: the branch, uncommitted and untracked files, the agent sessions and the chats. Runs the repo's setup on the new copy and records the move on it. The old copy is never deleted: when its host comes back it is listed as superseded, flagged diverged when it holds changes the checkpoint lacks. Ignored files and running processes are not carried. Refused with a reason when the host is online (use `worktrees move`), the repo is limited to the offline host, checkpoints are off, no allowed host is online or the agent is not available on another host."
+            "notes": "Restores the worktree from the hub's latest checkpoint on an online worker the repo may run on: the branch, uncommitted and untracked files, the agent sessions and the chats. Runs the repo's setup on the new copy and records the move on it. The old copy is never deleted: when its worker comes back it is listed as superseded, flagged diverged when it holds changes the checkpoint lacks. Ignored files and running processes are not carried. Refused with a reason when the worker is online (use `worktrees move`), the repo is limited to the offline worker, checkpoints are off, no allowed worker is online or the agent is not available on another worker."
         }),
         serde_json::json!({
             "name": "worktrees set-origin",
@@ -5511,7 +5523,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "repo", "type": "string", "required": true, "positional": true, "description": "Repo name"},
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Worktree name"},
-                {"name": "--host", "type": "string", "required": false, "description": "Host the worktree is on (default: local)"},
+                {"name": "--worker", "type": "string", "required": false, "description": "Worker the worktree is on (default: local)"},
                 {"name": "--origin", "type": "string", "required": false, "description": "Parent worktree ID. Required unless --none"},
                 {"name": "--none", "type": "boolean", "required": false, "description": "Remove the parent"},
             ],
@@ -5527,14 +5539,14 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Text output: `ID  TAKEN  TRIGGER  SIZE  TREE  BRANCH`, plus a warning when a checkpoint was skipped for size.\nJSON output: `{\"checkpoints\": [...], \"warning\": null, \"taken\": null}`."
         }),
         serde_json::json!({
-            "name": "hosts evacuate",
-            "description": "Move every worktree on a host to another host, one after the other",
+            "name": "workers evacuate",
+            "description": "Move every worktree on a worker to another worker, one after the other",
             "parameters": [
-                {"name": "host", "type": "string", "required": true, "positional": true, "description": "Source host (id or name)"},
-                {"name": "--to", "type": "string", "required": true, "description": "Target host (id or name)"},
-                {"name": "--add-host", "type": "boolean", "required": false, "description": "Add the target host to the allowed hosts of repos that lack it"},
+                {"name": "worker", "type": "string", "required": true, "positional": true, "description": "Source worker (id or name)"},
+                {"name": "--to", "type": "string", "required": true, "description": "Target worker (id or name)"},
+                {"name": "--add-worker", "type": "boolean", "required": false, "description": "Add the target worker to the allowed workers of repos that lack it"},
             ],
-            "notes": "Needs an admin token. An online host moves its worktrees; an offline host restores them from their last checkpoints. Prints one line per worktree and exits non-zero if any failed."
+            "notes": "Needs an admin token. An online worker moves its worktrees; an offline worker restores them from their last checkpoints. Prints one line per worktree and exits non-zero if any failed."
         }),
         serde_json::json!({
             "name": "settings",
@@ -5671,7 +5683,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "force", "type": "boolean", "required": false, "description": "Build again even when an image for the same key exists"},
                 {"name": "no-wait", "type": "boolean", "required": false, "description": "Return once the build has started instead of waiting for it to finish"},
             ],
-            "notes": "Admin only. The hub builds on its builder host (settings `environmentBuilder.hostId`, default the hub's machine), from the default branch's `.band/environment.json`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused. Text output follows the build log, then `ready <image>` or `failed: <reason>`. Exits 0 for a ready image or a cache hit, 1 for a failed build.\nJSON output: `{\"cacheHit\": false, \"build\": {\"id\": \"...\", \"status\": \"ready\", \"image\": \"band-env/api:0123456789abcdef\", \"key\": \"...\"}}`."
+            "notes": "Admin only. The hub builds on its builder worker (settings `environmentBuilder.hostId`, default the hub's machine), from the default branch's `.band/environment.json`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused. Text output follows the build log, then `ready <image>` or `failed: <reason>`. Exits 0 for a ready image or a cache hit, 1 for a failed build.\nJSON output: `{\"cacheHit\": false, \"build\": {\"id\": \"...\", \"status\": \"ready\", \"image\": \"band-env/api:0123456789abcdef\", \"key\": \"...\"}}`."
         }),
         serde_json::json!({
             "name": "env status",
@@ -5682,18 +5694,18 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "The current image is the newest ready build. A failed build never replaces it.\nJSON output: `{\"builder\": {...}, \"current\": {...} | null, \"latest\": {..., \"log\": \"...\"} | null, \"builds\": [...]}`."
         }),
         serde_json::json!({
-            "name": "hosts list",
-            "description": "List the hosts worktrees can run on",
+            "name": "workers list",
+            "description": "List the workers worktrees can run on",
             "parameters": [],
-            "notes": "Text output: `ID  NAME  STATUS  VERSION  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. VERSION is the Band version the worker runs (the hub's for the local host), followed by `(behind)` when it is lower than the hub's, `(update)` when the worker never reported one, or `(update required)` when the hub refused its link for being too far from the hub's version. AGENTS are the coding agents the host can start, ROOTS the directories it serves worktrees from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null, \"workerVersion\": \"0.50.0\", \"versionState\": \"current\", \"updateTarget\": null}]}`. `versionState` is current, behind, ahead, unknown or refused."
+            "notes": "Text output: `ID  NAME  STATUS  VERSION  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. VERSION is the Band version the worker runs (the hub's for the local worker), followed by `(behind)` when it is lower than the hub's, `(update)` when the worker never reported one, or `(update required)` when the hub refused its link for being too far from the hub's version. AGENTS are the coding agents the worker can start, ROOTS the directories it serves worktrees from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null, \"workerVersion\": \"0.50.0\", \"versionState\": \"current\", \"updateTarget\": null}]}`. `versionState` is current, behind, ahead, unknown or refused."
         }),
         serde_json::json!({
-            "name": "hosts remove",
-            "description": "Remove an offline worker host that has no worktrees, and revoke its tokens",
+            "name": "workers remove",
+            "description": "Remove an offline worker that has no worktrees, and revoke its tokens",
             "parameters": [
-                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Host ID (from `band hosts list`)"},
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worker ID (from `band workers list`)"},
             ],
-            "notes": "Needs an admin token. Refused for the local host, a host that is online or lost, and a host that still has worktrees."
+            "notes": "Needs an admin token. Refused for the local worker, a worker that is online or lost, and a worker that still has worktrees."
         }),
         serde_json::json!({
             "name": "vault list",
@@ -5762,15 +5774,15 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "runners list",
-            "description": "List the runners that start workers for worktrees waiting on a host",
+            "description": "List the runners that start workers for worktrees waiting on a worker",
             "parameters": [],
             "notes": "Text output: `ID  SPAWN  LABELS  RUNNING  TIMEOUT` (space-padded table), then one `Invalid runner: ...` line per entry of `runners` in settings.json that the hub skips. RUNNING is `<in flight>/<maxConcurrent>`.\nJSON output: `{\"runners\": [{\"id\": \"local\", \"spawn\": \"bundled:local\", \"labels\": {}, \"maxConcurrent\": 1, \"timeoutSec\": 120, \"running\": 0}], \"runs\": [...], \"errors\": []}`."
         }),
         serde_json::json!({
             "name": "runners log",
-            "description": "Show what a runner's hooks printed for a host request",
+            "description": "Show what a runner's hooks printed for a worker request",
             "parameters": [
-                {"name": "request_id", "type": "string", "required": true, "positional": true, "description": "Host request ID"},
+                {"name": "request_id", "type": "string", "required": true, "positional": true, "description": "Worker request ID"},
             ],
             "notes": "Prints the hub's log of the request's spawn and destroy hooks, with tokens replaced by `[redacted]`. Fails when there is no log for the request."
         }),

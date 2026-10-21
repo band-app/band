@@ -81,7 +81,7 @@ describe("band-worker doctor", () => {
     const expected =
       platform() === "linux" ? formatHostWarnings(hostWarnings(readLinuxHostSettings())) : "";
     if (expected) assert.ok(run.stdout.endsWith(expected), run.stdout);
-    else assert.doesNotMatch(run.stdout, /^WARN host/m);
+    else assert.doesNotMatch(run.stdout, /^WARN worker/m);
     assert.equal(run.status, 0, run.stdout + run.stderr);
   });
 });

@@ -293,6 +293,84 @@ describe("the ssh hook", () => {
   }, 120_000);
 });
 
+describe("the repo path a hook prints", () => {
+  // The `local` hook prints BAND_WORKER_REPO_PATH, which the test above already relies on. This one
+  // rewrites that line to the older BAND_HOST_REPO_PATH, which the hub still reads. Without either
+  // line the worker has no checkout of this remote-less repo and the request fails.
+  const wrap = (name: string, filter: string) => {
+    const spawnHook = join(import.meta.dirname, "../../../runners/local/spawn.sh");
+    return script(join(work, name), `sh ${JSON.stringify(spawnHook)} | ${filter}`);
+  };
+  const runnerWith = (id: string, hook: string) => ({
+    id,
+    spawn: hook,
+    destroy: "bundled:local",
+    labels: { pool: id },
+    isolation: "process",
+    maxConcurrent: 1,
+    timeoutSec: 90,
+    env: { BAND_WORKER_BIN: WORKER_BIN, BAND_IDLE_EXIT: "120s" },
+  });
+
+  it("reads the older BAND_HOST_REPO_PATH name", async () => {
+    await setRunners([
+      runnerWith(
+        "oldname",
+        wrap("old-name.sh", "sed 's/^BAND_WORKER_REPO_PATH=/BAND_HOST_REPO_PATH=/'"),
+      ),
+    ]);
+    const created = await create("runner-old-name", { labels: { pool: "oldname" } });
+    const id = requestIdOf(created);
+    const wt = await waitFor(() => worktree("runner-old-name"), {
+      label: "worktree exists on the worker that printed the old name",
+      timeoutMs: 90_000,
+      intervalMs: 250,
+    });
+    expect(wt.hostId).toMatch(/^h-/);
+    expect(await request(id)).toBeUndefined();
+  }, 120_000);
+
+  it("prefers BAND_WORKER_REPO_PATH when the hook prints both names, whatever the order", async () => {
+    // The older line comes last and names a folder that does not exist. A parser that keeps the
+    // last line would send the worker there and the worktree would not be created.
+    await setRunners([
+      runnerWith(
+        "bothnames",
+        wrap(
+          "both-names.sh",
+          "awk '{print} END {print \"BAND_HOST_REPO_PATH=/nonexistent/band-old-name\"}'",
+        ),
+      ),
+    ]);
+    const created = await create("runner-both-names", { labels: { pool: "bothnames" } });
+    const id = requestIdOf(created);
+    const wt = await waitFor(() => worktree("runner-both-names"), {
+      label: "worktree exists on the path the new name gave",
+      timeoutMs: 90_000,
+      intervalMs: 250,
+    });
+    expect(wt.hostId).toMatch(/^h-/);
+    expect(await request(id)).toBeUndefined();
+  }, 120_000);
+
+  it("fails the request when the hook prints neither name", async () => {
+    await setRunners([
+      runnerWith("noname", wrap("no-name.sh", "grep -v '^BAND_WORKER_REPO_PATH='")),
+    ]);
+    const created = await create("runner-no-name", { labels: { pool: "noname" } });
+    const id = requestIdOf(created);
+    const failed = await waitFor(
+      async () => {
+        const r = await request(id);
+        return r?.status === "failed" ? r : undefined;
+      },
+      { label: "request fails without a repo path", timeoutMs: 90_000, intervalMs: 250 },
+    );
+    expect(failed.error).toBeTruthy();
+    await m("hostRequests.cancel", { requestId: id });
+  }, 120_000);
+});
+
 describe("failing hooks", () => {
   it("retries a hook that exits non-zero once, then fails with its log tail and runs destroy (S2)", async () => {
     const marks = join(work, "fail-marks");

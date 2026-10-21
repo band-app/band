@@ -102,7 +102,7 @@ function formFor(server: McpServer): FormState {
 
 function scopeSummary(server: McpServer): string {
   if (server.scopeRepos) return `Repos: ${server.scopeRepos.join(", ") || "none"}`;
-  if (server.scopeHosts) return `Hosts: ${server.scopeHosts.join(", ") || "none"}`;
+  if (server.scopeHosts) return `Workers: ${server.scopeHosts.join(", ") || "none"}`;
   return "All worktrees";
 }
 
@@ -174,7 +174,7 @@ export function McpSettings() {
   // Scope choices, the stdio host picker and the status of a stdio server's host.
   const hosts = useQuery({
     queryKey: ["mcp.hosts"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
     enabled: servers.isSuccess,
     // A worker may join or drop while this section is open.
     refetchInterval: 5000,
@@ -420,7 +420,7 @@ export function McpSettings() {
       <SettingsRow
         variant="stacked"
         label="MCP servers"
-        description="MCP servers the hub proxies to coding agents, over HTTP or as a process on a host. The hub adds the credential, so an agent never holds it."
+        description="MCP servers the hub proxies to coding agents, over HTTP or as a process on a worker. The hub adds the credential, so an agent never holds it."
       >
         <ul className="divide-y divide-border rounded-md border border-border">
           {(servers.data?.servers ?? []).map((server) => (
@@ -435,7 +435,7 @@ export function McpSettings() {
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
                   {server.transport === "stdio"
-                    ? `${server.command ?? ""} ${server.args.join(" ")} on ${server.hostId ? (hosts.data?.find((h) => h.id === server.hostId)?.name ?? server.hostId) : "no host"}`
+                    ? `${server.command ?? ""} ${server.args.join(" ")} on ${server.hostId ? (hosts.data?.find((h) => h.id === server.hostId)?.name ?? server.hostId) : "no worker"}`
                     : server.url}
                 </div>
                 <div className="text-xs text-muted-foreground">
@@ -452,7 +452,7 @@ export function McpSettings() {
                 >
                   {server.enabled
                     ? server.transport === "stdio"
-                      ? `Host ${hostStatus(server) ?? "unknown"}`
+                      ? `Worker ${hostStatus(server) ?? "unknown"}`
                       : statusText(status[server.name])
                     : "Disabled"}
                 </div>
@@ -524,17 +524,17 @@ export function McpSettings() {
               className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
             >
               <option value="http">HTTP server</option>
-              <option value="stdio">Process on a host (stdio)</option>
+              <option value="stdio">Process on a worker (stdio)</option>
             </select>
             {form.transport === "stdio" ? (
               <div className="space-y-2" data-testid="settings__mcp-stdio">
                 <select
-                  aria-label="MCP host"
+                  aria-label="MCP worker"
                   value={form.hostId}
                   onChange={(e) => patch({ hostId: e.target.value })}
                   className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
                 >
-                  <option value="">Choose a host</option>
+                  <option value="">Choose a worker</option>
                   {(hosts.data ?? [])
                     .filter((h) => h.usable)
                     .map((host) => (
@@ -820,7 +820,7 @@ export function McpSettings() {
                 [
                   ["all", "All worktrees"],
                   ["repos", "Selected repos"],
-                  ["hosts", "Selected hosts"],
+                  ["hosts", "Selected workers"],
                 ] as const
               ).map(([mode, label]) => (
                 <label key={mode} className="flex items-center gap-2 text-sm">
@@ -860,7 +860,7 @@ export function McpSettings() {
                     <label key={host.id} className="ml-6 flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
-                        aria-label={`Host ${host.id}`}
+                        aria-label={`Worker ${host.id}`}
                         checked={form.scopeHosts.includes(host.id)}
                         onChange={(e) =>
                           patch({ scopeHosts: toggle(form.scopeHosts, host.id, e.target.checked) })

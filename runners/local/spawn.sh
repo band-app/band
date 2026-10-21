@@ -26,7 +26,7 @@ if [ -n "${BAND_REPO_URLS:-}" ]; then
   name="$(printf '%s' "${BAND_REPO:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
   # With BAND_CLONE_BY_HUB the hub clones through the worker, which asks it for the credential.
   if [ -z "${BAND_CLONE_BY_HUB:-}" ]; then git clone --quiet -- "$repo" "$base/work/$name"; fi
-  echo "BAND_HOST_REPO_PATH=$base/work/$name"
+  echo "BAND_WORKER_REPO_PATH=$base/work/$name"
 fi
 
 worker="${BAND_WORKER_BIN:-band-worker}"

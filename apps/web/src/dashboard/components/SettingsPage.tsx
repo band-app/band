@@ -195,8 +195,8 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   },
   {
     id: "hosts",
-    title: "Hosts",
-    subtitle: "Machines that run worktrees, and the tokens their workers use.",
+    title: "Workers",
+    subtitle: "Computers that run worktrees, and the tokens they use to connect.",
     group: "Infrastructure",
   },
   {
@@ -868,7 +868,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
 
                   {/* ── Hosts ──────────────────────────────────────── */}
                   {active === "hosts" ? (
-                    <SettingsSection title="Hosts">
+                    <SettingsSection title="Workers">
                       <HostsSettings />
                     </SettingsSection>
                   ) : null}
@@ -1066,8 +1066,8 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                       )}
                       <SettingsRow
                         htmlFor="cross-host-worktrees"
-                        label="Agents may start worktrees on other hosts"
-                        description="An agent on a worker can create a worktree on another online worker, when the repo allows that host. The new worktree records the agent's worktree as its origin. Agents never start runner machines this way."
+                        label="Agents may start worktrees on other workers"
+                        description="An agent on a worker can create a worktree on another online worker, when the repo allows that worker. The new worktree records the agent's worktree as its origin. Agents never start runner-started workers this way."
                       >
                         <Switch
                           id="cross-host-worktrees"
@@ -1234,7 +1234,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                                       </Label>
                                       {(availability.data?.hosts.length ?? 0) > 1 && (
                                         <select
-                                          aria-label={`Host to refresh ${known.label} on`}
+                                          aria-label={`Worker to refresh ${known.label} on`}
                                           data-testid={`settings-page__refresh-host-${agent.id}`}
                                           value={refreshHostId}
                                           onChange={(e) => setRefreshHostId(e.target.value)}

@@ -231,7 +231,7 @@ describe("GET /api/hosts/<id>/desktop", () => {
     const v = viewer("h-nothere");
     const { code, reason } = await v.closed;
     expect(code).toBe(4001);
-    expect(reason).toMatch(/Unknown host/);
+    expect(reason).toMatch(/Unknown worker/);
   });
 
   it("refuses a request without a device token", async () => {

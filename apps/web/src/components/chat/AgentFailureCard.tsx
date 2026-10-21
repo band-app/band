@@ -24,7 +24,7 @@ function facts(f: AgentFailure): [string, string][] {
   const rows: [string, string][] = [];
   if (f.signal) rows.push(["Exit signal", `${f.signal}${f.exitCode === null ? " (no code)" : ""}`]);
   else if (f.exitCode !== null) rows.push(["Exit code", String(f.exitCode)]);
-  if (f.host) rows.push(["Host", f.host]);
+  if (f.host) rows.push(["Worker", f.host]);
   if (f.agent) rows.push(["Agent", f.agent]);
   if (f.sessionId) rows.push(["Session", f.sessionId]);
   if (f.at > 0) {

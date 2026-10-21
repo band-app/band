@@ -1,5 +1,5 @@
 /**
- * Page object for the "Available on" and "Primary host" fields (`RepoHostsFields.tsx`) of the
+ * Page object for the "Available on" and "Primary worker" fields (`RepoHostsFields.tsx`) of the
  * Add repo dialog. It is built on the element that contains the fields. A repo's page in Settings
  * > Repos has its own Workers controls (`SettingsPage.ts`).
  */
@@ -34,7 +34,7 @@ export class RepoHostsFieldsPage {
     await expect(this.primarySelect()).toHaveValue("");
   }
 
-  /** Asserts the repo is limited to exactly these hosts, with `primary` as the primary host. */
+  /** Asserts the repo is limited to exactly these workers, with `primary` as the primary worker. */
   async expectOnly(hostIds: string[], primary: string): Promise<void> {
     await expect(this.onlyRadio()).toBeChecked();
     await expect(this.fields.getByTestId("repo-hosts__host").first()).toBeVisible();

@@ -6,7 +6,7 @@ import { useAdapter } from "../context";
 export const UPDATE_STATUS_KEY = ["hosts.updateStatus"] as const;
 export const HOSTS_LIST_KEY = ["hosts.list"] as const;
 
-export type HostView = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"][number];
+export type HostView = Awaited<ReturnType<typeof trpc.workers.list.query>>["hosts"][number];
 
 /** How often the page asks the hub again. The hub itself checks GitHub once a day. */
 const REFETCH_MS = 10 * 60_000;
@@ -15,7 +15,7 @@ const REFETCH_MS = 10 * 60_000;
 export function useUpdateStatus() {
   return useQuery({
     queryKey: UPDATE_STATUS_KEY,
-    queryFn: () => trpc.hosts.updateStatus.query(),
+    queryFn: () => trpc.workers.updateStatus.query(),
     refetchInterval: REFETCH_MS,
     // An old hub has no such procedure, and a missing badge is the right answer for it.
     retry: false,
@@ -36,7 +36,7 @@ export function useHostsList(enabled = true) {
   }, [adapter, queryClient, enabled]);
   return useQuery({
     queryKey: HOSTS_LIST_KEY,
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
     enabled,
   });
 }

@@ -1,4 +1,4 @@
-# S1 (settings): the Settings button on home opens a screen that lists Hosts, Agents, Voice,
+# S1 (settings): the Settings button on home opens a screen that lists Workers, Agents, Voice,
 # Devices and About, and each opens its screen.
 appId: app.getband.mobile
 name: Settings lists its sections and each opens

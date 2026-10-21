@@ -23,7 +23,7 @@ export function crossHostWorktreesEnabled(): boolean {
 /** Why agents on `callerHostId` may not create worktrees at all (a restricted host), or null. */
 export function restrictedHostRefusal(callerHostId: string): string | null {
   if (hostTrustService.trustOf(callerHostId) !== "restricted") return null;
-  return "Agents on a restricted host cannot create worktrees. An admin can raise this host's trust level in Settings > Hosts.";
+  return "Agents on a restricted worker cannot create worktrees. An admin can raise this worker's trust level in Settings > Workers.";
 }
 
 /**
@@ -42,20 +42,20 @@ export function crossHostRefusal(
   if (targetHostId === callerHostId) return null;
   const admin = hostTrustService.trustOf(callerHostId) === "admin";
   if (!admin && !crossHostWorktreesEnabled()) {
-    return "Agents may not start worktrees on other hosts. An admin can turn this on in Settings > Agents.";
+    return "Agents may not start worktrees on other workers. An admin can turn this on in Settings > Agents.";
   }
   if (targetHostId === "local") {
     return "Agents on a worker cannot start worktrees on the hub's own machine";
   }
   const host = tokenService.listHosts(1000).find((h) => h.id === targetHostId);
-  if (!host) return `No host "${targetHostId}"`;
+  if (!host) return `No worker "${targetHostId}"`;
   if (host.mode === "ephemeral" || host.info?.mode === "ephemeral") {
-    return `Host "${host.name}" is an ephemeral worker. Agents may use static workers only.`;
+    return `Worker "${host.name}" is an ephemeral worker. Agents may use static workers only.`;
   }
   if (runnerMachines.latestLiveForWorker(targetHostId)) {
-    return `Host "${host.name}" was started by a runner. Agents may use static workers only.`;
+    return `Worker "${host.name}" was started by a runner. Agents may use static workers only.`;
   }
-  if (host.status !== "online") return `Host "${host.name}" is ${host.status}`;
+  if (host.status !== "online") return `Worker "${host.name}" is ${host.status}`;
   const allowed = allowedHostsOf(repo);
   if (!isHostAllowed(allowed, targetHostId)) {
     return onlyAvailableOnMessage(repo, hostNamesOf(allowed ?? []));
@@ -71,5 +71,5 @@ export function crossHostRefusal(
 export function repoHostRefusal(repo: string, callerHostId: string): string | null {
   const allowed = allowedHostsOf(repo);
   if (isHostAllowed(allowed, callerHostId)) return null;
-  return `${repo} is limited to other hosts (${hostNamesOf(allowed ?? []).join(", ")})`;
+  return `${repo} is limited to other workers (${hostNamesOf(allowed ?? []).join(", ")})`;
 }

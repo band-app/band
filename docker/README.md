@@ -46,10 +46,10 @@ For a real server deployment use `deploy/compose/` instead.
 
 ## Add a repo
 
-With `BAND_LOCAL_HOST=on` the container **auto-creates and registers a
+With `BAND_LOCAL_WORKER=on` the container **auto-creates and registers a
 `sample` repo** at `/data/repos/sample` on first boot. The image default
 is `off`: worktrees run on workers and no sample repo is created. Set
-`BAND_LOCAL_HOST=on` to run worktrees in the container.
+`BAND_LOCAL_WORKER=on` to run worktrees in the container.
 To add more, note: a "repo" is just a directory the server can see (a git
 repo, or a plain folder — plain folders get a single implicit worktree).
 

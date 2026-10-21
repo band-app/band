@@ -125,7 +125,7 @@ function requireAdminToAddHost(addHost: boolean | undefined, admin: boolean | un
   if (addHost && !admin) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "Only an admin token can add a host to a repo's allowed hosts.",
+      message: "Only an admin token can add a worker to a repo's allowed workers.",
     });
   }
 }

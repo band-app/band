@@ -28,8 +28,8 @@ function onPath(bin: string): boolean {
 
 /** Why this machine has no desktop, or null when it has one. Read on every call. */
 export function desktopUnavailableReason(): string | null {
-  if (!process.env.DISPLAY) return "no display: DISPLAY is not set on this host";
-  if (!onPath("x11vnc")) return "x11vnc is not installed on this host";
+  if (!process.env.DISPLAY) return "no display: DISPLAY is not set on this worker";
+  if (!onPath("x11vnc")) return "x11vnc is not installed on this worker";
   return null;
 }
 
@@ -39,7 +39,7 @@ export function desktopUnavailableReason(): string | null {
  */
 export async function openDesktop(): Promise<Duplex> {
   const reason = desktopUnavailableReason();
-  if (reason) throw new Error(`This host has no desktop: ${reason}`);
+  if (reason) throw new Error(`This worker has no desktop: ${reason}`);
   const port = vncPort();
   const socket = await new Promise<Socket>((resolve, reject) => {
     const s = connect({ host: "127.0.0.1", port });
@@ -47,7 +47,7 @@ export async function openDesktop(): Promise<Duplex> {
       s.destroy();
       reject(
         new Error(
-          `This host has no desktop: cannot reach x11vnc on 127.0.0.1:${port} (${err.message})`,
+          `This worker has no desktop: cannot reach x11vnc on 127.0.0.1:${port} (${err.message})`,
         ),
       );
     };

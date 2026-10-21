@@ -101,7 +101,7 @@ if [ -z "$restore" ] && [ -n "${BAND_REPO_URLS:-}" ]; then
   esac
   repo_name="$(printf '%s' "${BAND_REPO:-repo}" | tr -c 'A-Za-z0-9_.-' '_')"
   case "$repo_name" in "" | . | ..) repo_name=repo ;; esac
-  echo "BAND_HOST_REPO_PATH=/work/$repo_name"
+  echo "BAND_WORKER_REPO_PATH=/work/$repo_name"
 fi
 # With BAND_CLONE_BY_HUB the hub clones through the worker once it is up, because the worker can ask
 # the hub for the repository's git credential and this script cannot.

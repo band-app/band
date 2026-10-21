@@ -334,7 +334,7 @@ export class RepoService {
   async add({ path, label }: { path: string; label?: string }): Promise<RepoState> {
     if (!isLocalHostEnabled()) {
       throw new RepoInputError(
-        "This hub does not use its own machine (BAND_LOCAL_HOST=off). Add the repo from a worker or by URL.",
+        "This hub does not use its own machine (BAND_LOCAL_WORKER=off). Add the repo from a worker or by URL.",
       );
     }
     const repos = this.queries.loadAll();
@@ -473,7 +473,7 @@ export class RepoService {
     try {
       host = hostRegistry.hostById(input.hostId);
     } catch {
-      throw new RepoInputError(`Unknown host "${input.hostId}"`);
+      throw new RepoInputError(`Unknown worker "${input.hostId}"`);
     }
     const inspected = await host.repos.inspect(input.path).catch((err: unknown) => {
       throw new RepoInputError(err instanceof Error ? err.message : String(err));
@@ -729,7 +729,7 @@ export class RepoService {
     try {
       host = hostRegistry.hostById(hostId);
     } catch {
-      throw new RepoInputError(`Unknown host "${hostId}"`);
+      throw new RepoInputError(`Unknown worker "${hostId}"`);
     }
     const inspected = await host.repos.inspect(path).catch((err: unknown) => {
       throw new RepoInputError(err instanceof Error ? err.message : String(err));
@@ -779,7 +779,7 @@ export class RepoService {
     try {
       host = hostRegistry.hostById(hostId);
     } catch {
-      throw new RepoInputError(`Unknown host "${hostId}"`);
+      throw new RepoInputError(`Unknown worker "${hostId}"`);
     }
     return host.fs.browse(path);
   }
@@ -814,7 +814,7 @@ export class RepoService {
         .filter((h) => h.id !== "local" && h.status === "online")
         .map((h) => h.id),
     ];
-    let failure = "no host is available to ask";
+    let failure = "no worker is available to ask";
     for (const hostId of hostIds) {
       try {
         const { stdout } = await hostRegistry
@@ -954,15 +954,17 @@ export class RepoService {
     const known = new Set(tokenService.listHosts(1000).map((h) => h.id));
     if (allowed) {
       if (allowed.length === 0) {
-        throw new RepoInputError("Choose at least one host, or all hosts.");
+        throw new RepoInputError("Choose at least one worker, or all workers.");
       }
       const unknown = allowed.find((id) => !known.has(id));
-      if (unknown) throw new RepoInputError(`Unknown host "${unknown}"`);
+      if (unknown) throw new RepoInputError(`Unknown worker "${unknown}"`);
     }
     if (primary) {
-      if (!known.has(primary)) throw new RepoInputError(`Unknown host "${primary}"`);
+      if (!known.has(primary)) throw new RepoInputError(`Unknown worker "${primary}"`);
       if (!isHostAllowed(allowed, primary)) {
-        throw new RepoInputError(`The primary host "${primary}" must be one of the allowed hosts.`);
+        throw new RepoInputError(
+          `The primary worker "${primary}" must be one of the allowed workers.`,
+        );
       }
     }
   }

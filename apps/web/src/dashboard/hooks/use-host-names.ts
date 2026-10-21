@@ -8,12 +8,12 @@ import { trpc } from "../../lib/trpc-client";
 export function useHostNames(): (hostId: string | null | undefined) => string {
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   return (hostId) => {
     if (!hostId) return "the hub";
     const host = hosts.data?.find((h) => h.id === hostId);
-    return host?.name?.trim() ? host.name : "unknown host";
+    return host?.name?.trim() ? host.name : "unknown worker";
   };
 }
 
@@ -24,9 +24,9 @@ export function useHostNames(): (hostId: string | null | undefined) => string {
 export function useHostLabel(hostId: string | null | undefined): string | undefined {
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   if (!hosts.data || hosts.data.length < 2) return undefined;
   if (!hostId || hostId === "local") return "This hub";
-  return hosts.data.find((h) => h.id === hostId)?.name?.trim() || "unknown host";
+  return hosts.data.find((h) => h.id === hostId)?.name?.trim() || "unknown worker";
 }

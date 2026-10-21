@@ -78,7 +78,7 @@ export function StartSheet({
           prompt: message.trim(),
           agentMode: "gui",
         });
-        if (result.provisioning) throw new Error("No host is ready for this repo yet.");
+        if (result.provisioning) throw new Error("No worker is ready for this repo yet.");
         worktreeId = toWorktreeId(picked.name, branch.trim(), result.hostId);
       } else {
         worktreeId = target;

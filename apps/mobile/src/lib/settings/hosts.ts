@@ -1,5 +1,5 @@
 /**
- * What the Hosts screen shows for a row of `hosts.list`. Pure, so the tests run under Node.
+ * What the Workers screen shows for a row of `hosts.list`. Pure, so the tests run under Node.
  */
 
 import { relativeTime } from "@band-app/client/merge";

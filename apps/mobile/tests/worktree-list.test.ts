@@ -284,7 +284,7 @@ describe("pinned, labels and origin like the web", () => {
     assert.deepEqual(mine, webRows);
   });
 
-  it("S6: Host groups the hub first and keeps Pinned on top", () => {
+  it("S6: Worker groups the hub first and keeps Pinned on top", () => {
     const withHost: RepoLike[] = [
       ...fixture,
       {

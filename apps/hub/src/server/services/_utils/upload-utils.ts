@@ -80,7 +80,7 @@ export async function saveUploadedFilesDetailed(fileParts: FilePart[]): Promise<
 /** Where a remote host keeps one worktree's uploads. Rejects when the host declares no directory. */
 async function remoteUploadDir(host: Host, worktreeId: string): Promise<string> {
   const dirs = (await host.info()).dirs;
-  if (!dirs) throw new Error(`Host ${host.id} has no directory for uploads`);
+  if (!dirs) throw new Error(`Worker ${host.id} has no directory for uploads`);
   return join(dirs.uploads, worktreeId);
 }
 

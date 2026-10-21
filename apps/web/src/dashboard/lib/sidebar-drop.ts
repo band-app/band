@@ -251,14 +251,14 @@ export function moveRefusal(
   const fromHostId = hostIdOf(worktree);
   const hostName = (id: string) => context.hosts.find((h) => h.id === id)?.name?.trim() || id;
   if (fromHostId === "local" || worktree.supersededBy) {
-    return "A worktree on this hub's own machine can't be moved to another host.";
+    return "A worktree on this hub's own machine can't be moved to another worker.";
   }
   if (toHostId === "local") return "A worktree can't be moved onto this hub's own machine.";
   const source = context.hosts.find((h) => h.id === fromHostId);
   if (source && source.status !== "online") {
-    return `${hostName(fromHostId)} is offline. Use "Open on another host" in the worktree's menu.`;
+    return `${hostName(fromHostId)} is offline. Use "Open on another worker" in the worktree's menu.`;
   }
-  if (repo.kind === "plain") return "A plain folder can't be moved to another host.";
+  if (repo.kind === "plain") return "A plain folder can't be moved to another worker.";
   if (repo.allowedHostIds?.every((id) => id === fromHostId)) {
     return `Only available on ${hostName(fromHostId)}`;
   }
@@ -266,7 +266,7 @@ export function moveRefusal(
   if (!target || target.status !== "online") return `${hostName(toHostId)} is offline.`;
   const allowed = repo.allowedHostIds ?? null;
   if (allowed !== null && !allowed.includes(toHostId) && !context.isAdmin) {
-    return `${repo.name} isn't allowed on ${hostName(toHostId)}, and adding a host needs an admin.`;
+    return `${repo.name} isn't allowed on ${hostName(toHostId)}, and adding a worker needs an admin.`;
   }
   return null;
 }

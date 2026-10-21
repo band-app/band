@@ -201,7 +201,7 @@ export class RepoOutsideRootsError extends Error {
   readonly path: string;
   readonly roots: string[];
   constructor(path: string, roots: string[]) {
-    super(`${path} is outside the directories this host serves (${roots.join(", ") || "none"}).`);
+    super(`${path} is outside the directories this worker serves (${roots.join(", ") || "none"}).`);
     this.name = "RepoOutsideRootsError";
     this.path = path;
     this.roots = roots;

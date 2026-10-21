@@ -10,7 +10,7 @@ import { useRepos } from "./use-repos";
 function useHostList() {
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   return hosts.data;
 }

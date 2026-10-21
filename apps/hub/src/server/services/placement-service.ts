@@ -261,7 +261,7 @@ export class PlacementService {
     if (hostId) return { kind: "host", hostId };
     if (holders) {
       throw new Error(
-        `Repo "${input.repo}" has no remote URL, so it can only run on the host that holds it (${
+        `Repo "${input.repo}" has no remote URL, so it can only run on the worker that holds it (${
           holders.join(", ") || "none recorded"
         }), and none of them is online and fits the placement.`,
       );
@@ -420,7 +420,7 @@ export class PlacementService {
     hostRepoPath?: string,
   ): HostRequestRow {
     if (!tokenService.listHosts(1000).some((h) => h.id === hostId)) {
-      throw new HostRequestError("conflict", `No host "${hostId}"`);
+      throw new HostRequestError("conflict", `No worker "${hostId}"`);
     }
     // The runner knows where the repository is on the machine it started.
     const current = this.queries.get(requestId);
@@ -487,8 +487,8 @@ export class PlacementService {
         this.fail(
           row.id,
           row.status === "fulfilled"
-            ? `Host ${row.hostId} did not connect within ${seconds}s`
-            : `No host matched the placement within ${seconds}s`,
+            ? `Worker ${row.hostId} did not connect within ${seconds}s`
+            : `No worker matched the placement within ${seconds}s`,
         );
       }
       for (const row of this.queries.listAwaitingHost()) void this.finish(row);
@@ -543,13 +543,13 @@ export class PlacementService {
 
   private require(requestId: string): HostRequestRow {
     const row = this.queries.get(requestId);
-    if (!row) throw new HostRequestError("not-found", `No host request "${requestId}"`);
+    if (!row) throw new HostRequestError("not-found", `No worker request "${requestId}"`);
     return row;
   }
 
   private notHeld(requestId: string, runnerId: string): HostRequestError {
     if (!this.queries.get(requestId)) {
-      return new HostRequestError("not-found", `No host request "${requestId}"`);
+      return new HostRequestError("not-found", `No worker request "${requestId}"`);
     }
     return new HostRequestError(
       "conflict",

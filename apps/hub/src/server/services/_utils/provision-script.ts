@@ -64,7 +64,7 @@ hub_get() {
 EXCHANGE="$WORK/exchange"
 if ! curl -fsS -X POST -H 'Content-Type: application/json' \\
   --data "{\\"code\\":\\"$CODE\\"}" -o "$EXCHANGE" "$HUB_URL/api/provision/exchange"; then
-  fail "the hub refused this command. It was already used or has expired. Create a new one in Settings > Hosts."
+  fail "the hub refused this command. It was already used or has expired. Create a new one in Settings > Workers."
 fi
 TOKEN=""
 WORKER_ID=""
@@ -190,7 +190,7 @@ custom_install() {
   [ -f "$DEST/repo/$START_COMMAND" ] || fail "the provisioning repo has no $START_COMMAND"
   chmod u+x "$DEST/repo/$START_COMMAND"
   export BAND_HUB_URL="$HUB_URL" BAND_BOOTSTRAP_TOKEN="$TOKEN" BAND_WORKER_ID="$WORKER_ID"
-  export BAND_HOST_LABELS="$LABELS" BAND_PROVISION_DIR="$DEST/repo" BAND_WORKER_VERSION="$WORKER_VERSION"
+  export BAND_WORKER_LABELS="$LABELS" BAND_HOST_LABELS="$LABELS" BAND_PROVISION_DIR="$DEST/repo" BAND_WORKER_VERSION="$WORKER_VERSION"
   say "Running $START_COMMAND"
   ( cd "$DEST/repo" && "./$START_COMMAND" )
   if worker_service_running; then
@@ -203,9 +203,9 @@ custom_install() {
 }
 
 steps() {
-  say "Provisioning $OS $ARCH as $(id -un) for host $WORKER_ID"
+  say "Provisioning $OS $ARCH as $(id -un) for worker $WORKER_ID"
   if [ "$BUNDLE" = 1 ]; then custom_install; else default_install; fi
-  say "Done. The worker should appear online in Settings > Hosts."
+  say "Done. The worker should appear online in Settings > Workers."
 }
 
 SENT=0

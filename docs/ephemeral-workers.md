@@ -10,7 +10,7 @@ A worktree placed on a worker that a runner started behaves like one on a machin
 |---|---|
 | running | A worker is online and serves the worktree. |
 | sleeping | The worker exited after the hub stored the worktree. The worktree card shows "Sleeping". |
-| waking | A host request for a new worker is open, or the worker is restoring the worktree. The card shows "Waking". |
+| waking | A worker request for a new worker is open, or the worker is restoring the worktree. The card shows "Waking". |
 
 `repos.list` carries the state as `lifecycle` on each worktree. A running worktree has none.
 
@@ -26,14 +26,14 @@ A worktree placed on a worker that a runner started behaves like one on a machin
 
 The reaper starts the same hand-off before the idle time when a machine reaches its runner's `maxLifetimeSec`: the hub sends the worker `lifecycle.sleep`, the worker answers at once and sends `lifecycle.idle`, and steps 2 to 4 follow. The reaper destroys the machine after the worker has exited with its worktrees stored (see [Runner hooks](runner-hooks.md#the-reaper)).
 
-If anything in step 3 fails, nothing is kept half done. The worker stays up, `hosts.list` reports the reason as `sleepError`, and the worker asks again after another idle time. A worktree with uncommitted work, no writable origin and no usable `<BAND_HOME>/sleep` never loses that work this way.
+If anything in step 3 fails, nothing is kept half done. The worker stays up, `workers.list` reports the reason as `sleepError`, and the worker asks again after another idle time. A worktree with uncommitted work, no writable origin and no usable `<BAND_HOME>/sleep` never loses that work this way.
 
 ## Waking up
 
 A chat message, `terminal.create` or opening a terminal pane, and the file calls of the editor (`worktree.listFiles`, `getFile`, `saveFile`, `createFile`) call `ephemeralLifecycleService.ensureAwake`. Background work, such as the status pollers and the repo list, does not, so it never wakes a worktree.
 
-1. The hub records a host request that repeats the labels, requirements and environment of the request that made the host, and names the sleeping host in `input.wake`. The request does not show as a provisioning card.
-2. A runner leases it and runs `spawn` with the sleeping host's id. The hub revokes the old tokens of that host and issues a bootstrap token for the same id.
+1. The hub records a worker request that repeats the labels, requirements and environment of the request that made the worker, and names the sleeping worker in `input.wake`. The request does not show as a provisioning card.
+2. A runner leases it and runs `spawn` with the sleeping worker's id. The hub revokes the old tokens of that worker and issues a bootstrap token for the same id.
 3. When the new worker says hello, the hub checks the snapshot out into a new worktree on the branch (`git worktree add -B`), puts the uncommitted changes back with `git read-tree -u --reset <snapshot>` and `git reset`, copies the repo's `copyFiles` again and writes the agent session files back.
 4. The chat reattaches with `session/resume` (or `session/load` when the agent cannot resume) on the session it had.
 
@@ -47,7 +47,7 @@ When the runner that started the worker has `snapshot` and `restore` hooks, the 
 
 ## Claims
 
-A worker that says `ephemeral` in its hello is claimed by the worktrees created on it. Placement never offers it to another worktree, so a request without a matching online host always starts a new worker.
+A worker that says `ephemeral` in its hello is claimed by the worktrees created on it. Placement never offers it to another worktree, so a request without a matching online worker always starts a new worker.
 
 ## Settings and limits
 

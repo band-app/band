@@ -44,11 +44,11 @@ name: S1 repos and worktrees on the home screen
     id: home__repo-beta
 - assertVisible:
     id: home__worktree-beta-main
-# Group by: Host lists the worktrees under "This hub"; Origin and Repo list them again.
+# Group by: Worker lists the worktrees under "This hub"; Origin and Repo list them again.
 - tapOn:
     id: home__group-by
 - tapOn:
-    text: Host
+    text: Worker
 - extendedWaitUntil:
     visible:
       id: "home__repo-host:local"

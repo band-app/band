@@ -261,7 +261,7 @@ export class TerminalService {
     const host = this.hostOfWorktree(worktreeId);
     const known = this.terminalHosts.get(terminalId);
     if (known && known.id !== host.id) {
-      throw new Error(`Terminal ${terminalId} already runs on another host`);
+      throw new Error(`Terminal ${terminalId} already runs on another worker`);
     }
     // A shell on a remote host calls the hub through the worker's relay. The
     // token goes only into this spawn's env, never into the saved layout.

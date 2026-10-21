@@ -9,7 +9,7 @@ import {
 import type { RepoInfo, WorktreeInfo } from "../src/dashboard/types";
 
 // Pure functions with no state to fake: the rules that decide whether a worktree dropped on a host
-// may open the "Open on another host" dialog.
+// may open the "Open on another worker" dialog.
 
 const hosts = [
   { id: "a", name: "box-a", status: "online" },

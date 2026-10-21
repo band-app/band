@@ -46,7 +46,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
   const { repos } = useRepos();
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
     enabled: open,
   });
   const hostName = useHostNames();
@@ -122,7 +122,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
           <div className="grid grid-cols-[minmax(0,1fr)] gap-3 py-4">
             {hostChoices.length > 1 && (
               <>
-                <Label htmlFor="worktree-host">Host</Label>
+                <Label htmlFor="worktree-host">Worker</Label>
                 <select
                   id="worktree-host"
                   data-testid="new-worktree-form__host"

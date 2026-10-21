@@ -1,4 +1,4 @@
-// BAND_LOCAL_HOST=off: a real hub with local worktrees off and a real
+// BAND_LOCAL_WORKER=off: a real hub with local worktrees off and a real
 // `band-worker` process. A worktree with no host goes to the worker, and a
 // request for the local host is refused.
 
@@ -82,7 +82,7 @@ beforeAll(async () => {
   });
   server = await startServer({
     tmpHome: hubHome,
-    env: { BAND_LOCAL_HOST: "off", BAND_SERVE_UI: "false" },
+    env: { BAND_LOCAL_WORKER: "off", BAND_SERVE_UI: "false" },
     // The test starts its own worker, and "the only online worker" needs exactly one.
     remoteHost: false,
   });
@@ -125,7 +125,7 @@ afterAll(async () => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
 });
 
-describe("BAND_LOCAL_HOST=off", () => {
+describe("BAND_LOCAL_WORKER=off", () => {
   it("leaves the local host out of the list and marks the worker as usable", async () => {
     const { hosts } = await query<{ hosts: HostView[] }>("hosts.list");
     expect(hosts.find((h) => h.id === "local")).toBeUndefined();
@@ -139,7 +139,7 @@ describe("BAND_LOCAL_HOST=off", () => {
       hostId: "local",
     });
     expect(res.status).toBe(500);
-    expect(await res.text()).toContain("BAND_LOCAL_HOST=off");
+    expect(await res.text()).toContain("BAND_LOCAL_WORKER=off");
   });
 
   it("puts a worktree with no host on the only online worker", async () => {

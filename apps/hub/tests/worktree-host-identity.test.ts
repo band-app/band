@@ -1,4 +1,4 @@
-// A worktree is identified by host, repo and branch. A real hub with BAND_LOCAL_HOST=off and two
+// A worktree is identified by host, repo and branch. A real hub with BAND_LOCAL_WORKER=off and two
 // real `band-worker` processes that both hold the same repo: the same branch on the two hosts is
 // two worktrees, a worktree whose folder or branch was deleted outside Band can be removed, and a
 // folder that vanished shows as missing and is pruned by the next scan. The hub's own machine
@@ -148,7 +148,7 @@ beforeAll(async () => {
   });
   server = await startServer({
     tmpHome: hubHome,
-    env: { BAND_LOCAL_HOST: "off", BAND_SERVE_UI: "false" },
+    env: { BAND_LOCAL_WORKER: "off", BAND_SERVE_UI: "false" },
     remoteHost: false,
   });
   workers.push(await startWorker("a"), await startWorker("b"));
@@ -212,7 +212,7 @@ describe("worktrees on two hosts", () => {
   });
 });
 
-describe("BAND_LOCAL_HOST=off leaves the hub's own machine empty", () => {
+describe("BAND_LOCAL_WORKER=off leaves the hub's own machine empty", () => {
   it("forgot the hub's worktree records and checkout at boot", async () => {
     const hubonly = (await query<{ repos: RepoView[] }>("repos.list")).repos.find(
       (r) => r.name === "hubonly",
@@ -228,10 +228,10 @@ describe("BAND_LOCAL_HOST=off leaves the hub's own machine empty", () => {
     expect(res.status).not.toBe(200);
   });
 
-  it("makes no clone or worktree on the hub, and never lists a local host", async () => {
+  it("makes no clone or worktree on the hub, and never lists a local worker", async () => {
     const res = await mutate("worktrees.create", { repo: "hubonly", branch: "nope" });
     expect(res.status).not.toBe(200);
-    expect(await res.text()).toMatch(/local host|host/i);
+    expect(await res.text()).toMatch(/turned off/);
     expect(existsSync(join(hubHome, "band"))).toBe(false);
     const all = (await query<{ repos: RepoView[] }>("repos.list")).repos.flatMap(
       (r) => r.worktrees,

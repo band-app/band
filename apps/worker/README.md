@@ -77,7 +77,7 @@ Anything else is refused with "is outside the worker's roots". The message adds 
 
 ## State and tokens
 
-The state directory (mode 0700) holds `worker-id`, created once and reused so the hub sees the same worker after a restart, and `session-token` (mode 0600). A session token passed with `--token` is used as given. A bootstrap token is traded once for a session token by `POST /api/workers/exchange` with `{ token, workerId?, name? }`, answered by `{ sessionToken, workerId }`. The hub binds the token to the host id it issued it for, and the worker adopts that id and saves it as `worker-id`. A session token lives until it is revoked. Restarting with the same bootstrap token reuses the saved one. Tokens are never logged.
+The state directory (mode 0700) holds `worker-id`, created once and reused so the hub sees the same worker after a restart, and `session-token` (mode 0600). A session token passed with `--token` is used as given. A bootstrap token is traded once for a session token by `POST /api/workers/exchange` with `{ token, workerId?, name? }`, answered by `{ sessionToken, workerId }`. The hub binds the token to the worker id it issued it for, and the worker adopts that id and saves it as `worker-id`. A session token lives until it is revoked. Restarting with the same bootstrap token reuses the saved one. Tokens are never logged.
 
 ## The band CLI
 

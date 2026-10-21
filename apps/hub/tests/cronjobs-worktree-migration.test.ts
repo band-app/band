@@ -186,7 +186,7 @@ describe("upgrading an install with repo-scoped cronjobs", () => {
     const job = (await jobs()).find((j) => j.id === "cj_old_nomain");
     expect(job?.enabled).toBe(false);
     expect(job?.lastRunStatus).toBe("failed");
-    expect(job?.lastRunMessage).toContain("not checked out on any host");
+    expect(job?.lastRunMessage).toContain("not checked out on any worker");
   });
 
   it("S2: disables a job of a repo that no longer exists, and deletes nothing", async () => {

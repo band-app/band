@@ -42,7 +42,7 @@ The token is the worktree's direct-path token, checked like the file and termina
 
 ## Restore
 
-A worktree whose owning worker is offline restores on another host as any other ([checkpoints](checkpoints.md)): the chat continues there from the hub's copy of the log and the agent session files of the last checkpoint. Events the worker logged after its last replication are not in the hub's copy yet. When that worker reconnects, the hub keeps those rows apart (`chat_event_holds`) and never mixes them into the restored chat.
+A worktree whose owning worker is offline restores on another worker as any other ([checkpoints](checkpoints.md)): the chat continues there from the hub's copy of the log and the agent session files of the last checkpoint. Events the worker logged after its last replication are not in the hub's copy yet. When that worker reconnects, the hub keeps those rows apart (`chat_event_holds`) and never mixes them into the restored chat.
 
 ## Limits
 

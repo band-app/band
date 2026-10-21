@@ -12,7 +12,7 @@ export function DesktopHeaderButton({ worktreeId }: { worktreeId: string }) {
   const { repos } = useRepos();
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   const hostId = repos
     .flatMap((repo) =>

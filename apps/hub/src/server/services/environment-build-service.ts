@@ -272,14 +272,14 @@ export class EnvironmentBuildService {
     } catch {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: `environmentBuilder.hostId "${cfg.hostId}" is not a known host`,
+        message: `environmentBuilder.hostId "${cfg.hostId}" is not a known worker`,
       });
     }
     const repoPath = hostRegistry.repoPathOn(repo, host.id, location.path);
     if (repoPath === null) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: `Repo "${repo}" has no checkout on host "${host.id}"`,
+        message: `Repo "${repo}" has no checkout on worker "${host.id}"`,
       });
     }
 
@@ -394,7 +394,7 @@ export class EnvironmentBuildService {
     } catch (err) {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
-        message: `Docker is not available on host "${host.id}": ${(err as Error).message}. Environment images are built on a host with a running Docker daemon (environmentBuilder.hostId).`,
+        message: `Docker is not available on worker "${host.id}": ${(err as Error).message}. Environment images are built on a worker with a running Docker daemon (environmentBuilder.hostId).`,
       });
     }
   }
@@ -410,7 +410,7 @@ export class EnvironmentBuildService {
     } catch {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
-        message: `The worker base image "${image}" is not on host "${host.id}". Build it there with: docker build -f docker/worker.Dockerfile -t ${image} . (or set environmentBuilder.workerImage).`,
+        message: `The worker base image "${image}" is not on worker "${host.id}". Build it there with: docker build -f docker/worker.Dockerfile -t ${image} . (or set environmentBuilder.workerImage).`,
       });
     }
   }
@@ -558,7 +558,7 @@ export class EnvironmentBuildService {
         );
       } catch (err) {
         throw new Error(
-          `${(err as Error).message}. Building a devcontainer needs the devcontainers CLI on host "${plan.host.id}" (npm install -g @devcontainers/cli).`,
+          `${(err as Error).message}. Building a devcontainer needs the devcontainers CLI on worker "${plan.host.id}" (npm install -g @devcontainers/cli).`,
         );
       }
       return tag;

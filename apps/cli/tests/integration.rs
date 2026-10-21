@@ -632,7 +632,7 @@ fn worktrees_continue_explains_why_it_cannot() {
     let nowhere = env.band(&["worktrees", "continue", &id, "--to", "nowhere"]);
     assert!(!nowhere.status.success());
     assert!(
-        stderr(&nowhere).contains("Unknown host"),
+        stderr(&nowhere).contains("Unknown worker"),
         "{}",
         stderr(&nowhere)
     );
@@ -690,7 +690,7 @@ fn worktrees_checkpoints_restore_and_evacuate_report_plainly() {
     let unknown = env.band(&["worktrees", "restore", &id, "--to", "nowhere"]);
     assert!(!unknown.status.success());
     assert!(
-        stderr(&unknown).contains("Unknown host"),
+        stderr(&unknown).contains("Unknown worker"),
         "{}",
         stderr(&unknown)
     );
@@ -700,7 +700,7 @@ fn worktrees_checkpoints_restore_and_evacuate_report_plainly() {
     assert!(!stderr(&offline).trim().is_empty());
 
     // A host with nothing on it evacuates zero worktrees.
-    let evacuated = env.band(&["hosts", "evacuate", &worker, "--to", "local"]);
+    let evacuated = env.band(&["workers", "evacuate", &worker, "--to", "local"]);
     assert!(evacuated.status.success(), "stderr: {}", stderr(&evacuated));
     assert!(
         stdout(&evacuated).contains("0 worktrees moved"),
@@ -718,7 +718,7 @@ fn repos_set_hosts_limits_the_repo_and_refuses_other_hosts() {
         "repos",
         "set",
         "my-repo",
-        "--hosts",
+        "--workers",
         "local",
         "--primary",
         "local",
@@ -729,13 +729,13 @@ fn repos_set_hosts_limits_the_repo_and_refuses_other_hosts() {
     assert_eq!(repo["allowedHostIds"], serde_json::json!(["local"]));
     assert_eq!(repo["primaryHostId"], "local");
     let text = stdout(&env.band(&["repos", "list"]));
-    assert!(text.contains("HOSTS"), "{text}");
+    assert!(text.contains("WORKERS"), "{text}");
 
     let output = env.band(&[
         "repos",
         "set",
         "my-repo",
-        "--hosts",
+        "--workers",
         "all",
         "--primary",
         "auto",
@@ -745,15 +745,15 @@ fn repos_set_hosts_limits_the_repo_and_refuses_other_hosts() {
     assert!(listed["repos"][0]["allowedHostIds"].is_null());
 
     // An unknown host, and an empty list, are refused.
-    let output = env.band(&["repos", "set", "my-repo", "--hosts", "nowhere"]);
+    let output = env.band(&["repos", "set", "my-repo", "--workers", "nowhere"]);
     assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("Unknown host"),
+        stderr(&output).contains("Unknown worker"),
         "{}",
         stderr(&output)
     );
     assert!(!env
-        .band(&["repos", "set", "my-repo", "--hosts", ","])
+        .band(&["repos", "set", "my-repo", "--workers", ","])
         .status
         .success());
 }
@@ -777,11 +777,11 @@ fn worktrees_create_refuses_a_host_the_repo_is_not_allowed_on() {
     .expect("issue bootstrap");
 
     // Limit the repo to that host, so the hub's own machine is the host that is not allowed.
-    let set = env.band(&["repos", "set", "my-repo", "--hosts", "Mac box"]);
+    let set = env.band(&["repos", "set", "my-repo", "--workers", "Mac box"]);
     assert!(set.status.success(), "stderr: {}", stderr(&set));
 
     // The default host is the hub's machine, and automatic placement finds no allowed host online.
-    for extra in [&[][..], &["--any-host"][..]] {
+    for extra in [&[][..], &["--any-worker"][..], &["--any-host"][..]] {
         let mut args = vec!["worktrees", "create", "my-repo", "feat/refused"];
         args.extend_from_slice(extra);
         let out = env.band(&args);
@@ -817,7 +817,7 @@ fn worktrees_create_host_flag_conflicts_and_unknown_host() {
         "create",
         "my-repo",
         "feat/h",
-        "--host",
+        "--worker",
         "h-1",
         "--labels",
         "a=b",
@@ -1185,7 +1185,7 @@ fn worktrees_remove_with_host_removes_only_that_hosts_worktree() {
         "remove",
         "my-repo",
         "feat/rm-host",
-        "--host",
+        "--worker",
         "h-nothere",
     ]);
     assert!(!wrong.status.success());
@@ -1714,6 +1714,7 @@ fn band_notify_with_env(
         .env_remove("BAND_DISPATCH")
         .env_remove("BAND_TERMINAL_ID")
         .env_remove("BAND_HOST_ID")
+        .env_remove("BAND_WORKER_ID")
         .envs(extra_env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -2392,16 +2393,58 @@ fn chat_send_while_agent_runs_queues_the_message() {
 // --- Hosts tests ---
 
 #[test]
+fn old_hosts_command_and_flag_spellings_still_parse() {
+    let env = TestEnv::new();
+
+    // `band hosts list` answers like `band workers list`.
+    let old = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let new = json_of(&env.band(&["workers", "list", "--output", "json"]));
+    assert_eq!(old["hosts"][0]["id"], new["hosts"][0]["id"]);
+
+    // `--help` lists `workers` and hides `hosts`.
+    let help = stdout(&env.band(&["--help"]));
+    assert!(help.contains("workers"), "help: {help}");
+    assert!(
+        !help.lines().any(|l| l.trim_start().starts_with("hosts")),
+        "help: {help}"
+    );
+
+    // The new and the old spellings both pass clap. A refusal from the hub is fine here.
+    let spellings: [&[&str]; 2] = [
+        &["--worker", "h-nothere", "--worker-repo-path", "/tmp/x"],
+        &["--host", "h-nothere", "--host-repo-path", "/tmp/x"],
+    ];
+    for extra in spellings {
+        let mut args = vec!["worktrees", "create", "my-repo", "feat/spelling"];
+        args.extend_from_slice(extra);
+        let out = env.band(&args);
+        assert!(
+            !stderr(&out).contains("unexpected argument"),
+            "args: {args:?} stderr: {}",
+            stderr(&out)
+        );
+    }
+    for flag in ["--add-worker", "--add-host"] {
+        let out = env.band(&["worktrees", "move", "my-repo-feat-x", "--to", "local", flag]);
+        assert!(
+            !stderr(&out).contains("unexpected argument"),
+            "flag: {flag} stderr: {}",
+            stderr(&out)
+        );
+    }
+}
+
+#[test]
 fn hosts_list_shows_the_local_host_and_new_workers() {
     let env = TestEnv::new();
 
-    let listed = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let listed = json_of(&env.band(&["workers", "list", "--output", "json"]));
     let hosts = listed["hosts"].as_array().expect("hosts");
     assert_eq!(hosts.len(), 1, "hosts: {listed}");
     assert_eq!(hosts[0]["id"], "local");
     assert_eq!(hosts[0]["status"], "online");
 
-    let text = stdout(&env.band(&["hosts", "list"]));
+    let text = stdout(&env.band(&["workers", "list"]));
     assert!(text.starts_with("ID"), "text: {text}");
     assert!(text.contains("Local"), "text: {text}");
     assert!(text.contains("online"), "text: {text}");
@@ -2416,10 +2459,10 @@ fn hosts_list_shows_the_local_host_and_new_workers() {
 fn hosts_trust_sets_the_level_and_audit_lists_the_log() {
     let env = TestEnv::new();
 
-    let listed = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let listed = json_of(&env.band(&["workers", "list", "--output", "json"]));
     assert_eq!(listed["hosts"][0]["trust"], "standard", "hosts: {listed}");
 
-    let set = env.band(&["hosts", "trust", "Local", "restricted"]);
+    let set = env.band(&["workers", "trust", "Local", "restricted"]);
     assert!(set.status.success(), "stderr: {}", stderr(&set));
     assert!(
         stdout(&set).contains("restricted"),
@@ -2427,18 +2470,76 @@ fn hosts_trust_sets_the_level_and_audit_lists_the_log() {
         stdout(&set)
     );
 
-    let text = stdout(&env.band(&["hosts", "list"]));
+    let text = stdout(&env.band(&["workers", "list"]));
     assert!(text.contains("TRUST"), "text: {text}");
     assert!(text.contains("restricted"), "text: {text}");
 
-    let bad = env.band(&["hosts", "trust", "Local", "root"]);
+    let bad = env.band(&["workers", "trust", "Local", "root"]);
     assert!(!bad.status.success());
 
-    let audit = json_of(&env.band(&["hosts", "audit", "--output", "json"]));
+    let audit = json_of(&env.band(&["workers", "audit", "--output", "json"]));
     assert_eq!(
         audit["entries"].as_array().map(Vec::len),
         Some(0),
         "audit: {audit}"
+    );
+}
+
+#[test]
+fn hosts_alias_works_and_stays_out_of_help() {
+    let env = TestEnv::new();
+
+    let old = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let new = json_of(&env.band(&["workers", "list", "--output", "json"]));
+    assert_eq!(old["hosts"][0]["id"], "local", "old: {old}");
+    assert_eq!(old["hosts"], new["hosts"], "old: {old}\nnew: {new}");
+
+    let help = stdout(&env.band(&["--help"]));
+    assert!(
+        help.lines().any(|l| l.trim_start().starts_with("workers")),
+        "help: {help}"
+    );
+    assert!(
+        !help.lines().any(|l| l.trim_start().starts_with("hosts")),
+        "help: {help}"
+    );
+}
+
+/// `BAND_WORKER_ID` names the worker a hook ran on and wins over the older `BAND_HOST_ID`.
+#[test]
+fn notify_prefers_band_worker_id_over_band_host_id() {
+    let env = TestEnv::new();
+    let payload = serde_json::json!({
+        "hook_event_name": "Stop",
+        "session_id": "worker-id-session",
+        "cwd": env.repo_path.to_string_lossy()
+    });
+
+    // A hook from a worker with no worktree at the path changes nothing, even though the old
+    // variable names the hub's own machine.
+    let output = band_notify_with_env(
+        &env,
+        &["--agent", "claude-code"],
+        &payload,
+        &[
+            ("BAND_WORKER_ID", "h-cccccccccccc"),
+            ("BAND_HOST_ID", "local"),
+        ],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(query_agent_status(&env.band_dir, "my-repo-main"), None);
+
+    // The old variable alone still routes the hook.
+    let output = band_notify_with_env(
+        &env,
+        &["--agent", "claude-code"],
+        &payload,
+        &[("BAND_HOST_ID", "local")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(
+        query_agent_status(&env.band_dir, "my-repo-main").as_deref(),
+        Some("done"),
     );
 }
 
@@ -2690,7 +2791,7 @@ fn hosts_remove_deletes_an_offline_worker_and_refuses_local() {
         .expect("hostId")
         .to_string();
 
-    let hosts_before = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let hosts_before = json_of(&env.band(&["workers", "list", "--output", "json"]));
     assert!(
         hosts_before["hosts"]
             .as_array()
@@ -2700,19 +2801,19 @@ fn hosts_remove_deletes_an_offline_worker_and_refuses_local() {
         "hosts: {hosts_before}"
     );
 
-    let local = env.band(&["hosts", "remove", "local"]);
+    let local = env.band(&["workers", "remove", "local"]);
     assert!(!local.status.success());
     assert!(
-        stderr(&local).contains("local host"),
+        stderr(&local).contains("local worker"),
         "stderr: {}",
         stderr(&local)
     );
 
-    let removed = env.band(&["hosts", "remove", &host_id, "--output", "json"]);
+    let removed = env.band(&["workers", "remove", &host_id, "--output", "json"]);
     assert!(removed.status.success(), "stderr: {}", stderr(&removed));
     assert_eq!(json_of(&removed)["id"], host_id.as_str());
 
-    let hosts_after = json_of(&env.band(&["hosts", "list", "--output", "json"]));
+    let hosts_after = json_of(&env.band(&["workers", "list", "--output", "json"]));
     assert!(
         !hosts_after["hosts"]
             .as_array()
@@ -4666,7 +4767,7 @@ fn schema_lists_all_commands() {
     assert!(names.contains(&"cronjobs trigger"), "missing: {names:?}");
     assert!(names.contains(&"notify"), "missing: {names:?}");
     assert!(names.contains(&"schema"), "missing: {names:?}");
-    assert!(names.contains(&"hosts list"), "missing: {names:?}");
+    assert!(names.contains(&"workers list"), "missing: {names:?}");
     assert!(names.contains(&"tokens list"), "missing: {names:?}");
     assert!(
         names.contains(&"tokens create-device"),
@@ -6145,7 +6246,7 @@ fn worktrees_create_isolation_container_waits_for_a_runner() {
     ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     assert!(
-        String::from_utf8_lossy(&out.stdout).contains("provisioning (host request"),
+        String::from_utf8_lossy(&out.stdout).contains("provisioning (worker request"),
         "stdout: {}",
         String::from_utf8_lossy(&out.stdout)
     );

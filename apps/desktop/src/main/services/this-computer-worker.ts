@@ -112,7 +112,7 @@ export interface ThisComputerDeps {
   computerName?: () => string;
   /** The `launchctl` binary. `BAND_LAUNCHCTL_BIN` in the environment overrides it. */
   launchctl?: string;
-  /** Milliseconds to wait for the host to come online, and the poll gap. */
+  /** Milliseconds to wait for the worker to come online, and the poll gap. */
   onlineTimeoutMs?: number;
   pollMs?: number;
 }
@@ -275,7 +275,7 @@ export class ThisComputerWorker {
       const { hosts } = await this.trpc<{ hosts: Array<{ id: string; status: string }> }>(
         hub,
         "query",
-        "hosts.list",
+        "workers.list",
       );
       return hosts.find((h) => h.id === hostId)?.status ?? "removed";
     } catch {
@@ -316,7 +316,7 @@ export class ThisComputerWorker {
     }
   }
 
-  /** Installs the bundled worker for `hub` and waits until the host shows online. */
+  /** Installs the bundled worker for `hub` and waits until the worker shows online. */
   add(hub: HubAccess, input: { name?: string; roots?: string[] }): Promise<ThisComputerResult> {
     return this.guard(async () => {
       if (this.platform !== "darwin") return { ok: false, error: "Only macOS is supported." };
@@ -367,7 +367,7 @@ export class ThisComputerWorker {
 
   private async rollback(hub: HubAccess, hostId: string): Promise<void> {
     await this.runWorker(["uninstall-service"]).catch(() => {});
-    await this.trpc(hub, "mutation", "hosts.remove", { hostId }).catch(() => {});
+    await this.trpc(hub, "mutation", "workers.remove", { hostId }).catch(() => {});
   }
 
   private async waitForStatus(hub: HubAccess, hostId: string, want: string): Promise<boolean> {
@@ -379,7 +379,7 @@ export class ThisComputerWorker {
     return false;
   }
 
-  /** Uninstalls the service, then removes the host from the hub once it is offline. */
+  /** Uninstalls the service, then removes the worker from the hub once it is offline. */
   remove(hub: HubAccess | null): Promise<ThisComputerResult> {
     return this.guard(async () => {
       const installed = this.readInstalled();
@@ -390,13 +390,13 @@ export class ThisComputerWorker {
       if (hub && hostId && installed.env.BAND_HUB_URL === hub.url) {
         if (await this.waitForStatus(hub, hostId, "offline")) {
           try {
-            await this.trpc(hub, "mutation", "hosts.remove", { hostId });
+            await this.trpc(hub, "mutation", "workers.remove", { hostId });
           } catch (err) {
-            note = `The service is removed. The host stays on the hub: ${err instanceof Error ? err.message : String(err)}`;
+            note = `The service is removed. The worker stays on the hub: ${err instanceof Error ? err.message : String(err)}`;
           }
         } else {
           note =
-            "The service is removed. Remove the host in Settings > Hosts once it shows offline.";
+            "The service is removed. Remove the worker in Settings > Workers once it shows offline.";
         }
       }
       return note ? { ok: true, note } : { ok: true };

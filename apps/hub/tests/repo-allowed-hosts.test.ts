@@ -1,5 +1,5 @@
 // Integration tests for repos limited to chosen hosts and for one host per branch. A real hub
-// (production bundle, temp BAND_HOME, BAND_LOCAL_HOST=off) and two real `band-worker` processes
+// (production bundle, temp BAND_HOME, BAND_LOCAL_WORKER=off) and two real `band-worker` processes
 // with their own temp HOMEs. Remotes are local bare repos.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
@@ -261,13 +261,13 @@ describe("the defaults a repo gets when it is added (S2)", () => {
     );
     const unknown = await refused("repos.update", { name: "shared", allowedHostIds: ["h-nope"] });
     expect(unknown.status).toBe(400);
-    expect(unknown.body.error.message).toContain("Unknown host");
+    expect(unknown.body.error.message).toContain("Unknown worker");
     const outside = await refused("repos.update", {
       name: "epic",
       primaryHostId: bravo.hostId,
     });
     expect(outside.status).toBe(400);
-    expect(outside.body.error.message).toContain("must be one of the allowed hosts");
+    expect(outside.body.error.message).toContain("must be one of the allowed workers");
   });
 });
 

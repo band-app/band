@@ -179,6 +179,6 @@ describe("a registered worktree outside the worker's roots", () => {
       SHARED_TOKEN,
     );
     expect(res.status).not.toBe(200);
-    expect(await res.text()).toMatch(/outside the directories host/);
+    expect(await res.text()).toMatch(/outside the directories worker .+ serves/);
   });
 });

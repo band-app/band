@@ -1,6 +1,6 @@
 /**
  * Settings > Repos: the "Checkpoints on the hub" switch. A repo available on every host follows the
- * default (on) and a repo limited to chosen hosts follows the other default (off). Flipping the
+ * default (on) and a repo limited to chosen workers follows the other default (off). Flipping the
  * switch stores a choice the hub reports back, and the note stops calling it a default.
  *
  * Real production hub with a temp BAND_HOME. The repos are seeded rows; no worker is needed.

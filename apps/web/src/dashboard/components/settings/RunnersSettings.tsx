@@ -88,7 +88,7 @@ export function RunnersSettings() {
       <SettingsRow
         variant="stacked"
         label="Runners"
-        description="Scripts the hub runs to start a worker when a worktree asks for a host that does not exist yet. Set them in settings.json under runners."
+        description="Scripts the hub runs to start a worker when a worktree asks for a worker that does not exist yet. Set them in settings.json under runners."
       >
         {runners.length === 0 ? (
           <p className="text-xs text-muted-foreground" data-testid="settings__runners-empty">
@@ -137,12 +137,12 @@ export function RunnersSettings() {
 
       <SettingsRow
         variant="stacked"
-        label="Machines"
-        description="Every machine a runner started. The hub destroys one that never connects, that goes offline, that no runner knows about, or that outlives the runner's maximum lifetime (docs/runner-hooks.md)."
+        label="Workers started"
+        description="Every worker a runner started, with the cloud handle as a detail. The hub destroys one that never connects, that goes offline, that no runner knows about, or that outlives the runner's maximum lifetime (docs/runner-hooks.md)."
       >
         {(machines.data ?? []).length === 0 ? (
           <p className="text-xs text-muted-foreground" data-testid="settings__machines-empty">
-            No machines yet.
+            No workers started yet.
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border">
@@ -183,7 +183,7 @@ export function RunnersSettings() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      aria-label={`Destroy machine ${machine.workerId}`}
+                      aria-label={`Destroy worker ${machine.workerId}`}
                       data-testid="settings__machine-destroy"
                       onClick={() => void destroyMachine(machine, false)}
                     >

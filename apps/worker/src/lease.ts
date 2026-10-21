@@ -91,7 +91,7 @@ export class LeaseGuard {
     const at = resolve(cwd);
     for (const dir of this.blocked) {
       if (at === dir || at.startsWith(dir + sep)) {
-        throw new Error(`${dir} was continued on another host, so nothing starts here.`);
+        throw new Error(`${dir} was continued on another worker, so nothing starts here.`);
       }
     }
   }

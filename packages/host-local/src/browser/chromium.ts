@@ -207,7 +207,7 @@ export class ChromiumManager {
   private async start(spec: BrowserOpenSpec): Promise<BrowserInfo> {
     const bin = findChromium();
     if (!bin) {
-      throw new Error("No Chromium found on this host. Install one or set BAND_CHROMIUM_BIN.");
+      throw new Error("No Chromium found on this worker. Install one or set BAND_CHROMIUM_BIN.");
     }
     const profileDir =
       spec.profileDir ??

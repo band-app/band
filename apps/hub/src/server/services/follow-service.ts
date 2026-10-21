@@ -181,7 +181,7 @@ export class FollowService {
     const at = this.locate(worktreeId);
     if (!at) throw new CheckpointError("invalid", `Unknown worktree "${worktreeId}"`);
     const { repo, worktree, hostId } = at;
-    const hostName = hostNamesOf([hostId])[0] ?? "unknown host";
+    const hostName = hostNamesOf([hostId])[0] ?? "unknown worker";
     const base: ContinueOffer = {
       worktreeId,
       repo: repo.name,
@@ -213,7 +213,7 @@ export class FollowService {
     if (allowed && allowed.every((id) => id === hostId)) {
       return blocked(
         "restricted-to-offline-host",
-        `${onlyAvailableOnMessage(repo.name, hostNamesOf(allowed))}, and ${hostName} is offline. Bring ${hostName} back online, or allow another host for ${repo.name} in Settings > Repos.`,
+        `${onlyAvailableOnMessage(repo.name, hostNamesOf(allowed))}, and ${hostName} is offline. Bring ${hostName} back online, or allow another worker for ${repo.name} in Settings > Repos.`,
       );
     }
     if (!checkpointsEnabledFor(repo.checkpointsEnabled, repo.allowedHostIds)) {
@@ -226,7 +226,7 @@ export class FollowService {
     if (!checkpoint) {
       return blocked(
         "no-checkpoint",
-        `The hub has no checkpoint of ${worktreeId} yet, so it cannot continue on another host. Bring ${hostName} back online.`,
+        `The hub has no checkpoint of ${worktreeId} yet, so it cannot continue on another worker. Bring ${hostName} back online.`,
       );
     }
 
@@ -236,7 +236,7 @@ export class FollowService {
       return {
         ...blocked(
           "lease-active",
-          `${hostName} may still be running ${worktreeId}. It stops all work when its lease ends, in ${formatAge(leaseLeft)}, and then this worktree can be opened on another host.`,
+          `${hostName} may still be running ${worktreeId}. It stops all work when its lease ends, in ${formatAge(leaseLeft)}, and then this worktree can be opened on another worker.`,
         ),
         leaseExpiresAt: Date.now() + leaseLeft,
         leaseRemainingMs: leaseLeft,
@@ -268,7 +268,7 @@ export class FollowService {
       return {
         ...blocked(
           "no-online-host",
-          `${hostName} is offline and no other host that ${repo.name} may run on is online. Bring ${hostName} or another allowed host online and try again.`,
+          `${hostName} is offline and no other worker that ${repo.name} may run on is online. Bring ${hostName} or another allowed worker online and try again.`,
         ),
         checkpointId: checkpoint.id,
         checkpointAt: checkpoint.createdAt,
@@ -315,7 +315,7 @@ export class FollowService {
       return {
         ...blocked(
           "agent-unavailable",
-          `${hostName} is offline and the agent for this work is not available on any other host that ${repo.name} may run on (${detail}). Bring ${hostName} back online, or install and log in the agent on another host.`,
+          `${hostName} is offline and the agent for this work is not available on any other worker that ${repo.name} may run on (${detail}). Bring ${hostName} back online, or install and log in the agent on another worker.`,
         ),
         ...withCheckpoint,
         targets,
@@ -423,7 +423,7 @@ export class FollowService {
     if (!this.isOffline(worktreeId)) {
       throw new CheckpointError(
         "conflict",
-        `${hostNamesOf([at.hostId])[0] ?? "unknown host"} is online. Continue on another host only when it is offline; to move the work while it is up, use "Move to host".`,
+        `${hostNamesOf([at.hostId])[0] ?? "unknown worker"} is online. Continue on another worker only when it is offline; to move the work while it is up, use "Move to worker".`,
       );
     }
     const offer = await this.offer(worktreeId, input);
@@ -433,7 +433,7 @@ export class FollowService {
     if (!toHostId || !target) {
       throw new CheckpointError(
         "invalid",
-        `${toHostId ?? "That host"} cannot take ${worktreeId}: it is offline, not allowed for ${at.repo.name}, or not a worker.`,
+        `${toHostId ?? "That worker"} cannot take ${worktreeId}: it is offline, not allowed for ${at.repo.name}, or not a worker.`,
       );
     }
     if (!target.agentReady) {
@@ -457,7 +457,7 @@ export class FollowService {
     this.repos.setContinuedFrom(at.repo.name, at.worktree.name, toHostId, continuedFrom);
     log.info(
       { worktreeId, newId: restored.worktreeId, toHostId, reason: continuedFrom.reason },
-      "continued a worktree on another host",
+      "continued a worktree on another worker",
     );
     this.runSetup(restored.worktreeId);
     for (const chatId of restored.chatIds) {
@@ -531,7 +531,7 @@ export class FollowService {
     if (!checkpointService.isHostOnline(old.hostId)) {
       throw new CheckpointError(
         "offline",
-        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} is offline.`,
+        `${hostNamesOf([old.hostId])[0] ?? "unknown worker"} is offline.`,
       );
     }
     const row = checkpointService.row(repl.from.checkpointId);
@@ -546,7 +546,7 @@ export class FollowService {
     if (!root)
       throw new CheckpointError(
         "invalid",
-        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} serves no directory.`,
+        `${hostNamesOf([old.hostId])[0] ?? "unknown worker"} serves no directory.`,
       );
     const snap = await buildSnapshot(
       host,
@@ -667,7 +667,7 @@ export class FollowService {
     if (!checkpointService.isHostOnline(old.hostId)) {
       throw new CheckpointError(
         "offline",
-        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} is offline.`,
+        `${hostNamesOf([old.hostId])[0] ?? "unknown worker"} is offline.`,
       );
     }
     const row = checkpointService.row(from.checkpointId);
@@ -678,7 +678,7 @@ export class FollowService {
     if (!root)
       throw new CheckpointError(
         "invalid",
-        `${hostNamesOf([old.hostId])[0] ?? "unknown host"} serves no directory.`,
+        `${hostNamesOf([old.hostId])[0] ?? "unknown worker"} serves no directory.`,
       );
     const snap = await buildSnapshot(
       host,
@@ -725,7 +725,7 @@ export class FollowService {
     if (!root)
       throw new CheckpointError(
         "invalid",
-        `${hostNamesOf([next.hostId])[0] ?? "unknown host"} serves no directory.`,
+        `${hostNamesOf([next.hostId])[0] ?? "unknown worker"} serves no directory.`,
       );
     const wipDir = posix.join(root, WIP_DIR);
     await newHost.fs.mkdir(wipDir, { recursive: true });
@@ -803,7 +803,7 @@ export class FollowService {
     if (!confirm) {
       throw new CheckpointError(
         "invalid",
-        `Removing ${oldId} deletes its files on the old host. Confirm to go on.`,
+        `Removing ${oldId} deletes its files on the old worker. Confirm to go on.`,
       );
     }
     const repl = this.replacementOf(oldId);

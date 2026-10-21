@@ -1,7 +1,7 @@
-# S2 (settings): Hosts shows one online worker (edge-box) and one offline (old-box) with their
+# S2 (settings): Workers shows one online worker (edge-box) and one offline (old-box) with their
 # state and version line, and a row follows its worker going offline without a reload.
 appId: app.getband.mobile
-name: Hosts shows worker state and follows it live
+name: Workers shows worker state and follows it live
 ---
 - runScript:
     file: scripts/hub-control.js

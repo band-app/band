@@ -4,7 +4,7 @@
  */
 export class HostNotImplementedError extends Error {
   constructor(hostId: string, method: string) {
-    super(`Host "${hostId}" does not implement ${method} yet`);
+    super(`Worker "${hostId}" does not implement ${method} yet`);
     this.name = "HostNotImplementedError";
   }
 }
@@ -16,7 +16,7 @@ export class HostNotImplementedError extends Error {
 export class HostPathDeniedError extends Error {
   readonly path: string;
   constructor(path: string, message?: string) {
-    super(message ?? `Path ${JSON.stringify(path)} is outside the host's roots`);
+    super(message ?? `Path ${JSON.stringify(path)} is outside the worker's roots`);
     this.name = "HostPathDeniedError";
     this.path = path;
   }
@@ -25,7 +25,7 @@ export class HostPathDeniedError extends Error {
 /** A remote host has no live link to the hub, so the call could not be sent or its answer was lost. */
 export class HostOfflineError extends Error {
   constructor(hostId: string, detail?: string) {
-    super(`Host "${hostId}" is offline${detail ? `: ${detail}` : ""}`);
+    super(`Worker "${hostId}" is offline${detail ? `: ${detail}` : ""}`);
     this.name = "HostOfflineError";
   }
 }
@@ -33,7 +33,7 @@ export class HostOfflineError extends Error {
 /** A call to a remote host did not answer within its time limit. */
 export class HostTimeoutError extends Error {
   constructor(hostId: string, method: string, ms: number) {
-    super(`Host "${hostId}" did not answer ${method} within ${ms} ms`);
+    super(`Worker "${hostId}" did not answer ${method} within ${ms} ms`);
     this.name = "HostTimeoutError";
   }
 }

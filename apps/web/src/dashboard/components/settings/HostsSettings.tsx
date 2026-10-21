@@ -67,18 +67,18 @@ const TRUST_LABEL: Record<TrustLevel, string> = {
 };
 
 const TRUST_HINT: Record<TrustLevel, string> = {
-  restricted: "Agents on this host can only use their own worktrees.",
+  restricted: "Agents on this worker can only use their own worktrees.",
   standard:
-    "Agents on this host work on their own host, and start worktrees elsewhere when Settings > Agents allows it.",
+    "Agents on this worker work on their own worker, and start worktrees elsewhere when Settings > Agents allows it.",
   admin:
-    "Agents on this host can work on any host, change hub settings and manage repos and cronjobs. Tokens, the vault and trust levels stay out of reach.",
+    "Agents on this worker can work on any worker, change hub settings and manage repos and cronjobs. Tokens, the vault and trust levels stay out of reach.",
 };
 
-type HostList = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
+type HostList = Awaited<ReturnType<typeof trpc.workers.list.query>>["hosts"];
 type TokenList = Awaited<ReturnType<typeof trpc.tokens.list.query>>["tokens"];
 type TokenView = TokenList[number];
 
-type AuditEntries = Awaited<ReturnType<typeof trpc.hosts.audit.query>>["entries"];
+type AuditEntries = Awaited<ReturnType<typeof trpc.workers.audit.query>>["entries"];
 
 const HOSTS_KEY = ["hosts.list"] as const;
 const AUDIT_KEY = ["hosts.audit"] as const;
@@ -140,7 +140,7 @@ export function HostsSettings() {
   const isAdmin = useIsAdmin();
   const hosts = useQuery<HostList>({
     queryKey: HOSTS_KEY,
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   // Device tokens are managed in Settings > Devices; Hosts keeps the workers' tokens.
   const tokens = useQuery<TokenList>({
@@ -152,7 +152,7 @@ export function HostsSettings() {
   const admin = useIsAdmin();
   const audit = useQuery<AuditEntries>({
     queryKey: AUDIT_KEY,
-    queryFn: async () => (await trpc.hosts.audit.query({ limit: 50 })).entries,
+    queryFn: async () => (await trpc.workers.audit.query({ limit: 50 })).entries,
     enabled: admin,
   });
   const [evacuating, setEvacuating] = useState<string | null>(null);
@@ -206,7 +206,7 @@ export function HostsSettings() {
   const setTrust = async (host: HostList[number], trust: TrustLevel) => {
     setError(null);
     try {
-      await trpc.hosts.setTrust.mutate({ hostId: host.id, trust });
+      await trpc.workers.setTrust.mutate({ hostId: host.id, trust });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -216,7 +216,7 @@ export function HostsSettings() {
   const removeHost = async (host: HostList[number]) => {
     setError(null);
     try {
-      await trpc.hosts.remove.mutate({ hostId: host.id });
+      await trpc.workers.remove.mutate({ hostId: host.id });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -247,8 +247,8 @@ export function HostsSettings() {
       <ThisComputerSettings />
       <SettingsRow
         variant="stacked"
-        label="Hosts"
-        description="Machines that run worktrees. Workers connect to the hub and appear here. On a hub started with BAND_LOCAL_HOST=off the hub itself runs no worktrees and is not listed."
+        label="Workers"
+        description="Computers that run worktrees. Workers connect to the hub and appear here. The hub's own machine is the built-in worker. On a hub started with BAND_LOCAL_WORKER=off it runs no worktrees and is not listed."
       >
         <ul className="divide-y divide-border rounded-md border border-border">
           {(hosts.data ?? []).map((host) => (
@@ -339,7 +339,7 @@ export function HostsSettings() {
                     data-testid="settings__host-evacuate"
                     onClick={() => setEvacuating(host.id)}
                   >
-                    Move all worktrees on this host…
+                    Move all worktrees on this worker…
                   </Button>
                 )}
                 {host.id !== "local" && (
@@ -347,7 +347,7 @@ export function HostsSettings() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    aria-label={`Remove host ${host.name}`}
+                    aria-label={`Remove worker ${host.name}`}
                     data-testid="settings__host-remove"
                     disabled={host.status === "online" || host.status === "lost"}
                     onClick={() => void removeHost(host)}
@@ -377,8 +377,8 @@ export function HostsSettings() {
       {admin ? (
         <SettingsRow
           variant="stacked"
-          label="Cross-host activity"
-          description="What agents on admin hosts did across hosts or as an admin: the newest calls first."
+          label="Cross-worker activity"
+          description="What agents on admin workers did across workers or as an admin: the newest calls first."
         >
           {(audit.data ?? []).length === 0 ? (
             <p className="text-xs text-muted-foreground" data-testid="settings__audit-empty">
@@ -413,7 +413,7 @@ export function HostsSettings() {
       <SettingsRow
         variant="stacked"
         label="Manual install"
-        description="Create a one-time token for a worker on another machine. It works once and expires in an hour."
+        description="Create a one-time token for a worker on another computer. It works once and expires in an hour."
       >
         {!adding ? (
           <Button
@@ -441,7 +441,7 @@ export function HostsSettings() {
               data-testid="settings__bootstrap-token"
               className="h-8 font-mono text-xs"
             />
-            <div className="text-xs font-medium">Run on the worker machine</div>
+            <div className="text-xs font-medium">Run on the worker</div>
             <div role="tablist" aria-label="Install method" className="flex flex-wrap gap-1">
               {WORKER_INSTALL_TABS.map((tab) => (
                 <Button
@@ -487,8 +487,8 @@ export function HostsSettings() {
         ) : (
           <div className="space-y-2">
             <Input
-              aria-label="Host name"
-              placeholder="Host name"
+              aria-label="Worker name"
+              placeholder="Worker name"
               value={hostName}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHostName(e.target.value)}
               className="h-8 text-sm"

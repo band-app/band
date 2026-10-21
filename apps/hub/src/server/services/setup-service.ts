@@ -196,7 +196,7 @@ function migrateRepoCronjobs(): void {
   }
 }
 
-/** With `BAND_LOCAL_HOST=off`, the hub's own machine holds no worktrees: forget the records. */
+/** With `BAND_LOCAL_WORKER=off`, the hub's own machine holds no worktrees: forget the records. */
 function forgetLocalWorktrees(): void {
   try {
     worktreeService.forgetLocalWorktrees();

@@ -182,7 +182,7 @@ export const reposRouter = t.router({
             throw new TRPCError({
               code: "FORBIDDEN",
               message:
-                "Only an admin token can change whether a repo continues on another host by itself.",
+                "Only an admin token can change whether a repo continues on another worker by itself.",
             });
           }
           repoService.setAutoContinue(input.name, input.autoContinue);
@@ -193,7 +193,7 @@ export const reposRouter = t.router({
         ) {
           throw new TRPCError({
             code: "FORBIDDEN",
-            message: "Only an admin token can change the hosts a repo runs on.",
+            message: "Only an admin token can change the workers a repo runs on.",
           });
         }
         if (input.allowedHostIds !== undefined || input.primaryHostId !== undefined) {

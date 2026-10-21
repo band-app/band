@@ -33,7 +33,7 @@ export function useLiveHosts() {
   );
   return useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await client.hosts.list.query()).hosts,
+    queryFn: async () => (await client.workers.list.query()).hosts,
     retry,
   });
 }
@@ -42,7 +42,7 @@ export function useInterruptions(hostId: string, enabled: boolean) {
   const { client } = useHubSession();
   return useQuery({
     queryKey: ["hosts.interruptions", hostId],
-    queryFn: () => client.hosts.interruptions.query({ hostId }),
+    queryFn: () => client.workers.interruptions.query({ hostId }),
     enabled,
     gcTime: 0,
     retry: false,
@@ -53,7 +53,7 @@ export function useUpdateHost() {
   const { client } = useHubSession();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (hostId: string) => client.hosts.update.mutate({ hostId }),
+    mutationFn: (hostId: string) => client.workers.update.mutate({ hostId }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["hosts.list"] }),
   });
 }
@@ -62,7 +62,7 @@ export function useDismissUpdate() {
   const { client } = useHubSession();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (hostId: string) => client.hosts.dismissUpdate.mutate({ hostId }),
+    mutationFn: (hostId: string) => client.workers.dismissUpdate.mutate({ hostId }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["hosts.list"] }),
   });
 }
@@ -71,7 +71,7 @@ export function useUpdateStatus() {
   const { client } = useHubSession();
   return useQuery({
     queryKey: ["hosts.updateStatus"],
-    queryFn: () => client.hosts.updateStatus.query(),
+    queryFn: () => client.workers.updateStatus.query(),
     retry: false,
   });
 }

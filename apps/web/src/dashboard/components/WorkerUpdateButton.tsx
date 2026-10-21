@@ -29,7 +29,7 @@ export function WorkerUpdateButton({ host }: Props) {
   const [error, setError] = useState<string | null>(null);
   const interruptions = useQuery({
     queryKey: ["hosts.interruptions", host.id],
-    queryFn: () => trpc.hosts.interruptions.query({ hostId: host.id }),
+    queryFn: () => trpc.workers.interruptions.query({ hostId: host.id }),
     enabled: open,
     gcTime: 0,
   });
@@ -41,7 +41,7 @@ export function WorkerUpdateButton({ host }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await trpc.hosts.update.mutate({ hostId: host.id });
+      await trpc.workers.update.mutate({ hostId: host.id });
       setOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -83,7 +83,7 @@ export function WorkerUpdateButton({ host }: Props) {
             </DialogTitle>
             <DialogDescription>
               The worker installs the new version and restarts. Restarting ends every agent running
-              on this host, and a turn in progress is lost.
+              on this worker, and a turn in progress is lost.
             </DialogDescription>
           </DialogHeader>
           <div
@@ -103,10 +103,10 @@ export function WorkerUpdateButton({ host }: Props) {
               <span className="text-muted-foreground">Checking running agents…</span>
             ) : interruptions.isError ? (
               <span className="text-destructive" data-testid="update-worker__agents-error">
-                Could not check which agents are running on this host.
+                Could not check which agents are running on this worker.
               </span>
             ) : agents.length === 0 ? (
-              <span className="text-muted-foreground">No agents are running on this host.</span>
+              <span className="text-muted-foreground">No agents are running on this worker.</span>
             ) : (
               <>
                 <div className="mb-1 font-medium">

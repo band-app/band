@@ -5,7 +5,7 @@ import { pickFolder, useThisComputerWorker } from "../../../lib/this-computer-wo
 import { SettingsRow } from "./SettingsRow";
 
 /**
- * The "This computer" section of Settings > Hosts (desktop app only): whether this Mac is a
+ * The "This computer" section of Settings > Workers (desktop app only): whether this Mac is a
  * worker of the hub the app is connected to, with Add, Remove and, for a worker service that
  * was installed from npm, Switch to the one bundled in the app.
  */
@@ -111,7 +111,7 @@ export function ThisComputerSettings() {
   return (
     <SettingsRow
       variant="stacked"
-      label="This computer"
+      label="Use this computer as a worker"
       description="Run worktrees and agents on this Mac from the hub the app is connected to. The service runs the worker bundled in this app, so an app update updates it."
     >
       <div data-testid="this-computer">

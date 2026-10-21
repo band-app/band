@@ -100,7 +100,7 @@ export function DivergencePanel({ open, onOpenChange, worktreeId }: Props) {
         <DialogHeader>
           <DialogTitle>Changes on the old copy</DialogTitle>
           <DialogDescription>
-            This host was offline while the work continued elsewhere. These files differ from the
+            This worker was offline while the work continued elsewhere. These files differ from the
             checkpoint the continuation used.
           </DialogDescription>
         </DialogHeader>
@@ -112,7 +112,7 @@ export function DivergencePanel({ open, onOpenChange, worktreeId }: Props) {
         ) : null}
         {data && !data.hostOnline ? (
           <p className="text-sm text-muted-foreground">
-            The host is offline, so the old copy cannot be compared now.
+            The worker is offline, so the old copy cannot be compared now.
           </p>
         ) : null}
         {data?.hostOnline && data.state === "clean" ? (
@@ -183,8 +183,8 @@ export function DivergencePanel({ open, onOpenChange, worktreeId }: Props) {
               </p>
             ) : (
               <p className="text-xs">
-                Discard the old copy? Its files on the old host are deleted. The continued worktree
-                is not touched.
+                Discard the old copy? Its files on the old worker are deleted. The continued
+                worktree is not touched.
                 {data?.state === "diverged"
                   ? ` It holds ${lostFiles} changed file${lostFiles === 1 ? "" : "s"} the new copy lacks (listed above).`
                   : ""}

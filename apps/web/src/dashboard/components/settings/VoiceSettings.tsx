@@ -38,7 +38,7 @@ export function VoiceSettings() {
   });
   const hosts = useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   const [form, setForm] = useState<Form>(EMPTY);
   const [dirty, setDirty] = useState(false);
@@ -209,7 +209,7 @@ export function VoiceSettings() {
         variant="responsive"
         htmlFor="voice-host"
         label="Run on"
-        description="The hub calls the endpoint itself. Pick a host to have its worker call it, for a server on that machine's localhost."
+        description="The hub calls the endpoint itself. Pick a worker to make the request from that worker's own network, for a server on its localhost."
       >
         <select
           id="voice-host"

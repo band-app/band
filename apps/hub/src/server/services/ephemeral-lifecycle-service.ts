@@ -344,7 +344,7 @@ export class EphemeralLifecycleService {
 
   private async busyReason(hostId: string, tracked: Tracked[]): Promise<string | null> {
     if (tracked.length === 0 && this.requests.listAwaitingHost().some((r) => r.hostId === hostId)) {
-      return "a worktree is still being created on this host";
+      return "a worktree is still being created on this worker";
     }
     const host = hostRegistry.hostById(hostId);
     for (const ws of tracked) {
@@ -375,7 +375,7 @@ export class EphemeralLifecycleService {
     const git = async (args: string[], env?: Record<string, string>) =>
       (await host.exec("git", args, { cwd, env })).stdout.trim();
     const [root] = (await host.info()).roots;
-    if (!root) throw new SleepError(`host ${hostId} serves no directory`);
+    if (!root) throw new SleepError(`worker ${hostId} serves no directory`);
     const wipDir = posix.join(root, WIP_DIR);
 
     const { baseSha, branch, snapshotSha } = await buildSnapshot(
@@ -557,7 +557,7 @@ export class EphemeralLifecycleService {
     if (rows.length === 0) return;
     const host = hostRegistry.hostById(hostId);
     const session = this.sessions.get(hostId);
-    if (!session) throw new Error(`Host ${hostId} is not connected`);
+    if (!session) throw new Error(`Worker ${hostId} is not connected`);
     const rpc = new RemoteRpc(hostId, () => session);
     // A restore hook put the machine's disk back, so the checkouts may be there already.
     const fromSnapshot = runnerService.restoredSnapshot(hostId) !== undefined;
@@ -583,7 +583,7 @@ export class EphemeralLifecycleService {
     fromSnapshot = false,
   ): Promise<void> {
     const [root] = (await host.info()).roots;
-    if (!root) throw new Error(`host ${host.id} serves no directory`);
+    if (!root) throw new Error(`worker ${host.id} serves no directory`);
     if (fromSnapshot && (await this.checkoutSurvived(host, row))) {
       await this.finishFromDisk(host, rpc, row, root);
       return;
@@ -609,7 +609,7 @@ export class EphemeralLifecycleService {
       hostRegistry.setRepoPathOn(row.repo, host.id, repoPath);
     }
     if (!repoPath) {
-      throw new Error(`Repo "${row.repo}" has no checkout on host "${host.id}"`);
+      throw new Error(`Repo "${row.repo}" has no checkout on worker "${host.id}"`);
     }
     const wipDir = posix.join(root, WIP_DIR);
     await host.fs.mkdir(wipDir, { recursive: true });

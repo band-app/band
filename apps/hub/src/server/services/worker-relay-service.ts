@@ -176,7 +176,11 @@ export class WorkerRelayService {
       }
     }
     // The host list holds roots, tokens' hosts and runner details an agent has no use for.
-    if (decodedPath === "/trpc/hosts.list" && upstream.ok && trust !== "admin") {
+    if (
+      (decodedPath === "/trpc/hosts.list" || decodedPath === "/trpc/workers.list") &&
+      upstream.ok &&
+      trust !== "admin"
+    ) {
       try {
         return this.answer(session, upstream.status, redactHostsReply(await upstream.json()));
       } catch (err) {

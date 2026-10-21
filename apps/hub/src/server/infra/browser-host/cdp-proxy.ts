@@ -57,7 +57,7 @@ export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessa
     early = bridged;
   }
   if (!bandTabId) {
-    ws.close(4000, "Worktree is not on a remote host");
+    ws.close(4000, "Worktree is not on a remote worker");
     return;
   }
 

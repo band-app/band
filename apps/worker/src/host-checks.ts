@@ -83,7 +83,7 @@ export function hostWarnings(settings: LinuxHostSettings): HostWarning[] {
 export function formatHostWarnings(warnings: HostWarning[]): string {
   const lines: string[] = [];
   for (const w of warnings) {
-    lines.push(`WARN ${"host".padEnd(12)} ${w.message}`);
+    lines.push(`WARN ${"worker".padEnd(12)} ${w.message}`);
     for (const command of w.fix) lines.push(`       fix: ${command}`);
   }
   return lines.length > 0 ? `${lines.join("\n")}\n` : "";

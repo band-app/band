@@ -92,7 +92,7 @@ appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({
         return;
       }
       const path = (req.url ?? "").split("?")[0];
-      if (path === "/trpc/hosts.list") {
+      if (path === "/trpc/workers.list") {
         res.end(JSON.stringify({ result: { data: { hosts } } }));
       } else if (path === "/trpc/tokens.issueWorkerBootstrap") {
         res.end(JSON.stringify({ result: { data: { token: "bwb_secret", hostId: "h-new" } } }));
@@ -247,13 +247,13 @@ appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({
     assert(!call.args.includes("bwb_old"));
   });
 
-  test("add installs through the bundled worker with a hub-issued token, and rolls back when the host never connects", async () => {
+  test("add installs through the bundled worker with a hub-issued token, and rolls back when the worker never connects", async () => {
     const w = worker();
     const result = await w.add(hubAccess(), {
       name: "  My Mac ",
       roots: ["/Users/me/code", "relative"],
     });
-    // The stub hub never reports the host online, so the install fails and is undone.
+    // The stub hub never reports the worker online, so the install fails and is undone.
     assert.equal(result.ok, false);
     assert.match((result as { error: string }).error, /did not connect/);
     const [install, uninstall] = calls();
@@ -275,7 +275,7 @@ appendFileSync(${JSON.stringify(callLog)}, JSON.stringify({
     assert.equal((await w.status(hubAccess())).promptPending, true);
   });
 
-  test("add succeeds once the host is online, and the status then reads bundled and online", async () => {
+  test("add succeeds once the worker is online, and the status then reads bundled and online", async () => {
     hosts = [{ id: "h-new", status: "online" }];
     const w = worker();
     assert.deepEqual(await w.add(hubAccess(), { name: "My Mac" }), { ok: true });

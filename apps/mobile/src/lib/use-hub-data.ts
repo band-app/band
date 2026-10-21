@@ -28,7 +28,7 @@ export function useHosts() {
   const { client } = useHubSession();
   return useQuery({
     queryKey: ["hosts.list"],
-    queryFn: async () => (await client.hosts.list.query()).hosts,
+    queryFn: async () => (await client.workers.list.query()).hosts,
   });
 }
 

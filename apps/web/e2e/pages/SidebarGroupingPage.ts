@@ -1,5 +1,5 @@
 /**
- * Page object for the sidebar's Group by dropdown (Repo | Origin | Host) and the Set parent /
+ * Page object for the sidebar's Group by dropdown (Repo | Origin | Worker) and the Set parent /
  * Remove parent items of a worktree card's context menu.
  */
 
@@ -50,7 +50,9 @@ export class SidebarGroupingPage {
     await test.step(`Group the sidebar by ${mode}`, async () => {
       await this.groupByTrigger.click();
       await this.modeItem(mode).click();
-      await expect(this.groupByTrigger).toHaveAccessibleName(new RegExp(`Group by: ${mode}`, "i"));
+      await expect(this.groupByTrigger).toHaveAccessibleName(
+        new RegExp(`Group by: ${mode === "host" ? "worker" : mode}`, "i"),
+      );
     });
   }
 

@@ -19,7 +19,7 @@ A laptop that sleeps cannot host these. A mesh of peers has no natural owner for
 ## Decision
 
 1. **One hub, API only.** `apps/hub` owns the database, the API, the chat event log, scheduling and auth. Settings exist only on the hub. The UI stays in `apps/web` as a separate static SPA that connects to a hub URL. The hub, a static host or Electron can serve it.
-2. **Workers own machines.** Every git, file, process, PTY, search, LSP and agent operation for a worktree runs on that worktree's host, through a `Host` interface. The hub never touches a worker's disk directly.
+2. **Workers own machines.** Every git, file, process, PTY, search, LSP and agent operation for a worktree runs on that worktree's worker, through a `Host` interface. The hub never touches a worker's disk directly.
 3. **Workers dial out.** Each worker keeps one outbound WebSocket to the hub and opens no inbound ports. This works behind NAT and tunnels without a VPN.
 4. **Local mode is unchanged.** The hub runs a `LocalHost` in-process, so a single-machine user sees no difference.
 5. **Chat stays on the hub, and only agent stdio is remote.** The hub keeps the ACP client and the event log. The worker spawns the agent and relays its stdio. Replay, queueing and subscriptions stay independent of where the agent runs. Amended by [chat-ownership.md](chat-ownership.md): a worker that offers chat ownership runs the ACP client and the log for the chats of its worktrees, and the hub keeps a replicated copy.
@@ -64,7 +64,7 @@ Carried over:
 - a versioned protocol with a heartbeat
 - handoff by git
 - streamed PTY and file-change events
-- cron bound to a host
+- cron bound to a worker
 - `ownerPeerId` becomes `hostId`
 
 Dropped:
@@ -81,7 +81,7 @@ Dropped:
 - **1A.** Split the UI from the API: a static SPA, `apps/hub` created, cross-origin-safe auth, Electron loads the bundled UI.
 - **1.** Host abstraction with no behavior change: `Host` interface, `LocalHost`, all consumers routed through it.
 - **S.** Subscriptions: webhook and timer events delivered to chats. Independent of workers.
-- **2.** Link, worker and remote host: the WebSocket protocol, attached workers, device and worker tokens, a headless hub deploy.
+- **2.** Link, worker and remote worker: the WebSocket protocol, attached workers, device and worker tokens, a headless hub deploy.
 - **3.** Runners, environments and ephemeral workers: spawn hooks, `.band/environment.json`, placement, reaper.
 - **4.** MCP proxy and credential vault.
 - **7.** Desktop and browser: a desktop worker image and a remote viewer.

@@ -533,7 +533,7 @@ export class CronjobService {
       if (!hostId) {
         this.queries.disableWithReason(
           job.id,
-          `The default branch ${repo.defaultBranch} of ${repo.name} is not checked out on any host`,
+          `The default branch ${repo.defaultBranch} of ${repo.name} is not checked out on any worker`,
         );
         log.warn({ jobId: job.id, repo: repo.name }, "no default-branch worktree for cronjob");
         continue;

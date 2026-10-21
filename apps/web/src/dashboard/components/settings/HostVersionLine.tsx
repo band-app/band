@@ -54,7 +54,7 @@ export function HostVersionLine({ host, isAdmin }: { host: HostView; isAdmin: bo
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => void trpc.hosts.dismissUpdate.mutate({ hostId: host.id })}
+            onClick={() => void trpc.workers.dismissUpdate.mutate({ hostId: host.id })}
           >
             Dismiss
           </Button>

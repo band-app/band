@@ -223,7 +223,7 @@ export const WorktreeCard = memo(function WorktreeCard({
   // last checkpoint when it is offline. Nothing to move to, or no checkpoint, shows it disabled
   // with the reason. A worktree on the hub's own machine or a superseded copy has no such action.
   const onRemoteHost = !!worktree.hostId && worktree.hostId !== "local" && !superseded;
-  const hostLabelText = hostSeen.name || worktree.hostId || "this host";
+  const hostLabelText = hostSeen.name || worktree.hostId || "this worker";
   const moveMode: "move" | "offline" | null = !onRemoteHost
     ? null
     : hostOffline
@@ -520,7 +520,7 @@ export const WorktreeCard = memo(function WorktreeCard({
             <StatusIcon
               testId="worktree-card__superseded"
               label={`Superseded by ${superseded}`}
-              details={`Restored as ${superseded}. The files on this host are untouched.`}
+              details={`Restored as ${superseded}. The files on this worker are untouched.`}
               attrs={{ "data-superseded-by": superseded }}
             >
               <Replace className="size-3.5" />
@@ -545,8 +545,8 @@ export const WorktreeCard = memo(function WorktreeCard({
           {worktree.hostNotAllowed && !isDeleting && (
             <StatusIcon
               testId="worktree-card__not-allowed"
-              label="Not allowed on this host"
-              details="This repo is no longer allowed on this host. The worktree is kept and still opens."
+              label="Not allowed on this worker"
+              details="This repo is no longer allowed on this worker. The worktree is kept and still opens."
             >
               <Ban className="size-3.5" />
             </StatusIcon>
@@ -556,7 +556,7 @@ export const WorktreeCard = memo(function WorktreeCard({
             <StatusIcon
               testId="worktree-card__missing"
               label="Missing"
-              details="The host no longer has this worktree's folder. Remove drops the record."
+              details="The worker no longer has this worktree's folder. Remove drops the record."
             >
               <Link2Off className="size-3.5" />
             </StatusIcon>
@@ -664,7 +664,7 @@ export const WorktreeCard = memo(function WorktreeCard({
           >
             <MoveRight />
             <span className="flex flex-col">
-              Open on another host…
+              Open on another worker…
               {moveDisabledReason ? (
                 <span data-testid="worktree-card__move-reason" className="text-xs">
                   {moveDisabledReason}
@@ -680,7 +680,7 @@ export const WorktreeCard = memo(function WorktreeCard({
             onClick={() => {
               if (
                 window.confirm(
-                  `Remove this copy? The files of ${worktree.name} on its host are deleted. The restored worktree ${superseded} is not touched.`,
+                  `Remove this copy? The files of ${worktree.name} on its worker are deleted. The restored worktree ${superseded} is not touched.`,
                 )
               ) {
                 removeWorktreeMutation.mutate({

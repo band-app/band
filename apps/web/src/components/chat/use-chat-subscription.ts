@@ -227,7 +227,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
           const continued = await requestContinue(answer, chatId);
           if (!continued) {
             const message =
-              answer.code === "CONTINUE_NOT_POSSIBLE" ? answer.error : "The host is offline.";
+              answer.code === "CONTINUE_NOT_POSSIBLE" ? answer.error : "The worker is offline.";
             if (!willQueue) dispatch({ type: "local-send-failed", message });
             throw new Error(message);
           }

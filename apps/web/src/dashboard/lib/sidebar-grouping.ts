@@ -23,7 +23,7 @@ export type GroupBy = "repo" | "origin" | "host";
 export const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: "repo", label: "Repo" },
   { value: "origin", label: "Origin" },
-  { value: "host", label: "Host" },
+  { value: "host", label: "Worker" },
 ];
 
 /** Per device on purpose: a phone and a desktop may want different views. */
@@ -209,7 +209,7 @@ export function buildOriginRows(
 /** The name a host tag shows. */
 export function hostLabel(hostId: string, hosts: HostInfoLite[]): string {
   if (hostId === LOCAL_HOST) return "This hub";
-  return hosts.find((h) => h.id === hostId)?.name?.trim() || "unknown host";
+  return hosts.find((h) => h.id === hostId)?.name?.trim() || "unknown worker";
 }
 
 /** True when a repo has worktrees on more than one host. */
@@ -224,7 +224,7 @@ export function buildHostRows(
   isCollapsed: (id: string) => boolean,
 ): GroupedRow[] {
   const entries = entriesOf(repos);
-  // The hub's own machine has no row in the host list when it is turned off (BAND_LOCAL_HOST=off),
+  // The hub's own machine has no row in the host list when it is turned off (BAND_LOCAL_WORKER=off),
   // so it gets no group either.
   const localOff = hosts.length > 0 && !hosts.some((h) => h.id === LOCAL_HOST);
   const hostIds: string[] = [];

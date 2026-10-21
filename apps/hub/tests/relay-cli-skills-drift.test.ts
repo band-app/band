@@ -14,7 +14,7 @@ const GROUPS = [
   "browsers",
   "chats",
   "cronjobs",
-  "hosts",
+  "workers",
   "repos",
   "skills",
   "subscriptions",
