@@ -367,6 +367,7 @@ test("limiting a repo whose primary worker was removed starts from a worker that
   ).hostId;
   await trpcMutate(server.url, TOKEN, "repos.update", { name: REMOTE, primaryHostId: gone });
   await trpcMutate(server.url, TOKEN, "hosts.remove", { hostId: gone });
+  expect((await repoRow(REMOTE))?.primaryHostId).toBe(gone);
 
   const settings = new SettingsPage(page, server.url, TOKEN);
   await settings.goto();
