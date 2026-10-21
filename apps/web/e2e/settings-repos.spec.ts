@@ -155,11 +155,13 @@ test.beforeAll(async () => {
 
 test.beforeEach(() => resetClientState(tmpHome));
 
-// The workers tests change REMOTE's host list and checkpoint setting; put both back even when one fails.
+// The workers tests change REMOTE's host list, primary and checkpoint setting; put them back even
+// when one fails.
 test.afterEach(async () => {
   await trpcMutate(server.url, TOKEN, "repos.update", {
     name: REMOTE,
     allowedHostIds: null,
+    primaryHostId: null,
     checkpointsEnabled: null,
   });
 });
@@ -351,6 +353,29 @@ test("limiting a repo can turn its checkpoints off, and asks nothing once they a
   await settings.setRepoAllowedMode(REMOTE, "only");
   await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.length).toBe(1);
   await expect(settings.confirmLimitDialog()).toHaveCount(0);
+});
+
+test("limiting a repo whose primary worker was removed starts from a worker that exists (S3)", async ({
+  page,
+}) => {
+  // The hub keeps a removed worker's id as the repo's primary, so the page must not limit to it.
+  const gone = (
+    await trpcMutateData<{ hostId: string }>(server.url, TOKEN, "tokens.issueWorkerBootstrap", {
+      hostName: "e2e-removed",
+      labels: [],
+    })
+  ).hostId;
+  await trpcMutate(server.url, TOKEN, "repos.update", { name: REMOTE, primaryHostId: gone });
+  await trpcMutate(server.url, TOKEN, "hosts.remove", { hostId: gone });
+
+  const settings = new SettingsPage(page, server.url, TOKEN);
+  await settings.goto();
+  await settings.openRepoSettings(REMOTE);
+  await settings.setRepoAllowedMode(REMOTE, "only");
+  await settings.confirmLimit(false);
+  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.length).toBe(1);
+  expect((await repoRow(REMOTE))?.allowedHostIds).not.toContain(gone);
+  await expect(settings.repoWorkersError(REMOTE)).toHaveCount(0);
 });
 
 test("a repo page lists the MCP servers and cronjobs that reach it, with links (S5)", async ({

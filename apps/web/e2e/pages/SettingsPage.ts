@@ -843,6 +843,11 @@ export class SettingsPage {
     });
   }
 
+  /** The error under a repo page's worker list, when a change was refused. */
+  repoWorkersError(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__workers-error");
+  }
+
   repoRemoveButton(name: string): Locator {
     return this.repoPage(name).getByTestId("settings-repo__remove");
   }
