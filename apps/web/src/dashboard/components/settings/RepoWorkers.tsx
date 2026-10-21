@@ -177,6 +177,61 @@ function AddWorkerDialog({
 }
 
 /**
+ * Asks before "Only these" limits a repo whose checkpoints follow the default. The default is off
+ * for a limited repo, and turning checkpoints off deletes the ones the hub keeps, so the user
+ * chooses to keep them (checkpoints turned on for good) or to let them go.
+ */
+function ConfirmLimitDialog({
+  open,
+  onOpenChange,
+  repoName,
+  onLimit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  repoName: string;
+  onLimit: (keepCheckpoints: boolean) => void;
+}) {
+  const choose = (keepCheckpoints: boolean) => {
+    onOpenChange(false);
+    onLimit(keepCheckpoints);
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md" data-testid="settings-repo__confirm-limit-dialog">
+        <DialogHeader>
+          <DialogTitle>Limit {repoName} to chosen workers?</DialogTitle>
+          <DialogDescription>
+            Checkpoints are off by default for a limited repo. Turning them off deletes the
+            checkpoints the hub keeps for {repoName}.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="settings-repo__confirm-limit-drop"
+            onClick={() => choose(false)}
+          >
+            Turn checkpoints off
+          </Button>
+          <Button
+            size="sm"
+            data-testid="settings-repo__confirm-limit-keep"
+            onClick={() => choose(true)}
+          >
+            Keep checkpoints
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
  * The Workers section's rows: where the repo may run ("All workers" or "Only these", with "Add
  * worker…"), then each listed worker with its clone folder, its worktree count, a Primary switch
  * and, for a limited repo, Remove. Every change saves at once through `repos.update`.
@@ -188,6 +243,7 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [confirmingLimit, setConfirmingLimit] = useState(false);
   const usable = (hosts.data ?? []).filter((h) => h.usable);
   const counts = worktreesPerWorker(repo);
   const listed = listedWorkers(
@@ -199,7 +255,11 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
   const primary = repo.primaryHostId ?? null;
   const locked = !admin || saving;
 
-  const save = async (policy: { allowedHostIds?: string[] | null; primaryHostId?: string }) => {
+  const save = async (policy: {
+    allowedHostIds?: string[] | null;
+    primaryHostId?: string;
+    checkpointsEnabled?: boolean;
+  }) => {
     setError(null);
     setSaving(true);
     try {
@@ -214,9 +274,18 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
 
   // "Only these" starts from one worker: the primary, else one that holds a clone, else any usable one.
   const firstWorker = primary ?? (repo.clones ?? [])[0]?.hostId ?? usable[0]?.id;
+  const limit = (keepCheckpoints: boolean) => {
+    if (!firstWorker) return;
+    void save({
+      allowedHostIds: [firstWorker],
+      ...(keepCheckpoints ? { checkpointsEnabled: true } : {}),
+    });
+  };
   const chooseMode = (mode: string) => {
     if (mode === "all") return void save({ allowedHostIds: null });
-    if (firstWorker) void save({ allowedHostIds: [firstWorker] });
+    // A repo whose checkpoints follow the default loses them when it is limited, so ask first.
+    if (!allowed && (repo.checkpointsSetting ?? null) === null) setConfirmingLimit(true);
+    else limit(false);
   };
 
   const remove = (hostId: string) => {
@@ -332,6 +401,7 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
                           ? "A limited repo needs at least one worker"
                           : undefined
                       }
+                      data-testid="settings-repo__remove-worker-reason"
                     >
                       <Button
                         variant="outline"
@@ -361,6 +431,12 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
         ) : null}
       </div>
 
+      <ConfirmLimitDialog
+        open={confirmingLimit}
+        onOpenChange={setConfirmingLimit}
+        repoName={repo.name}
+        onLimit={limit}
+      />
       {allowed ? (
         <AddWorkerDialog
           open={adding}

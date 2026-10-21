@@ -111,6 +111,8 @@ test("a failed build shows its error and leaves no current image", async ({ page
 
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-status", "failed");
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-current", "");
+  // The build's error shows on the line that opens the log.
+  await expect(settingsPage.environmentImageLogToggle()).toHaveAttribute("data-error", "true");
   await settingsPage.openEnvironmentImageLog();
   await expect(settingsPage.environmentImageLog()).toContainText("FAIL_BUILD");
   await expect(settingsPage.environmentImageError()).toBeHidden();

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { useHostsList } from "../../hooks/use-update-status";
-import { Chip, Hint, RepoRow } from "./repo-page-ui";
+import { Chip, errorText, Hint, RepoRow } from "./repo-page-ui";
 
 type RepoEnvironment = Awaited<ReturnType<typeof trpc.environment.forRepo.query>>;
 type Environment = NonNullable<RepoEnvironment["environment"]>;
@@ -84,7 +84,7 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
       else setNotice(null);
       await queryClient.invalidateQueries({ queryKey });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
     } finally {
       setStarting(false);
     }
@@ -147,6 +147,7 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
           <summary
             className="cursor-pointer text-xs text-muted-foreground"
             data-testid="settings-repo__environment-image-log-toggle"
+            data-error={latest.error ? "true" : "false"}
           >
             Log of the last build{latest.error ? `: ${latest.error}` : ""}
           </summary>

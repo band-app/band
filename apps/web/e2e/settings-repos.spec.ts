@@ -51,6 +51,7 @@ interface RepoRow {
   label?: string | null;
   allowedHostIds: string[] | null;
   primaryHostId: string | null;
+  checkpointsSetting?: boolean | null;
 }
 const repoRow = async (name: string) =>
   (await trpcQuery<{ repos: RepoRow[] }>(server.url, TOKEN, "repos.list")).repos.find(
@@ -234,14 +235,25 @@ test("allowed workers and the primary worker save at once and show after a reloa
   await expect(settings.repoAllowedMode(REMOTE)).toHaveValue("all");
   await expect(settings.repoAddWorkerButton(REMOTE)).toHaveCount(0);
 
-  // "Only these" limits the repo to one worker at once, with no Save step.
+  // Limiting a repo whose checkpoints follow the default asks first, because the default for a
+  // limited repo is off and turning them off deletes them. Cancel limits nothing.
   await settings.setRepoAllowedMode(REMOTE, "only");
+  await expect(settings.confirmLimitDialog()).toBeVisible();
+  await settings.cancelLimit();
+  await expect(settings.repoAllowedMode(REMOTE)).toHaveValue("all");
+  expect((await repoRow(REMOTE))?.allowedHostIds).toBeNull();
+
+  // "Only these" limits the repo to one worker at once, with no Save step, and can keep checkpoints.
+  await settings.setRepoAllowedMode(REMOTE, "only");
+  await settings.confirmLimit(true);
+  await expect.poll(async () => (await repoRow(REMOTE))?.checkpointsSetting).toBe(true);
   await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.length).toBe(1);
   const first = (await repoRow(REMOTE))?.allowedHostIds?.[0] ?? "";
   await expect(settings.repoLimitedNote(REMOTE)).toBeVisible();
   await expect(settings.repoWorkerRows(REMOTE)).toHaveCount(1);
   // The last allowed worker cannot be removed, and with one worker there is nowhere to continue.
   await expect(settings.repoRemoveWorkerButton(REMOTE, first)).toBeDisabled();
+  await expect(settings.repoRemoveWorkerReason(REMOTE, first)).toHaveAttribute("title", /.+/);
   await expect(settings.autoContinueSwitch(REMOTE)).toBeDisabled();
   await expect(settings.autoContinueUnavailable(REMOTE)).toBeVisible();
 
@@ -259,6 +271,7 @@ test("allowed workers and the primary worker save at once and show after a reloa
     .poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.slice().sort())
     .toEqual([first, offlineHostId].sort());
   await expect(settings.autoContinueSwitch(REMOTE)).toBeEnabled();
+  await expect(settings.autoContinueUnavailable(REMOTE)).toHaveCount(0);
   // The dialog opens with an empty filter after a worker was added.
   await settings.openAddWorker(REMOTE);
   await expect(settings.addWorkerFilter()).toHaveValue("");
@@ -282,6 +295,7 @@ test("allowed workers and the primary worker save at once and show after a reloa
   await settings.setRepoAllowedMode(REMOTE, "all");
   await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds ?? null).toBeNull();
   await expect(settings.repoLimitedNote(REMOTE)).toHaveCount(0);
+  await trpcMutate(server.url, TOKEN, "repos.update", { name: REMOTE, checkpointsEnabled: null });
 });
 
 test("a repo page lists the MCP servers and cronjobs that reach it, with links (S5)", async ({

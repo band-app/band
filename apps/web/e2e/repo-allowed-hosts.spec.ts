@@ -315,4 +315,13 @@ test("worktrees on a host that stopped being allowed are flagged and still open 
   ).toMatchObject({
     hostNotAllowed: true,
   });
+
+  // The repo's settings page still lists A with its worktree, marked not allowed and with no controls.
+  // Settings opens over the worktree, whose live streams never let the network go idle for `goto`.
+  const settings = new SettingsPage(page, server.url, TOKEN);
+  await settings.openRepoSettings(repoName);
+  await expect(settings.repoClone(repoName, a.id)).toHaveAttribute("data-allowed", "false");
+  await expect(settings.repoClone(repoName, a.id)).toHaveAttribute("data-worktrees", "1");
+  await expect(settings.repoPrimarySwitch(repoName, a.id)).toHaveCount(0);
+  await expect(settings.repoRemoveWorkerButton(repoName, a.id)).toHaveCount(0);
 });

@@ -117,13 +117,22 @@ function RepoMcpServers({ repoName, onOpenMcp }: { repoName: string; onOpenMcp: 
 
 /** The cronjobs of this repo's worktrees, with their schedule, worktree and whether they run. */
 function RepoCronjobs({ repo, onOpenCronjobs }: { repo: RepoInfo; onOpenCronjobs?: () => void }) {
+  const hosts = useHostsList();
   const jobs = useQuery({
     queryKey: ["cronjobs.list"],
     queryFn: () => trpc.cronjobs.list.query(),
   });
-  const worktreeNames = new Map<string, string>(
-    repo.worktrees.map((w) => [toWorktreeId(repo.name, w.name, w.hostId ?? "local"), w.name]),
-  );
+  // `repos.list` leaves out the default-branch worktree of every worker but the primary, and a
+  // cronjob on one of those still runs, so the default branch on every worker counts too.
+  const worktreeNames = new Map<string, string>([
+    ...["local", ...(hosts.data ?? []).map((h) => h.id)].map(
+      (hostId) =>
+        [toWorktreeId(repo.name, repo.defaultBranch, hostId), repo.defaultBranch] as const,
+    ),
+    ...repo.worktrees.map(
+      (w) => [toWorktreeId(repo.name, w.name, w.hostId ?? "local"), w.name] as const,
+    ),
+  ]);
   if (jobs.isLoading) {
     return <p className="px-4 py-3 text-xs text-muted-foreground">Loading…</p>;
   }

@@ -704,6 +704,30 @@ export class SettingsPage {
     });
   }
 
+  /** The dialog that asks before "Only these" limits a repo whose checkpoints follow the default. */
+  confirmLimitDialog(): Locator {
+    return this.page.getByTestId("settings-repo__confirm-limit-dialog");
+  }
+
+  /** Answers the limit dialog: keep the checkpoints (turned on for good) or let them go. */
+  async confirmLimit(keepCheckpoints: boolean): Promise<void> {
+    await test.step(`Limit the repo and ${keepCheckpoints ? "keep" : "drop"} its checkpoints`, async () => {
+      await this.confirmLimitDialog()
+        .getByTestId(`settings-repo__confirm-limit-${keepCheckpoints ? "keep" : "drop"}`)
+        .click();
+      await expect(this.confirmLimitDialog()).toBeHidden();
+    });
+  }
+
+  /** Closes the limit dialog with Escape, which limits nothing and leaves Settings open. */
+  async cancelLimit(): Promise<void> {
+    await test.step("Cancel limiting the repo", async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.confirmLimitDialog()).toBeHidden();
+      await expect(this.dialog).toBeVisible();
+    });
+  }
+
   /** The "Add worker…" button, shown for a repo limited to chosen workers. */
   repoAddWorkerButton(name: string): Locator {
     return this.repoPage(name).getByTestId("settings-repo__add-worker");
@@ -784,9 +808,16 @@ export class SettingsPage {
     return this.repoPage(name).getByTestId("settings-repo__auto-continue-unavailable");
   }
 
-  /** One row per agent that takes a login on a repo page's Agents section. */
-  repoLoginRows(name: string): Locator {
-    return this.repoPage(name).getByTestId("settings-repo__login-row");
+  /** The Agents row of one agent type on a repo page. */
+  repoLoginRow(agentType: string, name: string): Locator {
+    return this.repoPage(name).locator(
+      `[data-testid="settings-repo__login-row"][data-agent="${agentType}"]`,
+    );
+  }
+
+  /** The wrapper of a worker's Remove button, whose `title` says why Remove is disabled. */
+  repoRemoveWorkerReason(name: string, hostId: string): Locator {
+    return this.repoClone(name, hostId).getByTestId("settings-repo__remove-worker-reason");
   }
 
   /** The "override" chip beside an agent's login picker on a repo page. */
@@ -1644,9 +1675,14 @@ export class SettingsPage {
   /** Expands the collapsed log of the latest image build. */
   async openEnvironmentImageLog(): Promise<void> {
     await test.step("Open the log of the last image build", async () => {
-      await this.dialog.getByTestId("settings-repo__environment-image-log-toggle").click();
+      await this.environmentImageLogToggle().click();
       await expect(this.environmentImageLog()).toBeVisible();
     });
+  }
+
+  /** The summary line that opens the build log, with `data-error` when the build failed. */
+  environmentImageLogToggle(): Locator {
+    return this.dialog.getByTestId("settings-repo__environment-image-log-toggle");
   }
 
   /** The log of the latest image build. */

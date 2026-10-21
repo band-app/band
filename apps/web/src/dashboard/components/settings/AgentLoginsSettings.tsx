@@ -297,6 +297,7 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
   const logins = useAgentLogins();
   const agents = useLoginAgents();
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const data = logins.data;
   if (!data) {
     return (
@@ -321,6 +322,7 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
 
   const change = async (agentType: string, loginId: string) => {
     setError(null);
+    setSaving(true);
     try {
       await trpc.agentLogins.setRepoOverride.mutate({
         agentType,
@@ -330,6 +332,8 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
       await queryClient.invalidateQueries({ queryKey: AGENT_LOGINS_KEY });
     } catch (err) {
       setError(errorText(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -349,6 +353,7 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
               label={agent.label}
               description="No logins yet."
               testId="settings-repo__login-row"
+              data={{ "data-agent": agent.type }}
             >
               <Hint>Add one in Agent logins</Hint>
             </RepoRow>
@@ -361,6 +366,7 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
             label={agent.label}
             description={`Default: ${fallback?.label ?? "none (the machine's own login)"}.`}
             testId="settings-repo__login-row"
+            data={{ "data-agent": agent.type }}
           >
             <select
               id={id}
@@ -369,6 +375,7 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
               data-agent={agent.type}
               data-repo={repoName}
               value={current}
+              disabled={saving}
               onChange={(e) => void change(agent.type, e.target.value)}
               className={SELECT_CLASS}
             >

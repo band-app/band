@@ -55,6 +55,7 @@ export function RepoRow({
   htmlFor,
   readOnly,
   testId,
+  data,
   children,
 }: {
   label: ReactNode;
@@ -62,6 +63,8 @@ export function RepoRow({
   htmlFor?: string;
   readOnly?: boolean;
   testId?: string;
+  /** Extra `data-*` attributes for tests, such as `{ "data-agent": "codex" }`. */
+  data?: Record<`data-${string}`, string>;
   children?: ReactNode;
 }) {
   return (
@@ -71,6 +74,7 @@ export function RepoRow({
         readOnly && "bg-muted/40",
       )}
       data-testid={testId}
+      {...data}
     >
       <div className="min-w-0">
         {htmlFor ? (
