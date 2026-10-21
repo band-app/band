@@ -1,5 +1,6 @@
 /**
- * Settings > Environment > Image: a repo whose environment has a `build`
+ * The image in the Environment section of a repo's page in Settings > Repos:
+ * a repo whose environment has a `build`
  * shows its current image, the status and log of its latest build and a
  * "Build image" button, driven through the real Settings dialog against the
  * real server.
@@ -84,8 +85,7 @@ test.afterAll(async () => {
 test("building an image shows the log and makes it the current image", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("environment");
-  await settingsPage.expandEnvironment("img-ok");
+  await settingsPage.openRepoSettings("img-ok");
 
   await expect(settingsPage.environmentImage()).toHaveAttribute("data-current", "");
   await settingsPage.buildEnvironmentImage();
@@ -102,8 +102,7 @@ test("building an image shows the log and makes it the current image", async ({ 
 test("a failed build shows its error and leaves no current image", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("environment");
-  await settingsPage.expandEnvironment("img-fail");
+  await settingsPage.openRepoSettings("img-fail");
 
   await settingsPage.buildEnvironmentImage();
 

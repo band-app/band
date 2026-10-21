@@ -1,8 +1,7 @@
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger, Button } from "@band-app/ui";
+import { Button } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
-import { useRepos } from "../../hooks/use-repos";
 
 type RepoEnvironment = Awaited<ReturnType<typeof trpc.environment.forRepo.query>>;
 
@@ -105,7 +104,12 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
   );
 }
 
-function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
+/**
+ * A repo's `.band/environment.json` on its repo page: the file parsed, its validation problems,
+ * which workers meet its `requires` and, when it has a `build`, its image with a button to build
+ * it. The file is read-only. Edit it in the repository, or check it with `band env validate`.
+ */
+export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
   const { data, isLoading, error } = useQuery<RepoEnvironment>({
     queryKey: ["environment.forRepo", repoName],
     queryFn: () => trpc.environment.forRepo.query({ repoName }),
@@ -190,7 +194,7 @@ function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
 
       {data.hosts.length > 0 && environment?.requires ? (
         <div className="space-y-1">
-          <h4 className="text-xs font-medium">Hosts</h4>
+          <h4 className="text-xs font-medium">Workers</h4>
           <ul className="divide-y divide-border rounded-md border border-border">
             {data.hosts.map((host) => (
               <li
@@ -216,44 +220,5 @@ function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
         </div>
       ) : null}
     </div>
-  );
-}
-
-/**
- * Rows for the Settings dialog's Environment section: one collapsed entry per
- * repo that, when opened, shows the repo's `.band/environment.json`
- * parsed, its validation problems, which hosts meet its `requires` and, when it
- * has a `build`, its image with a button to build it. The file is read-only.
- * Edit it in the repository, or check it with `band env validate`.
- */
-export function EnvironmentSettings() {
-  const { repos } = useRepos();
-  const [open, setOpen] = useState<string>("");
-
-  if (repos.length === 0) {
-    return <p className="px-4 py-3 text-sm text-muted-foreground">No repos yet.</p>;
-  }
-
-  return (
-    <Accordion type="single" collapsible value={open} onValueChange={setOpen}>
-      {repos.map((repo) => (
-        <AccordionItem
-          key={repo.name}
-          value={repo.name}
-          className="border-b-0"
-          data-testid="settings__environment-repo"
-        >
-          <AccordionTrigger
-            className="px-4 py-3 hover:no-underline"
-            data-testid={`settings__environment-trigger-${repo.name}`}
-          >
-            <span className="min-w-0 truncate text-sm font-medium">{repo.name}</span>
-          </AccordionTrigger>
-          <AccordionContent className="pb-0">
-            {open === repo.name ? <RepoEnvironmentDetails repoName={repo.name} /> : null}
-          </AccordionContent>
-        </AccordionItem>
-      ))}
-    </Accordion>
   );
 }

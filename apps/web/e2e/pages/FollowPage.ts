@@ -123,7 +123,7 @@ export class FollowPage {
 
   autoContinueSwitch(repo: string): Locator {
     return this.page
-      .locator(`[data-testid="settings-repos__row"][data-repo="${repo}"]`)
-      .getByTestId("settings-repos__auto-continue-switch");
+      .locator(`[data-testid="settings-repo"][data-repo="${repo}"]`)
+      .getByTestId("settings-repo__auto-continue-switch");
   }
 }

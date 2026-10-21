@@ -1,7 +1,7 @@
 /**
- * Settings › Browser: the browser profile list and, in a collapsed
- * "Repo defaults" accordion, each repo's default profile, driven
- * through the real Settings dialog against the real server.
+ * Settings › Browser: the browser profile list, and each repo's default
+ * profile on its page in Settings › Repos, driven through the real
+ * Settings dialog against the real server.
  *
  * Profiles are seeded over tRPC (the Chrome import that normally creates
  * them runs in the desktop app, which the e2e harness does not boot). The
@@ -107,27 +107,7 @@ async function newTabProfile(worktreeId: string): Promise<string | null> {
   return created.profileId;
 }
 
-test("repo defaults start collapsed and list each repo once by name", async ({ page }) => {
-  const settingsPage = new SettingsPage(page, server.url, TOKEN);
-  await settingsPage.goto();
-  await settingsPage.openDialog("browser");
-
-  await settingsPage.expectRowVisible(settingsPage.browserProfileRows().first());
-  await settingsPage.expectRowVisible(settingsPage.repoDefaultsTrigger());
-  await expect(settingsPage.repoDefaultsTrigger()).toHaveAttribute("aria-expanded", "false");
-  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toBeHidden();
-
-  await settingsPage.expandRepoDefaults();
-
-  await expect(settingsPage.repoBrowserProfileRows()).toHaveCount(2);
-  // The repo names come from the seed above, so matching on their text is safe.
-  await expect(settingsPage.repoBrowserProfileRows()).toContainText([REPO, OTHER_REPO]);
-  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toBeVisible();
-  await expect(settingsPage.repoBrowserProfileSelect(OTHER_REPO)).toBeVisible();
-  await expect(settingsPage.repoBrowserProfileSelect(SHARED_LABEL)).toHaveCount(0);
-});
-
-test("picking a repo's browser profile makes new tabs in every worktree use it", async ({
+test("the Browser page lists the profiles, and each repo's page has its own default", async ({
   page,
 }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
@@ -136,15 +116,32 @@ test("picking a repo's browser profile makes new tabs in every worktree use it",
 
   await settingsPage.expectRowVisible(settingsPage.browserProfileRows().first());
   await expect(settingsPage.browserProfileRows()).toHaveCount(1);
-  await settingsPage.expandRepoDefaults();
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toHaveCount(0);
+
+  await settingsPage.openRepoSettings(REPO);
+  await settingsPage.expectRowVisible(settingsPage.repoBrowserProfileSelect(REPO));
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText("Default");
+  await expect(settingsPage.repoBrowserProfileSelect(OTHER_REPO)).toHaveCount(0);
+  await expect(settingsPage.repoBrowserProfileSelect(SHARED_LABEL)).toHaveCount(0);
+});
+
+test("picking a repo's browser profile makes new tabs in every worktree use it", async ({
+  page,
+}) => {
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openRepoSettings(REPO);
   await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText("Default");
 
   await settingsPage.selectRepoBrowserProfile(REPO, PROFILE_NAME);
 
   await expect.poll(repoDefault).toBe(PROFILE_ID);
-  await expect(settingsPage.repoBrowserProfileSelect(OTHER_REPO)).toContainText("Default");
   expect(await newTabProfile(toWorktreeId(REPO, FEATURE_BRANCH, "local"))).toBe(PROFILE_ID);
   expect(await newTabProfile(toWorktreeId(REPO, "main", "local"))).toBe(PROFILE_ID);
+
+  await settingsPage.backToRepos();
+  await settingsPage.openRepo(OTHER_REPO);
+  await expect(settingsPage.repoBrowserProfileSelect(OTHER_REPO)).toContainText("Default");
 });
 
 test("deleting a profile removes it and puts its repo back on Default", async ({ page }) => {
@@ -154,15 +151,16 @@ test("deleting a profile removes it and puts its repo back on Default", async ({
   });
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("browser");
-  await settingsPage.expandRepoDefaults();
+  await settingsPage.openRepoSettings(REPO);
   await settingsPage.expectRowVisible(settingsPage.repoBrowserProfileSelect(REPO));
   await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText(PROFILE_NAME);
 
+  await settingsPage.openSection("browser");
   await settingsPage.deleteBrowserProfile(PROFILE_NAME);
-
   await expect(settingsPage.browserProfileRows()).toHaveCount(0);
-  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText("Default");
   await expect.poll(repoDefault).toBeNull();
+
+  await settingsPage.openRepoSettings(REPO);
+  await expect(settingsPage.repoBrowserProfileSelect(REPO)).toContainText("Default");
   expect(await newTabProfile(toWorktreeId(REPO, "main", "local"))).toBeNull();
 });

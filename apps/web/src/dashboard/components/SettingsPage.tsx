@@ -24,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useToolbarOverflow } from "../../components/ToolbarButtons";
 import { useTitleBarOffset } from "../../hooks/useIsFullscreen";
 import { isDesktop } from "../../lib/is-desktop";
 import { trpc } from "../../lib/trpc-client";
@@ -42,11 +43,11 @@ import { AppearanceSettings } from "./settings/AppearanceSettings";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
-import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
 import { McpSettings } from "./settings/McpSettings";
-import { ReposSettings } from "./settings/ReposSettings";
+import { RepoSettingsPage } from "./settings/RepoSettingsPage";
+import { ReposOverview } from "./settings/ReposOverview";
 import { RunnersSettings } from "./settings/RunnersSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsPageContext, SettingsSection } from "./settings/SettingsSection";
@@ -90,7 +91,6 @@ type SettingsSectionId =
   | "mcp"
   | "agent-hooks"
   | "runners"
-  | "environment"
   | "labels"
   | "agents"
   | "usage"
@@ -206,21 +206,9 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     adminOnly: true,
   },
   {
-    id: "repos",
-    title: "Repos",
-    subtitle: "Every repo, its remote URL and where each host keeps it.",
-    group: "Infrastructure",
-  },
-  {
     id: "runners",
     title: "Runners",
     subtitle: "How the hub starts workers on demand.",
-    group: "Infrastructure",
-  },
-  {
-    id: "environment",
-    title: "Environment",
-    subtitle: "Each repo's .band/environment.json, checked against the hosts.",
     group: "Infrastructure",
   },
   {
@@ -234,6 +222,13 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     title: "Usage report",
     subtitle:
       "Configure how the Usage dialog collects and retains per-session token and cost rows.",
+    group: "Worktree",
+  },
+  {
+    id: "repos",
+    title: "Repos",
+    subtitle:
+      "Every repo on this hub. Pick one to see and change its settings. Add a repo from the Repos panel in the sidebar.",
     group: "Worktree",
   },
 ];
@@ -294,6 +289,9 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
   useEffect(() => {
     if (open && initialSection) setActive(initialSection);
   }, [open, initialSection]);
+  // The repo whose page Settings > Repos shows, or null for the overview.
+  const [repoPage, setRepoPage] = useState<string | null>(null);
+  const toolbar = useToolbarOverflow();
   const [navQuery, setNavQuery] = useState("");
   const isAdmin = useIsAdmin();
   const availableSections = SETTINGS_SECTIONS.filter(
@@ -717,7 +715,11 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
             {visibleGroups.map((group) => (
               <Fragment key={group.name}>
                 <div className="flex flex-col gap-0.5 max-lg:flex-row max-lg:items-center">
-                  <div className="px-2 pt-2 pb-1 text-[10px] max-lg:hidden font-medium tracking-widest text-muted-foreground uppercase">
+                  <div
+                    data-testid="settings-page__nav-group"
+                    data-group={group.name}
+                    className="px-2 pt-2 pb-1 text-[10px] max-lg:hidden font-medium tracking-widest text-muted-foreground uppercase"
+                  >
                     {group.name}
                   </div>
                   {group.sections.map((section) => (
@@ -726,7 +728,10 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                       type="button"
                       data-testid={`settings__nav-${section.id}`}
                       aria-current={active === section.id ? "page" : undefined}
-                      onClick={() => setActive(section.id)}
+                      onClick={() => {
+                        setActive(section.id);
+                        setRepoPage(null);
+                      }}
                       className={cn(
                         "rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap transition-colors hover:bg-accent/60",
                         active === section.id && "bg-accent font-medium text-accent-foreground",
@@ -741,13 +746,20 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
           </nav>
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8">
-                <header className="space-y-1">
-                  <h1 className="text-xl font-semibold" data-testid="settings-page__title">
-                    {activeMeta.title}
-                  </h1>
-                  <p className="text-sm text-muted-foreground">{activeMeta.subtitle}</p>
-                </header>
+              <div
+                className={cn(
+                  "mx-auto flex w-full flex-col gap-6 px-6 py-8",
+                  active === "repos" ? "max-w-5xl" : "max-w-2xl",
+                )}
+              >
+                {active === "repos" && repoPage ? null : (
+                  <header className="space-y-1">
+                    <h1 className="text-xl font-semibold" data-testid="settings-page__title">
+                      {activeMeta.title}
+                    </h1>
+                    <p className="text-sm text-muted-foreground">{activeMeta.subtitle}</p>
+                  </header>
+                )}
                 <SettingsPageContext.Provider value={true}>
                   {/* ── Appearance ─────────────────────────────────── */}
                   {active === "appearance" ? (
@@ -855,11 +867,22 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                   ) : null}
 
                   {/* ── Repos ──────────────────────────────────────── */}
-                  {active === "repos" ? (
-                    <SettingsSection title="Repos">
-                      <ReposSettings />
-                    </SettingsSection>
+                  {active === "repos" && repoPage ? (
+                    <RepoSettingsPage
+                      name={repoPage}
+                      onBack={() => setRepoPage(null)}
+                      onOpenMcp={() => setActive("mcp")}
+                      onOpenCronjobs={
+                        toolbar
+                          ? () => {
+                              onOpenChange(false);
+                              toolbar.openCronjobs();
+                            }
+                          : undefined
+                      }
+                    />
                   ) : null}
+                  {active === "repos" && !repoPage ? <ReposOverview onOpen={setRepoPage} /> : null}
 
                   {/* ── Agent logins ───────────────────────────────── */}
                   {active === "agent-logins" ? (
@@ -900,16 +923,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                   {active === "runners" ? (
                     <SettingsSection title="Runners">
                       <RunnersSettings />
-                    </SettingsSection>
-                  ) : null}
-
-                  {/* ── Environment ────────────────────────────────── */}
-                  {active === "environment" ? (
-                    <SettingsSection
-                      title="Environment"
-                      description="Each repo's .band/environment.json, checked against the hosts."
-                    >
-                      <EnvironmentSettings />
                     </SettingsSection>
                   ) : null}
 

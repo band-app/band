@@ -1,8 +1,8 @@
 /**
- * Page object for the checkpoint surfaces: the "Checkpoints on the hub" switch in Settings >
- * Repos, the offline icon and superseded badge on a worktree card, its "Open on another host…"
+ * Page object for the checkpoint surfaces: the "Checkpoints on the hub" switch on a repo's
+ * page in Settings > Repos, the offline icon and superseded badge on a worktree card, its "Open on another host…"
  * menu item, the offline notice, and the read-only Explorer and Changes of the newest checkpoint. Locators use the test ids set in
- * `ReposSettings.tsx`, `WorktreeCard.tsx` and `OfflineCheckpoint.tsx`.
+ * `RepoControls.tsx`, `WorktreeCard.tsx` and `OfflineCheckpoint.tsx`.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -12,16 +12,17 @@ export class CheckpointsPage {
 
   // ---- Settings > Repos -----------------------------------------------------
 
-  repoRow(repo: string): Locator {
-    return this.page.locator(`[data-testid="settings-repos__row"][data-repo="${repo}"]`);
+  /** A repo's page in Settings > Repos. */
+  repoPage(repo: string): Locator {
+    return this.page.locator(`[data-testid="settings-repo"][data-repo="${repo}"]`);
   }
 
   checkpointsSwitch(repo: string): Locator {
-    return this.repoRow(repo).getByTestId("settings-repos__checkpoints-switch");
+    return this.repoPage(repo).getByTestId("settings-repo__checkpoints-switch");
   }
 
   checkpointsNote(repo: string): Locator {
-    return this.repoRow(repo).getByTestId("settings-repos__checkpoints-note");
+    return this.repoPage(repo).getByTestId("settings-repo__checkpoints-note");
   }
 
   async toggleCheckpoints(repo: string): Promise<void> {

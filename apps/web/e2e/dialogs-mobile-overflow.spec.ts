@@ -217,6 +217,8 @@ for (const width of WIDTHS) {
         await settingsPage.openSection(section);
         await expectFits(await measureDialogOverflow(settingsPage.dialog));
       }
+      await settingsPage.openRepoSettings(REPO);
+      await expectFits(await measureDialogOverflow(settingsPage.dialog));
     });
 
     test("Desktop viewer in fit mode fits the screen", async ({ page }) => {

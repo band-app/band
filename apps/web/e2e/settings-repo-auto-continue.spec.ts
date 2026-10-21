@@ -55,12 +55,16 @@ test("the switch is off by default and a choice sticks (S2)", async ({ page }) =
   const settings = new SettingsPage(page, server.url, TOKEN);
   const follow = new FollowPage(page);
   await settings.goto();
-  await settings.openDialog("repos");
+  await settings.openRepoSettings("everywhere");
 
   await expect(follow.autoContinueSwitch("everywhere")).not.toBeChecked();
   await follow.autoContinueSwitch("everywhere").click();
   await expect(follow.autoContinueSwitch("everywhere")).toBeChecked();
   await expect.poll(() => autoContinue("everywhere")).toBe(true);
+
+  await settings.goto();
+  await settings.openRepoSettings("everywhere");
+  await expect(follow.autoContinueSwitch("everywhere")).toBeChecked();
 
   await follow.autoContinueSwitch("everywhere").click();
   await expect(follow.autoContinueSwitch("everywhere")).not.toBeChecked();

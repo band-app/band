@@ -1,6 +1,7 @@
 /**
- * Settings > Environment: each repo's `.band/environment.json`, parsed,
- * with its validation problems and which hosts meet its `requires`, driven
+ * The Environment section of a repo's page in Settings > Repos: the repo's
+ * `.band/environment.json`, parsed, with its validation problems and which
+ * workers meet its `requires`, driven
  * through the real Settings dialog against the real server.
  *
  * The repos point at real temp directories that hold the files, because the
@@ -68,21 +69,17 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-async function open(page: Page): Promise<SettingsPage> {
+async function open(page: Page, repo: string): Promise<SettingsPage> {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("environment");
+  await settingsPage.openRepoSettings(repo);
   return settingsPage;
 }
 
-test("a valid environment shows its fields and the hosts that miss requires", async ({ page }) => {
-  const settingsPage = await open(page);
-  await expect(settingsPage.environmentTrigger("env-valid")).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
-
-  await settingsPage.expandEnvironment("env-valid");
+test("a valid environment shows its fields and the workers that miss requires", async ({
+  page,
+}) => {
+  const settingsPage = await open(page, "env-valid");
 
   await expect(settingsPage.environmentValid()).toBeVisible();
   await expect(settingsPage.environmentIssues()).toHaveCount(0);
@@ -95,8 +92,7 @@ test("a valid environment shows its fields and the hosts that miss requires", as
 });
 
 test("an invalid environment lists each problem with its path", async ({ page }) => {
-  const settingsPage = await open(page);
-  await settingsPage.expandEnvironment("env-broken");
+  const settingsPage = await open(page, "env-broken");
 
   const issues = settingsPage.environmentIssues();
   await expect(issues).toBeVisible();
@@ -106,15 +102,13 @@ test("an invalid environment lists each problem with its path", async ({ page })
 });
 
 test("a devcontainer file that does not exist is reported", async ({ page }) => {
-  const settingsPage = await open(page);
-  await settingsPage.expandEnvironment("env-missing-file");
+  const settingsPage = await open(page, "env-missing-file");
 
   await expect(settingsPage.environmentIssues()).toContainText("build.devcontainer");
 });
 
 test("a repo without the file says so", async ({ page }) => {
-  const settingsPage = await open(page);
-  await settingsPage.expandEnvironment("env-none");
+  const settingsPage = await open(page, "env-none");
 
   await expect(settingsPage.environmentNone()).toBeVisible();
 });

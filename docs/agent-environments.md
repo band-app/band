@@ -1,6 +1,6 @@
 # Agent environments
 
-A repository can say what its worktrees need by committing `.band/environment.json`. Band reads it when it sets up a worktree and shows it in Settings > Environment. It is the repo's answer to "what has to be installed and running before an agent can work here".
+A repository can say what its worktrees need by committing `.band/environment.json`. Band reads it when it sets up a worktree and shows it in the Environment section of the repo's page in Settings > Repos. It is the repo's answer to "what has to be installed and running before an agent can work here".
 
 This page covers the file format, how it relates to `.devcontainer/devcontainer.json` and `.band/config.json`, and how Band builds and caches an image from it. Choosing a host for a worktree and booting the image in a container are later steps. Today Band parses the file, validates it, runs its commands, compares `requires` with the tools a host reports and builds the image.
 
@@ -62,7 +62,7 @@ The commands run on the host that owns the worktree, so a worktree on a worker r
 
 - When a valid `environment.json` has `install` or `start`, it supplies the setup command. Otherwise Band reads `setup` from `config.json`.
 - When it has `teardown`, it supplies the teardown command. Otherwise Band reads `teardown` from `config.json`.
-- A file with problems is ignored and Band logs a warning, so a typo does not stop worktrees from being created. Settings > Environment and `band env validate` show the problems.
+- A file with problems is ignored and Band logs a warning, so a typo does not stop worktrees from being created. The repo's page in Settings > Repos and `band env validate` show the problems.
 
 Everything else in `config.json`, such as `workspace.copyFiles`, is unchanged. A repo that has only `config.json` keeps working.
 
@@ -78,7 +78,7 @@ Band does not build these yet. It checks that the file exists and nothing more.
 
 A range can be `>=24`, `>24`, `<=3`, `^3.12`, `~1.22.1`, `24` or `24.x`. Space separated comparators combine (`>=20 <23`), and `||` joins alternatives (`18 || >=20`). Pre-release tags are ignored.
 
-Settings > Environment lists each host and, for one that does not meet `requires`, what is missing and the version it has. Nothing blocks a worktree on an unmet requirement yet. Choosing hosts by `requires` comes with placement.
+The Environment section of the repo's page in Settings > Repos lists each worker and, for one that does not meet `requires`, what is missing and the version it has. Nothing blocks a worktree on an unmet requirement yet. Choosing hosts by `requires` comes with placement.
 
 ## Checking a file
 
@@ -106,7 +106,7 @@ band env build api       # build now, or report a cache hit; follows the log
 band env status api      # the current image and the latest build with its log
 ```
 
-Settings > Environment shows the same: the current image, the status and log of the latest build, and a "Build image" button. Building needs an admin token.
+The same section shows it too: the current image, the status and log of the latest build, and a "Build image" button. Building needs an admin token.
 
 ### What goes into an image
 

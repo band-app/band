@@ -166,7 +166,7 @@ test("adds a repo from a worker folder through the picker", async ({ page }) => 
   // The repo is named after its remote, not the folder.
   const repo = await findRepo(server.url, "from-worker-origin");
   expect(repo?.remoteUrl).toBe(origin);
-  await settingsPage.openDialog("repos");
+  await settingsPage.openRepoSettings("from-worker-origin");
   await expect(settingsPage.repoUrl("from-worker-origin")).toContainText(origin);
   await expect(settingsPage.repoBranch("from-worker-origin")).toContainText("main");
   // The dialog covers the page: the only Add repo buttons left would be Settings', and it has none.
@@ -227,9 +227,11 @@ test("Settings > Repos removes a repo that has no worktrees", async ({ page }) =
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
-  await settingsPage.openDialog("repos");
-  await expect(settingsPage.repoRow("registry-loose")).toHaveAttribute("data-in-use", "false");
+  await settingsPage.openRepoSettings("registry-loose");
+  await expect(settingsPage.repoRemoveButton("registry-loose")).toBeEnabled();
   await settingsPage.removeRepo("registry-loose");
+  // Removing it goes back to the overview, which no longer lists it.
+  await expect(settingsPage.reposOverview()).toBeVisible();
   await expect(settingsPage.repoRow("registry-loose")).toHaveCount(0);
 });
 

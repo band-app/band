@@ -175,8 +175,8 @@ test("a repo added from a worker is limited to it, and Settings > Repos changes 
   expect(added?.primaryHostId).toBe(a.id);
   const repoName = REPO;
 
-  // Settings > Repos shows the same, and the user makes the repo available everywhere.
-  await settings.openDialog("repos");
+  // The repo's page in Settings > Repos shows the same, and the user makes the repo available everywhere.
+  await settings.openRepoSettings(repoName);
   const hosts = settings.repoHosts(repoName);
   await hosts.expectOnly([a.id], a.id);
   await hosts.chooseAllHosts();
@@ -284,7 +284,7 @@ test("only the primary host's default-branch worktree is listed in every groupin
   }
 
   // Making B the primary switches which one is listed. Nothing moves on disk.
-  await settings.openDialog("repos");
+  await settings.openRepoSettings(repoName);
   await settings.repoHosts(repoName).choosePrimary(b.id);
   await settings.saveRepoHosts(repoName);
   await expect.poll(async () => (await repoRow(repoName))?.primaryHostId).toBe(b.id);

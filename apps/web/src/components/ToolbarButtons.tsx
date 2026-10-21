@@ -34,6 +34,11 @@ interface ToolbarOverflowContextValue {
 
 const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>(null);
 
+/** The overflow dialogs' openers, or null outside a <ToolbarOverflowProvider>. */
+export function useToolbarOverflow(): ToolbarOverflowContextValue | null {
+  return useContext(ToolbarOverflowContext);
+}
+
 /**
  * Owns the dialog state for the toolbar overflow menu (Cronjobs, Usage, Resources, Mobile access).
  *

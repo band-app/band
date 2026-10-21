@@ -98,13 +98,16 @@ test("adds, defaults, overrides and removes a login without ever showing its sec
   await settingsPage.setAgentLoginDefault("claude-code", "Team");
   await expect.poll(() => settingsPage.agentLoginDefaultLabel("claude-code")).toBe("Team");
 
-  // A repo can use another login than the default.
-  await settingsPage.openSection("repos");
+  // A repo can use another login than the default, on its repo page.
+  await settingsPage.openRepoSettings("logins");
   const override = settingsPage.repoLoginOverride("claude-code", "logins");
   await settingsPage.expectRowVisible(override);
   await settingsPage.setRepoLoginOverride("claude-code", "logins", "Spare");
-  await settingsPage.openSection("agent-logins");
-  await settingsPage.openSection("repos");
+  // The override shows after a reload, and in the overview's Logins column.
+  await settingsPage.goto();
+  await settingsPage.openDialog("repos");
+  await expect(settingsPage.repoCell("logins", "logins")).toContainText("Spare");
+  await settingsPage.openRepo("logins");
   await expect
     .poll(() => settingsPage.repoLoginOverrideLabel("claude-code", "logins"))
     .toBe("Spare");
@@ -113,7 +116,7 @@ test("adds, defaults, overrides and removes a login without ever showing its sec
   await settingsPage.removeAgentLogin("Spare");
   await expect(settingsPage.agentLoginRow("Spare")).toHaveCount(0);
   // Removing a login clears the override that used it.
-  await settingsPage.openSection("repos");
+  await settingsPage.openRepoSettings("logins");
   await expect(override).toHaveValue("");
 });
 

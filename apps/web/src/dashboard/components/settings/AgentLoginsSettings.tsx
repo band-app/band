@@ -22,7 +22,7 @@ export function useAgentLogins() {
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** The agent types of the configured coding agents that Band can hold a login for. */
-function useLoginAgents() {
+export function useLoginAgents() {
   const models = useQuery({
     queryKey: ["models.listAll"],
     queryFn: () => trpc.models.listAll.query(),
@@ -286,16 +286,37 @@ export function AgentLoginsSettings() {
   );
 }
 
-/** A repo's login override for each agent that has logins, in Settings > Repos. Admin only. */
+/**
+ * The repo page's Agents rows: for each agent with at least one login, which login it uses in this
+ * repo. "Use the default" follows the agent's default from Agent logins.
+ */
 export function RepoLoginOverrides({ repoName }: { repoName: string }) {
   const queryClient = useQueryClient();
   const logins = useAgentLogins();
   const agents = useLoginAgents();
   const [error, setError] = useState<string | null>(null);
   const data = logins.data;
-  if (!data) return null;
+  if (!data) {
+    return (
+      <p
+        className="px-4 py-3 text-xs text-muted-foreground"
+        data-testid="settings-repo__logins-none"
+      >
+        {logins.isError ? "Changing logins needs an admin token." : "Loading…"}
+      </p>
+    );
+  }
   const rows = agents.filter((a) => data.logins.some((l) => l.agentType === a.type));
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    return (
+      <p
+        className="px-4 py-3 text-xs text-muted-foreground"
+        data-testid="settings-repo__logins-none"
+      >
+        No agent logins yet. Add one in Agent logins.
+      </p>
+    );
+  }
 
   const change = async (agentType: string, loginId: string) => {
     setError(null);
@@ -312,23 +333,33 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
   };
 
   return (
-    <div className="space-y-1" data-testid="settings-repos__logins">
-      <p className="text-xs font-medium">Agent logins</p>
+    <div className="divide-y divide-border" data-testid="settings-repo__logins">
       {rows.map((agent) => {
         const current =
           data.repoOverrides.find((o) => o.agentType === agent.type && o.repo === repoName)
             ?.loginId ?? "";
+        const fallback = data.logins.find((l) => l.id === data.defaults[agent.type]);
+        const id = `settings-repo-${repoName}-login-${agent.type}`;
         return (
-          <label key={agent.type} className="flex items-center justify-between gap-2 text-xs">
-            <span>{agent.label}</span>
+          <SettingsRow
+            key={agent.type}
+            htmlFor={id}
+            label={agent.label}
+            description={
+              current
+                ? "Overrides the default for this repo."
+                : `Default: ${fallback?.label ?? "none (the machine's own login)"}.`
+            }
+          >
             <select
+              id={id}
               aria-label={`${agent.label} login for ${repoName}`}
-              data-testid="settings-repos__login-override"
+              data-testid="settings-repo__login-override"
               data-agent={agent.type}
               data-repo={repoName}
               value={current}
               onChange={(e) => void change(agent.type, e.target.value)}
-              className="h-7 rounded-md border border-border bg-background px-2 text-xs"
+              className="h-8 rounded-md border border-border bg-background px-2 text-sm"
             >
               <option value="">Use the default</option>
               {data.logins
@@ -339,11 +370,11 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
                   </option>
                 ))}
             </select>
-          </label>
+          </SettingsRow>
         );
       })}
       {error ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="px-4 py-2 text-xs text-destructive">
           {error}
         </p>
       ) : null}
