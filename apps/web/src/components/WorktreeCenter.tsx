@@ -1493,6 +1493,20 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
                 >
                   <Eye className="size-3.5" />
                 </button>
+                {fileActions?.showVisualToggle && viewMode === "preview" && (
+                  <button
+                    type="button"
+                    onClick={() => setHtmlEditing((v) => !v)}
+                    aria-pressed={htmlEditing}
+                    title="Edit text"
+                    data-testid="center-file-leaf__html-edit"
+                    className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
+                      htmlEditing ? "bg-accent text-foreground" : "text-muted-foreground"
+                    }`}
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1511,20 +1525,6 @@ function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
                 </button>
                 {fileActions?.showMarkdownToggle && viewMode !== "source" && (
                   <MarkdownWidthToggle />
-                )}
-                {fileActions?.showVisualToggle && viewMode === "preview" && (
-                  <button
-                    type="button"
-                    onClick={() => setHtmlEditing((v) => !v)}
-                    aria-pressed={htmlEditing}
-                    title="Edit text"
-                    data-testid="center-file-leaf__html-edit"
-                    className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
-                      htmlEditing ? "bg-accent text-foreground" : "text-muted-foreground"
-                    }`}
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
                 )}
               </>
             )}
