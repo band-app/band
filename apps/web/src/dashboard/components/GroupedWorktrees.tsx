@@ -1,5 +1,17 @@
-import { ChevronRight, Folder } from "lucide-react";
-import type { CollapseState } from "../hooks/use-collapse-state";
+import {
+  Button,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@band-app/ui";
+import { ChevronRight, Circle, Folder, Palette, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCapabilities } from "../context";
+import { type CollapseState, UNGROUPED_KEY } from "../hooks/use-collapse-state";
+import { GROUP_COLOR_PRESETS } from "../lib/group-colors";
 import {
   type GroupBy,
   type GroupedRow,
@@ -8,9 +20,16 @@ import {
   hostLabel,
   type WorktreeRow,
 } from "../lib/sidebar-grouping";
-import type { DeleteDialogInfo, SetupStatus, WorktreeBranchStatus, WorktreeStatus } from "../types";
+import { useDashboardStore } from "../stores/index";
+import type {
+  DeleteDialogInfo,
+  GroupDefinition,
+  SetupStatus,
+  WorktreeBranchStatus,
+  WorktreeStatus,
+} from "../types";
 import { RepoAvatar } from "./RepoAvatar";
-import { DragRow, HostDropTarget } from "./SidebarDnd";
+import { DragRow, GroupDropTarget, HostDropTarget } from "./SidebarDnd";
 import { WorktreeCard } from "./WorktreeCard";
 
 const INDENT_PX = 14;
@@ -52,7 +71,14 @@ export function WorktreeRowView({
 }: WorktreeRowViewProps) {
   const { entry } = row;
   const isPin = row.pinned === true && row.depth === 0;
-  const showToggle = mode === "origin" || row.pinned === true;
+  const showToggle = mode === "origin" || mode === "groups" || row.pinned === true;
+  const capabilities = useCapabilities();
+  const openWorktree = useDashboardStore((s) => s.openWorktree);
+  const selectParent = (worktreeId: string) => {
+    const href = capabilities.getWorktreeHref?.(worktreeId);
+    if (href && capabilities.navigate) capabilities.navigate(href);
+    else openWorktree(worktreeId);
+  };
   const showRepoName = mode !== "host" || row.pinned === true;
   const testPrefix = row.pinned ? "repo-list__pinned-row" : "repo-list__grouped-row";
   return (
@@ -107,12 +133,27 @@ export function WorktreeRowView({
               onShowDeleteDialog={onShowDeleteDialog}
               showRepoName={showRepoName}
               repoAvatar={entry.repo.avatar}
-              hostTag={mode === "repo" ? undefined : hostLabel(hostIdOf(entry.worktree), hosts)}
+              hostTag={
+                mode === "repo" || (mode === "groups" && hostIdOf(entry.worktree) === "local")
+                  ? undefined
+                  : hostLabel(hostIdOf(entry.worktree), hosts)
+              }
               allowedHostIds={entry.repo.allowedHostIds}
               onTogglePinned={onTogglePinned}
             />
           </div>
         </div>
+        {row.fromParent && (
+          <button
+            type="button"
+            data-testid={`repo-list__from-parent--${entry.worktreeId}`}
+            title={`Open ${row.fromParent.name}`}
+            onClick={() => selectParent(row.fromParent!.worktreeId)}
+            className="ml-8 w-fit max-w-full truncate rounded px-1 text-left text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          >
+            from {row.fromParent.name}
+          </button>
+        )}
         {row.parentRemoved && (
           <span
             data-testid={`repo-list__parent-removed--${entry.worktreeId}`}
@@ -126,10 +167,22 @@ export function WorktreeRowView({
   );
 }
 
+/** What a group header's menu does. Absent in the other views. */
+export interface GroupHeaderActions {
+  onRename: (group: GroupDefinition) => void;
+  onColor: (group: GroupDefinition, color: string) => void;
+  onDelete: (group: GroupDefinition) => void;
+  /** Starts a new worktree in the group (null for Ungrouped). */
+  onAddWorktree: (groupId: string | null) => void;
+}
+
 interface GroupedWorktreesProps extends RowCardProps {
   mode: Exclude<GroupBy, "repo">;
   rows: GroupedRow[];
   hostCollapse: CollapseState;
+  /** Groups view: the groups' collapsed state and menu actions. */
+  groupCollapse?: CollapseState;
+  groupActions?: GroupHeaderActions;
   /** Index of the first row of this list among the keyboard-navigable rows. */
   navStart: number;
 }
@@ -139,6 +192,8 @@ export function GroupedWorktrees({
   mode,
   rows,
   hostCollapse,
+  groupCollapse,
+  groupActions,
   navStart,
   ...cardProps
 }: GroupedWorktreesProps) {
@@ -146,6 +201,114 @@ export function GroupedWorktrees({
   return (
     <div className="flex flex-col gap-0.5 px-2" data-testid={`repo-list__grouped--${mode}`}>
       {rows.map((row) => {
+        if (row.kind === "group") {
+          const toggleKey = row.groupId ?? UNGROUPED_KEY;
+          const group: GroupDefinition | null =
+            row.groupId && row.color ? { id: row.groupId, name: row.name, color: row.color } : null;
+          const header = (
+            <div key={row.key} className="group/header mt-1 flex items-center first:mt-0">
+              <GroupDropTarget dndId={row.key} groupId={row.groupId}>
+                {({ setNodeRef, over }) => (
+                  <button
+                    ref={setNodeRef}
+                    type="button"
+                    data-testid={`repo-list__group-header--${toggleKey}`}
+                    data-drop-zone={over ? "into" : undefined}
+                    aria-expanded={!row.collapsed}
+                    onClick={() => {
+                      if (!row.filtered) groupCollapse?.toggle(toggleKey);
+                    }}
+                    className={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded pl-1 pr-2 text-left transition-colors hover:bg-accent/50 ${
+                      over ? "bg-primary/20" : ""
+                    }`}
+                  >
+                    {row.filtered ? (
+                      <span className="size-3.5 shrink-0" />
+                    ) : (
+                      <ChevronRight
+                        className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${
+                          row.collapsed ? "" : "rotate-90"
+                        }`}
+                      />
+                    )}
+                    {row.color ? (
+                      <span
+                        data-testid={`repo-list__group-dot--${toggleKey}`}
+                        className="size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: row.color }}
+                      />
+                    ) : (
+                      <Circle className="size-2.5 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="truncate text-[13px] font-semibold text-foreground/90">
+                      {row.name}
+                    </span>
+                    <span
+                      data-testid={`repo-list__group-count--${toggleKey}`}
+                      className="ml-auto shrink-0 text-[11px] text-muted-foreground"
+                    >
+                      {row.count}
+                    </span>
+                  </button>
+                )}
+              </GroupDropTarget>
+              {groupActions && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`New worktree in ${row.name}`}
+                  data-testid={`repo-list__group-add--${toggleKey}`}
+                  onClick={() => groupActions.onAddWorktree(row.groupId)}
+                >
+                  <Plus />
+                </Button>
+              )}
+            </div>
+          );
+          if (!group || !groupActions) return header;
+          return (
+            <ContextMenu key={row.key}>
+              <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem
+                  data-testid="repo-list__group-action--rename"
+                  onClick={() => groupActions.onRename(group)}
+                >
+                  <Pencil />
+                  Rename…
+                </ContextMenuItem>
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger data-testid="repo-list__group-action--color">
+                    <Palette />
+                    Color
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent>
+                    {GROUP_COLOR_PRESETS.map((preset) => (
+                      <ContextMenuItem
+                        key={preset.value}
+                        data-testid={`repo-list__group-color--${preset.name.toLowerCase()}`}
+                        onClick={() => groupActions.onColor(group, preset.value)}
+                      >
+                        <span
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: preset.value }}
+                        />
+                        {preset.name}
+                      </ContextMenuItem>
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                <ContextMenuItem
+                  data-testid="repo-list__group-action--delete"
+                  onClick={() => groupActions.onDelete(group)}
+                >
+                  <Trash2 />
+                  Delete…
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          );
+        }
         if (row.kind === "host") {
           return (
             <HostDropTarget key={row.key} dndId={`host:${row.hostId}`} hostId={row.hostId}>

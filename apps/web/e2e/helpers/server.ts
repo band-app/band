@@ -64,14 +64,23 @@ interface SeedRepo {
   name: string;
   path: string;
   defaultBranch: string;
-  label?: string;
   // `name` is the immutable worktree identity — defaults to `branch` (the
   // create-time invariant). Pass it explicitly to simulate a worktree
-  // whose git branch was switched after creation.
-  worktrees: { name?: string; branch: string; path: string }[];
+  // whose git branch was switched after creation. `groupId` is one of the
+  // seeded `groups`; `origin` is the id of the worktree this one was started from.
+  worktrees: { name?: string; branch: string; path: string; groupId?: string; origin?: string }[];
 }
 
-export function seedState(tmpHome: string, state: { repos: SeedRepo[] }): void {
+interface SeedGroup {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export function seedState(
+  tmpHome: string,
+  state: { repos: SeedRepo[]; groups?: SeedGroup[] },
+): void {
   // Write state.json for backwards compatibility
   writeFileSync(join(tmpHome, ".band", "state.json"), JSON.stringify(state));
 
@@ -82,22 +91,38 @@ export function seedState(tmpHome: string, state: { repos: SeedRepo[] }): void {
   const db = drizzle({ client: sqlite });
   migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 
+  (state.groups ?? []).forEach((group, i) => {
+    sqlite
+      .prepare(
+        `INSERT INTO worktree_groups (id, name, color, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(group.id, group.name, group.color, i, Date.now());
+  });
+
   for (let i = 0; i < state.repos.length; i++) {
     const repo = state.repos[i];
     sqlite
       .prepare(
-        `INSERT OR REPLACE INTO repos (name, path, default_branch, label, sort_order)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO repos (name, path, default_branch, sort_order)
+         VALUES (?, ?, ?, ?)`,
       )
-      .run(repo.name, repo.path, repo.defaultBranch, repo.label ?? null, i);
+      .run(repo.name, repo.path, repo.defaultBranch, i);
 
     for (const wt of repo.worktrees) {
       sqlite
         .prepare(
-          `INSERT INTO worktrees (repo_name, name, branch, path)
-           VALUES (?, ?, ?, ?)`,
+          `INSERT INTO worktrees (repo_name, name, branch, path, group_id, origin_worktree_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(repo.name, wt.name ?? wt.branch, wt.branch, wt.path);
+        .run(
+          repo.name,
+          wt.name ?? wt.branch,
+          wt.branch,
+          wt.path,
+          wt.groupId ?? null,
+          wt.origin ?? null,
+        );
     }
   }
   sqlite.close();
@@ -175,7 +200,7 @@ export function removeSeededRepo(tmpHome: string, name: string): void {
 
 /**
  * Delete every client-state row (the UI state the dashboard keeps on the
- * server: center tabs, panel widths, label memory, …). Before client state
+ * server: center tabs, panel widths, group memory, …). Before client state
  * moved to the server it lived in each browser context's localStorage, so a
  * spec whose tests share one server got fresh UI state per test for free.
  * Call this in `beforeEach` to keep that: one test's collapsed sidebar or

@@ -4,7 +4,8 @@ import {
   buildOriginTree,
   buildPinnedTree,
   entriesOf,
-  groupReposByLabel,
+  groupEntries,
+  originDescendants,
   type SidebarRepo,
   sortRepoWorktrees,
   withoutPinned,
@@ -68,36 +69,77 @@ describe("buildOriginTree", () => {
   });
 });
 
-describe("groupReposByLabel", () => {
-  const labels = [
-    { id: "l1", name: "Epic", color: "#f00" },
-    { id: "l2", name: "Private", color: "#00f" },
-  ];
-  const list = [
-    { name: "a", label: "l2" },
-    { name: "b" },
-    { name: "c", label: "l1" },
-    { name: "d", label: "gone" },
-  ];
-
-  it("follows the label order, then unlabeled repos", () => {
-    const groups = groupReposByLabel(list, labels);
+describe("buildOriginTree keepAtTop", () => {
+  it("leaves a worktree at the top level instead of nesting it under its repo's main", () => {
+    const list: SidebarRepo[] = [
+      {
+        name: "a",
+        defaultBranch: "main",
+        worktrees: [{ name: "main" }, { name: "x" }, { name: "y" }],
+      },
+    ];
+    const tree = buildOriginTree(entriesOf(list), { keepAtTop: (e) => e.worktree.name === "y" });
     assert.deepEqual(
-      groups.map((g) => [g.label?.name ?? null, g.repos.map((r) => r.name)]),
-      [
-        ["Epic", ["c"]],
-        ["Private", ["a"]],
-        [null, ["b", "d"]],
-      ],
+      tree.roots.map((r) => r.worktreeId),
+      ["a-main", "a-y"],
+    );
+    assert.deepEqual(
+      tree.childrenOf.get("a-main")?.map((e) => e.worktreeId),
+      ["a-x"],
     );
   });
+});
 
-  it("keeps one group when no labels exist, and only the filtered label otherwise", () => {
-    assert.equal(groupReposByLabel(list, []).length, 1);
-    const only = groupReposByLabel(list, labels, "l1");
+describe("groupEntries", () => {
+  const groups = [
+    { id: "g1", name: "Epic", color: "#f00" },
+    { id: "g2", name: "Private", color: "#00f" },
+  ];
+  const mixed: SidebarRepo[] = [
+    {
+      name: "a",
+      defaultBranch: "main",
+      worktrees: [
+        { name: "main", groupId: "g2" },
+        { name: "x", groupId: "g1" },
+        { name: "y" },
+        { name: "z", groupId: "gone" },
+      ],
+    },
+    { name: "b", defaultBranch: "main", worktrees: [{ name: "main", groupId: "g1" }] },
+  ];
+  const names = (sections: ReturnType<typeof groupEntries>) =>
+    sections.map((s) => [s.group?.name ?? null, s.entries.map((e) => e.worktreeId)]);
+
+  it("follows the group order, then ungrouped worktrees, mixing repos in a group", () => {
+    assert.deepEqual(names(groupEntries(entriesOf(mixed), groups)), [
+      ["Epic", ["a-x", "b-main"]],
+      ["Private", ["a-main"]],
+      [null, ["a-y", "a-z"]],
+    ]);
+  });
+
+  it("keeps an empty group, and one section with no groups defined", () => {
+    const empty = groupEntries(entriesOf(mixed), [
+      ...groups,
+      { id: "g3", name: "Idle", color: "#0f0" },
+    ]);
+    assert.deepEqual(empty[2].entries, []);
+    assert.equal(groupEntries(entriesOf(mixed), []).length, 1);
+  });
+
+  it("keeps only the filtered group", () => {
+    assert.deepEqual(names(groupEntries(entriesOf(mixed), groups, "g1")), [
+      ["Epic", ["a-x", "b-main"]],
+    ]);
+  });
+
+  it("finds the worktrees started from one, to any depth, by origin link", () => {
+    const all = entriesOf(repos);
     assert.deepEqual(
-      only.map((g) => g.repos.map((r) => r.name)),
-      [["c"]],
+      originDescendants(all, "alpha-a").map((e) => e.worktreeId),
+      ["alpha-kid", "alpha-grandkid"],
     );
+    assert.deepEqual(originDescendants(all, "alpha-main"), []);
   });
 });

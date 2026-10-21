@@ -701,7 +701,6 @@ describe("what an agent may call, and which ids it may take", () => {
       });
     for (const [procedure, input] of [
       ["repos.update", { name: "only_b", allowedHostIds: null }],
-      ["repos.updateLabel", { name: "only_b", label: "x" }],
       ["repos.remove", { name: "only_b" }],
       ["repos.promoteToGit", { name: "only_b" }],
     ] as const) {
@@ -849,6 +848,8 @@ describe("the band CLI through the relay (S2)", () => {
       (w) => w.worktreeId === ws,
     )?.path as string;
     expect(await ok("repos", "list", "--output", "json")).toContain("proj");
+    await ok("groups", "list", "--output", "json");
+    await ok("worktrees", "set-group", ws, "--none");
     // The host list an agent gets has no roots, home or tools.
     const hostList = await ok("workers", "list", "--output", "json");
     expect(hostList).toContain(b.hostId);

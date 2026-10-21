@@ -69,8 +69,8 @@ test("settings opens full screen with one page per sidebar entry", async ({ page
   expect(Math.round(box.width)).toBe(viewport?.width);
   expect(Math.round(box.height)).toBe(viewport?.height);
 
-  // Each sidebar entry shows its own page, anchored on its first row's control. The empty Labels
-  // state is anchored on its "Add label" button (the only stable system-controlled name there).
+  // Each sidebar entry shows its own page, anchored on its first row's control. The empty Groups
+  // state is anchored on its "Add group" button.
   const pages: Array<[SettingsNavId, () => Locator]> = [
     ["appearance", () => settingsPage.themeSelect()],
     ["general", () => settingsPage.worktreesFolderInput()],
@@ -79,7 +79,7 @@ test("settings opens full screen with one page per sidebar entry", async ({ page
     ["hosts", () => settingsPage.hostRow("local")],
     ["credentials", () => settingsPage.credentialsAddButton()],
     ["agent-hooks", () => settingsPage.hooksHostRow("local")],
-    ["labels", () => settingsPage.addLabelButton().first()],
+    ["groups", () => settingsPage.addGroupButton()],
     ["notifications", () => settingsPage.soundOnNeedsAttentionSwitch()],
     ["web-server", () => settingsPage.webServerPortInput()],
     ["web-server", () => settingsPage.autoStartTunnelSwitch()],

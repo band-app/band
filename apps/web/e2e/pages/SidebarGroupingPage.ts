@@ -1,11 +1,11 @@
 /**
- * Page object for the sidebar's Group by dropdown (Repo | Origin | Worker) and the Set parent /
+ * Page object for the sidebar's Group by dropdown (Groups | Repo | Origin | Worker) and the Set parent /
  * Remove parent items of a worktree card's context menu.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
-export type GroupByMode = "repo" | "origin" | "host";
+export type GroupByMode = "groups" | "repo" | "origin" | "host";
 
 export class SidebarGroupingPage {
   readonly startedFrom: Locator;

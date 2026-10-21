@@ -907,6 +907,210 @@ fn worktrees_set_origin_sets_clears_and_refuses_bad_input() {
     assert!(origin_of("my-repo-feat-b").is_null());
 }
 
+/// The group a worktree is in, read from `worktrees list --output json`.
+fn group_of(env: &TestEnv, id: &str) -> serde_json::Value {
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    listed["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["worktreeId"] == id)
+        .unwrap_or_else(|| panic!("{id} in {listed}"))["groupId"]
+        .clone()
+}
+
+#[test]
+fn groups_create_list_rename_and_remove() {
+    let env = TestEnv::new();
+    let created = env.band(&[
+        "groups", "create", "Work", "--color", "red", "--output", "json",
+    ]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let group = json_of(&created)["group"].clone();
+    let id = group["id"].as_str().expect("group id").to_string();
+    assert_eq!(group["name"], "Work");
+    assert_eq!(group["color"], "red");
+
+    let listed = json_of(&env.band(&["groups", "list", "--output", "json"]));
+    assert_eq!(listed["groups"].as_array().unwrap().len(), 1);
+    let text = stdout(&env.band(&["groups", "list"]));
+    assert!(text.starts_with("ID"), "text: {text}");
+    assert!(text.contains("Work"), "text: {text}");
+
+    // A group is addressed by name (any case) or by id.
+    let output = env.band(&["groups", "rename", "work", "Personal"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let listed = json_of(&env.band(&["groups", "list", "--output", "json"]));
+    assert_eq!(listed["groups"][0]["name"], "Personal");
+    assert_eq!(listed["groups"][0]["id"], id.as_str());
+
+    let output = env.band(&["groups", "rename", "no-such-group", "X"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Unknown group"),
+        "stderr: {}",
+        stderr(&output)
+    );
+
+    let output = env.band(&["groups", "remove", &id]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let listed = json_of(&env.band(&["groups", "list", "--output", "json"]));
+    assert!(listed["groups"].as_array().unwrap().is_empty());
+    assert!(stdout(&env.band(&["groups", "list"])).contains("No groups"));
+}
+
+#[test]
+fn groups_remove_leaves_its_worktrees_ungrouped() {
+    let env = TestEnv::new();
+    let group =
+        json_of(&env.band(&["groups", "create", "Temp", "--output", "json"]))["group"].clone();
+    let id = group["id"].as_str().unwrap().to_string();
+    let output = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/a",
+        "--group",
+        "Temp",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(group_of(&env, "my-repo-feat-a"), id.as_str());
+    let output = env.band(&["groups", "remove", "temp"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(group_of(&env, "my-repo-feat-a").is_null());
+}
+
+#[test]
+fn worktrees_set_group_moves_one_worktree_or_its_children() {
+    let env = TestEnv::new();
+    let a = json_of(&env.band(&["groups", "create", "A", "--output", "json"]))["group"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = json_of(&env.band(&["groups", "create", "B", "--output", "json"]))["group"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/parent"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let output = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/child",
+        "--origin",
+        "my-repo-feat-parent",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    // A child starts in its origin's group, so ungrouped parent means ungrouped child.
+    assert!(group_of(&env, "my-repo-feat-child").is_null());
+
+    // Without --with-children only the parent moves.
+    let output = env.band(&["worktrees", "set-group", "my-repo-feat-parent", "a"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(group_of(&env, "my-repo-feat-parent"), a.as_str());
+    assert!(group_of(&env, "my-repo-feat-child").is_null());
+
+    // With --with-children the whole subtree moves.
+    let output = env.band(&[
+        "worktrees",
+        "set-group",
+        "my-repo-feat-parent",
+        "B",
+        "--with-children",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let moved = json_of(&output)["moved"].as_array().unwrap().len();
+    assert_eq!(moved, 2);
+    assert_eq!(group_of(&env, "my-repo-feat-parent"), b.as_str());
+    assert_eq!(group_of(&env, "my-repo-feat-child"), b.as_str());
+
+    // --none takes the worktree out of its group.
+    let output = env.band(&["worktrees", "set-group", "my-repo-feat-parent", "--none"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(group_of(&env, "my-repo-feat-parent").is_null());
+    assert_eq!(group_of(&env, "my-repo-feat-child"), b.as_str());
+
+    // An unknown group or worktree is refused, and a group is required without --none.
+    let output = env.band(&["worktrees", "set-group", "my-repo-feat-parent", "nope"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Unknown group"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    let output = env.band(&["worktrees", "set-group", "my-repo-feat-parent"]);
+    assert!(!output.status.success());
+}
+
+#[test]
+fn worktrees_create_group_by_name_or_id_and_inherits_from_origin() {
+    let env = TestEnv::new();
+    let g = json_of(&env.band(&["groups", "create", "Release", "--output", "json"]))["group"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let output = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/one",
+        "--group",
+        "release",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/two", "--group", &g]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(group_of(&env, "my-repo-feat-one"), g.as_str());
+    assert_eq!(group_of(&env, "my-repo-feat-two"), g.as_str());
+
+    // With no --group a child joins its origin's group.
+    let output = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/child",
+        "--origin",
+        "my-repo-feat-one",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(group_of(&env, "my-repo-feat-child"), g.as_str());
+
+    let output = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/three",
+        "--group",
+        "missing",
+    ]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Unknown group"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    assert!(
+        !listed.to_string().contains("feat-three"),
+        "listed: {listed}"
+    );
+}
+
+#[test]
+fn repos_add_no_longer_takes_a_label() {
+    let env = TestEnv::new();
+    let output = env.band(&["repos", "add", "/tmp/whatever", "--label", "work"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("--label"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
 #[test]
 fn worktrees_create_records_the_origin_and_list_shows_it() {
     let env = TestEnv::new();

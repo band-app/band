@@ -294,3 +294,14 @@ export class AgentLoginNotFoundError extends Error {
     this.name = "AgentLoginNotFoundError";
   }
 }
+
+/**
+ * Thrown by `WorktreeGroupService` for an unknown group id. `api/groups/router.ts` and
+ * `api/worktrees/router.ts` map it to 404 `NOT_FOUND`.
+ */
+export class WorktreeGroupNotFoundError extends Error {
+  constructor(groupId: string) {
+    super(`Group not found: ${groupId}`);
+    this.name = "WorktreeGroupNotFoundError";
+  }
+}

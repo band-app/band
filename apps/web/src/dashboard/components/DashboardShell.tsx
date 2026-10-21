@@ -12,25 +12,25 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
+import { Check, ChevronsDownUp, FolderPlus, ListFilter, Plus, Settings, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToastObstruction } from "../../lib/toast-obstructions";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import {
-  LABELS_COLLAPSE_KEY,
+  GROUPS_COLLAPSE_KEY,
   PINNED_COLLAPSE_KEY,
   PINNED_SECTION_ID,
   REPOS_COLLAPSE_KEY,
-  UNLABELED_KEY,
+  UNGROUPED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
+import { useGroupFilter } from "../hooks/use-group-filter";
+import { useGroupLastWorktree } from "../hooks/use-group-last-worktree";
+import { useGroupsQuery } from "../hooks/use-groups";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
-import { useLabelFilter } from "../hooks/use-label-filter";
-import { useLabelLastWorktree } from "../hooks/use-label-last-worktree";
 import { useRepos } from "../hooks/use-repos";
-import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   useBranchStatusWatcher,
   useOriginChangeWatcher,
@@ -48,7 +48,6 @@ import {
   useGroupBy,
 } from "../lib/sidebar-grouping";
 import { useDashboardStore } from "../stores/index";
-import type { RepoInfo } from "../types";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { DesktopViewerDialog } from "./DesktopViewerDialog";
 import { GroupBySwitch } from "./GroupBySwitch";
@@ -69,7 +68,7 @@ interface DashboardShellProps {
    *  `hideTitleBar`. Set by the mobile repo-list fly-out, which reaches the
    *  bottom screen edge with no AppShell below it to pad the inset. */
   padBottomInset?: boolean;
-  /** Make the Repos header (label filter, collapse all, add repo) as tall as
+  /** Make the Repos header (group filter, collapse all, add repo) as tall as
    *  the mobile worktree header, so the two line up. Set by the mobile
    *  repo-list fly-out. */
   matchMobileHeader?: boolean;
@@ -103,8 +102,7 @@ export function DashboardShell({
   matchMobileHeader,
 }: DashboardShellProps) {
   const { repos, isLoading: loading } = useRepos();
-  const { settings } = useSettingsQuery();
-  const labels = settings.labels ?? [];
+  const { groups, loaded: groupsLoaded } = useGroupsQuery();
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [settingsHosts, setSettingsHosts] = useState(false);
   const [addingRepo, setAddingRepo] = useState(false);
@@ -115,8 +113,14 @@ export function DashboardShell({
     retry: false,
   });
   const actionBarObstructionRef = useToastObstruction();
-  const [labelFilter, persistLabelFilter] = useLabelFilter();
-  const { getLastWorktree, setLastWorktree } = useLabelLastWorktree();
+  const [groupFilter, persistGroupFilter] = useGroupFilter();
+  const { getLastWorktree, setLastWorktree } = useGroupLastWorktree();
+  // A filter on a group that was deleted (here or on another device) goes back to All.
+  useEffect(() => {
+    if (groupsLoaded && groupFilter && !groups.some((g) => g.id === groupFilter)) {
+      persistGroupFilter(null);
+    }
+  }, [groupsLoaded, groups, groupFilter, persistGroupFilter]);
   const capabilities = useCapabilities();
   const activeWorktreeId = useDashboardStore((s) => s.activeWorktreeId);
   const hooksSetup = useHooksSetup();
@@ -142,14 +146,14 @@ export function DashboardShell({
   }, []);
 
   // Collapse-all toolbar action: write every repo name into the
-  // collapsed-repos set and every label id (plus the unlabeled sentinel)
-  // into the collapsed-labels set. The custom event dispatched by `setAll`
+  // collapsed-repos set and every group id (plus the ungrouped sentinel)
+  // into the collapsed-groups set. The custom event dispatched by `setAll`
   // pings every useCollapseState consumer so the list re-renders instantly.
-  // The Pinned section header lives outside the labels/repos tree, so
+  // The Pinned section header lives outside the groups/repos tree, so
   // we also fold it into the collapsed state explicitly — "Collapse all"
   // is meant to collapse everything visible, including the pinned group.
   const repoCollapse = useCollapseState(REPOS_COLLAPSE_KEY);
-  const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+  const groupCollapse = useCollapseState(GROUPS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
   const originCollapse = useCollapseState(ORIGIN_COLLAPSE_KEY);
   const hostCollapse = useCollapseState(HOST_COLLAPSE_KEY);
@@ -162,7 +166,11 @@ export function DashboardShell({
     const parents = new Set(buildPinnedTree(sorted).childrenOf.keys());
     if (groupBy === "repo") {
       repoCollapse.setAll(repos.map((p) => p.name));
-      labelCollapse.setAll([...labels.map((l) => l.id), UNLABELED_KEY]);
+    } else if (groupBy === "groups") {
+      groupCollapse.setAll([...groups.map((g) => g.id), UNGROUPED_KEY]);
+      for (const [id, kids] of buildOriginTree(entriesOf(sorted)).childrenOf) {
+        if (kids.length > 0) parents.add(id);
+      }
     } else if (groupBy === "origin") {
       for (const [id, kids] of buildOriginTree(entriesOf(sorted)).childrenOf) {
         if (kids.length > 0) parents.add(id);
@@ -179,81 +187,82 @@ export function DashboardShell({
   }, [
     pinnedCollapse,
     repoCollapse,
-    labelCollapse,
+    groupCollapse,
     originCollapse,
     hostCollapse,
     groupBy,
     repos,
-    labels,
+    groups,
   ]);
 
-  const activeLabel = useMemo(
-    () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
-    [labelFilter, labels],
+  const activeGroup = useMemo(
+    () => (groupFilter ? groups.find((g) => g.id === groupFilter) : null),
+    [groupFilter, groups],
   );
 
-  // Find the repo that owns `worktreeId` in the current repo list, or
-  // `undefined` when the worktree no longer exists (deleted / renamed). Kept
-  // as a helper rather than a Map<worktreeId, RepoInfo> because the
-  // repo list churns rarely and the per-call O(repos × worktrees) walk
-  // is dominated by render cost anyway.
-  const findRepoForWorktree = useCallback(
-    (worktreeId: string): RepoInfo | undefined =>
-      repos.find((p) =>
-        p.worktrees.some((wt) => toWorktreeId(p.name, wt.name, wt.hostId) === worktreeId),
-      ),
+  // The group of the worktree `worktreeId` in the current repo list, or `undefined` when the
+  // worktree no longer exists (deleted / renamed) and null when it has no group. Kept as a helper
+  // rather than a Map because the repo list churns rarely and the per-call O(repos × worktrees)
+  // walk is dominated by render cost anyway.
+  const groupOfWorktree = useCallback(
+    (worktreeId: string): string | null | undefined => {
+      for (const p of repos) {
+        for (const wt of p.worktrees) {
+          if (toWorktreeId(p.name, wt.name, wt.hostId) === worktreeId) return wt.groupId ?? null;
+        }
+      }
+      return undefined;
+    },
     [repos],
   );
 
-  // Per-label "last worktree" for issue #505. Two write sites cooperate:
-  // `useRecordLabelLastWorktree`, run by the app shell, records each
-  // worktree opened under a label (the app shell also sees a pick on the
+  // Per-group "last worktree" for issue #505. Two write sites cooperate:
+  // `useRecordGroupLastWorktree`, run by the app shell, records each
+  // worktree opened under a group (the app shell also sees a pick on the
   // phone's full-screen dashboard, which unmounts this shell), and
-  // `setLabelFilter` below saves the outgoing label's worktree on a label
+  // `setGroupFilter` below saves the outgoing group's worktree on a group
   // switch, so a worktree reached by direct URL, the ⌘K picker or a reload
-  // is captured too. `setLabelFilter` also restores the incoming label's
+  // is captured too. `setGroupFilter` also restores the incoming group's
   // worktree.
   //
   // Invariants enforced by the caller:
-  //   1. Saves only happen when the outgoing label is non-null (ALL has no
-  //      per-label memory) AND the active worktree's repo is actually
-  //      labelled with the outgoing label. If the user navigated to a
-  //      worktree under a different label via the ⌘K picker, we don't
-  //      want to record that worktree as Personal's "last" just because
-  //      the filter happened to be Personal at the time.
-  //   2. Restores only happen when the saved worktree still exists AND its
-  //      repo is still labelled with the target label (labels can be
-  //      reassigned at any time). If validation fails we fall through to
-  //      the "no history" branch — current behaviour, i.e. keep the
-  //      previous active worktree, leaving the user to pick one.
-  const setLabelFilter = useCallback(
-    (newLabel: string | null) => {
-      if (newLabel === labelFilter) return;
+  //   1. Saves only happen when the outgoing group is non-null (ALL has no
+  //      per-group memory) AND the active worktree is actually in the
+  //      outgoing group. If the user navigated to a worktree in a
+  //      different group via the ⌘K picker, we don't want to record that
+  //      worktree as the filtered group's "last" just because the filter
+  //      happened to be on it at the time.
+  //   2. Restores only happen when the saved worktree still exists AND is
+  //      still in the target group (worktrees can be moved at any time). If
+  //      validation fails we fall through to the "no history" branch,
+  //      i.e. keep the previous active worktree, leaving the user to pick
+  //      one.
+  const setGroupFilter = useCallback(
+    (newGroup: string | null) => {
+      if (newGroup === groupFilter) return;
 
-      // Save the outgoing label's active worktree before mutating state.
+      // Save the outgoing group's active worktree before mutating state.
       // Doing this synchronously (rather than via an effect on
-      // labelFilter/activeWorktreeId) avoids a race where the effect would
-      // fire after the label changed but before the restore-driven
+      // groupFilter/activeWorktreeId) avoids a race where the effect would
+      // fire after the group changed but before the restore-driven
       // navigation propagated activeWorktreeId, briefly re-stamping the
-      // incoming label with the outgoing label's worktree.
-      if (labelFilter && activeWorktreeId) {
-        const repo = findRepoForWorktree(activeWorktreeId);
-        if (repo && repo.label === labelFilter) {
-          setLastWorktree(labelFilter, activeWorktreeId);
+      // incoming group with the outgoing group's worktree.
+      if (groupFilter && activeWorktreeId) {
+        if (groupOfWorktree(activeWorktreeId) === groupFilter) {
+          setLastWorktree(groupFilter, activeWorktreeId);
         }
       }
 
-      persistLabelFilter(newLabel);
+      persistGroupFilter(newGroup);
 
       // ALL is the explicit no-op case (per the issue): keep the user on
       // whatever worktree they were last viewing. Restoration only applies
-      // when switching to a *specific* label.
-      if (!newLabel) return;
+      // when switching to a *specific* group.
+      if (!newGroup) return;
 
-      const target = getLastWorktree(newLabel);
+      const target = getLastWorktree(newGroup);
       if (!target || target === activeWorktreeId) return;
-      const targetRepo = findRepoForWorktree(target);
-      if (!targetRepo || targetRepo.label !== newLabel) return;
+      if (groupOfWorktree(target) !== newGroup) return;
 
       const href = capabilities.getWorktreeHref?.(target);
       if (href && capabilities.navigate) {
@@ -261,12 +270,12 @@ export function DashboardShell({
       }
     },
     [
-      labelFilter,
+      groupFilter,
       activeWorktreeId,
-      persistLabelFilter,
+      persistGroupFilter,
       setLastWorktree,
       getLastWorktree,
-      findRepoForWorktree,
+      groupOfWorktree,
       capabilities,
     ],
   );
@@ -313,7 +322,7 @@ export function DashboardShell({
     return () => window.removeEventListener("band:focus-repos", handler);
   }, []);
 
-  // Keyboard shortcuts: Cmd+0 → all repos, Cmd+1..9 → nth label.
+  // Keyboard shortcuts: Cmd+0 → all repos, Cmd+1..9 → nth group.
   // ⌘ works from anywhere, like ⌘K: a worktree switch moves focus into the
   // terminal or editor (lib/leaf-focus.ts), and ⌘+digit types nothing there.
   // Ctrl skips editable elements, since a terminal sends Ctrl+3..8 to the
@@ -334,25 +343,25 @@ export function DashboardShell({
       const digit = Number(e.key);
       if (digit === 0) {
         e.preventDefault();
-        setLabelFilter(null);
+        setGroupFilter(null);
         return;
       }
-      const lbl = labels[digit - 1];
-      if (lbl) {
+      const grp = groups[digit - 1];
+      if (grp) {
         e.preventDefault();
-        setLabelFilter(lbl.id);
+        setGroupFilter(grp.id);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [labels, setLabelFilter]);
+  }, [groups, setGroupFilter]);
 
   // The command palette's "Show All Repos" (the ⌘0 entry above).
   useEffect(() => {
-    const handler = () => setLabelFilter(null);
+    const handler = () => setGroupFilter(null);
     window.addEventListener("band:show-all-repos", handler);
     return () => window.removeEventListener("band:show-all-repos", handler);
-  }, [setLabelFilter]);
+  }, [setGroupFilter]);
 
   return (
     <div
@@ -436,55 +445,59 @@ export function DashboardShell({
                 <TooltipContent side="bottom">Add repo</TooltipContent>
               </Tooltip>
             ) : null}
-            {labels.length > 0 && (
+            {groups.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     size="sm"
                     variant="ghost"
-                    data-testid="dashboard__label-filter-trigger"
-                    className={`min-w-6 shrink max-w-[5rem] text-[11px] h-5 px-1.5 gap-1 ${labelFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
+                    data-testid="dashboard__group-filter-trigger"
+                    className={`min-w-6 shrink max-w-[5rem] text-[11px] h-5 px-1.5 gap-1 ${groupFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
                   >
-                    {activeLabel ? (
+                    {activeGroup ? (
                       <>
                         <span
                           className="size-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: activeLabel.color }}
+                          style={{ backgroundColor: activeGroup.color }}
                         />
-                        <span className="truncate">{activeLabel.name}</span>
+                        <span className="truncate">{activeGroup.name}</span>
                       </>
                     ) : (
                       <>
-                        <Tag className="size-3.5 shrink-0" />
+                        <ListFilter className="size-3.5 shrink-0" />
                         <span className="truncate">All</span>
                       </>
                     )}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
+                <DropdownMenuContent
+                  align="start"
+                  collisionPadding={8}
+                  data-testid="dashboard__group-filter-menu"
+                >
                   <DropdownMenuItem
-                    data-testid="dashboard__label-filter-item--all"
-                    onClick={() => setLabelFilter(null)}
+                    data-testid="dashboard__group-filter-item--all"
+                    onClick={() => setGroupFilter(null)}
                   >
-                    <Tag />
+                    <ListFilter />
                     <span className="truncate">All</span>
-                    {!labelFilter && <Check className="size-3 shrink-0" />}
+                    {!groupFilter && <Check className="size-3 shrink-0" />}
                     <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
                       ⌘0
                     </span>
                   </DropdownMenuItem>
-                  {labels.map((lbl, idx) => (
+                  {groups.map((grp, idx) => (
                     <DropdownMenuItem
-                      key={lbl.id}
-                      data-testid={`dashboard__label-filter-item--${lbl.id}`}
-                      onClick={() => setLabelFilter(lbl.id)}
+                      key={grp.id}
+                      data-testid={`dashboard__group-filter-item--${grp.id}`}
+                      onClick={() => setGroupFilter(grp.id)}
                     >
                       <span
                         className="size-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: lbl.color }}
+                        style={{ backgroundColor: grp.color }}
                       />
-                      <span className="truncate">{lbl.name}</span>
-                      {labelFilter === lbl.id && <Check className="size-3 shrink-0" />}
+                      <span className="truncate">{grp.name}</span>
+                      {groupFilter === grp.id && <Check className="size-3 shrink-0" />}
                       {idx < 9 && (
                         <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
                           ⌘{idx + 1}
@@ -547,13 +560,12 @@ export function DashboardShell({
             ) : null}
           </div>
         ) : (
-          <RepoList labelFilter={labelFilter} />
+          <RepoList groupFilter={groupFilter} />
         )}
       </ReposPanel>
       <AddRepoDialog
         open={addingRepo}
         onOpenChange={setAddingRepo}
-        label={labelFilter}
         onOpenHosts={() => {
           setAddingRepo(false);
           setSettingsHosts(true);

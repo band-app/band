@@ -63,7 +63,6 @@ export interface RepoInfo {
   clones?: RepoClone[];
   defaultBranch: string;
   worktrees: WorktreeInfo[];
-  label?: string;
   /**
    * Required: the server always sets it (migration defaults pre-existing
    * rows to "git"), and the web adapter normalises any older API
@@ -124,6 +123,8 @@ export interface WorktreeInfo {
   lifecycle?: "sleeping" | "waking";
   /** The host the worktree lives on. Absent or `local` for this machine. */
   hostId?: string;
+  /** The group the worktree is in, or null for none. */
+  groupId?: string | null;
   /** True when a scan of the host found the worktree's folder gone. Remove drops the record. */
   missing?: boolean;
   /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */
@@ -241,7 +242,8 @@ export interface NotificationSettings {
   sound?: string;
 }
 
-export interface LabelDefinition {
+/** A worktree group (`groups.list`). The color is user data. */
+export interface GroupDefinition {
   id: string;
   name: string;
   color: string;
@@ -261,7 +263,6 @@ export interface Settings {
   agents?: { defaultMode?: AgentMode; crossHostWorktrees?: boolean };
   webServerPort?: number;
   notifications?: NotificationSettings;
-  labels?: LabelDefinition[];
   autoStartTunnel?: boolean;
   enableLSP?: boolean;
   /**

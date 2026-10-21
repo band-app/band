@@ -82,15 +82,6 @@ export interface CachedAgentModel {
 }
 
 /**
- * A user-defined label for grouping/filtering repos in the dashboard.
- */
-export interface LabelDefinition {
-  id: string;
-  name: string;
-  color: string;
-}
-
-/**
  * The shape of `~/.band/settings.json`.
  *
  * Settings are stored as a JSON document rather than relational rows because
@@ -114,7 +105,6 @@ export interface Settings {
   defaultCodingAgent?: string;
   webServerPort?: number;
   notifications?: NotificationSettings;
-  labels?: LabelDefinition[];
   tokenSecret?: string;
   /**
    * Extra browser origins allowed to call the hub from another origin (the
@@ -392,6 +382,23 @@ export class SettingsQueries {
     renameSync(tmpPath, filePath);
     // Drop the cache entry directly so a load() in the same coarse mtime tick
     // (some filesystems have 1s mtime resolution) can never read stale data.
+    settingsCache.delete(filePath);
+  }
+
+  /** Removes one top-level key from the settings file. Does nothing when the key is absent. */
+  removeKey(key: string): void {
+    const filePath = settingsFile();
+    let existing: Record<string, unknown>;
+    try {
+      existing = JSON.parse(readFileSync(filePath, "utf-8"));
+    } catch {
+      return;
+    }
+    if (!(key in existing)) return;
+    delete existing[key];
+    const tmpPath = `${filePath}.tmp.${process.pid}`;
+    writeFileSync(tmpPath, `${JSON.stringify(existing, null, 2)}\n`, "utf-8");
+    renameSync(tmpPath, filePath);
     settingsCache.delete(filePath);
   }
 

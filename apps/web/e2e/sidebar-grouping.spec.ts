@@ -89,17 +89,17 @@ test.beforeAll(async () => {
   const repos = ["borko", "svc", "lib"].map((name) => {
     const path = join(root, name);
     makeRepo(path);
-    const label = name === "svc" ? "team-a" : name === "lib" ? "team-b" : undefined;
-    return { name, path, defaultBranch: "main", label, worktrees: [{ branch: "main", path }] };
+    const groupId = name === "svc" ? "team-a" : name === "lib" ? "team-b" : undefined;
+    return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path, groupId }] };
   });
-  seedSettings(tmpHome, {
-    tokenSecret: TOKEN,
-    labels: [
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  seedState(tmpHome, {
+    repos,
+    groups: [
       { id: "team-a", name: "Team A", color: "#8b5cf6" },
       { id: "team-b", name: "Team B", color: "#3b82f6" },
     ],
   });
-  seedState(tmpHome, { repos });
   server = await startServer({ tmpHome });
 
   await createFrom({ repo: "svc", branch: "alpha", origin: "borko-main" });
@@ -248,6 +248,7 @@ test("Repo mode lists each worktree under its repo, and Host mode groups by work
   page,
 }) => {
   const sidebar = await open(page, "borko-main");
+  await sidebar.selectMode("repo");
   await expect(sidebar.repoModeCard("svc-alpha")).toBeVisible();
   await expect(sidebar.repoModeCard("lib-gamma")).toBeVisible();
   // The hub has more than one host, so every card carries its host's name.
@@ -274,12 +275,12 @@ test("the switch survives a reload (S3)", async ({ page }) => {
   await expect(sidebar.row("svc-alpha")).toBeVisible();
 });
 
-test("the header has the label filter and the Group by dropdown, and no switch row (S1, S2)", async ({
+test("the header has the group filter and the Group by dropdown, and no switch row (S1, S2)", async ({
   page,
 }) => {
   const sidebar = await open(page, "borko-main");
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
-  await expect(worktreePage.labelFilterTrigger()).toBeVisible();
+  await expect(worktreePage.groupFilterTrigger()).toBeVisible();
   await expect(sidebar.groupByTrigger).toBeVisible();
   await sidebar.expectHeaderFits();
   // The old always-visible switch row is gone: the modes exist only inside the open menu.
@@ -289,20 +290,22 @@ test("the header has the label filter and the Group by dropdown, and no switch r
   await page.keyboard.press("Escape");
 });
 
-for (const mode of ["repo", "origin", "host"] as const) {
-  test(`the label filter hides other repos in ${mode} mode (S1)`, async ({ page }) => {
+for (const mode of ["groups", "repo", "origin", "host"] as const) {
+  test(`the group filter hides worktrees of other groups in ${mode} mode (S1)`, async ({
+    page,
+  }) => {
     const sidebar = await open(page, "borko-main");
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
     await sidebar.selectMode(mode);
-    await worktreePage.selectLabelFilter("team-b");
+    await worktreePage.selectGroupFilter("team-b");
     if (mode === "repo") {
       await expect(sidebar.repoModeCard("lib-main")).toBeVisible();
-      await expect(sidebar.repoModeCard("svc-alpha")).toHaveCount(0);
+      await expect(sidebar.repoModeCard("svc-main")).toHaveCount(0);
     } else {
-      await expect(sidebar.row("lib-gamma")).toBeVisible();
-      await expect(sidebar.row("svc-alpha")).toHaveCount(0);
+      await expect(sidebar.row("lib-main")).toBeVisible();
+      await expect(sidebar.row("svc-main")).toHaveCount(0);
     }
-    await worktreePage.selectLabelFilter(null);
+    await worktreePage.selectGroupFilter(null);
   });
 }
 

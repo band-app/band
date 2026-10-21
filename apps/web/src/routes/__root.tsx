@@ -15,7 +15,7 @@ import {
   DashboardShell,
   isMacPlatform,
   useDashboardStore,
-  useRecordLabelLastWorktree,
+  useRecordGroupLastWorktree,
   useSettingsQuery,
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
@@ -428,7 +428,7 @@ function AppShell() {
     activateBrowserGuestWorktree(activeWorktreeId);
     recordLastWorktree(activeWorktreeId);
   }, [activeWorktreeId]);
-  useRecordLabelLastWorktree(activeWorktreeId);
+  useRecordGroupLastWorktree(activeWorktreeId);
 
   // Get the worktree path from the statuses store (for Finder / copy path)
   const worktreePath = useDashboardStore((s) =>

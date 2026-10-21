@@ -15,6 +15,8 @@ export interface SidebarWorktree {
   pinned?: boolean;
   sortIndex?: number;
   pinSortIndex?: number;
+  /** The group the worktree is in, or null or absent for none. */
+  groupId?: string | null;
   origin?: { worktreeId: string; removed?: boolean } | null;
 }
 
@@ -33,6 +35,9 @@ export interface WorktreeEntry<R extends SidebarRepo = SidebarRepo> {
   repo: R;
   worktree: WorktreeOf<R>;
 }
+
+/** Sentinel id for the "Ungrouped" section, which has no real group id. */
+export const UNGROUPED_KEY = "__ungrouped";
 
 export function hostIdOf(worktree: { hostId?: string }): string {
   return worktree.hostId || LOCAL_HOST;
@@ -90,7 +95,13 @@ export interface OriginTree<R extends SidebarRepo = SidebarRepo> {
  * nested under it. A worktree with no origin, or whose origin is gone, nests under its repo's main
  * on the same host. Siblings are ordered by their sort index.
  */
-export function buildOriginTree<R extends SidebarRepo>(entries: WorktreeEntry<R>[]): OriginTree<R> {
+export function buildOriginTree<R extends SidebarRepo>(
+  entries: WorktreeEntry<R>[],
+  options: {
+    /** True for a worktree that stays at the top level instead of nesting under its repo's main. */
+    keepAtTop?: (entry: WorktreeEntry<R>) => boolean;
+  } = {},
+): OriginTree<R> {
   const byId = new Map(entries.map((e) => [e.worktreeId, e]));
   const childrenOf = new Map<string, WorktreeEntry<R>[]>();
   const parentOf = new Map<string, string>();
@@ -117,7 +128,9 @@ export function buildOriginTree<R extends SidebarRepo>(entries: WorktreeEntry<R>
       addChild(origin.worktreeId, entry);
       continue;
     }
-    const main = mains.get(`${entry.repo.name}@${hostIdOf(entry.worktree)}`);
+    const main = options.keepAtTop?.(entry)
+      ? undefined
+      : mains.get(`${entry.repo.name}@${hostIdOf(entry.worktree)}`);
     if (main && main !== entry) addChild(main.worktreeId, entry);
     else roots.push(entry);
   }
@@ -186,37 +199,66 @@ export function withoutPinned<R extends SidebarRepo>(
   return { repos: result, reposWithPinned };
 }
 
-export interface LabelDefinition {
+export interface GroupDefinition {
   id: string;
   name: string;
   color: string;
 }
 
-export interface LabelGroup<R> {
-  /** Null for the repos that carry no label (or one that no longer exists). */
-  label: LabelDefinition | null;
-  repos: R[];
+export interface WorktreeGroupSection<R extends SidebarRepo = SidebarRepo> {
+  /** Null for the worktrees that are in no group (or in one that no longer exists). */
+  group: GroupDefinition | null;
+  entries: WorktreeEntry<R>[];
 }
 
 /**
- * The repos under label headers, in the order the labels are defined, with unlabeled repos last.
- * With no labels defined there is one group with a null label. `filter` keeps only that label's
- * repos, as the web's label filter does.
+ * The worktrees under group headers, in the order the groups are defined, with ungrouped
+ * worktrees last. A group with no worktree is kept, so it stays a drop target. With no groups
+ * defined there is one section with a null group. `filter` keeps only that group's worktrees, as
+ * the web's group filter does.
  */
-export function groupReposByLabel<R extends { label?: string }>(
-  repos: R[],
-  labels: readonly LabelDefinition[],
+export function groupEntries<R extends SidebarRepo>(
+  entries: WorktreeEntry<R>[],
+  groups: readonly GroupDefinition[],
   filter: string | null = null,
-): LabelGroup<R>[] {
-  const known = new Set(labels.map((l) => l.id));
-  const pool = filter ? repos.filter((r) => r.label === filter) : repos;
-  if (labels.length === 0) return [{ label: null, repos: pool }];
-  const groups: LabelGroup<R>[] = [];
-  for (const label of labels) {
-    const mine = pool.filter((r) => r.label === label.id);
-    if (mine.length > 0) groups.push({ label, repos: mine });
+): WorktreeGroupSection<R>[] {
+  const known = new Set(groups.map((g) => g.id));
+  const groupOf = (e: WorktreeEntry<R>) => (e.worktree.groupId ? e.worktree.groupId : null);
+  if (filter) {
+    const group = groups.find((g) => g.id === filter) ?? null;
+    return [{ group, entries: entries.filter((e) => groupOf(e) === filter) }];
   }
-  const rest = pool.filter((r) => !r.label || !known.has(r.label));
-  if (rest.length > 0) groups.push({ label: null, repos: rest });
-  return groups;
+  if (groups.length === 0) return [{ group: null, entries }];
+  const sections: WorktreeGroupSection<R>[] = groups.map((group) => ({
+    group,
+    entries: entries.filter((e) => groupOf(e) === group.id),
+  }));
+  sections.push({
+    group: null,
+    entries: entries.filter((e) => {
+      const id = groupOf(e);
+      return !id || !known.has(id);
+    }),
+  });
+  return sections;
+}
+
+/** The worktrees started from `id`, and theirs in turn, by origin link only. Excludes `id`. */
+export function originDescendants<R extends SidebarRepo>(
+  entries: WorktreeEntry<R>[],
+  id: string,
+): WorktreeEntry<R>[] {
+  const result: WorktreeEntry<R>[] = [];
+  const seen = new Set<string>([id]);
+  const queue = [id];
+  while (queue.length > 0) {
+    const parent = queue.shift() as string;
+    for (const e of entries) {
+      if (e.worktree.origin?.worktreeId !== parent || seen.has(e.worktreeId)) continue;
+      seen.add(e.worktreeId);
+      result.push(e);
+      queue.push(e.worktreeId);
+    }
+  }
+  return result;
 }

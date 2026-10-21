@@ -1,21 +1,14 @@
+import { originDescendants } from "@band-app/shared/sidebar-tree";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   Button,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuPortal,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -33,7 +26,6 @@ import {
   pointerWithin,
   TouchSensor,
   useDndContext,
-  useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -46,9 +38,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Check,
   ChevronRight,
-  Circle,
   Clipboard,
   Folder,
   FolderOpen,
@@ -57,7 +47,6 @@ import {
   MoreVertical,
   Pin,
   Plus,
-  Tag,
 } from "lucide-react";
 import {
   type ElementType,
@@ -71,13 +60,14 @@ import {
 import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
 import {
-  LABELS_COLLAPSE_KEY,
+  GROUPS_COLLAPSE_KEY,
   PINNED_COLLAPSE_KEY,
   PINNED_SECTION_ID,
   REPOS_COLLAPSE_KEY,
-  UNLABELED_KEY,
+  UNGROUPED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
+import { useGroupMutations, useGroups } from "../hooks/use-groups";
 import { useHostRequests } from "../hooks/use-host-requests";
 import { usePinnedWorktrees } from "../hooks/use-pinned-worktrees";
 import {
@@ -86,10 +76,8 @@ import {
   useRemoveWorktree,
   useReorderRepos,
   useReorderWorktrees,
-  useUpdateRepoLabel,
 } from "../hooks/use-repo-mutations";
 import { useRepos } from "../hooks/use-repos";
-import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   type DropPlan,
   type DropZone,
@@ -101,6 +89,7 @@ import {
   zoneAt,
 } from "../lib/sidebar-drop";
 import {
+  buildGroupRows,
   buildHostRows,
   buildOriginRows,
   buildOriginTree,
@@ -123,7 +112,7 @@ import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
-  LabelDefinition,
+  GroupDefinition,
   RepoInfo,
   SetupStatus,
   WorktreeBranchStatus,
@@ -131,6 +120,12 @@ import type {
 } from "../types";
 import { AgentStatusIndicator, isActiveAgentStatus } from "./AgentStatusIndicator";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
+import {
+  DeleteGroupDialog,
+  GroupNameDialog,
+  MoveChildrenDialog,
+  PickRepoDialog,
+} from "./GroupDialogs";
 import { GroupedWorktrees, WorktreeRowView } from "./GroupedWorktrees";
 import { MainMissingRow } from "./MainMissingRow";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
@@ -187,10 +182,8 @@ interface SortableRepoProps {
   branchStatuses: Map<string, WorktreeBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
   removeRepo: (name: string) => void;
-  updateRepoLabel: (name: string, label: string | null) => void;
   /** Opens the promote-to-git confirmation dialog for the given repo. */
   onPromoteToGit: (name: string) => void;
-  labels: LabelDefinition[];
   setWorktreeDialog: (name: string | null) => void;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
   focusedIndex: number;
@@ -214,9 +207,7 @@ function SortableRepo({
   branchStatuses,
   setupStatuses,
   removeRepo,
-  updateRepoLabel,
   onPromoteToGit,
-  labels,
   setWorktreeDialog,
   onShowDeleteDialog,
   focusedIndex,
@@ -325,16 +316,10 @@ function SortableRepo({
   // The repo action list is rendered in two places — the right-click
   // context menu and the header's "⋮" dropdown — so it's defined once here and
   // parameterised by the menu primitive set (Context* or Dropdown*), which
-  // share the same Item/Sub/SubTrigger/SubContent/Portal shape. Keeps the two
+  // share the same Item shape. Keeps the two
   // menus from drifting.
-  const renderMenuItems = (menu: {
-    Item: ElementType;
-    Sub: ElementType;
-    SubTrigger: ElementType;
-    SubContent: ElementType;
-    Portal: ElementType;
-  }) => {
-    const { Item, Sub, SubTrigger, SubContent, Portal } = menu;
+  const renderMenuItems = (menu: { Item: ElementType }) => {
+    const { Item } = menu;
     return (
       <>
         {/* Git repos only: `git worktree add`. Mirrors the header's
@@ -347,32 +332,6 @@ function SortableRepo({
             <Plus />
             Add worktree
           </Item>
-        )}
-        {labels.length > 0 && (
-          <Sub>
-            <SubTrigger data-testid="repo-list__action--set-label">
-              <Tag />
-              Set label
-            </SubTrigger>
-            <Portal>
-              <SubContent data-testid="repo-list__label-submenu">
-                <Item onClick={() => updateRepoLabel(repo.name, null)}>
-                  <span className="flex-1">None</span>
-                  {!repo.label && <Check className="size-3" />}
-                </Item>
-                {labels.map((lbl) => (
-                  <Item key={lbl.id} onClick={() => updateRepoLabel(repo.name, lbl.id)}>
-                    <span
-                      className="size-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: lbl.color }}
-                    />
-                    <span className="flex-1">{lbl.name}</span>
-                    {repo.label === lbl.id && <Check className="size-3" />}
-                  </Item>
-                ))}
-              </SubContent>
-            </Portal>
-          </Sub>
         )}
         {isPlain && canPromoteToGit && (
           <Item onClick={() => onPromoteToGit(repo.name)}>
@@ -520,10 +479,6 @@ function SortableRepo({
                   <DropdownMenuContent align="end">
                     {renderMenuItems({
                       Item: DropdownMenuItem,
-                      Sub: DropdownMenuSub,
-                      SubTrigger: DropdownMenuSubTrigger,
-                      SubContent: DropdownMenuSubContent,
-                      Portal: DropdownMenuPortal,
                     })}
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -556,10 +511,6 @@ function SortableRepo({
         <ContextMenuContent>
           {renderMenuItems({
             Item: ContextMenuItem,
-            Sub: ContextMenuSub,
-            SubTrigger: ContextMenuSubTrigger,
-            SubContent: ContextMenuSubContent,
-            Portal: ContextMenuPortal,
           })}
         </ContextMenuContent>
       </ContextMenu>
@@ -620,66 +571,6 @@ function SortableRepo({
   );
 }
 
-interface DroppableLabelHeaderProps {
-  labelId: string;
-  label: LabelDefinition;
-  collapsed: boolean;
-  onToggle: () => void;
-}
-
-function DroppableLabelHeader({ labelId, label, collapsed, onToggle }: DroppableLabelHeaderProps) {
-  const { setNodeRef, isOver } = useDroppable({ id: `group:${labelId}` });
-  return (
-    <button
-      type="button"
-      ref={setNodeRef}
-      onClick={onToggle}
-      aria-expanded={!collapsed}
-      className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
-        isOver ? "bg-primary/20" : ""
-      }`}
-    >
-      <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
-      <span className="text-[13px] font-semibold text-foreground/90">{label.name}</span>
-      <ChevronRight
-        className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
-          collapsed ? "" : "rotate-90"
-        }`}
-      />
-    </button>
-  );
-}
-
-interface DroppableUnlabeledHeaderProps {
-  collapsed: boolean;
-  onToggle: () => void;
-}
-
-function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHeaderProps) {
-  const { setNodeRef, isOver } = useDroppable({ id: "group:__unlabeled" });
-  return (
-    <button
-      type="button"
-      ref={setNodeRef}
-      onClick={onToggle}
-      aria-expanded={!collapsed}
-      className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
-        isOver ? "bg-primary/20" : ""
-      }`}
-    >
-      {/* Hollow circle mirrors the position of the filled color dot on labelled
-          group headers, signalling "no label" without borrowing a real color. */}
-      <Circle className="size-2.5 shrink-0 text-muted-foreground" />
-      <span className="text-[13px] font-semibold text-foreground/90">Unlabeled</span>
-      <ChevronRight
-        className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
-          collapsed ? "" : "rotate-90"
-        }`}
-      />
-    </button>
-  );
-}
-
 function findWorktree(
   repos: RepoInfo[],
   worktreeId: string,
@@ -693,13 +584,13 @@ function findWorktree(
 }
 
 interface RepoListProps {
-  labelFilter: string | null;
+  groupFilter: string | null;
 }
 
-export function RepoList({ labelFilter }: RepoListProps) {
+export function RepoList({ groupFilter }: RepoListProps) {
   const { repos } = useRepos();
-  const { settings } = useSettingsQuery();
-  const labels = settings.labels ?? [];
+  const groups = useGroups();
+  const groupMutations = useGroupMutations();
   const statuses = useDashboardStore((s) => s.statuses);
   const branchStatuses = useDashboardStore((s) => s.branchStatuses);
   const setupStatuses = useDashboardStore((s) => s.setupStatuses);
@@ -710,11 +601,19 @@ export function RepoList({ labelFilter }: RepoListProps) {
   const reorderReposMutation = useReorderRepos();
   const reorderWorktreesMutation = useReorderWorktrees();
   const isAdmin = useIsAdmin();
-  const updateRepoLabelMutation = useUpdateRepoLabel();
   const promoteRepoToGitMutation = usePromoteRepoToGit();
   const removeWorktreeMutation = useRemoveWorktree();
 
-  const [worktreeDialog, setWorktreeDialog] = useState<string | null>(null);
+  const [worktreeDialog, setWorktreeDialogRepo] = useState<string | null>(null);
+  // The group a worktree started from a group header joins. Undefined for the repo menu's "+",
+  // which leaves the choice to the group filter.
+  const [worktreeDialogGroup, setWorktreeDialogGroup] = useState<string | null | undefined>();
+  const setWorktreeDialog = useCallback((repo: string | null) => {
+    setWorktreeDialogRepo(repo);
+    if (repo === null) setWorktreeDialogGroup(undefined);
+  }, []);
+  /** Group header "+": the group whose repo is being picked. */
+  const [pickingRepoFor, setPickingRepoFor] = useState<{ groupId: string | null } | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogInfo | null>(null);
   /** Repo name whose "Promote to git" confirmation dialog is open. */
   const [promoteDialog, setPromoteDialog] = useState<string | null>(null);
@@ -734,25 +633,43 @@ export function RepoList({ labelFilter }: RepoListProps) {
   const keyboardNavRef = useRef(false);
 
   const repoCollapse = useCollapseState(REPOS_COLLAPSE_KEY);
-  const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+  const groupCollapse = useCollapseState(GROUPS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
   const originCollapse = useCollapseState(ORIGIN_COLLAPSE_KEY);
   const hostCollapse = useCollapseState(HOST_COLLAPSE_KEY);
-  const [groupBy] = useGroupBy();
+  const [chosenView] = useGroupBy();
+  // With no group defined the Groups view would be one "Ungrouped" list, so the sidebar keeps
+  // listing worktrees under their repos until the first group exists.
+  const groupBy = chosenView === "groups" && groups.length === 0 ? "repo" : chosenView;
   const grouped = groupBy !== "repo";
+  const [renamingGroup, setRenamingGroup] = useState<GroupDefinition | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<GroupDefinition | null>(null);
+  const [childrenPrompt, setChildrenPrompt] = useState<{
+    entry: WorktreeEntry;
+    group: GroupDefinition | null;
+    childCount: number;
+  } | null>(null);
   const hostsQuery = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
   const { toggle: togglePinned } = usePinnedWorktrees();
 
-  // Worktrees in the order the user dragged them to, and the pins with their subtrees. The label
-  // filter applies to pins too: a pin shows only when its repo has the selected label, and its
+  // Worktrees in the order the user dragged them to, and the pins with their subtrees. The group
+  // filter applies to pins too: a pin shows only when it is in the selected group, and its
   // children follow the same rule.
   const sortedRepos = useMemo(() => sortRepoWorktrees(repos), [repos]);
   const visibleRepos = useMemo(
-    () => (labelFilter ? sortedRepos.filter((r) => r.label === labelFilter) : sortedRepos),
-    [sortedRepos, labelFilter],
+    () =>
+      groupFilter
+        ? sortedRepos
+            .map((r) => ({
+              ...r,
+              worktrees: r.worktrees.filter((wt) => wt.groupId === groupFilter),
+            }))
+            .filter((r) => r.worktrees.length > 0)
+        : sortedRepos,
+    [sortedRepos, groupFilter],
   );
   const pinnedTree = useMemo(() => buildPinnedTree(visibleRepos), [visibleRepos]);
   const pinnedRows = useMemo(
@@ -774,9 +691,9 @@ export function RepoList({ labelFilter }: RepoListProps) {
   // them out. `reposWithPinned` lets SortableRepo hide "No worktrees yet" for a repo that only
   // looks empty because its worktrees are pinned. Plain repos are flat and have no pins.
   const { displayRepos, reposWithPinned } = useMemo(() => {
-    const result = withoutPinned(sortedRepos, pinnedTree);
+    const result = withoutPinned(visibleRepos, pinnedTree);
     return { displayRepos: result.repos, reposWithPinned: result.reposWithPinned };
-  }, [sortedRepos, pinnedTree]);
+  }, [visibleRepos, pinnedTree]);
 
   const pinnedSectionCollapsed = pinnedCollapse.isCollapsed(PINNED_SECTION_ID);
   const showPinnedSection = pinnedTree.pins.length > 0;
@@ -787,108 +704,67 @@ export function RepoList({ labelFilter }: RepoListProps) {
   );
   const pinnedNavCount = pinnedNavIds.length;
 
-  const groups = useMemo(() => {
-    if (labels.length === 0)
-      return [
-        {
-          labelId: null as string | null,
-          label: null as LabelDefinition | null,
-          repos: displayRepos,
-        },
-      ];
-
-    const byLabel = new Map<string | null, RepoInfo[]>();
-    for (const p of displayRepos) {
-      const key = p.label ?? null;
-      if (!byLabel.has(key)) byLabel.set(key, []);
-      byLabel.get(key)!.push(p);
-    }
-
-    const result: {
-      labelId: string | null;
-      label: LabelDefinition | null;
-      repos: RepoInfo[];
-    }[] = [];
-    for (const lbl of labels) {
-      const grouped = byLabel.get(lbl.id);
-      if (grouped) {
-        result.push({ labelId: lbl.id, label: lbl, repos: grouped });
-      }
-    }
-    const unlabeled = byLabel.get(null);
-    if (unlabeled) {
-      result.push({ labelId: null, label: null, repos: unlabeled });
-    }
-    return result;
-  }, [displayRepos, labels]);
-
-  const visibleGroups = useMemo(() => {
-    if (!labelFilter) return groups;
-    return groups.filter((g) => g.labelId === labelFilter);
-  }, [groups, labelFilter]);
-
-  // The Origin and Host views list every worktree of the repos the label filter lets through,
-  // except the ones the Pinned section shows, in one flat list of rows.
+  // The Groups, Origin and Host views list every worktree the group filter lets through, except
+  // the ones the Pinned section shows, in one flat list of rows.
   const groupedRepos = useMemo(
     () => withoutPinned(visibleRepos, pinnedTree).repos,
     [visibleRepos, pinnedTree],
   );
   const groupedRows = useMemo(() => {
+    if (groupBy === "groups") {
+      return buildGroupRows({
+        repos: groupedRepos,
+        allRepos: sortedRepos,
+        groups,
+        filter: groupFilter,
+        isGroupCollapsed: groupCollapse.isCollapsed,
+        isOriginCollapsed: originCollapse.isCollapsed,
+      });
+    }
     if (groupBy === "origin") return buildOriginRows(groupedRepos, originCollapse.isCollapsed);
     if (groupBy === "host")
       return buildHostRows(groupedRepos, hostsQuery.data ?? [], hostCollapse.isCollapsed);
     return [];
-  }, [groupBy, groupedRepos, hostsQuery.data, originCollapse, hostCollapse]);
+  }, [
+    groupBy,
+    groupedRepos,
+    sortedRepos,
+    groups,
+    groupFilter,
+    groupCollapse,
+    hostsQuery.data,
+    originCollapse,
+    hostCollapse,
+  ]);
   const groupedEntries = useMemo(() => entriesOf(groupedRepos), [groupedRepos]);
   const originTree = useMemo(() => buildOriginTree(groupedEntries), [groupedEntries]);
 
-  // Only count worktrees that are actually rendered — collapsed
-  // repos/labels hide their worktrees entirely, and keyboard arrow
-  // navigation must skip over them so focus never lands on something the
-  // user can't see. Pinned worktrees are always at the top of the list
-  // (independent of label filter), then the regular tree follows.
+  // Only count worktrees that are actually rendered: collapsed repos and groups hide their
+  // worktrees entirely, and keyboard arrow navigation must skip over them so focus never lands on
+  // something the user can't see. Pinned worktrees are always at the top of the list, then the
+  // regular tree follows.
   const allWorktreeIds = useMemo(() => {
     if (grouped) return [...pinnedNavIds, ...navigableIds(groupedRows)];
-    const headerVisible = labels.length > 0 && !labelFilter;
-    const pinnedPart = pinnedNavIds;
-    const rest = visibleGroups.flatMap((g) => {
-      const groupKey = g.labelId ?? UNLABELED_KEY;
-      if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
-      return g.repos.flatMap((p) => {
-        if (repoCollapse.isCollapsed(p.name)) return [];
-        return p.worktrees.map((wt) => toWorktreeId(p.name, wt.name, wt.hostId));
-      });
+    const rest = displayRepos.flatMap((p) => {
+      if (repoCollapse.isCollapsed(p.name)) return [];
+      return p.worktrees.map((wt) => toWorktreeId(p.name, wt.name, wt.hostId));
     });
-    return [...pinnedPart, ...rest];
-  }, [
-    grouped,
-    groupedRows,
-    visibleGroups,
-    labels.length,
-    labelFilter,
-    labelCollapse,
-    repoCollapse,
-    pinnedNavIds,
-  ]);
+    return [...pinnedNavIds, ...rest];
+  }, [grouped, groupedRows, displayRepos, repoCollapse, pinnedNavIds]);
 
   const worktreeIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     // Reserve slots [0..pinnedNavCount) for pinned worktrees so per-repo
     // worktreeIndexStart values align with allWorktreeIds.
     let index = pinnedNavCount;
-    const headerVisible = labels.length > 0 && !labelFilter;
-    for (const group of visibleGroups) {
-      const groupKey = group.labelId ?? UNLABELED_KEY;
-      if (headerVisible && labelCollapse.isCollapsed(groupKey)) continue;
-      for (const repo of group.repos) {
-        map.set(repo.name, index);
-        if (!repoCollapse.isCollapsed(repo.name)) {
-          index += repo.worktrees.length;
-        }
+    for (const repo of displayRepos) {
+      map.set(repo.name, index);
+      if (!repoCollapse.isCollapsed(repo.name)) {
+        index += repo.worktrees.length;
       }
     }
     return map;
-  }, [visibleGroups, labels.length, labelFilter, labelCollapse, repoCollapse, pinnedNavCount]);
+  }, [displayRepos, repoCollapse, pinnedNavCount]);
 
   useEffect(() => {
     if (keyboardNavRef.current) return;
@@ -901,7 +777,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
   }, [activeWorktreeId, allWorktreeIds]);
 
   // Reveal the active worktree in the tree by auto-expanding the repo
-  // and label group it belongs to. This should run ONLY when
+  // and group it belongs to. This should run ONLY when
   // activeWorktreeId changes — i.e. when the user switches worktrees via
   // the ⌘K picker, URL nav, notifications, etc. After the initial
   // reveal we deliberately leave the collapse state alone so the user can
@@ -910,9 +786,8 @@ export function RepoList({ labelFilter }: RepoListProps) {
   // back on the very next render.
   //
   // The naive implementation would include only `activeWorktreeId` in the
-  // deps, but we also reference `labelCollapse`/`repoCollapse` inside
-  // (their references change on every state update), `groups` (which we
-  // walk), and `pinnedTree` (for the pinned-worktree early-exit).
+  // deps, but we also reference `groupCollapse`/`repoCollapse` inside
+  // (their references change on every state update), and `pinnedTree` (for the pinned-worktree early-exit).
   // Including all of those in the deps makes the effect re-fire on every
   // collapse-state change and undo the user's collapse. To preserve the
   // "once per activeWorktreeId" semantics while keeping the deps list
@@ -929,13 +804,13 @@ export function RepoList({ labelFilter }: RepoListProps) {
   // the top of the tree (and are filtered out of `groups` via
   // `displayRepos`). They have no presence inside their repo's
   // worktree list, so for a pinned active worktree we reveal it by
-  // expanding the Pinned section header — not the repo or label group
+  // expanding the Pinned section header — not the repo or group
   // that contains its (now hidden) original entry.
   // Two refs so we run the reveal logic again when the *pinned-ness* of
   // the active worktree changes, not only when activeWorktreeId itself
   // changes. Without the pinned-tracking ref, pinning or unpinning the
   // currently-active worktree early-returns here before
-  // `pinnedCollapse.expand` (or the regular repo/label expand) gets
+  // `pinnedCollapse.expand` (or the regular repo/group expand) gets
   // a chance to run.
   const revealedWorktreeRef = useRef<string | null>(null);
   const revealedAsPinnedRef = useRef<boolean>(false);
@@ -972,7 +847,10 @@ export function RepoList({ labelFilter }: RepoListProps) {
       return;
     }
     if (grouped) {
-      // Open what hides the active worktree: its origin ancestors, or its host and repo group.
+      // Open what hides the active worktree: its group, its origin ancestors, or its host and
+      // repo group.
+      const found = findWorktree(repos, activeWorktreeId);
+      if (found) groupCollapse.expand(found.wt.groupId ?? UNGROUPED_KEY);
       let id: string | undefined = activeWorktreeId;
       const seen = new Set<string>();
       while (id && !seen.has(id)) {
@@ -990,21 +868,14 @@ export function RepoList({ labelFilter }: RepoListProps) {
       keyboardNavRef.current = false;
       return;
     }
-    for (const group of groups) {
-      for (const repo of group.repos) {
-        const containsActive = repo.worktrees.some(
-          (wt) => toWorktreeId(repo.name, wt.name, wt.hostId) === activeWorktreeId,
-        );
-        if (!containsActive) continue;
-        if (labelFilter && group.labelId !== labelFilter) return;
-        const headerVisible = labels.length > 0 && !labelFilter;
-        if (headerVisible) {
-          labelCollapse.expand(group.labelId ?? UNLABELED_KEY);
-        }
-        repoCollapse.expand(repo.name);
-        keyboardNavRef.current = false;
-        return;
-      }
+    for (const repo of displayRepos) {
+      const containsActive = repo.worktrees.some(
+        (wt) => toWorktreeId(repo.name, wt.name, wt.hostId) === activeWorktreeId,
+      );
+      if (!containsActive) continue;
+      repoCollapse.expand(repo.name);
+      keyboardNavRef.current = false;
+      return;
     }
   }, [
     activeWorktreeId,
@@ -1013,10 +884,8 @@ export function RepoList({ labelFilter }: RepoListProps) {
     repos,
     originCollapse,
     hostCollapse,
-    groups,
-    labelFilter,
-    labels.length,
-    labelCollapse,
+    displayRepos,
+    groupCollapse,
     repoCollapse,
     pinnedCollapse,
     pinnedTree,
@@ -1101,10 +970,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
     }
   }
 
-  const allRepoNames = useMemo(
-    () => visibleGroups.flatMap((g) => g.repos.map((p) => p.name)),
-    [visibleGroups],
-  );
+  const allRepoNames = useMemo(() => displayRepos.map((p) => p.name), [displayRepos]);
 
   // Rows are only candidates for the kind of drag that makes sense: pins among pins, worktrees
   // within their repo in the Repo view, onto rows and pins in the Origin view, onto rows and host
@@ -1131,6 +997,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
             (c.data.current as { repoName?: string } | undefined)?.repoName === activeData.repoName
           );
         }
+        if (groupBy === "groups") return kind === "group";
         if (groupBy === "origin") return kind === "wt" || kind === "pin";
         return kind === "wt" || kind === "host";
       });
@@ -1158,7 +1025,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
     if (!over) return null;
     const overKind = (over.data.current as { kind?: string } | undefined)?.kind;
     const activeKind = (active.data.current as { kind?: string } | undefined)?.kind;
-    if (overKind === "host") return "into";
+    if (overKind === "host" || overKind === "group") return "into";
     if (overKind === "pin" && activeKind === "wt") return "into";
     const start = activatorEvent as Partial<MouseEvent & TouchEvent>;
     const startY =
@@ -1195,6 +1062,19 @@ export function RepoList({ labelFilter }: RepoListProps) {
     }
   }
 
+  /** Moves a worktree to a group (null for Ungrouped), asking first about its children. */
+  function moveToGroup(worktreeId: string, groupId: string | null) {
+    const all = entriesOf(sortedRepos);
+    const entry = all.find((e) => e.worktreeId === worktreeId);
+    if (!entry || (entry.worktree.groupId ?? null) === groupId) return;
+    const children = originDescendants(all, worktreeId).filter(
+      (e) => (e.worktree.groupId ?? null) !== groupId,
+    );
+    const group = groups.find((g) => g.id === groupId) ?? null;
+    if (children.length > 0) setChildrenPrompt({ entry, group, childCount: children.length });
+    else groupMutations.setWorktreeGroup.mutate({ worktreeId, groupId });
+  }
+
   function handleWorktreeDrop(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
@@ -1208,6 +1088,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
       worktreeId?: string;
       repoName?: string;
       hostId?: string;
+      groupId?: string | null;
     };
     const zone = zoneOf(event);
     if (!zone) return;
@@ -1215,6 +1096,10 @@ export function RepoList({ labelFilter }: RepoListProps) {
     if (activeData.kind === "pin") {
       if (overData.worktreeId)
         applyPlan(planPinDrop(pinnedTree, activeId, overData.worktreeId, zone), null);
+      return;
+    }
+    if (overData.kind === "group") {
+      moveToGroup(activeId, overData.groupId ?? null);
       return;
     }
     if (groupBy === "repo") {
@@ -1253,25 +1138,11 @@ export function RepoList({ labelFilter }: RepoListProps) {
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    if (overId.startsWith("group:")) {
-      const targetLabelId = overId === "group:__unlabeled" ? null : overId.slice("group:".length);
-      updateRepoLabelMutation.mutate({ name: activeId, label: targetLabelId });
-      return;
-    }
-
-    const activeGroup = groups.find((g) => g.repos.some((p) => p.name === activeId));
-    const overGroup = groups.find((g) => g.repos.some((p) => p.name === overId));
-
-    if (!activeGroup || !overGroup) return;
-
-    if (activeGroup.labelId === overGroup.labelId) {
-      const allNames = repos.map((p) => p.name);
-      const oldIndex = allNames.indexOf(activeId);
-      const newIndex = allNames.indexOf(overId);
-      reorderReposMutation.mutate(arrayMove(allNames, oldIndex, newIndex));
-    } else {
-      updateRepoLabelMutation.mutate({ name: activeId, label: overGroup.labelId });
-    }
+    const allNames = repos.map((p) => p.name);
+    const oldIndex = allNames.indexOf(activeId);
+    const newIndex = allNames.indexOf(overId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    reorderReposMutation.mutate(arrayMove(allNames, oldIndex, newIndex));
   }
 
   function handleDragCancel() {
@@ -1366,7 +1237,7 @@ export function RepoList({ labelFilter }: RepoListProps) {
                         row={row}
                         index={i}
                         mode={groupBy}
-                        draggable={groupBy === "origin" || row.depth === 0}
+                        draggable={groupBy === "origin" || groupBy === "groups" || row.depth === 0}
                         originCollapse={originCollapse}
                         hosts={hostsQuery.data ?? []}
                         statuses={statuses}
@@ -1383,8 +1254,15 @@ export function RepoList({ labelFilter }: RepoListProps) {
 
             {grouped ? (
               <GroupedWorktrees
-                mode={groupBy as "origin" | "host"}
+                mode={groupBy as "groups" | "origin" | "host"}
                 rows={groupedRows}
+                groupCollapse={groupCollapse}
+                groupActions={{
+                  onRename: setRenamingGroup,
+                  onColor: (group, color) => groupMutations.update.mutate({ id: group.id, color }),
+                  onDelete: setDeletingGroup,
+                  onAddWorktree: (groupId) => setPickingRepoFor({ groupId }),
+                }}
                 navStart={pinnedNavCount}
                 originCollapse={originCollapse}
                 hostCollapse={hostCollapse}
@@ -1398,63 +1276,28 @@ export function RepoList({ labelFilter }: RepoListProps) {
               />
             ) : (
               <SortableContext items={allRepoNames} strategy={verticalListSortingStrategy}>
-                {visibleGroups.map((group) => {
-                  const groupKey = group.labelId ?? UNLABELED_KEY;
-                  // When a label filter is active we render a single group without
-                  // a header, so honour the group's collapsed state only when the
-                  // header is visible (otherwise users would have no way to expand
-                  // it again). Same for the no-labels mode.
-                  const headerVisible = labels.length > 0 && !labelFilter;
-                  const groupCollapsed = headerVisible && labelCollapse.isCollapsed(groupKey);
-                  return (
-                    <div key={groupKey}>
-                      {headerVisible &&
-                        (group.label ? (
-                          <DroppableLabelHeader
-                            labelId={group.labelId!}
-                            label={group.label}
-                            collapsed={groupCollapsed}
-                            onToggle={() => labelCollapse.toggle(groupKey)}
-                          />
-                        ) : (
-                          <DroppableUnlabeledHeader
-                            collapsed={groupCollapsed}
-                            onToggle={() => labelCollapse.toggle(groupKey)}
-                          />
-                        ))}
-                      <CollapsibleSection collapsed={groupCollapsed}>
-                        {group.repos.map((repo) => (
-                          // Consecutive repos in a label group are separated by
-                          // spacing alone (no divider line); the first row sits
-                          // flush under the label header.
-                          <div key={repo.name} className="pt-1 first:pt-0">
-                            <SortableRepo
-                              repo={repo}
-                              statuses={statuses}
-                              branchStatuses={branchStatuses}
-                              setupStatuses={setupStatuses}
-                              removeRepo={(name) => removeRepoMutation.mutate(name)}
-                              updateRepoLabel={(name, label) =>
-                                updateRepoLabelMutation.mutate({ name, label })
-                              }
-                              onPromoteToGit={setPromoteDialog}
-                              labels={labels}
-                              setWorktreeDialog={setWorktreeDialog}
-                              onShowDeleteDialog={setDeleteDialog}
-                              focusedIndex={focusedIndex}
-                              worktreeIndexStart={worktreeIndexMap.get(repo.name) ?? 0}
-                              collapsed={repoCollapse.isCollapsed(repo.name)}
-                              onToggleCollapse={repoCollapse.toggle}
-                              hasPinnedSiblings={reposWithPinned.has(repo.name)}
-                              onTogglePinned={togglePinned}
-                              hosts={hostsQuery.data ?? []}
-                            />
-                          </div>
-                        ))}
-                      </CollapsibleSection>
-                    </div>
-                  );
-                })}
+                {displayRepos.map((repo) => (
+                  // Consecutive repos are separated by spacing alone (no divider line).
+                  <div key={repo.name} className="pt-1 first:pt-0">
+                    <SortableRepo
+                      repo={repo}
+                      statuses={statuses}
+                      branchStatuses={branchStatuses}
+                      setupStatuses={setupStatuses}
+                      removeRepo={(name) => removeRepoMutation.mutate(name)}
+                      onPromoteToGit={setPromoteDialog}
+                      setWorktreeDialog={setWorktreeDialog}
+                      onShowDeleteDialog={setDeleteDialog}
+                      focusedIndex={focusedIndex}
+                      worktreeIndexStart={worktreeIndexMap.get(repo.name) ?? 0}
+                      collapsed={repoCollapse.isCollapsed(repo.name)}
+                      onToggleCollapse={repoCollapse.toggle}
+                      hasPinnedSiblings={reposWithPinned.has(repo.name)}
+                      onTogglePinned={togglePinned}
+                      hosts={hostsQuery.data ?? []}
+                    />
+                  </div>
+                ))}
               </SortableContext>
             )}
             {/* dropAnimation={null} disables dnd-kit's default snap-back. The reorder
@@ -1480,6 +1323,48 @@ export function RepoList({ labelFilter }: RepoListProps) {
         </DropIndicatorContext.Provider>
       </div>
 
+      <GroupNameDialog
+        open={renamingGroup !== null}
+        onOpenChange={(open) => {
+          if (!open) setRenamingGroup(null);
+        }}
+        title="Rename group"
+        submitLabel="Rename"
+        initialName={renamingGroup?.name ?? ""}
+        onSubmit={(name) => {
+          if (renamingGroup) groupMutations.update.mutate({ id: renamingGroup.id, name });
+        }}
+      />
+
+      <DeleteGroupDialog
+        open={deletingGroup !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingGroup(null);
+        }}
+        groupName={deletingGroup?.name ?? ""}
+        onConfirm={() => {
+          if (deletingGroup) groupMutations.remove.mutate({ id: deletingGroup.id });
+        }}
+      />
+
+      <MoveChildrenDialog
+        open={childrenPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) setChildrenPrompt(null);
+        }}
+        worktreeName={childrenPrompt?.entry.worktree.name ?? ""}
+        groupName={childrenPrompt?.group?.name ?? "Ungrouped"}
+        childCount={childrenPrompt?.childCount ?? 0}
+        onChoose={(withChildren) => {
+          if (!childrenPrompt) return;
+          groupMutations.setWorktreeGroup.mutate({
+            worktreeId: childrenPrompt.entry.worktreeId,
+            groupId: childrenPrompt.group?.id ?? null,
+            withChildren,
+          });
+        }}
+      />
+
       {moveDialog && (
         <MoveWorktreeDialog
           open
@@ -1492,8 +1377,22 @@ export function RepoList({ labelFilter }: RepoListProps) {
         />
       )}
 
+      <PickRepoDialog
+        open={pickingRepoFor !== null}
+        onOpenChange={(open) => {
+          if (!open) setPickingRepoFor(null);
+        }}
+        groupName={groups.find((g) => g.id === pickingRepoFor?.groupId)?.name ?? "Ungrouped"}
+        repos={repos.filter((r) => r.kind !== "plain").map((r) => r.name)}
+        onPick={(repo) => {
+          setWorktreeDialogGroup(pickingRepoFor?.groupId ?? null);
+          setWorktreeDialogRepo(repo);
+        }}
+      />
+
       <NewWorktreeDialog
         repoName={worktreeDialog ?? ""}
+        groupId={worktreeDialogGroup}
         open={worktreeDialog !== null}
         onOpenChange={(open) => setWorktreeDialog(open ? worktreeDialog : null)}
       />

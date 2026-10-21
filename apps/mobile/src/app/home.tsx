@@ -22,22 +22,22 @@ import { StartSheet } from "../components/start-sheet";
 import { Button } from "../components/ui";
 import { WorktreeRowView } from "../components/worktree-row";
 import { canDelete, deleteFailure, deletePrompt, removeRequest } from "../lib/deleting";
+import { effectiveGroupFilter } from "../lib/group-filter";
 import { SessionGate, useHubSession } from "../lib/hub-session";
 import { useHubs } from "../lib/hubs-context";
-import { effectiveLabelFilter } from "../lib/label-filter";
 import { resetTo } from "../lib/navigation";
 import { pinRequest } from "../lib/pinning";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
 import { useGroupBy } from "../lib/use-group-by";
+import { useGroupFilter } from "../lib/use-group-filter";
 import {
+  useGroups,
   useHosts,
-  useLabels,
   usePinWorktree,
   useRemoveWorktree,
   useRepos,
   useStatusFeed,
 } from "../lib/use-hub-data";
-import { useLabelFilter } from "../lib/use-label-filter";
 import {
   buildSections,
   GROUP_BY_OPTIONS,
@@ -66,8 +66,8 @@ function WorktreeList() {
   const { state: statuses, connection: stream } = useStatusFeed();
   const { collapsed, toggle } = useCollapsedRepos();
   const [groupBy, setGroupBy] = useGroupBy();
-  const labels = useLabels();
-  const [storedLabel, setLabelFilter] = useLabelFilter();
+  const groups = useGroups();
+  const [storedGroup, setGroupFilter] = useGroupFilter();
   const pin = usePinWorktree();
   const remove = useRemoveWorktree();
   const [deleting, setDeleting] = useState<ReadonlySet<string>>(new Set());
@@ -96,10 +96,10 @@ function WorktreeList() {
 
   const repoList = repos.data;
   const hostList = hosts.data;
-  const labelList = labels.data;
-  const labelFilter = useMemo(
-    () => effectiveLabelFilter(storedLabel, labelList ?? []),
-    [storedLabel, labelList],
+  const groupList = groups.data;
+  const groupFilter = useMemo(
+    () => effectiveGroupFilter(storedGroup, groupList ?? []),
+    [storedGroup, groupList],
   );
   const sections = useMemo(
     () =>
@@ -109,10 +109,10 @@ function WorktreeList() {
         collapsed,
         query,
         groupBy,
-        labels: labelList ?? [],
-        labelFilter,
+        groups: groupList ?? [],
+        groupFilter,
       }),
-    [repoList, hostList, statuses, collapsed, query, groupBy, labelList, labelFilter],
+    [repoList, hostList, statuses, collapsed, query, groupBy, groupList, groupFilter],
   );
 
   const refresh = useCallback(async () => {
@@ -135,17 +135,17 @@ function WorktreeList() {
     );
   }, [setGroupBy]);
 
-  const chooseLabel = useCallback(() => {
-    const defined = labelList ?? [];
+  const chooseGroup = useCallback(() => {
+    const defined = groupList ?? [];
     const options = ["All", ...defined.map((l) => l.name), "Cancel"];
     ActionSheetIOS.showActionSheetWithOptions(
-      { title: "Filter by label", options, cancelButtonIndex: options.length - 1 },
+      { title: "Filter by group", options, cancelButtonIndex: options.length - 1 },
       (index) => {
-        if (index === 0) setLabelFilter(null);
-        else if (index <= defined.length) setLabelFilter(defined[index - 1]?.id ?? null);
+        if (index === 0) setGroupFilter(null);
+        else if (index <= defined.length) setGroupFilter(defined[index - 1]?.id ?? null);
       },
     );
-  }, [labelList, setLabelFilter]);
+  }, [groupList, setGroupFilter]);
 
   const confirmDelete = useCallback(
     (row: WorktreeRow) => {
@@ -203,7 +203,7 @@ function WorktreeList() {
   const loading = repos.isPending || !clientStateReady;
   const filtering = query.trim() !== "";
   const groupLabel = GROUP_BY_OPTIONS.find((o) => o.value === groupBy)?.label ?? "Repo";
-  const activeLabel = labelList?.find((l) => l.id === labelFilter) ?? null;
+  const activeGroup = groupList?.find((g) => g.id === groupFilter) ?? null;
   const hubLabel = active?.label ?? "Band";
 
   return (
@@ -310,13 +310,13 @@ function WorktreeList() {
             section={section}
             first={section === sections.find((s) => s.kind !== "pinned")}
             groupLabel={groupLabel}
-            labelName={labelList && labelList.length > 0 ? (activeLabel?.name ?? "All") : null}
+            groupName={groupList && groupList.length > 0 ? (activeGroup?.name ?? "All") : null}
             filtering={filtering}
             avatarBase={hub.url}
             token={hub.token}
             onToggle={() => toggle(section.name)}
             onGroupBy={chooseGroupBy}
-            onLabel={chooseLabel}
+            onGroup={chooseGroup}
           />
         )}
         renderItem={({ item, index, section }) => (
@@ -363,25 +363,25 @@ function SectionHeader({
   section,
   first,
   groupLabel,
-  labelName,
+  groupName,
   filtering,
   avatarBase,
   token,
   onToggle,
   onGroupBy,
-  onLabel,
+  onGroup,
 }: {
   section: RepoSection;
   first: boolean;
   groupLabel: string;
-  /** The filter's current name, or null when the hub defines no labels. */
-  labelName: string | null;
+  /** The filter's current name, or null when the hub defines no groups. */
+  groupName: string | null;
   filtering: boolean;
   avatarBase: string;
   token: string;
   onToggle: () => void;
   onGroupBy: () => void;
-  onLabel: () => void;
+  onGroup: () => void;
 }) {
   if (section.kind === "pinned") {
     return (
@@ -398,16 +398,16 @@ function SectionHeader({
             {groupLabel === "Worker" ? "Workers" : groupLabel === "Origin" ? "Origin" : "Repos"}
           </Text>
           <View style={styles.controls}>
-            {labelName !== null ? (
+            {groupName !== null ? (
               <Pressable
-                onPress={onLabel}
+                onPress={onGroup}
                 accessibilityRole="button"
-                accessibilityLabel={`Filter by label, ${labelName}`}
-                testID="home__label-filter"
+                accessibilityLabel={`Filter by group, ${groupName}`}
+                testID="home__group-filter"
                 style={styles.groupBy}
               >
                 <Tag size={13} color={colors.foreground} />
-                <Text style={styles.groupByText}>{labelName}</Text>
+                <Text style={styles.groupByText}>{groupName}</Text>
                 <ChevronGlyph direction="down" size={7} color={colors.foreground} />
               </Pressable>
             ) : null}
@@ -425,17 +425,17 @@ function SectionHeader({
           </View>
         </View>
       ) : null}
-      {section.labelHeader ? (
+      {section.groupHeader ? (
         <View
-          style={styles.labelRow}
-          testID={`home__label-group-${section.labelHeader.id ?? "none"}`}
+          style={styles.groupRow}
+          testID={`home__group-header-${section.groupHeader.id ?? "none"}`}
         >
-          {section.labelHeader.color ? (
-            <View style={[styles.labelDot, { backgroundColor: section.labelHeader.color }]} />
+          {section.groupHeader.color ? (
+            <View style={[styles.groupDot, { backgroundColor: section.groupHeader.color }]} />
           ) : (
-            <View style={[styles.labelDot, styles.labelDotEmpty]} />
+            <View style={[styles.groupDot, styles.groupDotEmpty]} />
           )}
-          <Text style={styles.labelName}>{section.labelHeader.name}</Text>
+          <Text style={styles.groupName}>{section.groupHeader.name}</Text>
         </View>
       ) : null}
       {section.kind === "origin" ? null : (
@@ -571,7 +571,7 @@ const styles = StyleSheet.create({
   sectionLabel: { color: colors.mutedForeground, fontSize: 14 },
   controls: { alignItems: "center", flexDirection: "row", gap: 14 },
   groupBy: { alignItems: "center", flexDirection: "row", gap: 5 },
-  labelRow: {
+  groupRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: 8,
@@ -579,9 +579,9 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 14,
   },
-  labelDot: { borderRadius: 5, height: 10, width: 10 },
-  labelDotEmpty: { borderColor: colors.faint, borderWidth: 1.5 },
-  labelName: { color: colors.foreground, fontSize: 13, fontWeight: "600" },
+  groupDot: { borderRadius: 5, height: 10, width: 10 },
+  groupDotEmpty: { borderColor: colors.faint, borderWidth: 1.5 },
+  groupName: { color: colors.foreground, fontSize: 13, fontWeight: "600" },
   groupByText: { color: colors.foreground, fontSize: 13 },
   repoHeader: {
     alignItems: "center",

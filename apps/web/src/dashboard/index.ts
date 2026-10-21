@@ -71,20 +71,19 @@ export {
   type UseEditorHistoryReturn,
   useEditorHistory,
 } from "./hooks/use-editor-history";
+export { GROUP_FILTER_KEY, useGroupFilter } from "./hooks/use-group-filter";
+export {
+  GROUP_LAST_WORKTREE_KEY,
+  useGroupLastWorktree,
+  useRecordGroupLastWorktree,
+} from "./hooks/use-group-last-worktree";
 export { useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
-export { LABEL_FILTER_KEY, useLabelFilter } from "./hooks/use-label-filter";
-export {
-  LABEL_LAST_WORKTREE_KEY,
-  useLabelLastWorktree,
-  useRecordLabelLastWorktree,
-} from "./hooks/use-label-last-worktree";
 export {
   useCreateWorktree,
   useRemoveRepo,
   useRemoveWorktree,
   useReorderRepos,
-  useUpdateRepoLabel,
 } from "./hooks/use-repo-mutations";
 export { useRepos } from "./hooks/use-repos";
 export { type UseSearchReturn, useSearch } from "./hooks/use-search";
@@ -181,9 +180,9 @@ export type {
   FormatFileResult,
   GitStatus,
   GitSyncState,
+  GroupDefinition,
   HooksStatus,
   HostHooks,
-  LabelDefinition,
   ListWorktreeBranchesResult,
   NotificationSettings,
   RepoAvatarInfo,

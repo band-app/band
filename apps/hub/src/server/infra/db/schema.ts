@@ -115,7 +115,6 @@ export const repos = sqliteTable("repos", {
   remoteUrl: text("remote_url"),
   remoteKey: text("remote_key"),
   defaultBranch: text("default_branch").notNull(),
-  label: text("label"),
   sortOrder: integer("sort_order").notNull(),
   // Discriminates between git-backed repos (one worktree per branch,
   // branches, PR/CI features) and plain folders (single implicit worktree,
@@ -163,6 +162,15 @@ export const repoHosts = sqliteTable(
   (t) => [primaryKey({ columns: [t.repoName, t.hostId] })],
 );
 
+// A user-made group of worktrees across repos and hosts. A worktree is in at most one.
+export const worktreeGroups = sqliteTable("worktree_groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  color: text("color").notNull(),
+  sortOrder: integer("sort_order").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
 export const worktrees = sqliteTable("worktrees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   repoName: text("repo_name")
@@ -193,6 +201,10 @@ export const worktrees = sqliteTable("worktrees", {
   originWorktreeId: text("origin_worktree_id"),
   originChatId: text("origin_chat_id"),
   originTerminalId: text("origin_terminal_id"),
+  // The group the worktree is shown under (`worktree_groups.id`), or null for Ungrouped. A plain
+  // id with no foreign key, like the origin columns: only `RepoQueries.setGroup` writes it, and
+  // deleting a group nulls it.
+  groupId: text("group_id"),
   // Set when the worktree was restored on another host: the id of the replacement. The copy
   // stays on disk untouched and is listed as superseded until a person removes it.
   supersededBy: text("superseded_by"),

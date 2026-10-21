@@ -336,7 +336,7 @@ describe("clientState", () => {
   });
 
   it("deletes a key as a tombstone whose version keeps counting", async () => {
-    const key = "band.repos-list.label-filter";
+    const key = "band.repos-list.group-filter";
     const created = await setEntry(server.url, {
       key,
       scope: "all",
@@ -377,7 +377,7 @@ describe("clientState", () => {
   });
 
   it("refuses a delete based on a stale version", async () => {
-    const key = "band.repos-list.collapsed-labels";
+    const key = "band.repos-list.collapsed-groups";
     const first = await setEntry(server.url, { key, scope: "all", value: ["a"], baseVersion: 0 });
     const second = await setEntry(server.url, {
       key,
@@ -452,7 +452,7 @@ describe("clientState", () => {
     const featureDraft = `band-draft:${WS_FEATURE}`;
     const featureSplit = `band:term-split:${WS_FEATURE}:leaf-1`;
     const mainBranch = `band:diff-compare-branch:${WS_MAIN}`;
-    const globalKey = "band.repos-list.label-last-worktree";
+    const globalKey = "band.repos-list.group-last-worktree";
     const draft = (await listEntries(server.url, WS_FEATURE, "desktop")).find(
       (e) => e.key === featureDraft,
     );

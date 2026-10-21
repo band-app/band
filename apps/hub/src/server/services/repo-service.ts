@@ -40,6 +40,7 @@ import { type SettingsService, settingsService } from "./settings-service";
 import { pruneMissing } from "./sync-service";
 import { tokenService } from "./token-service";
 import { vaultService } from "./vault-service";
+import { type WorktreeGroup, worktreeGroupService } from "./worktree-group-service";
 
 const log = createLogger("repo-service");
 
@@ -58,10 +59,10 @@ function isInsideRoots(path: string, roots: string[]): boolean {
  * refactor (`docs/web-architecture.md`).
  *
  * Owns the lifecycle of `RepoState` rows: add, list, promote (plain →
- * git), reorder, label, remove. Each operation is a thin orchestration of
+ * git), reorder, remove. Each operation is a thin orchestration of
  * the infra adapters it depends on (`RepoQueries` for the DB,
  * the repo's host for the shell-out to git, `SettingsService` for the
- * label / worktrees-dir lookup) — no SQL or `execFile` calls live here.
+ * worktrees-dir lookup) — no SQL or `execFile` calls live here.
  *
  * Cross-domain teardown (cronjob cleanup on repo removal, worktree
  * removal when a worktree's repo is deleted) stays in the router so
@@ -92,7 +93,7 @@ export class RepoService {
 
   /**
    * Snapshot of the repos table joined with the dashboard-facing
-   * extras: `labels` from settings and per-worktree `worktreeId` /
+   * extras: `groups` and per-worktree `worktreeId` /
    * `agent` from the worktree_statuses table. For git repos we
    * enrich each tracked worktree with the live `git worktree list`
    * output so the dashboard sees up-to-the-second branch / HEAD info
@@ -116,7 +117,6 @@ export class RepoService {
       /** Where each host keeps the repo: the folder on the hub's machine and on each worker that has it. */
       clones: Array<{ hostId: string; path: string }>;
       defaultBranch: string;
-      label: string | undefined;
       kind: RepoKind;
       /** The hosts the repo may run on, or null for every host. */
       allowedHostIds: string[] | null;
@@ -160,16 +160,17 @@ export class RepoService {
         // null` — `NonNullable` isn't needed because the source type is
         // already non-undefined, but `| null` matches the null fallback.
         agent: WorktreeAgentInfo | null;
+        /** The group the worktree is in, or null for Ungrouped. */
+        groupId: string | null;
         /** Where the worktree was started from, or null for top-level work. */
         origin: WorktreeOriginInfo | null;
         /** Ids of the worktrees started from this one, on any repo and host. */
         children: string[];
       }>;
     }>;
-    labels: NonNullable<ReturnType<SettingsService["get"]>["labels"]>;
+    groups: WorktreeGroup[];
   }> {
     const repos = this.queries.loadAll();
-    const settings = this.settings.get();
     const statuses = this.statusQueries.loadCurrent();
     const statusMap = new Map(statuses.map((s) => [s.worktreeId, s]));
     const lifecycles = ephemeralLifecycleService.states();
@@ -255,6 +256,7 @@ export class RepoService {
                 path: wt.path,
                 head: wt.head,
                 pinned: tracked?.pinned ?? false,
+                ...(tracked?.groupId ? { groupId: tracked.groupId } : {}),
                 ...(tracked?.sortIndex === undefined ? {} : { sortIndex: tracked.sortIndex }),
                 ...(tracked?.pinSortIndex === undefined
                   ? {}
@@ -281,7 +283,6 @@ export class RepoService {
           ([hostId, path]) => ({ hostId, path }),
         ),
         defaultBranch: repo.defaultBranch,
-        label: repo.label,
         kind: repo.kind,
         allowedHostIds: repo.allowedHostIds ?? null,
         primaryHostId: primaryHostOf({ ...repo, worktrees }),
@@ -303,6 +304,7 @@ export class RepoService {
             ...(lifecycle ? { lifecycle } : {}),
             lastCheckpointAt: lastCheckpoints.get(worktreeId) ?? null,
             agent: status?.agent ?? null,
+            groupId: wt.groupId ?? null,
             origin: links.origins.get(worktreeId) ?? null,
             children: links.children.get(worktreeId) ?? [],
           };
@@ -310,7 +312,7 @@ export class RepoService {
       };
     });
 
-    return { repos: result, labels: settings.labels ?? [] };
+    return { repos: result, groups: worktreeGroupService.list() };
   }
 
   /**
@@ -327,11 +329,10 @@ export class RepoService {
    * Register a repo at `path`. Detects `kind` from the presence of
    * `.git`, seeds an initial worktree list (one synthetic `main`
    * worktree for plain repos, every existing branch for git
-   * repos), validates that the optional `label` exists, and
-   * persists. Returns the newly created `RepoState` for the router
+   * repos) and persists. Returns the newly created `RepoState` for the router
    * to relay back to the client.
    */
-  async add({ path, label }: { path: string; label?: string }): Promise<RepoState> {
+  async add({ path }: { path: string }): Promise<RepoState> {
     if (!isLocalHostEnabled()) {
       throw new RepoInputError(
         "This hub does not use its own machine (BAND_LOCAL_WORKER=off). Add the repo from a worker or by URL.",
@@ -342,16 +343,6 @@ export class RepoService {
 
     if (repos.some((p) => p.name === name)) {
       throw new Error(`Repo "${name}" already registered`);
-    }
-
-    if (label) {
-      const settings = this.settings.get();
-      const validIds = (settings.labels ?? []).map((l) => l.id);
-      if (!validIds.includes(label)) {
-        throw new Error(
-          `Label "${label}" does not exist. Valid labels: ${validIds.join(", ") || "(none)"}`,
-        );
-      }
     }
 
     // Detect repo kind from the presence of `.git`. Plain (non-git)
@@ -429,7 +420,6 @@ export class RepoService {
       path: resolvedPath,
       defaultBranch,
       worktrees,
-      label,
       kind,
       // For git repos, default to `true` so the first CI poll
       // still runs the GraphQL query — `syncWorktrees` writes the
@@ -458,7 +448,6 @@ export class RepoService {
   async addFromWorker(input: {
     hostId: string;
     path: string;
-    label?: string;
     name?: string;
     addRoot?: boolean;
     /** Hosts the repo is limited to. Default: only the host the folder is on. `null` means every host. */
@@ -501,7 +490,6 @@ export class RepoService {
         input.name ?? remote?.name ?? posix.basename(inspected.path),
         remote?.owner,
       );
-      this.checkLabel(input.label);
       const kind: RepoKind = inspected.isGit ? "git" : "plain";
       const onLocal = input.hostId === "local";
       let worktrees: WorktreeState[] = [];
@@ -534,7 +522,6 @@ export class RepoService {
         ...(remote ? { remoteUrl: remote.url, remoteKey: remote.key } : {}),
         defaultBranch: inspected.defaultBranch ?? "main",
         worktrees,
-        label: input.label,
         kind,
         hasOrigin: kind === "git" && remote !== null,
         ...this.initialHostPolicy(input.hostId, input.allowedHostIds, input.primaryHostId),
@@ -607,7 +594,6 @@ export class RepoService {
     remoteUrl: string;
     defaultBranch?: string;
     name?: string;
-    label?: string;
     /** Hosts the repo is limited to. Default: every host. */
     allowedHostIds?: string[] | null;
     /** The host that lists the default branch. Default: the first host that clones the repo. */
@@ -622,7 +608,6 @@ export class RepoService {
     const repos = this.queries.loadAll();
     const dup = repos.find((r) => r.remoteKey === remote.key);
     if (dup) throw new RepoConflictError(`Repo "${dup.name}" already uses ${remote.url}`);
-    this.checkLabel(input.label);
     const defaultBranch =
       input.defaultBranch?.trim() || (await this.resolveDefaultBranch(remote.url));
     const repo: RepoState = {
@@ -632,7 +617,6 @@ export class RepoService {
       remoteKey: remote.key,
       defaultBranch,
       worktrees: [],
-      label: input.label,
       kind: "git",
       hasOrigin: true,
       ...this.initialHostPolicy(undefined, input.allowedHostIds, input.primaryHostId),
@@ -782,16 +766,6 @@ export class RepoService {
       throw new RepoInputError(`Unknown worker "${hostId}"`);
     }
     return host.fs.browse(path);
-  }
-
-  private checkLabel(label: string | undefined): void {
-    if (!label) return;
-    const validIds = (this.settings.get().labels ?? []).map((l) => l.id);
-    if (!validIds.includes(label)) {
-      throw new RepoInputError(
-        `Label "${label}" does not exist. Valid labels: ${validIds.join(", ") || "(none)"}`,
-      );
-    }
   }
 
   /** The name for a new repo: the wanted one, else prefixed with the owner when that is taken by another repo. */
@@ -1021,27 +995,6 @@ export class RepoService {
     if (!this.queries.setAutoContinue(name, enabled)) {
       throw new RepoInputError(`Unknown repo "${name}"`);
     }
-  }
-
-  /**
-   * Set (or clear, when `label` is `null`) the dashboard label for
-   * `name`. Throws if the repo is missing — the dashboard sends
-   * names from its own snapshot, so a miss here means the user's view
-   * is stale and the client will refetch.
-   */
-  updateLabel({ name, label }: { name: string; label: string | null }): void {
-    const repos = this.queries.loadAll();
-    const repo = repos.find((p) => p.name === name);
-    if (!repo) {
-      throw new Error("Repo not found");
-    }
-
-    if (label === null || label === undefined) {
-      delete repo.label;
-    } else {
-      repo.label = label;
-    }
-    this.queries.saveAll(repos);
   }
 
   /**

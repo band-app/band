@@ -4,8 +4,10 @@ import type { DropZone } from "../lib/sidebar-drop";
 
 /** What the sidebar's drag layer knows about a draggable or droppable row. */
 export interface SidebarDragData {
-  kind: "wt" | "pin" | "host";
+  kind: "wt" | "pin" | "host" | "group";
   worktreeId?: string;
+  /** On a group header: the group, or null for Ungrouped. */
+  groupId?: string | null;
   repoName?: string;
   hostId?: string;
 }
@@ -83,6 +85,21 @@ export function HostDropTarget({
   children: (props: { setNodeRef: (node: HTMLElement | null) => void; over: boolean }) => ReactNode;
 }) {
   const { setNodeRef } = useDroppable({ id: dndId, data: { kind: "host", hostId } });
+  const { overId } = useContext(DropIndicatorContext);
+  return <>{children({ setNodeRef, over: overId === dndId })}</>;
+}
+
+/** A group header that worktrees can be dropped on, to move them to that group. */
+export function GroupDropTarget({
+  dndId,
+  groupId,
+  children,
+}: {
+  dndId: string;
+  groupId: string | null;
+  children: (props: { setNodeRef: (node: HTMLElement | null) => void; over: boolean }) => ReactNode;
+}) {
+  const { setNodeRef } = useDroppable({ id: dndId, data: { kind: "group", groupId } });
   const { overId } = useContext(DropIndicatorContext);
   return <>{children({ setNodeRef, over: overId === dndId })}</>;
 }

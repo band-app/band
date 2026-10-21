@@ -16,6 +16,8 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../lib/trpc-client";
+import { useGroupFilter } from "../hooks/use-group-filter";
+import { useGroups } from "../hooks/use-groups";
 import { useHostNames } from "../hooks/use-host-names";
 import { useCreateWorktree } from "../hooks/use-repo-mutations";
 import { useRepos } from "../hooks/use-repos";
@@ -23,6 +25,11 @@ import { useDashboardStore } from "../stores/index";
 
 interface Props {
   repoName: string;
+  /**
+   * The group the worktree joins (null for none). Without it the sidebar's group filter decides,
+   * and with no filter the worktree joins its origin's group.
+   */
+  groupId?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -36,7 +43,12 @@ function conflictedWorktreeId(error: unknown): string | undefined {
   return typeof id === "string" ? id : undefined;
 }
 
-export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
+export function NewWorktreeDialog({
+  repoName,
+  groupId: explicitGroupId,
+  open,
+  onOpenChange,
+}: Props) {
   const [chosenHostId, setHostId] = useState(LOCAL_HOST_ID);
   const [hostRepoPath, setHostRepoPath] = useState("");
   const [branch, setBranch] = useState("");
@@ -44,6 +56,12 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
   const [prompt, setPrompt] = useState("");
   const createWorktreeMutation = useCreateWorktree();
   const { repos } = useRepos();
+  // A worktree made while the sidebar is filtered to a group joins that group.
+  const [groupFilter] = useGroupFilter();
+  const groups = useGroups();
+  const filteredGroupId =
+    groupFilter && groups.some((g) => g.id === groupFilter) ? groupFilter : undefined;
+  const groupId = explicitGroupId !== undefined ? explicitGroupId : filteredGroupId;
   const hosts = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.workers.list.query()).hosts,
@@ -100,6 +118,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
         base: base.trim() || undefined,
         prompt: prompt.trim() || undefined,
         host: remote ? { hostId, hostRepoPath: hostRepoPath.trim() || undefined } : undefined,
+        groupId,
       });
     } catch {
       // The error shows in the dialog, which stays open.
@@ -175,6 +194,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
             <Label htmlFor="branch-name">Branch name</Label>
             <Input
               id="branch-name"
+              data-testid="new-worktree-form__branch"
               placeholder="feature/my-branch"
               value={branch}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
@@ -241,6 +261,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
             </Button>
             <Button
               type="submit"
+              data-testid="new-worktree-form__submit"
               disabled={!slug || !!slugError || createWorktreeMutation.isPending}
             >
               Create

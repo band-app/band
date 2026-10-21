@@ -100,14 +100,14 @@ describe("tRPC — repos CRUD", () => {
     tmpHome = createTmpHome();
     repoPath = createGitRepo(tmpHome, "myrepo");
     secondRepoPath = createGitRepo(tmpHome, "second-repo");
-    seedState(tmpHome, { repos: [] });
-    seedSettings(tmpHome, {
-      tokenSecret: DEFAULT_TOKEN,
-      labels: [
-        { id: "lbl_work", name: "Work", color: "#3b82f6" },
-        { id: "lbl_personal", name: "Personal", color: "#8b5cf6" },
+    seedState(tmpHome, {
+      repos: [],
+      groups: [
+        { id: "grp_work", name: "Work", color: "#3b82f6" },
+        { id: "grp_personal", name: "Personal", color: "#8b5cf6" },
       ],
     });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -119,9 +119,9 @@ describe("tRPC — repos CRUD", () => {
   it("repos.list returns empty list initially", async () => {
     const res = await trpcQuery(server.url, "repos.list");
     expect(res.status).toBe(200);
-    const data = await trpcData<{ repos: unknown[]; labels: unknown[] }>(res);
+    const data = await trpcData<{ repos: unknown[]; groups: unknown[] }>(res);
     expect(data.repos).toEqual([]);
-    expect(data.labels).toHaveLength(2);
+    expect(data.groups).toHaveLength(2);
   });
 
   it("repos.add registers a new repo", async () => {
@@ -138,25 +138,11 @@ describe("tRPC — repos CRUD", () => {
     expect(res.status).toBe(500);
   });
 
-  it("repos.add rejects a non-existing label", async () => {
-    const res = await trpcMutate(server.url, "repos.add", {
-      path: secondRepoPath,
-      label: "nonexistent",
-    });
-    expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(body.error.message).toContain("does not exist");
-  });
-
-  it("repos.add registers a second repo with a valid label", async () => {
-    const res = await trpcMutate(server.url, "repos.add", {
-      path: secondRepoPath,
-      label: "lbl_work",
-    });
+  it("repos.add registers a second repo", async () => {
+    const res = await trpcMutate(server.url, "repos.add", { path: secondRepoPath });
     expect(res.status).toBe(200);
-    const data = await trpcData<{ name: string; label?: string }>(res);
+    const data = await trpcData<{ name: string }>(res);
     expect(data.name).toBe("second-repo");
-    expect(data.label).toBe("lbl_work");
   });
 
   it("repos.list returns both repos", async () => {
@@ -183,38 +169,55 @@ describe("tRPC — repos CRUD", () => {
     expect(mainWt.agent).toBeNull();
   });
 
-  it("repos.updateLabel sets a label on a repo", async () => {
-    const res = await trpcMutate(server.url, "repos.updateLabel", {
-      name: "myrepo",
-      label: "Personal",
+  it("groups.create, worktrees.setGroup and groups.remove move a worktree in and out of a group", async () => {
+    const created = await trpcMutate(server.url, "groups.create", {
+      name: "Work",
+      color: "#ff0000",
     });
-    expect(res.status).toBe(200);
+    expect(created.status).toBe(200);
+    const { group } = await trpcData<{ group: { id: string; name: string; color: string } }>(
+      created,
+    );
+    expect(group).toMatchObject({ name: "Work", color: "#ff0000" });
 
-    const listRes = await trpcQuery(server.url, "repos.list");
-    const data = await trpcData<{ repos: Array<{ name: string; label?: string }> }>(listRes);
-    const proj = data.repos.find((p) => p.name === "myrepo")!;
-    expect(proj.label).toBe("Personal");
+    const worktreeId = testWorktreeId("myrepo", "main", false);
+    const set = await trpcMutate(server.url, "worktrees.setGroup", {
+      worktreeId,
+      groupId: group.id,
+    });
+    expect(set.status).toBe(200);
+
+    type ListData = {
+      groups: Array<{ id: string }>;
+      repos: Array<{
+        name: string;
+        label?: string;
+        worktrees: Array<{ worktreeId: string; groupId: string | null }>;
+      }>;
+    };
+    const listed = await trpcData<ListData>(await trpcQuery(server.url, "repos.list"));
+    expect(listed.groups.map((g) => g.id)).toContain(group.id);
+    const repo = listed.repos.find((p) => p.name === "myrepo")!;
+    expect(Object.keys(repo)).not.toContain("label");
+    expect(repo.worktrees.find((w) => w.worktreeId === worktreeId)?.groupId).toBe(group.id);
+
+    const removed = await trpcMutate(server.url, "groups.remove", { id: group.id });
+    expect(removed.status).toBe(200);
+    const after = await trpcData<ListData>(await trpcQuery(server.url, "repos.list"));
+    expect(after.groups.map((g) => g.id)).not.toContain(group.id);
+    expect(
+      after.repos
+        .find((p) => p.name === "myrepo")!
+        .worktrees.find((w) => w.worktreeId === worktreeId)?.groupId,
+    ).toBeNull();
   });
 
-  it("repos.updateLabel clears a label when set to null", async () => {
-    const res = await trpcMutate(server.url, "repos.updateLabel", {
-      name: "myrepo",
-      label: null,
+  it("worktrees.setGroup answers 404 for an unknown group", async () => {
+    const res = await trpcMutate(server.url, "worktrees.setGroup", {
+      worktreeId: testWorktreeId("myrepo", "main", false),
+      groupId: "no-such-group",
     });
-    expect(res.status).toBe(200);
-
-    const listRes = await trpcQuery(server.url, "repos.list");
-    const data = await trpcData<{ repos: Array<{ name: string; label?: string }> }>(listRes);
-    const proj = data.repos.find((p) => p.name === "myrepo")!;
-    expect(proj.label).toBeUndefined();
-  });
-
-  it("repos.updateLabel returns error for unknown repo", async () => {
-    const res = await trpcMutate(server.url, "repos.updateLabel", {
-      name: "nonexistent",
-      label: "Foo",
-    });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
   });
 
   it("repos.reorder changes repo order", async () => {

@@ -89,6 +89,7 @@ import { emit } from "./watcher-service";
 // reference inside a function body; capturing it at module load would
 // silently get `undefined`.
 import { workerLeaseService } from "./worker-lease-service";
+import { worktreeGroupService } from "./worktree-group-service";
 import { worktreeScriptService } from "./worktree-script-service";
 
 /** How long {@link WorktreeService.remove} waits for a `teardown` command. */
@@ -173,6 +174,9 @@ export const worktreeCreateInput = z.object({
   origin: z.string().min(1).optional(),
   // Start the worktree with no origin, even when the caller is inside a chat or terminal.
   noOrigin: z.boolean().optional(),
+  // The group to put the worktree in (`groups.list`), or null for none. Without it the worktree
+  // joins its origin's group, else none.
+  groupId: z.string().min(1).nullable().optional(),
 });
 export type WorktreeCreateInput = z.infer<typeof worktreeCreateInput>;
 
@@ -251,6 +255,15 @@ const worktreeRefInput = z.object({
   name: z.string(),
   hostId: z.string().optional(),
 });
+
+export const worktreeSetGroupInput = z.object({
+  worktreeId: z.string().min(1),
+  // The group's id, or null to take the worktree out of its group.
+  groupId: z.string().min(1).nullable(),
+  // Also moves every worktree started from this one, on any repo and host, and theirs in turn.
+  withChildren: z.boolean().optional(),
+});
+export type WorktreeSetGroupInput = z.infer<typeof worktreeSetGroupInput>;
 
 export const worktreeReorderInput = z.object({
   // The worktrees of one list in their new order.
@@ -616,6 +629,13 @@ export class WorktreeService {
       input = { ...input, originLink: this.resolveOrigin(input, caller) };
     }
     const originLink = input.originLink ?? null;
+    if (input.groupId === undefined) {
+      // A replayed placement request carries the settled group, so this runs once per create.
+      const parent = originLink ? this.resolve(originLink.worktreeId) : null;
+      input = { ...input, groupId: parent?.worktree.groupId ?? null };
+    } else if (input.groupId !== null) {
+      worktreeGroupService.require(input.groupId);
+    }
     const sanitizedBranch = slugifyBranchName(input.branch);
     if (!sanitizedBranch) {
       throw new Error(
@@ -762,6 +782,9 @@ export class WorktreeService {
     }
     this.creatingBranches.delete(inFlightKey);
     if (originLink) this.repoQueries.setOrigin(input.repo, input.branch, originLink);
+    if (input.groupId) {
+      this.repoQueries.setGroup(input.repo, input.branch, input.groupId, remote ? hostId : "local");
+    }
     syncService.commitWorktreeAdd(input.repo, row);
 
     // Copy declared worktree files from the main checkout into the new
@@ -1411,6 +1434,44 @@ export class WorktreeService {
     );
     emit({ kind: "worktree-origin-changed", worktreeId });
     return { ok: true };
+  }
+
+  /**
+   * Puts a worktree in a group, or in none with `null`. With `withChildren` every worktree
+   * started from it, and theirs in turn, moves too.
+   */
+  setGroup(input: WorktreeSetGroupInput): { ok: true; moved: string[] } {
+    if (input.groupId !== null) worktreeGroupService.require(input.groupId);
+    const state = loadState();
+    const rows = new Map<
+      string,
+      { repoName: string; name: string; hostId: string; origin?: string }
+    >();
+    for (const repo of state.repos) {
+      for (const wt of repo.worktrees) {
+        rows.set(toWorktreeId(repo.name, wt.name, wt.hostId), {
+          repoName: repo.name,
+          name: wt.name,
+          hostId: wt.hostId ?? "local",
+          origin: wt.origin?.worktreeId,
+        });
+      }
+    }
+    if (!rows.has(input.worktreeId)) throw new WorktreeNotFoundError(input.worktreeId);
+    const moved = [input.worktreeId];
+    if (input.withChildren) {
+      for (let i = 0; i < moved.length; i++) {
+        for (const [id, row] of rows) {
+          if (row.origin === moved[i] && !moved.includes(id)) moved.push(id);
+        }
+      }
+    }
+    for (const id of moved) {
+      const row = rows.get(id);
+      if (row) this.repoQueries.setGroup(row.repoName, row.name, input.groupId, row.hostId);
+    }
+    emit({ kind: "worktree-origin-changed", worktreeId: input.worktreeId });
+    return { ok: true, moved };
   }
 
   /**

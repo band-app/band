@@ -59,7 +59,6 @@ export interface RepoState {
   remoteKey?: string;
   defaultBranch: string;
   worktrees: WorktreeState[];
-  label?: string;
   kind: RepoKind;
   /**
    * Whether the repo's git repo has an `origin` remote.
@@ -127,6 +126,11 @@ export interface WorktreeState {
    * `RepoQueries.setOrigin` writes it.
    */
   origin?: WorktreeOrigin;
+  /**
+   * The group the worktree is in (`worktree_groups.id`). Read-only here like `origin`: `saveAll`
+   * keeps what the database holds, and `RepoQueries.setGroup` writes it.
+   */
+  groupId?: string;
   /**
    * The id of the worktree that replaced this one when it was restored on another host. The copy
    * stays on its host untouched. Read-only here: `saveAll` keeps what the database holds, and
@@ -199,7 +203,7 @@ export function reconcileKindForRepo(repo: RepoState): boolean {
  * Two write shapes:
  *   - `saveAll(repos)` — whole-tree DELETE + re-INSERT inside a
  *     transaction. The right primitive when worktrees / defaultBranch /
- *     labels / sort order change in batch (`repos.add`,
+ *     sort order change in batch (`repos.add`,
  *     `worktrees.create`, `syncWorktrees`).
  *   - `setHasOrigin(name, hasOrigin)` — focused single-column UPDATE that
  *     does NOT touch the worktrees table. Used by `syncWorktrees` to flip
@@ -242,6 +246,7 @@ export class RepoQueries {
               },
             }
           : {}),
+        ...(row.groupId ? { groupId: row.groupId } : {}),
         ...(row.supersededBy ? { supersededBy: row.supersededBy } : {}),
         ...(row.continuedFrom
           ? { continuedFrom: row.continuedFrom as unknown as ContinuedFrom }
@@ -257,7 +262,6 @@ export class RepoQueries {
       ...(row.remoteUrl ? { remoteUrl: row.remoteUrl } : {}),
       ...(row.remoteKey ? { remoteKey: row.remoteKey } : {}),
       defaultBranch: row.defaultBranch,
-      label: row.label ?? undefined,
       kind: (row.kind ?? "git") as RepoKind,
       hasOrigin: row.hasOrigin,
       ...(row.allowedHostIds ? { allowedHostIds: row.allowedHostIds } : {}),
@@ -314,6 +318,7 @@ export class RepoQueries {
             originWorktreeId: worktreesTable.originWorktreeId,
             originChatId: worktreesTable.originChatId,
             originTerminalId: worktreesTable.originTerminalId,
+            groupId: worktreesTable.groupId,
           })
           .from(worktreesTable)
           .all()
@@ -347,7 +352,6 @@ export class RepoQueries {
             remoteUrl: repo.remoteUrl ?? null,
             remoteKey: repo.remoteKey ?? null,
             defaultBranch: repo.defaultBranch,
-            label: repo.label ?? null,
             sortOrder: i,
             kind: repo.kind,
             hasOrigin: repo.hasOrigin,
@@ -375,6 +379,7 @@ export class RepoQueries {
               originWorktreeId: origin?.originWorktreeId ?? null,
               originChatId: origin?.originChatId ?? null,
               originTerminalId: origin?.originTerminalId ?? null,
+              groupId: origin?.groupId ?? null,
               repoName: repo.name,
               name: wt.name,
               branch: wt.branch,
@@ -703,6 +708,24 @@ export class RepoQueries {
     return row
       ? { allowedHostIds: row.allowedHostIds ?? null, primaryHostId: row.primaryHostId ?? null }
       : undefined;
+  }
+
+  /**
+   * Puts a worktree in a group, or in none with `null`. Focused UPDATE, because `saveAll` keeps
+   * the stored group and never writes the one in its snapshot.
+   */
+  setGroup(repoName: string, name: string, groupId: string | null, hostId?: string): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ groupId })
+      .where(
+        and(
+          eq(worktreesTable.repoName, repoName),
+          eq(worktreesTable.name, name),
+          ...(hostId === undefined ? [] : [eq(worktreesTable.hostId, hostId)]),
+        ),
+      )
+      .run();
   }
 
   /**

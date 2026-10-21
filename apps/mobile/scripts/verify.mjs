@@ -21,11 +21,13 @@ import {
   acpRequests,
   addSubscription,
   chatSubscriptions,
+  clearGroups,
   fillWorktrees,
   findWorktree,
   makePlainRepo,
   makeWorktree,
   receivedPrompts,
+  seedGroups,
   seedHub,
   sessionState,
   sharedTabs,
@@ -209,6 +211,8 @@ function checkTabs({ tabs, chats }, params) {
  * simulator's clipboard holds that text, /check-transcript?wt=<id> fails unless the copied
  * last turn matches the hub's (`checkTranscript`), and /note?name=<n>&value=<v> adds a line
  * to the report (with `&max-gap=<ms>`, it fails when a frame log's longest gap is above it).
+ * /groups-seed puts the alpha worktrees in the group Work and beta-main in Home, and /groups-clear
+ * removes the groups again.
  * /explorer-change?name=<file> writes an untracked file into the delta repo's root, as an agent would.
  * /checks-finish-build completes the running job of widgets-feat-checks, and
  * /expect-rerun?run=<id>&failed=1|job=<id> fails unless the fake `gh` got that `gh run rerun`.
@@ -234,6 +238,8 @@ function startControlServer(hub, chats, udid, notes) {
       else if (url.pathname === "/work") await startTurn(hub, target, wt, "work until I say stop");
       else if (url.pathname === "/ask") await startTurn(hub, target, wt, "ask before you run the tests");
       else if (url.pathname === "/halt") await stopTurn(hub, target, wt);
+      else if (url.pathname === "/groups-seed") await seedGroups(hub);
+      else if (url.pathname === "/groups-clear") await clearGroups(hub);
       else if (url.pathname === "/check-tabs") {
         // The phone pushes its tab list 500 ms after a change and removes a chat without waiting,
         // so the hub may not have it yet: check again until it does or 10 s pass.
