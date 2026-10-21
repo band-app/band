@@ -113,23 +113,6 @@ export function useReorderWorktrees() {
   });
 }
 
-export function useUpdateRepoLabel() {
-  const adapter = useAdapter();
-  const queryClient = useQueryClient();
-  const setError = useDashboardStore((s) => s.setError);
-
-  return useMutation({
-    mutationFn: ({ name, label }: { name: string; label: string | null }) =>
-      adapter.updateRepoLabel(name, label),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.repos });
-    },
-    onError: (err) => {
-      setError(err);
-    },
-  });
-}
-
 export function useGitInit() {
   const adapter = useAdapter();
   const setError = useDashboardStore((s) => s.setError);
@@ -178,13 +161,15 @@ export function useCreateWorktree() {
       base,
       prompt,
       host,
+      groupId,
     }: {
       repo: string;
       branch: string;
       base?: string;
       prompt?: string;
       host?: { hostId: string; hostRepoPath?: string };
-    }) => adapter.createWorktree(repo, branch, base, prompt, readAgentMode(), host),
+      groupId?: string | null;
+    }) => adapter.createWorktree(repo, branch, base, prompt, readAgentMode(), host, groupId),
     onSuccess: (data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.repos });
       const worktreeId = toWorktreeId(vars.repo, vars.branch, data.hostId ?? vars.host?.hostId);

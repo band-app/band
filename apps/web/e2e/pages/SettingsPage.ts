@@ -50,7 +50,7 @@ export type SettingsNavId =
   | "agent-hooks"
   | "context"
   | "runners"
-  | "labels"
+  | "groups"
   | "agents"
   | "usage"
   | "notifications"
@@ -241,12 +241,71 @@ export class SettingsPage {
     });
   }
 
-  /** "Add label" button — rendered in both the empty state and the row
-   *  appended after existing labels. Used to anchor on the Labels section
-   *  in tests that don't want to depend on the localised "No labels yet"
-   *  copy. The empty-state button is the first one in DOM order. */
-  addLabelButton(): Locator {
-    return this.dialog.getByRole("button", { name: "Add label" });
+  /** Settings > Groups: the "Add group" button, shown with and without groups. */
+  addGroupButton(): Locator {
+    return this.dialog.getByTestId("settings-groups__add");
+  }
+
+  /** Settings > Groups: the row of a group, by id. */
+  groupRow(groupId: string): Locator {
+    return this.dialog.locator(`[data-testid="settings-groups__row"][data-group-id="${groupId}"]`);
+  }
+
+  /** Settings > Groups: every group row, in the order shown. */
+  groupRows(): Locator {
+    return this.dialog.getByTestId("settings-groups__row");
+  }
+
+  /** The name field of a group row. */
+  groupNameInput(groupId: string): Locator {
+    return this.groupRow(groupId).getByTestId("settings-groups__name");
+  }
+
+  /** The color dot of a group row. Its inline `background-color` is the group's color. */
+  groupDot(groupId: string): Locator {
+    return this.groupRow(groupId).getByTestId("settings-groups__dot");
+  }
+
+  /** Adds a group through the name dialog. The new row appears at the end of the list. */
+  async addGroup(name: string): Promise<void> {
+    await test.step(`Add the group ${name}`, async () => {
+      await this.addGroupButton().click();
+      await this.page.getByTestId("group-dialog__name").fill(name);
+      await this.page.getByTestId("group-dialog__submit").click();
+      await expect(this.page.getByTestId("group-dialog")).toBeHidden();
+    });
+  }
+
+  /** Renames a group: types the new name and presses Enter. */
+  async renameGroup(groupId: string, name: string): Promise<void> {
+    await test.step(`Rename group ${groupId} to ${name}`, async () => {
+      const input = this.groupNameInput(groupId);
+      await input.fill(name);
+      await input.press("Enter");
+    });
+  }
+
+  /** Picks one of the preset colors of a group row, by its lowercase name ("red", "green"). */
+  async setGroupColor(groupId: string, preset: string): Promise<void> {
+    await test.step(`Set the color of group ${groupId} to ${preset}`, async () => {
+      await this.groupRow(groupId).getByTestId(`settings-groups__color--${preset}`).click();
+    });
+  }
+
+  /** Moves a group one place up or down. */
+  async moveGroup(groupId: string, direction: "up" | "down"): Promise<void> {
+    await test.step(`Move group ${groupId} ${direction}`, async () => {
+      await this.groupRow(groupId).getByTestId(`settings-groups__move-${direction}`).click();
+    });
+  }
+
+  /** Deletes a group and confirms. */
+  async deleteGroup(groupId: string): Promise<void> {
+    await test.step(`Delete group ${groupId}`, async () => {
+      await this.groupRow(groupId).getByTestId("settings-groups__delete").click();
+      await this.page.getByTestId("group-delete-dialog__confirm").click();
+      await expect(this.page.getByTestId("group-delete-dialog")).toBeHidden();
+    });
   }
 
   /** The install banner for Claude Code hooks (`DashboardShell.tsx`). */
@@ -567,13 +626,6 @@ export class SettingsPage {
     });
   }
 
-  /** Picks a label in the overview's label filter. An empty id shows every repo. */
-  async filterReposByLabel(labelId: string): Promise<void> {
-    await test.step(`Filter repos by label ${labelId || "(any)"}`, async () => {
-      await this.dialog.getByTestId("settings-repos__label-filter").selectOption(labelId);
-    });
-  }
-
   /** The remote shown under a repo's name in the overview. */
   repoRowUrl(name: string): Locator {
     return this.repoRow(name).getByTestId("settings-repos__url");
@@ -626,15 +678,9 @@ export class SettingsPage {
     return this.repoPage(name).getByTestId("settings-repo__branch");
   }
 
-  /** The label picker on a repo page. Its value is the label id. */
-  repoLabelSelect(name: string): Locator {
+  /** The label picker repo pages used to have. Groups replaced it, so it must not be there. */
+  repoLabelPicker(name: string): Locator {
     return this.repoPage(name).getByTestId("settings-repo__label");
-  }
-
-  async setRepoLabel(name: string, labelId: string): Promise<void> {
-    await test.step(`Set the label of ${name} to ${labelId || "none"}`, async () => {
-      await this.repoLabelSelect(name).selectOption(labelId);
-    });
   }
 
   /** The workers listed on a repo page, each with `data-host` and `data-primary`. */

@@ -1124,6 +1124,9 @@ export class CheckpointService {
         clearWorktreeKeyedRows(newId);
       }
       if (worktree.origin) this.repos.setOrigin(repo.name, worktree.name, worktree.origin);
+      if (worktree.groupId) {
+        this.repos.setGroup(repo.name, worktree.name, worktree.groupId, toHostId);
+      }
       this.repos.setSupersededBy(repo.name, worktree.name, fromHostId, newId);
       // Each worker learns its new blocked list now, not at its next timed renewal.
       await Promise.all([

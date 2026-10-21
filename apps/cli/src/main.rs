@@ -66,6 +66,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: SubscriptionsCmd,
     },
+    /// Manage worktree groups (the sections of the sidebar)
+    Groups {
+        #[command(subcommand)]
+        cmd: GroupsCmd,
+    },
     /// List the workers worktrees can run on
     #[command(name = "workers", alias = "hosts")]
     Workers {
@@ -161,9 +166,6 @@ enum ReposCmd {
     Add {
         /// Path to the git repository. With `--from`, the folder on that worker
         path: Option<String>,
-        /// Label for the repo
-        #[arg(long)]
-        label: Option<String>,
         /// Add by remote URL. A worker clones it when a worktree first lands there
         #[arg(long, conflicts_with = "from")]
         url: Option<String>,
@@ -278,6 +280,10 @@ enum WorktreesCmd {
         /// Record no origin, even inside a Band chat or terminal
         #[arg(long)]
         no_origin: bool,
+        /// Put the worktree in this group (id or name, see `band groups list`).
+        /// Without it the worktree joins its origin's group, if any.
+        #[arg(long)]
+        group: Option<String>,
     },
     /// Remove a worktree (git worktree + state cleanup)
     Remove {
@@ -338,6 +344,20 @@ enum WorktreesCmd {
         /// Remove the parent
         #[arg(long)]
         none: bool,
+    },
+    /// Move a worktree into a group, or out of its group
+    SetGroup {
+        /// Worktree ID
+        worktree: String,
+        /// Group id or name
+        #[arg(required_unless_present = "none", conflicts_with = "none")]
+        group: Option<String>,
+        /// Take the worktree out of its group
+        #[arg(long)]
+        none: bool,
+        /// Also move every worktree started from this one, and theirs in turn
+        #[arg(long)]
+        with_children: bool,
     },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
@@ -709,6 +729,32 @@ enum SubscriptionsCmd {
 }
 
 #[derive(Subcommand)]
+enum GroupsCmd {
+    /// List groups in sidebar order
+    List,
+    /// Create a group (needs an admin token for the shared hub, like the UI)
+    Create {
+        /// Group name
+        name: String,
+        /// Color for the group, e.g. `red` or `#ff0000`
+        #[arg(long)]
+        color: Option<String>,
+    },
+    /// Rename a group
+    Rename {
+        /// Group id or name
+        group: String,
+        /// New name
+        new_name: String,
+    },
+    /// Delete a group. Its worktrees become ungrouped
+    Remove {
+        /// Group id or name
+        group: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum HostsCmd {
     /// List workers with their status, labels, agents, roots and last contact
     List,
@@ -966,14 +1012,12 @@ fn main() {
             ReposCmd::List => cmd_repos_list(),
             ReposCmd::Add {
                 path,
-                label,
                 url,
                 branch,
                 from,
                 add_root,
             } => cmd_repos_add(&ReposAddArgs {
                 path: path.as_deref(),
-                label: label.as_deref(),
                 url: url.as_deref(),
                 branch: branch.as_deref(),
                 from: from.as_deref(),
@@ -1013,6 +1057,7 @@ fn main() {
                 host,
                 origin,
                 no_origin,
+                group,
             } => cmd_worktrees_create(
                 &repo,
                 &branch,
@@ -1032,6 +1077,7 @@ fn main() {
                 },
                 origin.as_deref(),
                 no_origin,
+                group.as_deref(),
             ),
             WorktreesCmd::Remove { repo, name, host } => {
                 cmd_worktrees_remove(&repo, &name, host.as_deref())
@@ -1051,6 +1097,12 @@ fn main() {
                 origin,
                 none,
             } => cmd_worktrees_set_origin(&repo, &name, host.as_deref(), origin.as_deref(), none),
+            WorktreesCmd::SetGroup {
+                worktree,
+                group,
+                none,
+                with_children,
+            } => cmd_worktrees_set_group(&worktree, group.as_deref(), none, with_children),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -1228,6 +1280,12 @@ fn main() {
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
         },
         Commands::Env { .. } => unreachable!("handled before the match"),
+        Commands::Groups { cmd } => match cmd {
+            GroupsCmd::List => cmd_groups_list(),
+            GroupsCmd::Create { name, color } => cmd_groups_create(&name, color.as_deref()),
+            GroupsCmd::Rename { group, new_name } => cmd_groups_rename(&group, &new_name),
+            GroupsCmd::Remove { group } => cmd_groups_remove(&group),
+        },
         Commands::Workers { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
             HostsCmd::Trust { host, level } => cmd_hosts_trust(&host, &level),
@@ -1479,7 +1537,6 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
 
 struct ReposAddArgs<'a> {
     path: Option<&'a str>,
-    label: Option<&'a str>,
     url: Option<&'a str>,
     branch: Option<&'a str>,
     from: Option<&'a str>,
@@ -1497,9 +1554,6 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
         if let Some(branch) = args.branch {
             input["defaultBranch"] = serde_json::json!(branch);
         }
-        if let Some(label) = args.label {
-            input["label"] = serde_json::json!(label);
-        }
         client.trpc_mutate("repos.addByUrl", &input)?
     } else if let Some(host) = args.from {
         let path = args.path.ok_or(
@@ -1509,9 +1563,6 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
         let mut input = serde_json::json!({"hostId": host, "path": path});
         if args.add_root {
             input["addRoot"] = serde_json::json!(true);
-        }
-        if let Some(label) = args.label {
-            input["label"] = serde_json::json!(label);
         }
         client
             .trpc_mutate("repos.addFromWorker", &input)
@@ -1527,10 +1578,7 @@ fn cmd_repos_add(args: &ReposAddArgs) -> Result<CommandResult, String> {
             .path
             .ok_or("Pass a path, --url <url> or --from <worker> <path>")?;
         validate::validate_path(path, "Path")?;
-        let mut input = serde_json::json!({"path": path});
-        if let Some(label) = args.label {
-            input["label"] = serde_json::json!(label);
-        }
+        let input = serde_json::json!({"path": path});
         client.trpc_mutate("repos.add", &input)?
     };
     let name = data.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -1777,6 +1825,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 "path": path,
                 "supersededBy": superseded_by,
                 "origin": origin,
+                "groupId": wt.get("groupId").cloned().unwrap_or(serde_json::Value::Null),
                 "children": wt.get("children").cloned().unwrap_or_else(|| serde_json::json!([])),
             }));
             found_any = true;
@@ -2062,6 +2111,7 @@ fn cmd_worktrees_create(
     placement: &Placement,
     origin: Option<&str>,
     no_origin: bool,
+    group: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(repo, "Repo name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -2159,6 +2209,9 @@ fn cmd_worktrees_create(
         .filter(|v| !v.is_empty())
     {
         input["origin"] = serde_json::json!(current);
+    }
+    if let Some(group) = group {
+        input["groupId"] = serde_json::json!(resolve_group_id(&client, group)?);
     }
     let data = client.trpc_mutate("worktrees.create", &input)?;
     // No host fits yet: the hub recorded a host request and creates the
@@ -4273,6 +4326,147 @@ fn cmd_hosts_audit(limit: u32) -> Result<CommandResult, String> {
     })
 }
 
+/// Resolves a group id or name (case-insensitive) from `groups.list` to its id.
+fn resolve_group_id(client: &api::ApiClient, given: &str) -> Result<String, String> {
+    let given = given.trim();
+    let listed = client.trpc_query_no_input("groups.list")?;
+    let groups = listed
+        .get("groups")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let text = |group: &serde_json::Value, key: &str| {
+        group
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    groups
+        .iter()
+        .find(|g| text(g, "id") == given)
+        .or_else(|| {
+            groups
+                .iter()
+                .find(|g| text(g, "name").eq_ignore_ascii_case(given))
+        })
+        .map(|g| text(g, "id"))
+        .ok_or_else(|| format!("Unknown group \"{given}\". See `band groups list`."))
+}
+
+fn cmd_groups_list() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query_no_input("groups.list")?;
+    let groups = data
+        .get("groups")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 3]> = groups
+        .iter()
+        .map(|g| {
+            let text = |key: &str| g.get(key).and_then(|v| v.as_str()).unwrap_or("-");
+            [
+                text("id").to_string(),
+                text("name").to_string(),
+                text("color").to_string(),
+            ]
+        })
+        .collect();
+    let text = if rows.is_empty() {
+        "No groups\n".to_string()
+    } else {
+        format_table(&["ID", "NAME", "COLOR"], &rows)
+    };
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"groups": groups}),
+    })
+}
+
+fn cmd_groups_create(name: &str, color: Option<&str>) -> Result<CommandResult, String> {
+    validate::validate_name(name, "Group name")?;
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({"name": name});
+    if let Some(color) = color {
+        validate::validate_name(color, "Color")?;
+        input["color"] = serde_json::json!(color);
+    }
+    let data = client.trpc_mutate("groups.create", &input)?;
+    let group = data.get("group").cloned().unwrap_or_default();
+    let id = group.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    Ok(CommandResult {
+        text: format!("{id}\n"),
+        json: serde_json::json!({"group": group}),
+    })
+}
+
+fn cmd_groups_rename(group: &str, new_name: &str) -> Result<CommandResult, String> {
+    validate::validate_name(new_name, "Group name")?;
+    let client = api::ApiClient::from_settings()?;
+    let id = resolve_group_id(&client, group)?;
+    let data = client.trpc_mutate(
+        "groups.update",
+        &serde_json::json!({"id": id, "name": new_name}),
+    )?;
+    Ok(CommandResult {
+        text: format!("Group {id} renamed to {new_name}\n"),
+        json: serde_json::json!({"group": data.get("group").cloned().unwrap_or_default()}),
+    })
+}
+
+fn cmd_groups_remove(group: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let id = resolve_group_id(&client, group)?;
+    client.trpc_mutate("groups.remove", &serde_json::json!({"id": id}))?;
+    Ok(CommandResult {
+        text: format!("Group {id} removed\n"),
+        json: serde_json::json!({"ok": true, "id": id}),
+    })
+}
+
+#[allow(clippy::format_push_string)]
+fn cmd_worktrees_set_group(
+    worktree: &str,
+    group: Option<&str>,
+    none: bool,
+    with_children: bool,
+) -> Result<CommandResult, String> {
+    validate::validate_name(worktree, "Worktree id")?;
+    let client = api::ApiClient::from_settings()?;
+    let group_id = match group {
+        Some(group) if !none => Some(resolve_group_id(&client, group)?),
+        _ => None,
+    };
+    let mut input = serde_json::json!({"worktreeId": worktree, "groupId": group_id});
+    if with_children {
+        input["withChildren"] = serde_json::json!(true);
+    }
+    let data = client.trpc_mutate("worktrees.setGroup", &input)?;
+    let moved = data
+        .get("moved")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let target = group_id
+        .as_deref()
+        .map_or_else(|| "no group".to_string(), |id| format!("group {id}"));
+    let mut text = String::new();
+    for id in &moved {
+        text.push_str(&format!(
+            "{} is now in {target}\n",
+            id.as_str().unwrap_or("")
+        ));
+    }
+    if moved.is_empty() {
+        text.push_str(&format!("{worktree} is already in {target}\n"));
+    }
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"ok": true, "moved": moved}),
+    })
+}
+
 fn cmd_hosts_remove(id: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     client.trpc_mutate("workers.remove", &serde_json::json!({"hostId": id}))?;
@@ -5428,7 +5622,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Register an existing repository as a repo",
             "parameters": [
                 {"name": "path", "type": "string", "required": true, "positional": true, "description": "Path to the git repository"},
-                {"name": "--label", "type": "string", "required": false, "description": "Label for the repo"},
             ],
             "notes": "Registers an existing git repository. Detects the default branch automatically. Returns the repo name."
         }),
@@ -5474,8 +5667,52 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--via", "type": "string", "required": false, "description": "Where to dispatch --prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a PTY). Defaults to 'terminal' from the CLI."},
                 {"name": "--origin", "type": "string", "required": false, "description": "Worktree id to record as the origin (where this work was started from). Defaults to the current worktree ($BAND_WORKTREE_ID)."},
                 {"name": "--no-origin", "type": "boolean", "required": false, "description": "Record no origin, even inside a Band chat or terminal"},
+                {"name": "--group", "type": "string", "required": false, "description": "Group id or name for the new worktree (default: the origin's group)"},
             ],
             "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the worktree's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a worktree and implement X\" or \"start working on X\"\nband worktrees create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a worktree for issue #99 and start implementing\"\nband worktrees create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband worktrees create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a worktree, I'll work on it myself\"\nband worktrees create my-app feat/experiment\n```\n\n**Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
+        }),
+        serde_json::json!({
+            "name": "worktrees set-group",
+            "description": "Move a worktree into a group, or out of its group",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "group", "type": "string", "required": false, "positional": true, "description": "Group id or name (omit with --none)"},
+                {"name": "--none", "type": "boolean", "required": false, "description": "Take the worktree out of its group"},
+                {"name": "--with-children", "type": "boolean", "required": false, "description": "Also move every worktree started from this one"},
+            ],
+            "notes": "Prints each worktree that moved. Agents may use this command, but cannot create, rename or delete groups."
+        }),
+        serde_json::json!({
+            "name": "groups list",
+            "description": "List groups in sidebar order",
+            "parameters": [],
+            "notes": "JSON output: `{\"groups\": [{\"id\": \"...\", \"name\": \"...\", \"color\": \"...\"}]}`"
+        }),
+        serde_json::json!({
+            "name": "groups create",
+            "description": "Create a group",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Group name"},
+                {"name": "--color", "type": "string", "required": false, "description": "Group color"},
+            ],
+            "notes": "Prints the new group's id. Not available to an agent on a worker."
+        }),
+        serde_json::json!({
+            "name": "groups rename",
+            "description": "Rename a group",
+            "parameters": [
+                {"name": "group", "type": "string", "required": true, "positional": true, "description": "Group id or name"},
+                {"name": "new-name", "type": "string", "required": true, "positional": true, "description": "New name"},
+            ],
+            "notes": "Not available to an agent on a worker."
+        }),
+        serde_json::json!({
+            "name": "groups remove",
+            "description": "Delete a group. Its worktrees become ungrouped",
+            "parameters": [
+                {"name": "group", "type": "string", "required": true, "positional": true, "description": "Group id or name"},
+            ],
+            "notes": "Not available to an agent on a worker."
         }),
         serde_json::json!({
             "name": "worktrees remove",

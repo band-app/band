@@ -2,7 +2,7 @@ import { cn } from "@band-app/ui";
 import type React from "react";
 
 /**
- * The sidebar's repos: a header with the count and `actions` (label filter, Collapse all), above a
+ * The sidebar's repos: a header with the count and `actions` (group filter, Collapse all), above a
  * scrolling list that fills the column.
  */
 export function ReposPanel({

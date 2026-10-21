@@ -68,7 +68,33 @@ export const clientStorage = {
 
 /** Resolve once the global keys are hydrated, or after `timeoutMs` (offline). */
 export function hydrateGlobal(timeoutMs = HYDRATE_WAIT_MS): Promise<void> {
-  return withTimeout(store.hydrate(null), timeoutMs);
+  return withTimeout(store.hydrate(null), timeoutMs).then(migrateLegacyGroupKeys);
+}
+
+/** The sidebar keys that held labels before groups replaced them, and the keys that hold groups. */
+const LEGACY_GROUP_KEYS: [oldKey: string, newKey: string][] = [
+  ["band.repos-list.label-filter", "band.repos-list.group-filter"],
+  ["band.repos-list.collapsed-labels", "band.repos-list.collapsed-groups"],
+  ["band.repos-list.label-last-worktree", "band.repos-list.group-last-worktree"],
+];
+
+/**
+ * Copies a value an older build left under a label key to its group key, once, and drops the old
+ * key. Group ids are the old label ids, so the value stays valid. A value already under the new
+ * key (from the server) wins.
+ */
+function migrateLegacyGroupKeys(): void {
+  if (typeof window === "undefined") return;
+  try {
+    for (const [oldKey, newKey] of LEGACY_GROUP_KEYS) {
+      const old = localStorage.getItem(oldKey);
+      if (old === null) continue;
+      if (store.getItem(newKey) === null) store.setItem(newKey, old);
+      localStorage.removeItem(oldKey);
+    }
+  } catch {
+    // Storage blocked: nothing to migrate.
+  }
 }
 
 /** Resolve once a worktree's keys are hydrated, or after `timeoutMs` (offline). */

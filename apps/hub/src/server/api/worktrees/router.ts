@@ -1,5 +1,9 @@
 import { TRPCError } from "@trpc/server";
-import { BranchOnOtherHostError, RepoHostNotAllowedError } from "../../errors";
+import {
+  BranchOnOtherHostError,
+  RepoHostNotAllowedError,
+  WorktreeGroupNotFoundError,
+} from "../../errors";
 import {
   InvalidOriginError,
   PlainRepoError,
@@ -9,6 +13,7 @@ import {
   worktreeReorderInput,
   worktreeRunScriptInput,
   worktreeService,
+  worktreeSetGroupInput,
   worktreeSetOriginInput,
   worktreeSetPinnedInput,
 } from "../../services/worktree-service";
@@ -75,6 +80,14 @@ export const worktreesRouter = t.router({
     }
   }),
 
+  setGroup: publicProcedure.input(worktreeSetGroupInput).mutation(({ input }) => {
+    try {
+      return worktreeService.setGroup(input);
+    } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
   gitPull: publicProcedure.input(worktreeGitInput).mutation(async ({ input }) => {
     try {
       return await worktreeService.gitPull(input);
@@ -130,6 +143,9 @@ export type WorktreesRouter = typeof worktreesRouter;
 function throwAsTrpcError(err: unknown): never {
   if (err instanceof PlainRepoError || err instanceof InvalidOriginError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
+  }
+  if (err instanceof WorktreeGroupNotFoundError) {
+    throw new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
   }
   if (err instanceof RepoHostNotAllowedError) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message, cause: err });

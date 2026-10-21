@@ -27,6 +27,7 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
   "cronjobs list",
   "cronjobs trigger",
   "cronjobs update",
+  "groups list",
   "workers list",
   "notify",
   "open",
@@ -46,6 +47,7 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
   "worktrees create",
   "worktrees list",
   "worktrees remove",
+  "worktrees set-group",
 ];
 
 /** Commands the relay refuses or cannot carry, each with the reason. */
@@ -68,6 +70,9 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "worktrees move": "moves work between workers, which an agent on a worker must not do",
   "worktrees restore": "moves work between workers, which an agent on a worker must not do",
   "worktrees continue": "moves work between workers, which an agent on a worker must not do",
+  "groups create": "creating groups is a person's call, not an agent's",
+  "groups rename": "renaming groups is a person's call, not an agent's",
+  "groups remove": "deleting groups is a person's call, not an agent's",
   "worktrees set-origin": "rewires the sidebar tree, which is a person's call, not an agent's",
   "worktrees checkpoints": "reads the hub's checkpoints, which a worker has no need to see",
   "workers evacuate": "admin only, moves every worktree off a worker",

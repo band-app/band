@@ -21,6 +21,8 @@ interface WorktreeData {
   pinned?: boolean;
   /** The host the worktree lives on. Omitted means the hub's own machine. The host must be in `hosts`. */
   hostId?: string;
+  /** The id of one of the seeded `groups`. Omitted means Ungrouped. */
+  groupId?: string;
 }
 
 interface RepoData {
@@ -28,7 +30,6 @@ interface RepoData {
   path: string;
   defaultBranch: string;
   worktrees?: WorktreeData[];
-  label?: string;
   kind?: "git" | "plain";
   /**
    * Whether the repo has an `origin` remote. Optional; defaults to
@@ -47,6 +48,8 @@ interface StateData {
   repos: RepoData[];
   /** Worker hosts to put in the `hosts` table (offline, no worker behind them). */
   hosts?: { id: string; name: string }[];
+  /** Worktree groups to put in the `worktree_groups` table, in sidebar order. */
+  groups?: { id: string; name: string; color: string }[];
 }
 
 export function seedState(tmpHome: string, state: StateData): void {
@@ -66,6 +69,11 @@ export function seedState(tmpHome: string, state: StateData): void {
         .values({ id: host.id, name: host.name, status: "offline", createdAt: Date.now() })
         .run();
     }
+    (state.groups ?? []).forEach((group, i) => {
+      tx.insert(schema.worktreeGroups)
+        .values({ ...group, sortOrder: i, createdAt: Date.now() })
+        .run();
+    });
     for (let i = 0; i < state.repos.length; i++) {
       const repo = state.repos[i];
       tx.insert(schema.repos)
@@ -73,7 +81,6 @@ export function seedState(tmpHome: string, state: StateData): void {
           name: repo.name,
           path: repo.path,
           defaultBranch: repo.defaultBranch,
-          label: repo.label ?? null,
           sortOrder: i,
           kind: repo.kind ?? "git",
           hasOrigin: repo.hasOrigin ?? true,
@@ -92,6 +99,7 @@ export function seedState(tmpHome: string, state: StateData): void {
             head: wt.head ?? null,
             pinned: wt.pinned ?? false,
             hostId: wt.hostId ?? "local",
+            groupId: wt.groupId ?? null,
           })
           .run();
       }

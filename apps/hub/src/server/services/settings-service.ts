@@ -72,7 +72,6 @@ export const settingsUpdateInput = z
         sound: z.string().optional(),
       })
       .optional(),
-    labels: z.array(z.object({ id: z.string(), name: z.string(), color: z.string() })).optional(),
     tokenSecret: z.string().optional(),
     corsAllowedOrigins: z.array(z.string()).optional(),
     autoStartTunnel: z.boolean().optional(),

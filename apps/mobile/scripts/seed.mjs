@@ -590,6 +590,29 @@ export async function startTurn(state, chats, worktreeId, text, files) {
   if (!res.ok) throw new Error(`send failed: HTTP ${res.status} ${await res.text()}`);
 }
 
+/**
+ * Puts the seeded worktrees in two groups, as `groups-seed` asks: Work holds both worktrees of
+ * `alpha`, Home holds `beta-main`. The gamma worktrees stay ungrouped. `clearGroups` removes the
+ * groups again, because a hub with groups lists the home screen with group headers and the other
+ * flows expect the plain repo list.
+ */
+export async function seedGroups(state) {
+  const work = (await trpc(state, "groups.create", { name: "Work", color: "#3b82f6" })).group;
+  const home = (await trpc(state, "groups.create", { name: "Home", color: "#f97316" })).group;
+  for (const [worktreeId, group] of [
+    ["alpha-main", work],
+    ["alpha-feat-mobile", work],
+    ["beta-main", home],
+  ]) {
+    await trpc(state, "worktrees.setGroup", { worktreeId, groupId: group.id });
+  }
+}
+
+export async function clearGroups(state) {
+  const { groups } = await trpcQuery(state, "groups.list", {});
+  for (const group of groups) await trpc(state, "groups.remove", { id: group.id });
+}
+
 /** The ACP requests the stub agent logged (`BAND_TEST_ACP_LOG`), one parsed object per line. */
 export function acpRequests(state) {
   const file = join(state.home, "acp-requests.jsonl");

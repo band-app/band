@@ -4,9 +4,10 @@ import { useSyncExternalStore } from "react";
 import type { removeRequest } from "./deleting";
 import { useHubSession } from "./hub-session";
 import { type pinRequest, withPinned } from "./pinning";
-import type { LabelDefinition } from "./worktree-list";
+import type { GroupDefinition } from "./worktree-list";
 
-type Repo = Awaited<ReturnType<HubClient["repos"]["list"]["query"]>>["repos"][number];
+type ReposReply = Awaited<ReturnType<HubClient["repos"]["list"]["query"]>>;
+type Repo = ReposReply["repos"][number];
 
 /** The live agent and branch statuses, and whether the stream is connected. */
 export function useStatusFeed() {
@@ -15,13 +16,23 @@ export function useStatusFeed() {
 }
 
 /** `repos.list`, re-read every 30 s like the web sidebar and on pull to refresh. */
-export function useRepos() {
+function useReposReply<T>(select: (reply: ReposReply) => T) {
   const { client } = useHubSession();
   return useQuery({
     queryKey: ["repos.list"],
-    queryFn: async () => (await client.repos.list.query()).repos,
+    queryFn: () => client.repos.list.query(),
     refetchInterval: 30_000,
+    select,
   });
+}
+
+export function useRepos() {
+  return useReposReply((reply) => reply.repos);
+}
+
+/** The worktree groups (name and color) the hub returns beside the repos, in their order. */
+export function useGroups() {
+  return useReposReply((reply): GroupDefinition[] => reply.groups as GroupDefinition[]);
 }
 
 export function useHosts() {
@@ -29,16 +40,6 @@ export function useHosts() {
   return useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await client.workers.list.query()).hosts,
-  });
-}
-
-/** The label definitions (name and color) repos are grouped under; the same list the web reads. */
-export function useLabels() {
-  const { client } = useHubSession();
-  return useQuery({
-    queryKey: ["settings.labels"],
-    queryFn: async (): Promise<LabelDefinition[]> =>
-      ((await client.settings.get.query()).labels ?? []) as LabelDefinition[],
   });
 }
 
@@ -51,8 +52,13 @@ export function usePinWorktree() {
       client.worktrees.setPinned.mutate(request),
     onMutate: async (request) => {
       await queryClient.cancelQueries({ queryKey: ["repos.list"] });
-      const previous = queryClient.getQueryData<Repo[]>(["repos.list"]);
-      if (previous) queryClient.setQueryData(["repos.list"], withPinned(previous, request));
+      const previous = queryClient.getQueryData<ReposReply>(["repos.list"]);
+      if (previous) {
+        queryClient.setQueryData<ReposReply>(["repos.list"], {
+          ...previous,
+          repos: withPinned<Repo>(previous.repos, request),
+        });
+      }
       return { previous };
     },
     onError: (_error, _request, context) => {

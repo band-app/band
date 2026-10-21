@@ -635,7 +635,7 @@ function MobileWorktreeChrome({
       <WorktreePickerDialog open={pickerOpen} onOpenChange={setPickerOpen} />
       <Sheet open={repoListOpen} onOpenChange={setRepoListOpen}>
         {/* The repo list fly-out reuses the exact same DashboardShell
-            the `/` home route renders, so labels, add-repo, settings
+            the `/` home route renders, so groups, add-repo, settings
             and the full worktree tree are all available from here. */}
         <SheetContent
           side="left"

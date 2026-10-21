@@ -6,7 +6,6 @@ import {
   AccordionItem,
   AccordionTriggerInline,
   Button,
-  ColorPicker,
   cn,
   Dialog,
   DialogContent,
@@ -22,7 +21,7 @@ import {
   Switch,
 } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, FolderOpen, RefreshCcw } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useTitleBarOffset } from "../../hooks/useIsFullscreen";
 import { isDesktop } from "../../lib/is-desktop";
@@ -35,7 +34,7 @@ import { useSettingsQuery } from "../hooks/use-settings-query";
 import { useRestartTerminalDaemon } from "../hooks/use-terminal-daemon";
 import { useAgentMode } from "../lib/agent-mode";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
-import type { CodingAgentDefinition, CodingAgentType, LabelDefinition } from "../types";
+import type { CodingAgentDefinition, CodingAgentType } from "../types";
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { AgentHooksSettings } from "./settings/AgentHooksSettings";
@@ -44,6 +43,7 @@ import { AppearanceSettings } from "./settings/AppearanceSettings";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
+import { GroupsSettings } from "./settings/GroupsSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
 import { McpSettings } from "./settings/McpSettings";
@@ -92,7 +92,7 @@ type SettingsSectionId =
   | "mcp"
   | "agent-hooks"
   | "runners"
-  | "labels"
+  | "groups"
   | "agents"
   | "usage"
   | "notifications"
@@ -213,9 +213,9 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     group: "Infrastructure",
   },
   {
-    id: "labels",
-    title: "Labels",
-    subtitle: "Tag repos to filter and group them in the sidebar.",
+    id: "groups",
+    title: "Groups",
+    subtitle: "Sort worktrees into groups in the sidebar.",
     group: "Worktree",
   },
   {
@@ -333,7 +333,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
   const [selectedSound, setSelectedSound] = useState<SoundId>(
     (settings.notifications?.sound as SoundId) ?? "chime",
   );
-  const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
   const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
   const [enableFilePreviewTabs, setEnableFilePreviewTabs] = useState(
@@ -557,7 +556,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     if (soundOnNeedsAttention !== (settings.notifications?.soundOnNeedsAttention ?? false))
       return true;
     if (selectedSound !== ((settings.notifications?.sound as SoundId) ?? "chime")) return true;
-    if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
     if (enableFilePreviewTabs !== (settings.enableFilePreviewTabs ?? true)) return true;
@@ -576,7 +574,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     webServerPort,
     soundOnNeedsAttention,
     selectedSound,
-    labels,
     autoStartTunnel,
     enableLSP,
     enableFilePreviewTabs,
@@ -597,7 +594,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     setWebServerPort(settings.webServerPort?.toString() ?? "");
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
-    setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setEnableLSP(settings.enableLSP ?? false);
     setEnableFilePreviewTabs(settings.enableFilePreviewTabs ?? true);
@@ -613,7 +609,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     settings.agents,
     settings.webServerPort,
     settings.notifications,
-    settings.labels,
     settings.autoStartTunnel,
     settings.enableLSP,
     settings.enableFilePreviewTabs,
@@ -654,7 +649,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
       agents: { ...settings.agents, defaultMode: defaultAgentMode, crossHostWorktrees },
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
-      labels: labels.length > 0 ? labels : undefined,
       // Always send explicit booleans rather than `value || undefined`.
       // `saveSettings` does a shallow merge with the on-disk file, so
       // sending `undefined` (or omitting the key) keeps whatever value
@@ -940,94 +934,13 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                     </SettingsSection>
                   ) : null}
 
-                  {/* ── Labels ─────────────────────────────────────── */}
-                  {active === "labels" ? (
+                  {/* ── Groups ─────────────────────────────────────── */}
+                  {active === "groups" ? (
                     <SettingsSection
-                      title="Labels"
-                      description="Tag repos to filter and group them in the sidebar."
+                      title="Groups"
+                      description="A worktree is in one group. The sidebar lists each group's worktrees together."
                     >
-                      {labels.length === 0 ? (
-                        <SettingsRow
-                          label="No labels yet"
-                          description="Add a label to start tagging repos."
-                        >
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const id = `lbl_${Date.now()}`;
-                              setLabels((prev) => [
-                                ...prev,
-                                // theme-lint-ignore-line: default value of a user-chosen label color
-                                { id, name: "New label", color: "#3b82f6" },
-                              ]);
-                            }}
-                          >
-                            <Plus className="size-3" />
-                            Add label
-                          </Button>
-                        </SettingsRow>
-                      ) : (
-                        <>
-                          {labels.map((lbl) => (
-                            <div
-                              key={lbl.id}
-                              data-slot="settings-row"
-                              className="flex items-center gap-2 px-4 py-2.5"
-                            >
-                              <ColorPicker
-                                value={lbl.color}
-                                onChange={(color) =>
-                                  setLabels((prev) =>
-                                    prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)),
-                                  )
-                                }
-                                showHex={false}
-                                className="w-auto h-7 px-1.5 shrink-0"
-                              />
-                              <Input
-                                value={lbl.name}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                  setLabels((prev) =>
-                                    prev.map((l) =>
-                                      l.id === lbl.id ? { ...l, name: e.target.value } : l,
-                                    ),
-                                  )
-                                }
-                                className="flex-1 h-8 text-sm"
-                              />
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                aria-label="Remove label"
-                                className="shrink-0 text-foreground hover:text-foreground"
-                                onClick={() =>
-                                  setLabels((prev) => prev.filter((l) => l.id !== lbl.id))
-                                }
-                              >
-                                <X className="size-3.5" />
-                              </Button>
-                            </div>
-                          ))}
-                          <div data-slot="settings-row" className="flex items-center px-4 py-2.5">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const id = `lbl_${Date.now()}`;
-                                setLabels((prev) => [
-                                  ...prev,
-                                  // theme-lint-ignore-line: default value of a user-chosen label color
-                                  { id, name: "New label", color: "#3b82f6" },
-                                ]);
-                              }}
-                            >
-                              <Plus className="size-3" />
-                              Add label
-                            </Button>
-                          </div>
-                        </>
-                      )}
+                      <GroupsSettings />
                     </SettingsSection>
                   ) : null}
 

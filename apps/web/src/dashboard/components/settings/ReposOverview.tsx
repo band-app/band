@@ -2,9 +2,8 @@ import { Input } from "@band-app/ui";
 import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRepos } from "../../hooks/use-repos";
-import { useSettingsQuery } from "../../hooks/use-settings-query";
 import { useHostsList } from "../../hooks/use-update-status";
-import type { LabelDefinition, RepoInfo } from "../../types";
+import type { RepoInfo } from "../../types";
 
 /** The worktrees a repo counts as in use: every listed worktree but the hub's own checkout. */
 export function repoWorktreeCount(repo: RepoInfo): number {
@@ -16,29 +15,25 @@ function allowsWorker(repo: RepoInfo, hostId: string): boolean {
   return !repo.allowedHostIds || repo.allowedHostIds.includes(hostId);
 }
 
-function matchesQuery(repo: RepoInfo, labels: LabelDefinition[], query: string): boolean {
+function matchesQuery(repo: RepoInfo, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const label = labels.find((l) => l.id === repo.label)?.name ?? "";
-  return [repo.name, repo.remoteUrl ?? "", label].some((text) => text.toLowerCase().includes(q));
+  return [repo.name, repo.remoteUrl ?? ""].some((text) => text.toLowerCase().includes(q));
 }
 
 const ALL = "";
 
 /**
- * Settings > Repos: every repo on the hub in one list, each with its label colour, name, remote
+ * Settings > Repos: every repo on the hub in one list, each with its name, remote
  * and, for a repo limited to some workers, which ones. The filter has focus when the page opens,
  * and Enter opens the first repo that matches it. A row opens the repo's page. Repos are added
  * from the Repos panel in the sidebar.
  */
 export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
   const { repos } = useRepos();
-  const { settings } = useSettingsQuery();
-  const labels = settings.labels ?? [];
   const hosts = useHostsList();
   const [query, setQuery] = useState("");
   const [worker, setWorker] = useState(ALL);
-  const [label, setLabel] = useState(ALL);
   const filterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -47,10 +42,7 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
 
   const workerName = (id: string) => hosts.data?.find((h) => h.id === id)?.name ?? id;
   const visible = repos.filter(
-    (repo) =>
-      matchesQuery(repo, labels, query) &&
-      (worker === ALL || allowsWorker(repo, worker)) &&
-      (label === ALL || repo.label === label),
+    (repo) => matchesQuery(repo, query) && (worker === ALL || allowsWorker(repo, worker)),
   );
 
   return (
@@ -59,7 +51,7 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
         <Input
           ref={filterRef}
           aria-label="Filter repos"
-          placeholder="Filter by name, URL or label. Enter opens the first match"
+          placeholder="Filter by name or URL. Enter opens the first match"
           value={query}
           data-testid="settings-repos__filter"
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
@@ -85,20 +77,6 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
             </option>
           ))}
         </select>
-        <select
-          aria-label="Filter repos by label"
-          data-testid="settings-repos__label-filter"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
-        >
-          <option value={ALL}>Any label</option>
-          {labels.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name}
-            </option>
-          ))}
-        </select>
       </div>
 
       {repos.length === 0 ? (
@@ -112,7 +90,6 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
       ) : (
         <ul className="overflow-hidden rounded-xl border border-border divide-y divide-border">
           {visible.map((repo) => {
-            const repoLabel = labels.find((l) => l.id === repo.label);
             const limitedTo = repo.allowedHostIds?.map(workerName).join(", ");
             return (
               <li key={repo.name}>
@@ -124,11 +101,6 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
                   data-limited={repo.allowedHostIds ? "true" : "false"}
                   onClick={() => onOpen(repo.name)}
                 >
-                  <span
-                    aria-hidden
-                    className="size-2.5 shrink-0 rounded-[3px]"
-                    style={repoLabel ? { backgroundColor: repoLabel.color } : undefined}
-                  />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-semibold">{repo.name}</span>
                     <span

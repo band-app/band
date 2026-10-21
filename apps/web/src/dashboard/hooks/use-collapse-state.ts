@@ -1,25 +1,26 @@
+import { UNGROUPED_KEY } from "@band-app/shared/sidebar-tree";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clientStorage } from "../../lib/client-state";
 
 /**
  * Tracks which items in a collection are collapsed, persisting the set to
  * localStorage so the state survives page reloads. Used by the repo list
- * to remember which repos and label groups the user has collapsed.
+ * to remember which repos and groups the user has collapsed.
  *
  * The state is stored as a JSON-serialised array of string ids; missing keys
- * mean "expanded" so brand-new repos/labels show up expanded by default.
+ * mean "expanded" so brand-new repos/groups show up expanded by default.
  */
 
 /** localStorage key for the collapsed-repos set (repo names). */
 export const REPOS_COLLAPSE_KEY = "band.repos-list.collapsed-repos";
-/** localStorage key for the collapsed-label-groups set (label ids + UNLABELED_KEY). */
-export const LABELS_COLLAPSE_KEY = "band.repos-list.collapsed-labels";
+/** localStorage key for the collapsed-group sections (group ids + UNGROUPED_KEY). */
+export const GROUPS_COLLAPSE_KEY = "band.repos-list.collapsed-groups";
 /** localStorage key for the collapsed Pinned section. The section only has a
  *  single id (PINNED_SECTION_ID) but we reuse the same Set<string> hook for
- *  consistency with the labels/repos collapse state. */
+ *  consistency with the groups/repos collapse state. */
 export const PINNED_COLLAPSE_KEY = "band.repos-list.collapsed-pinned";
-/** Sentinel id for the "Unlabeled" group — it has no real label.id. */
-export const UNLABELED_KEY = "__unlabeled";
+/** Sentinel id for the "Ungrouped" section, which has no real group id. */
+export { UNGROUPED_KEY };
 /** Sentinel id for the "Pinned" section — used with PINNED_COLLAPSE_KEY. */
 export const PINNED_SECTION_ID = "__pinned";
 

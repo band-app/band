@@ -370,7 +370,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => window.dispatchEvent(new CustomEvent("band:worktree-go-forward")),
     },
     {
-      // ⌘1..9 pick the Nth label; they depend on the user's labels, so only
+      // ⌘1..9 pick the Nth group; they depend on the user's groups, so only
       // "All repos" is listed here.
       id: "show-all-repos",
       label: "Show All Repos",

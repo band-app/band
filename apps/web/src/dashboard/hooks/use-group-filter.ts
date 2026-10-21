@@ -2,27 +2,27 @@ import { useCallback, useEffect, useState } from "react";
 import { clientStorage } from "../../lib/client-state";
 
 /**
- * Tracks the currently-selected repo-list label filter and shares it across
+ * Tracks the currently-selected repo-list group filter and shares it across
  * every DashboardShell instance on the page. Multiple worktrees each render
  * their own DashboardShell (inactive ones are display:none-hidden), so a plain
  * `useState` would give each one a separate filter — switching worktrees
  * would appear to "reset" the dropdown. Persisting through localStorage plus
  * a same-tab CustomEvent keeps every instance in sync and survives reloads.
  *
- * Value is the label id, or `null` for "All".
+ * Value is the group id, or `null` for "All".
  */
 
-/** localStorage key for the active label filter. */
-export const LABEL_FILTER_KEY = "band.repos-list.label-filter";
+/** localStorage key for the active group filter. */
+export const GROUP_FILTER_KEY = "band.repos-list.group-filter";
 
 /** Custom event used to broadcast same-tab updates. The native `storage`
  *  event only fires across tabs, so we dispatch this on every write. */
-const SYNC_EVENT = "band:label-filter-change";
+const SYNC_EVENT = "band:group-filter-change";
 
 function read(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(LABEL_FILTER_KEY);
+    const raw = window.localStorage.getItem(GROUP_FILTER_KEY);
     return raw ?? null;
   } catch {
     return null;
@@ -33,9 +33,9 @@ function write(value: string | null): void {
   if (typeof window === "undefined") return;
   try {
     if (value == null) {
-      clientStorage.removeItem(LABEL_FILTER_KEY);
+      clientStorage.removeItem(GROUP_FILTER_KEY);
     } else {
-      clientStorage.setItem(LABEL_FILTER_KEY, value);
+      clientStorage.setItem(GROUP_FILTER_KEY, value);
     }
   } catch {
     // localStorage full or unavailable — ignore
@@ -43,12 +43,12 @@ function write(value: string | null): void {
   window.dispatchEvent(new CustomEvent(SYNC_EVENT));
 }
 
-export function useLabelFilter(): [string | null, (next: string | null) => void] {
+export function useGroupFilter(): [string | null, (next: string | null) => void] {
   const [value, setValue] = useState<string | null>(() => read());
 
   useEffect(() => {
     const sync = (e: Event) => {
-      if (e instanceof StorageEvent && e.key !== LABEL_FILTER_KEY) return;
+      if (e instanceof StorageEvent && e.key !== GROUP_FILTER_KEY) return;
       setValue(read());
     };
     window.addEventListener("storage", sync);
@@ -59,10 +59,10 @@ export function useLabelFilter(): [string | null, (next: string | null) => void]
     };
   }, []);
 
-  const setLabelFilter = useCallback((next: string | null) => {
+  const setGroupFilter = useCallback((next: string | null) => {
     write(next);
     setValue(next);
   }, []);
 
-  return [value, setLabelFilter];
+  return [value, setGroupFilter];
 }

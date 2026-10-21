@@ -12,6 +12,23 @@ The CLI is split into seven domain-specific skills, each authored as its own `SK
 
 Run `band schema` for live introspection of every command, or `band <command> --help` for inline help.
 
+## Worktree groups
+
+A worktree is in at most one group, and groups are the sections of the sidebar. A group is addressed by id or by name (any case).
+
+```sh
+band groups create Work --color red
+band groups list
+band groups rename work Client
+band groups remove client
+
+band worktrees create my-app feat/auth --group work
+band worktrees set-group my-app-feat-auth work --with-children
+band worktrees set-group my-app-feat-auth --none
+```
+
+A new worktree joins its origin's group unless `--group` says otherwise. `--with-children` moves the worktrees started from the one named as well. Removing a group leaves its worktrees ungrouped. Agents on a worker can run `groups list` and `worktrees set-group`, but not `groups create`, `rename` or `remove`.
+
 ## Chat labels (#520)
 
 Chat panes carry a free-form `Record<string, string>` of labels alongside their name/agent/model/mode. Labels are visible in `band chats list` (a `LABELS` column rendered as `k=v,k=v` with sorted keys, empty cell when unset) and in the JSON output of every `chats.*` route.

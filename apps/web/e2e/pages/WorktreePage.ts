@@ -8,7 +8,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { AGENT_MODE_KEY, LABEL_FILTER_KEY, LABEL_LAST_WORKTREE_KEY } from "@/dashboard";
+import { AGENT_MODE_KEY, GROUP_FILTER_KEY, GROUP_LAST_WORKTREE_KEY } from "@/dashboard";
 import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
 import { FindWidget } from "./FindWidget";
 
@@ -628,55 +628,6 @@ export class WorktreePage {
     });
   }
 
-  /** The "Set label" row in an open repo menu (opens a submenu). */
-  get setLabelMenuItem(): Locator {
-    return this.page.getByTestId("repo-list__action--set-label");
-  }
-
-  /** The open "Set label" submenu, listing "None" and every label. */
-  get labelSubmenu(): Locator {
-    return this.page.getByTestId("repo-list__label-submenu");
-  }
-
-  /** A row in the open "Set label" submenu, by label name (test data). */
-  labelSubmenuOption(name: string): Locator {
-    return this.labelSubmenu.getByRole("menuitem", { name, exact: true });
-  }
-
-  /** Open the "Set label" submenu of the open repo menu. */
-  async openSetLabelSubmenu(): Promise<void> {
-    await test.step("Open the Set label submenu", async () => {
-      await this.setLabelMenuItem.click();
-      await expect(this.labelSubmenu).toBeVisible();
-    });
-  }
-
-  /** Move keyboard focus to the last row of the open "Set label" submenu:
-   *  into the submenu, then End. */
-  async focusLastLabelSubmenuOption(): Promise<void> {
-    await test.step("Focus the last label with the keyboard", async () => {
-      await this.labelSubmenu.getByRole("menuitem").first().focus();
-      await this.page.keyboard.press("End");
-    });
-  }
-
-  /** Scroll the open "Set label" submenu back to its top. */
-  async scrollLabelSubmenuToTop(): Promise<void> {
-    await test.step("Scroll the Set label submenu to the top", async () => {
-      await this.labelSubmenu.evaluate((el) => {
-        el.scrollTop = 0;
-      });
-    });
-  }
-
-  /** Click a label in the open "Set label" submenu. The menu closes. */
-  async clickLabelSubmenuOption(name: string): Promise<void> {
-    await test.step(`Click label "${name}"`, async () => {
-      await this.labelSubmenuOption(name).click();
-      await expect(this.contextMenu).toHaveCount(0);
-    });
-  }
-
   /** Click a worktree card to switch to that worktree via the dashboard
    *  sidebar's client-side navigation. Unlike `goto()`, which does a full
    *  browser navigation that resets React state (including the
@@ -689,23 +640,66 @@ export class WorktreePage {
     });
   }
 
-  /** Trigger button for the label filter dropdown in the dashboard
-   *  sidebar toolbar (issue #505). Only rendered when at least one label
+  /** Trigger button for the group filter dropdown in the dashboard
+   *  sidebar toolbar (issue #505). Only rendered when at least one group
    *  is defined in settings. */
-  labelFilterTrigger(): Locator {
-    return this.page.getByTestId("dashboard__label-filter-trigger");
+  groupFilterTrigger(): Locator {
+    return this.page.getByTestId("dashboard__group-filter-trigger");
   }
 
-  /** Menu item inside the label-filter dropdown. Pass `null` for the
-   *  "All" (no-filter) item, or a label id for a specific label. */
-  labelFilterItem(labelId: string | null): Locator {
-    const key = labelId ?? "all";
-    return this.page.getByTestId(`dashboard__label-filter-item--${key}`);
+  /** The open group-filter dropdown, listing "All" and every group. */
+  get groupFilterMenu(): Locator {
+    return this.page.getByTestId("dashboard__group-filter-menu");
   }
 
-  /** Open the label-filter dropdown and click the item for `labelId`.
-   *  `null` selects the "All" item. Mirrors what `setLabelFilter` would
-   *  produce — including the per-label "last worktree" restore added in
+  /** A row in the open group-filter dropdown, by group name (test data). */
+  groupFilterOption(name: string): Locator {
+    return this.groupFilterMenu.getByRole("menuitem", { name, exact: false });
+  }
+
+  /** Open the group-filter dropdown without choosing anything. */
+  async openGroupFilter(): Promise<void> {
+    await test.step("Open the group filter", async () => {
+      await this.groupFilterTrigger().click();
+      await expect(this.groupFilterMenu).toBeVisible();
+    });
+  }
+
+  /** Move keyboard focus to the last row of the open group-filter dropdown. */
+  async focusLastGroupFilterOption(): Promise<void> {
+    await test.step("Focus the last group with the keyboard", async () => {
+      await this.groupFilterMenu.getByRole("menuitem").first().focus();
+      await this.page.keyboard.press("End");
+    });
+  }
+
+  /** Scroll the open group-filter dropdown back to its top. */
+  async scrollGroupFilterToTop(): Promise<void> {
+    await test.step("Scroll the group filter to the top", async () => {
+      await this.groupFilterMenu.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+    });
+  }
+
+  /** Click a group in the open group-filter dropdown. The menu closes. */
+  async clickGroupFilterOption(name: string): Promise<void> {
+    await test.step(`Click group "${name}"`, async () => {
+      await this.groupFilterOption(name).click();
+      await expect(this.groupFilterMenu).toHaveCount(0);
+    });
+  }
+
+  /** Menu item inside the group-filter dropdown. Pass `null` for the
+   *  "All" (no-filter) item, or a group id for a specific group. */
+  groupFilterItem(groupId: string | null): Locator {
+    const key = groupId ?? "all";
+    return this.page.getByTestId(`dashboard__group-filter-item--${key}`);
+  }
+
+  /** Open the group-filter dropdown and click the item for `groupId`.
+   *  `null` selects the "All" item. Mirrors what `setGroupFilter` would
+   *  produce — including the per-group "last worktree" restore added in
    *  issue #505 — so this is the right path for tests that need the
    *  full click→restore behaviour.
    *
@@ -719,11 +713,11 @@ export class WorktreePage {
    *  for the new portal to be both visible AND stable before clicking
    *  (via Locator's auto-waits + `state: "visible"`) avoids the
    *  `element was detached from the DOM` flake. */
-  async selectLabelFilter(labelId: string | null): Promise<void> {
-    const label = labelId ?? "all";
-    await test.step(`Select label filter "${label}" via dropdown`, async () => {
-      await this.labelFilterTrigger().click();
-      const item = this.labelFilterItem(labelId);
+  async selectGroupFilter(groupId: string | null): Promise<void> {
+    const group = groupId ?? "all";
+    await test.step(`Select group filter "${group}" via dropdown`, async () => {
+      await this.groupFilterTrigger().click();
+      const item = this.groupFilterItem(groupId);
       await item.waitFor({ state: "visible" });
       await item.click();
       // Wait for the menu to close before returning so a back-to-back
@@ -735,8 +729,8 @@ export class WorktreePage {
     });
   }
 
-  /** Reset both label-related localStorage entries (active filter +
-   *  per-label "last worktree" map) and navigate to `worktreeId`, so
+  /** Reset both group-related localStorage entries (active filter +
+   *  per-group "last worktree" map) and navigate to `worktreeId`, so
    *  tests start from a known-clean slate. Two-step: navigate first to
    *  land on the origin (localStorage isn't accessible until a same-
    *  origin page is loaded), then evaluate the clear. Keeps the raw
@@ -744,36 +738,36 @@ export class WorktreePage {
    *  storage-key constants in this page object.
    *
    *  IMPORTANT: the clear runs AFTER the page mounts, so the React
-   *  tree's in-memory copies of those values (e.g. `useLabelFilter`'s
+   *  tree's in-memory copies of those values (e.g. `useGroupFilter`'s
    *  state, `lastSeenActiveRef`) still reflect what was in storage at
    *  mount time. Tests that call this helper should follow up with
-   *  another `goto(...)` (or `reload()`) before exercising label-state
+   *  another `goto(...)` (or `reload()`) before exercising group-state
    *  behaviour, so the React tree re-reads the now-clean storage on
    *  remount. All in-tree callers already do — every test body opens
    *  with its own `goto(...)`. */
-  async resetLabelStateAndGoto(worktreeId: string): Promise<void> {
-    await test.step(`Reset label state, navigate to ${worktreeId}`, async () => {
+  async resetGroupStateAndGoto(worktreeId: string): Promise<void> {
+    await test.step(`Reset group state, navigate to ${worktreeId}`, async () => {
       await this.goto(worktreeId);
       await this.page.evaluate(
         ([filterKey, mapKey]) => {
           localStorage.removeItem(filterKey);
           localStorage.removeItem(mapKey);
         },
-        [LABEL_FILTER_KEY, LABEL_LAST_WORKTREE_KEY] as const,
+        [GROUP_FILTER_KEY, GROUP_LAST_WORKTREE_KEY] as const,
       );
     });
   }
 
-  /** Read the persisted label filter from localStorage: a label id, or
+  /** Read the persisted group filter from localStorage: a group id, or
    *  `null` for All. */
-  async readLabelFilter(): Promise<string | null> {
-    return await this.page.evaluate((key) => localStorage.getItem(key), LABEL_FILTER_KEY);
+  async readGroupFilter(): Promise<string | null> {
+    return await this.page.evaluate((key) => localStorage.getItem(key), GROUP_FILTER_KEY);
   }
 
-  /** Read the persisted per-label "last worktree" map from
+  /** Read the persisted per-group "last worktree" map from
    *  localStorage. Returns an empty object when nothing has been
    *  recorded yet. */
-  async readLabelLastWorktrees(): Promise<Record<string, string>> {
+  async readGroupLastWorktrees(): Promise<Record<string, string>> {
     return await this.page.evaluate((key) => {
       const raw = localStorage.getItem(key);
       if (!raw) return {};
@@ -786,7 +780,7 @@ export class WorktreePage {
         // Corrupted entry — treat as empty.
       }
       return {};
-    }, LABEL_LAST_WORKTREE_KEY);
+    }, GROUP_LAST_WORKTREE_KEY);
   }
 
   /** Sidebar repo-list root — the keyboard nav anchor in
@@ -1209,35 +1203,35 @@ export class WorktreePage {
     });
   }
 
-  /** Press the ⌘0..9 label shortcut as a real user keypress, wherever focus
+  /** Press the ⌘0..9 group shortcut as a real user keypress, wherever focus
    *  is. `DashboardShell`'s window listener takes ⌘+digit from any element,
    *  the terminal input included, so no focus has to be set up first: a
    *  worktree switch moves focus into the new worktree's tab a frame or
    *  more later, and a focus set here could be taken before the key.
-   *  Waits for the label filter trigger first: it renders once the labels
-   *  have loaded, and the listener ignores a digit with no label behind it.
-   *  `index` 0 picks "All", 1..9 pick the Nth label. */
-  async pressLabelShortcut(index: number): Promise<void> {
+   *  Waits for the group filter trigger first: it renders once the groups
+   *  have loaded, and the listener ignores a digit with no group behind it.
+   *  `index` 0 picks "All", 1..9 pick the Nth group. */
+  async pressGroupShortcut(index: number): Promise<void> {
     if (index < 0 || index > 9) {
-      throw new Error(`pressLabelShortcut: index must be 0..9, got ${index}`);
+      throw new Error(`pressGroupShortcut: index must be 0..9, got ${index}`);
     }
-    await test.step(`Press Meta+${index} (label shortcut)`, async () => {
-      await this.labelFilterTrigger().waitFor({ state: "visible" });
+    await test.step(`Press Meta+${index} (group shortcut)`, async () => {
+      await this.groupFilterTrigger().waitFor({ state: "visible" });
       await this.page.keyboard.press(`Meta+${index}`);
     });
   }
 
   /** Press ⌘0..9 (or Ctrl+0..9) with focus in `worktreeId`'s terminal,
-   *  where a worktree switch leaves it. `index` as in `pressLabelShortcut`. */
-  async pressLabelShortcutInTerminal(
+   *  where a worktree switch leaves it. `index` as in `pressGroupShortcut`. */
+  async pressGroupShortcutInTerminal(
     worktreeId: string,
     index: number,
     modifier: "Meta" | "Control" = "Meta",
   ): Promise<void> {
     if (index < 0 || index > 9) {
-      throw new Error(`pressLabelShortcutInTerminal: index must be 0..9, got ${index}`);
+      throw new Error(`pressGroupShortcutInTerminal: index must be 0..9, got ${index}`);
     }
-    await test.step(`Press ${modifier}+${index} (label shortcut) in the terminal`, async () => {
+    await test.step(`Press ${modifier}+${index} (group shortcut) in the terminal`, async () => {
       await this.cachedPanelEntries(worktreeId)
         .getByRole("textbox", { name: "Terminal input" })
         .first()
@@ -1248,12 +1242,12 @@ export class WorktreePage {
   /** Press Ctrl+0..9 with focus on the repo list, a non-editable target
    *  (Ctrl+digit is skipped in an editable one). Focus and key are two
    *  steps, so the caller must know no worktree switch is still moving
-   *  focus into its tab. `index` as in `pressLabelShortcut`. */
-  async pressLabelShortcutFromRepoList(index: number): Promise<void> {
+   *  focus into its tab. `index` as in `pressGroupShortcut`. */
+  async pressGroupShortcutFromRepoList(index: number): Promise<void> {
     if (index < 0 || index > 9) {
-      throw new Error(`pressLabelShortcutFromRepoList: index must be 0..9, got ${index}`);
+      throw new Error(`pressGroupShortcutFromRepoList: index must be 0..9, got ${index}`);
     }
-    await test.step(`Press Control+${index} (label shortcut) on the repo list`, async () => {
+    await test.step(`Press Control+${index} (group shortcut) on the repo list`, async () => {
       await this.repoListRoot().press(`Control+${index}`);
     });
   }
@@ -2950,7 +2944,7 @@ export class WorktreePage {
    *  Because ⌘ is a meta key the shortcut fires regardless of focus
    *  (including from inside a focused terminal), but we still route the
    *  keypress through the repo list root (focusable, non-editable) —
-   *  the same stable anchor the label shortcut test uses. */
+   *  the same stable anchor the group shortcut test uses. */
   async openWorktreePickerViaShortcut(): Promise<void> {
     await test.step("Open worktree picker (⌘K)", async () => {
       const root = this.repoListRoot();
@@ -4188,7 +4182,7 @@ export class WorktreePage {
   /** Reset the per-worktree shared-layout state entry in
    *  `localStorage` and (re-)navigate to the worktree so the next
    *  mount runs against a clean slate. Two-step (matches
-   *  `resetLabelStateAndGoto`): navigate first to land on the origin
+   *  `resetGroupStateAndGoto`): navigate first to land on the origin
    *  (localStorage isn't accessible until a same-origin page has
    *  loaded), then evaluate the clear. Centralises the
    *  `ACTIVE_STATE_KEY_PREFIX` key construction so test bodies don't

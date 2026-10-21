@@ -45,7 +45,7 @@ export class MobileLayoutPage {
   readonly headerRepoName: Locator;
   /** The header label, both rows. */
   readonly headerLabel: Locator;
-  /** The top row of the repo-list fly-out (label filter, add repo). */
+  /** The top row of the repo-list fly-out (group filter, add repo). */
   readonly flyoutTopBar: Locator;
   /** The vertical 3-dot button at the right of the header; it opens the
    *  panel menu (Explorer, Changes, plugin tabs) as a bottom drawer. */

@@ -76,8 +76,13 @@ const worktreeRow = async (id: string) =>
   (await listed()).repos.flatMap((r) => r.worktrees).find((w) => w.worktreeId === id);
 const originOf = async (id: string) => (await worktreeRow(id))?.origin?.worktreeId ?? null;
 
+// Alpha's worktrees are in the Private group and beta's in Other.
 const create = (input: Record<string, unknown>) =>
-  trpcMutate(server.url, TOKEN, "worktrees.create", { noOrigin: true, ...input });
+  trpcMutate(server.url, TOKEN, "worktrees.create", {
+    noOrigin: true,
+    groupId: input.repo === "alpha" ? "private" : "other",
+    ...input,
+  });
 const pin = (repo: string, name: string) =>
   trpcMutate(server.url, TOKEN, "worktrees.setPinned", { repo, name, pinned: true });
 
@@ -91,18 +96,17 @@ test.beforeAll(async () => {
       name,
       path,
       defaultBranch: "main",
-      label: name === "alpha" ? "private" : "other",
-      worktrees: [{ branch: "main", path }],
+      worktrees: [{ branch: "main", path, groupId: name === "alpha" ? "private" : "other" }],
     };
   });
-  seedSettings(tmpHome, {
-    tokenSecret: TOKEN,
-    labels: [
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  seedState(tmpHome, {
+    repos,
+    groups: [
       { id: "private", name: "Private", color: "#3b82f6" },
       { id: "other", name: "Other", color: "#f97316" },
     ],
   });
-  seedState(tmpHome, { repos });
   server = await startServer({ tmpHome });
 
   // Plain worktrees to reorder and reparent.
@@ -124,6 +128,7 @@ test.beforeAll(async () => {
     repo: "beta",
     branch: "pin-other",
     origin: "alpha-pin",
+    groupId: "other",
   });
   await create({ repo: "beta", branch: "pinned-beta" });
   await pin("beta", "pinned-beta");
@@ -141,9 +146,14 @@ test.afterAll(async () => {
 async function open(page: Page, worktreeId = "alpha-main", mobile = false) {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   await worktreePage.goto(worktreeId);
+  const sidebar = new SidebarPinsDragPage(page);
   if (mobile) await worktreePage.waitForMobileReady();
-  else await worktreePage.waitForReady();
-  return { sidebar: new SidebarPinsDragPage(page), worktreePage };
+  else {
+    await worktreePage.waitForReady();
+    // Groups are seeded, so the sidebar opens in the Groups view. These tests start from Repo.
+    await sidebar.selectMode("repo");
+  }
+  return { sidebar, worktreePage };
 }
 
 const MODES = ["repo", "origin", "host"] as const;
@@ -173,17 +183,17 @@ for (const mode of MODES) {
   });
 }
 
-test("the label filter hides pins and children of other labels (S3)", async ({ page }) => {
+test("the group filter hides pins and children of other groups (S3)", async ({ page }) => {
   const { sidebar, worktreePage } = await open(page);
-  for (const mode of MODES) {
+  for (const mode of [...MODES, "groups"] as const) {
     await sidebar.selectMode(mode);
-    await worktreePage.selectLabelFilter("private");
+    await worktreePage.selectGroupFilter("private");
     await expect
       .poll(async () => (await sidebar.pinnedOrder()).map((r) => r.id))
       .toEqual(["alpha-pin", "alpha-pin-child", "alpha-pin-grand"]);
     await expect(sidebar.card("beta-pin-other")).toHaveCount(0);
     await expect(sidebar.card("beta-pinned-beta")).toHaveCount(0);
-    await worktreePage.selectLabelFilter(null);
+    await worktreePage.selectGroupFilter(null);
     await expect(sidebar.pinnedRow("beta-pinned-beta")).toBeVisible();
     await expect(sidebar.pinnedRow("beta-pin-other")).toBeVisible();
   }
@@ -445,6 +455,8 @@ test.describe("on a phone", () => {
   }) => {
     const { sidebar, worktreePage } = await open(page, "alpha-main", true);
     await worktreePage.openRepoListFlyout();
+    // Groups are seeded, so the flyout opens in the Groups view. This test starts from Repo.
+    await sidebar.selectMode("repo");
     const order = () => sidebar.treeCardOrder("alpha-");
     const [first, second] = (await order())
       .filter((id) => ["alpha-a", "alpha-b"].includes(id))

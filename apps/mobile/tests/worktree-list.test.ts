@@ -28,8 +28,7 @@ const repos: RepoLike[] = [
   },
   {
     name: "beta",
-    label: "lbl_1791723973064",
-    worktrees: [{ name: "main", branch: "main", pinned: false }],
+    worktrees: [{ name: "main", branch: "main", pinned: false, groupId: "grp_1791723973064" }],
   },
 ];
 
@@ -189,18 +188,17 @@ const webPins = (repos: RepoLike[]) => ({
   pins: webPinnedTree(sortRepoWorktrees(repos as never) as never),
 });
 
-describe("pinned, labels and origin like the web", () => {
-  const labels = [
+describe("pinned, groups and origin like the web", () => {
+  const groups = [
     { id: "l1", name: "Epic", color: "#ef4444" },
     { id: "l2", name: "Private", color: "#3b82f6" },
   ];
   const fixture: RepoLike[] = [
     {
       name: "alpha",
-      label: "l2",
       defaultBranch: "main",
       worktrees: [
-        { name: "main", branch: "main", pinned: false },
+        { name: "main", branch: "main", pinned: false, groupId: "l2" },
         { name: "second", branch: "second", pinned: true, pinSortIndex: 2 },
         { name: "first", branch: "first", pinned: true, pinSortIndex: 1 },
         {
@@ -208,15 +206,15 @@ describe("pinned, labels and origin like the web", () => {
           branch: "s",
           pinned: false,
           origin: { worktreeId: "alpha-first", removed: false },
+          groupId: "l2",
         },
-        { name: "loose", branch: "loose", pinned: false, sortIndex: 1 },
+        { name: "loose", branch: "loose", pinned: false, sortIndex: 1, groupId: "l1" },
       ],
     },
     {
       name: "beta",
-      label: "l1",
       defaultBranch: "main",
-      worktrees: [{ name: "main", branch: "main", pinned: false }],
+      worktrees: [{ name: "main", branch: "main", pinned: false, groupId: "l1" }],
     },
     {
       name: "gamma",
@@ -224,7 +222,7 @@ describe("pinned, labels and origin like the web", () => {
       worktrees: [{ name: "main", branch: "main", pinned: false }],
     },
   ];
-  const opts = { ...base, labels };
+  const opts = { ...base, groups };
 
   it("S2: Pinned lists the pins in the web's order with what started from each", () => {
     const pinned = buildSections(fixture, opts)[0];
@@ -239,36 +237,59 @@ describe("pinned, labels and origin like the web", () => {
     );
   });
 
-  it("S4: repos sit under label headers in label order, unlabeled last", () => {
+  it("S4: worktrees sit under group headers in group order, ungrouped last, a repo once per group", () => {
     const sections = buildSections(fixture, opts).filter((s) => s.kind === "repo");
     assert.deepEqual(
-      sections.map((s) => [s.name, s.labelHeader?.name ?? null, s.labelHeader?.color ?? null]),
+      sections.map((s) => [
+        s.name,
+        s.groupHeader?.name ?? null,
+        s.groupHeader?.color ?? null,
+        s.data.map((r) => r.id),
+      ]),
       [
-        ["beta", "Epic", "#ef4444"],
-        ["alpha", "Private", "#3b82f6"],
-        ["gamma", "Unlabeled", null],
+        ["l1:alpha", "Epic", "#ef4444", ["alpha-loose"]],
+        ["l1:beta", null, null, ["beta-main"]],
+        ["l2:alpha", "Private", "#3b82f6", ["alpha-main"]],
+        ["none:gamma", "Ungrouped", null, ["gamma-main"]],
       ],
     );
   });
 
-  it("S4: no label headers without labels or while a filter is on", () => {
-    assert.ok(buildSections(fixture, base).every((s) => !s.labelHeader));
-    assert.ok(buildSections(fixture, { ...opts, labelFilter: "l1" }).every((s) => !s.labelHeader));
+  it("S4: a worktree whose group is gone is listed as ungrouped", () => {
+    const sections = buildSections(
+      [
+        {
+          name: "delta",
+          defaultBranch: "main",
+          worktrees: [{ name: "main", branch: "main", pinned: false, groupId: "gone" }],
+        },
+      ],
+      opts,
+    );
+    assert.deepEqual(
+      sections.map((s) => [s.name, s.groupHeader?.name]),
+      [["none:delta", "Ungrouped"]],
+    );
   });
 
-  it("S5: the filter keeps only that label's repos, the pins and the other views included", () => {
-    const names = (groupBy: "repo" | "origin" | "host") =>
-      buildSections(fixture, { ...opts, labelFilter: "l1", groupBy }).flatMap((s) =>
-        s.data.map((r) => r.repo),
+  it("S4: no group headers without groups or while a filter is on", () => {
+    assert.ok(buildSections(fixture, base).every((s) => !s.groupHeader));
+    assert.ok(buildSections(fixture, { ...opts, groupFilter: "l1" }).every((s) => !s.groupHeader));
+  });
+
+  it("S5: the filter keeps only that group's worktrees, the pins and the other views included", () => {
+    const ids = (groupBy: "repo" | "origin" | "host") =>
+      buildSections(fixture, { ...opts, groupFilter: "l1", groupBy }).flatMap((s) =>
+        s.data.map((r) => r.id),
       );
-    assert.deepEqual(names("repo"), ["beta"]);
-    assert.deepEqual(names("origin"), ["beta"]);
-    assert.deepEqual(names("host"), ["beta"]);
+    assert.deepEqual(ids("repo"), ["alpha-loose", "beta-main"]);
+    assert.deepEqual(ids("origin").sort(), ["alpha-loose", "beta-main"]);
+    assert.deepEqual(ids("host").sort(), ["alpha-loose", "beta-main"]);
     assert.deepEqual(
-      buildSections(fixture, { ...opts, labelFilter: "l1" }).map((s) => s.kind),
-      ["repo"],
+      buildSections(fixture, { ...opts, groupFilter: "l1" }).map((s) => s.kind),
+      ["repo", "repo"],
     );
-    assert.equal(buildSections(fixture, { ...opts, labelFilter: null }).length, 4);
+    assert.equal(buildSections(fixture, { ...opts, groupFilter: null }).length, 5);
   });
 
   it("S6: Origin matches the web's Origin view for the same data, Pinned on top", () => {
