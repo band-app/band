@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "205c3988-9e71-48d4-abe6-e067bb33147f",
+  "id": "be5166e2-83d9-4bc0-a327-e609225bb9d6",
   "prevIds": [
-    "e50186c6-9b3c-4ba3-b7b0-9759363ea708"
+    "68dc1cdd-e7ae-494c-8680-8aafda3b5372"
   ],
   "ddl": [
     {
@@ -148,6 +148,10 @@
     },
     {
       "name": "worktree_checkpoints",
+      "entityType": "tables"
+    },
+    {
+      "name": "worktree_groups",
       "entityType": "tables"
     },
     {
@@ -2307,16 +2311,6 @@
       "table": "repos"
     },
     {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "label",
-      "entityType": "columns",
-      "table": "repos"
-    },
-    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -3542,6 +3536,56 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "worktree_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "worktree_groups"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "color",
+      "entityType": "columns",
+      "table": "worktree_groups"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sort_order",
+      "entityType": "columns",
+      "table": "worktree_groups"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "worktree_groups"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "worktree_id",
       "entityType": "columns",
       "table": "worktree_sleep"
@@ -3953,6 +3997,16 @@
       "default": null,
       "generated": null,
       "name": "origin_terminal_id",
+      "entityType": "columns",
+      "table": "worktrees"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "group_id",
       "entityType": "columns",
       "table": "worktrees"
     },
@@ -4389,6 +4443,15 @@
       "nameExplicit": false,
       "name": "worktree_checkpoints_pk",
       "table": "worktree_checkpoints",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "worktree_groups_pk",
+      "table": "worktree_groups",
       "entityType": "pks"
     },
     {
