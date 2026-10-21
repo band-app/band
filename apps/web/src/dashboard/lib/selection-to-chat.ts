@@ -22,6 +22,17 @@ export interface TextToChatDetail {
   text: string;
 }
 
+/**
+ * Payload of the `band:send-to-chat` window CustomEvent: send `text` to the
+ * worktree's chat as a new message, with no review step. `done` reports
+ * whether the hub took it.
+ */
+export interface SendToChatDetail {
+  worktreeId: string;
+  text: string;
+  done: (ok: boolean) => void;
+}
+
 /** Everything the `band:add-to-chat` intent can carry. */
 export type AddToChatDetail = SelectionToChatDetail | TextToChatDetail;
 
