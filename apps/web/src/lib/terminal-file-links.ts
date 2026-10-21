@@ -64,7 +64,7 @@ export function findTerminalFileLinks(lineText: string): TerminalFileMatch[] {
  * string character but two columns, so a naive index→column assumption would
  * place the link underline a cell too far left for everything after it.
  */
-function readLineColumns(
+export function readLineColumns(
   terminal: Terminal,
   line: IBufferLine,
 ): { text: string; columnForIndex: number[] } {

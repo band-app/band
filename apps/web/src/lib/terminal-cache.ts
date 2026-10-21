@@ -40,6 +40,7 @@ import {
   noteTypingLatencyOutput,
   registerTypingLatencyTerminal,
 } from "./terminal-typing-latency";
+import { createTerminalWebLinkProvider } from "./terminal-web-links";
 import { cssColorToHex, cssVar, THEME_CHANGED_EVENT } from "./theme/apply";
 import { isWorktreeColdParked, subscribeWorktreeColdPark } from "./worktree-cold-park";
 import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
@@ -399,15 +400,13 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   Promise.all([
     import("@xterm/xterm"),
     import("@xterm/addon-fit"),
-    import("@xterm/addon-web-links"),
     import("@xterm/addon-search"),
     import("@xterm/addon-webgl"),
     import("@xterm/addon-unicode11"),
-  ]).then(([xtermMod, fitMod, webLinksMod, searchMod, webglMod, unicode11Mod]) => {
+  ]).then(([xtermMod, fitMod, searchMod, webglMod, unicode11Mod]) => {
     if (destroyed) return;
     const { Terminal: XTerm } = xtermMod;
     const { FitAddon: XFitAddon } = fitMod;
-    const { WebLinksAddon: XWebLinksAddon } = webLinksMod;
     const { SearchAddon: XSearchAddon } = searchMod;
     const { WebglAddon: XWebglAddon } = webglMod;
     const { Unicode11Addon: XUnicode11Addon } = unicode11Mod;
@@ -428,6 +427,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       theme: getTerminalTheme(),
       // Orca's scrollback wheel speed. Alt+wheel's 5x is xterm's default.
       scrollSensitivity: 1.15,
+      // OSC 8 hyperlinks (programs that see FORCE_HYPERLINK=1) take the same menu path as
+      // detected URLs. Without a handler xterm asks window.confirm.
+      linkHandler: { activate: (event, uri) => openLink(event, uri) },
     });
     terminal = term;
     // All output reaches xterm through this queue: paced while the terminal is
@@ -462,18 +464,19 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       !liveContainer ||
       liveContainer.clientWidth !== lastFitBox.width ||
       liveContainer.clientHeight !== lastFitBox.height;
-    term.loadAddon(
-      new XWebLinksAddon((event, uri) => {
-        if (!isWebUrl(uri)) {
-          openExternalUrl(uri);
-          return;
-        }
-        handleTerminalLinkClick(event, uri, {
-          worktreeId,
-          terminalId,
-          focusTerminal: () => term.focus(),
-        });
-      }),
+    const openLink = (event: MouseEvent, uri: string) => {
+      if (!isWebUrl(uri)) {
+        openExternalUrl(uri);
+        return;
+      }
+      handleTerminalLinkClick(event, uri, {
+        worktreeId,
+        terminalId,
+        focusTerminal: () => term.focus(),
+      });
+    };
+    const webLinkProviderDisposable = term.registerLinkProvider(
+      createTerminalWebLinkProvider(term, openLink),
     );
 
     const fileLinkProviderDisposable = term.registerLinkProvider(
@@ -1318,6 +1321,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       unsubscribeLayoutResizeEnd();
       searchResultsDisposable.dispose();
       selectionResizeDisposable.dispose();
+      webLinkProviderDisposable.dispose();
       fileLinkProviderDisposable.dispose();
       disposeTypingLatency();
       output.dispose();
