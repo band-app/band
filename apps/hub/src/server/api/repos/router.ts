@@ -151,7 +151,7 @@ export const reposRouter = t.router({
   }),
 
   /**
-   * Changes a repo's settings: `meta` (whether it is a meta repo), `allowedHostIds` (the hosts it
+   * Changes a repo's settings: `allowedHostIds` (the hosts it
    * may run on, `null` for all) and `primaryHostId` (the host that lists its default branch,
    * `null` to let the hub pick) and `checkpointsEnabled` (whether the hub keeps checkpoints, `null` for the default) and `autoContinue` (whether a worktree on an offline host continues elsewhere without asking, `null` for off). Changing the host policy, the checkpoint setting or auto-continue is an admin call.
    */
@@ -159,7 +159,6 @@ export const reposRouter = t.router({
     .input(
       z.object({
         name: z.string(),
-        meta: z.boolean().optional(),
         allowedHostIds: hostIds.nullable().optional(),
         primaryHostId: z.string().min(1).nullable().optional(),
         checkpointsEnabled: z.boolean().nullable().optional(),
@@ -203,7 +202,6 @@ export const reposRouter = t.router({
             primaryHostId: input.primaryHostId,
           });
         }
-        if (input.meta !== undefined) repoService.setMeta(input.name, input.meta);
         return { ok: true };
       } catch (err) {
         throw repoErrorToTrpc(err);

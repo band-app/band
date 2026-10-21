@@ -87,10 +87,6 @@ export class SidebarGroupingPage {
     );
   }
 
-  metaBadge(repo: string): Locator {
-    return this.page.getByTestId(`repo-list__meta-badge--${repo}`).first();
-  }
-
   /** The ids of the worktree rows in display order, with the depth of each. */
   async rowOrder(): Promise<Array<{ id: string; depth: number }>> {
     const rows = this.page.locator('[data-testid^="repo-list__grouped-row--"]');

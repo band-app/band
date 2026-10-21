@@ -89,4 +89,4 @@ Dropped:
 
 ## Projects were removed
 
-Band once had projects (a cross-repo meta repo with a context repo, a project folder on each host and a coordinator chat). They were removed in favour of origin links, where a chat started from another chat records where it came from. See section 15 of the implementation plan. The hub has no `projects.*` API, context repos, git context endpoint or coordinator tools.
+Band once had projects (a cross-repo unit with a context repo, a project folder on each host and a coordinator chat). They were removed in favour of origin links, where a chat started from another chat records where it came from. See section 15 of the implementation plan. The hub has no `projects.*` API, context repos, git context endpoint or coordinator tools.

@@ -180,9 +180,6 @@ enum ReposCmd {
     Set {
         /// Repo name
         name: String,
-        /// Mark the repo as a meta repo (where work in other repos is started from), or unmark it
-        #[arg(long, action = clap::ArgAction::Set, value_name = "true|false")]
-        meta: Option<bool>,
         /// Hosts the repo may run on, as host ids or names separated by commas, or `all`
         #[arg(long, value_name = "HOSTS|all")]
         hosts: Option<String>,
@@ -977,14 +974,12 @@ fn main() {
             }),
             ReposCmd::Set {
                 name,
-                meta,
                 hosts,
                 primary,
                 checkpoints,
                 auto_continue,
             } => cmd_repos_set(
                 &name,
-                meta,
                 hosts.as_deref(),
                 primary.as_deref(),
                 checkpoints.as_deref(),
@@ -1369,7 +1364,7 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     let mut json_repos = Vec::new();
-    let mut rows: Vec<[String; 9]> = Vec::new();
+    let mut rows: Vec<[String; 8]> = Vec::new();
     for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
@@ -1386,10 +1381,6 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
         // path — keep working. The JSON output is keyed and order-
         // insensitive, so the field placement there doesn't matter.
         let remote_url = proj.get("remoteUrl").and_then(|u| u.as_str());
-        let meta = proj
-            .get("meta")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
         let allowed_hosts = proj
             .get("allowedHostIds")
             .cloned()
@@ -1442,7 +1433,6 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             kind.to_string(),
             remote_url.unwrap_or("-").to_string(),
             clones_text,
-            if meta { "yes" } else { "-" }.to_string(),
             hosts_text,
             checkpoints_text.to_string(),
         ]);
@@ -1453,7 +1443,6 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "worktreeCount": wt_count,
             "remoteUrl": remote_url,
             "clones": clones,
-            "meta": meta,
             "allowedHostIds": allowed_hosts,
             "primaryHostId": primary_host,
             "checkpointsEnabled": checkpoints,
@@ -1469,7 +1458,6 @@ fn cmd_repos_list() -> Result<CommandResult, String> {
             "KIND",
             "URL",
             "CLONES",
-            "META",
             "HOSTS",
             "CHECKPOINTS",
         ],
@@ -1627,30 +1615,21 @@ fn apply_auto_continue_flag(
 
 fn cmd_repos_set(
     name: &str,
-    meta: Option<bool>,
     hosts: Option<&str>,
     primary: Option<&str>,
     checkpoints: Option<&str>,
     auto_continue: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(name, "Repo name")?;
-    if meta.is_none()
-        && hosts.is_none()
-        && primary.is_none()
-        && checkpoints.is_none()
-        && auto_continue.is_none()
-    {
+    if hosts.is_none() && primary.is_none() && checkpoints.is_none() && auto_continue.is_none() {
         return Err(
-            "Nothing to change. Pass --meta true|false, --hosts <hosts>|all, --primary <host>, --checkpoints on|off|default or --auto-continue on|off"
+            "Nothing to change. Pass --hosts <hosts>|all, --primary <host>, --checkpoints on|off|default or --auto-continue on|off"
                 .to_string(),
         );
     }
 
     let client = api::ApiClient::from_settings()?;
     let mut input = serde_json::json!({"name": name});
-    if let Some(meta) = meta {
-        input["meta"] = serde_json::json!(meta);
-    }
     let mut lines = Vec::new();
     if let Some(value) = checkpoints {
         apply_checkpoints_flag(name, value, &mut input, &mut lines)?;
@@ -1693,12 +1672,6 @@ fn cmd_repos_set(
             }
         }
     }
-    if let Some(meta) = meta {
-        lines.push(format!(
-            "{name} is {} a meta repo",
-            if meta { "now" } else { "no longer" }
-        ));
-    }
     client.trpc_mutate("repos.update", &input)?;
 
     Ok(CommandResult {
@@ -1706,7 +1679,6 @@ fn cmd_repos_set(
         json: serde_json::json!({
             "ok": true,
             "name": name,
-            "meta": meta,
             "allowedHostIds": input.get("allowedHostIds"),
             "primaryHostId": input.get("primaryHostId"),
             "checkpointsEnabled": input.get("checkpointsEnabled"),
@@ -5453,13 +5425,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Change a repo's settings",
             "parameters": [
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Repo name"},
-                {"name": "--meta", "type": "boolean", "required": false, "description": "Mark the repo as a meta repo (true) or unmark it (false)"},
                 {"name": "--hosts", "type": "string", "required": false, "description": "Hosts the repo may run on (ids or names, comma separated), or `all`"},
                 {"name": "--primary", "type": "string", "required": false, "description": "Host that lists the repo's default-branch worktree (id or name), or `auto`"},
                 {"name": "--checkpoints", "type": "string", "required": false, "description": "Whether the hub keeps checkpoints of the repo's worktrees: on, off or default"},
                 {"name": "--auto-continue", "type": "string", "required": false, "description": "Whether a worktree on an offline host continues on another host without asking: on or off"},
             ],
-            "notes": "A meta repo is one that work in other repos is started from (a repo of notes or specs). The flag only groups and defaults; it changes no behaviour. `band repos list` shows it in the META column. `--hosts` is a hard rule: creating a worktree, cloning or placing the repo on any other host fails with `<repo> is only available on <hosts>`. Needs an admin token. A branch exists as a worktree on one host only, and the repo lists its default-branch worktree from its primary host."
+            "notes": "`--hosts` is a hard rule: creating a worktree, cloning or placing the repo on any other host fails with `<repo> is only available on <hosts>`. Needs an admin token. A branch exists as a worktree on one host only, and the repo lists its default-branch worktree from its primary host."
         }),
         serde_json::json!({
             "name": "repos remove",
