@@ -21,6 +21,8 @@ interface HtmlVisualEditorProps {
   /** The file as it is on disk. The preview reloads whenever this changes. */
   diskContent: string;
   canEdit: boolean;
+  /** Whether a click on text edits it. Comments work either way. */
+  editing: boolean;
   getPreviewUrl: (worktreeId: string, path: string) => Promise<string>;
   /** Make `text` the file's content and save it through the normal save path. */
   onApply: (text: string) => Promise<void>;
@@ -51,6 +53,7 @@ export function HtmlVisualEditor({
   getSource,
   diskContent,
   canEdit,
+  editing: editingRequested,
   getPreviewUrl,
   onApply,
 }: HtmlVisualEditorProps) {
@@ -64,8 +67,8 @@ export function HtmlVisualEditor({
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
-  // Text is editable whenever the file can be saved and the page was annotated.
-  const editing = canEdit && !unavailable;
+  // Text is editable when it is asked for, the file can be saved and the page was annotated.
+  const editing = editingRequested && canEdit && !unavailable;
   const [notice, setNotice] = useState<string | null>(null);
   const getSourceRef = useRef(getSource);
   getSourceRef.current = getSource;

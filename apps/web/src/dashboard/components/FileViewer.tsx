@@ -60,6 +60,8 @@ interface FileViewerProps {
    * code view. Needs `adapter.getWorktreePreviewUrl`.
    */
   htmlVisual?: boolean;
+  /** Whether a click on text edits it in the HTML Visual mode. */
+  htmlEditing?: boolean;
   /** When true, code files open in an editable editor instead of read-only viewer */
   editable?: boolean;
   /** Called when user clicks the back navigation button */
@@ -268,6 +270,7 @@ export function FileViewer({
   overlay,
   renderMarkdownBlock,
   htmlVisual,
+  htmlEditing,
   editable,
   onGoBack,
   onGoForward,
@@ -1213,6 +1216,7 @@ export function FileViewer({
             getSource={getVisualSource}
             diskContent={data.content}
             canEdit={!!canEdit && canSave}
+            editing={!!htmlEditing}
             getPreviewUrl={getVisualPreviewUrl}
             onApply={applyVisualEdit}
           />

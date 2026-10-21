@@ -1,6 +1,6 @@
 # Visual mode for HTML files
 
-An HTML file in the file viewer has a Visual button next to the code button, like Markdown's preview. Visual renders the page in an iframe with its CSS, images and scripts. A click on text that comes straight from the source makes it editable. Enter or leaving the field commits the edit, Escape reverts it. A commit changes only the characters of that text in the file.
+An HTML file in the file viewer has a Visual button next to the code button, like Markdown's preview. Visual renders the page in an iframe with its CSS, images and scripts. The pencil button in the tab header, shown only in Visual mode, turns text editing on. With it on, a click on text that comes straight from the source makes it editable. Enter or leaving the field commits the edit, Escape reverts it. A commit changes only the characters of that text in the file.
 
 ## What is editable
 
