@@ -1,6 +1,6 @@
 /**
  * Visual mode of the HTML file viewer: the page renders in a sandboxed iframe
- * and, with "Edit text" on, a click on source text makes it editable and the
+ * and, a click on source text makes it editable and the
  * commit patches only that text range in the file.
  *
  * The real hub boots on a tmp HOME with a real git worktree. Files are read
@@ -125,7 +125,6 @@ test.describe("HTML Visual mode", () => {
 
   test("S2: an edit changes only the edited text range", async ({ page }) => {
     const visual = await openVisual(page);
-    await visual.turnOnEditText();
 
     await visual.replaceText(visual.frame.getByRole("heading"), "Annual summary");
 
@@ -135,7 +134,6 @@ test.describe("HTML Visual mode", () => {
 
   test("S3: markup characters are written as entities and shown literally", async ({ page }) => {
     const visual = await openVisual(page);
-    await visual.turnOnEditText();
 
     await visual.replaceText(visual.frame.getByText("Second slide"), "<b>&");
 
@@ -145,7 +143,6 @@ test.describe("HTML Visual mode", () => {
 
   test("S4: text a script inserted is not editable and nothing is written", async ({ page }) => {
     const visual = await openVisual(page);
-    await visual.turnOnEditText();
     const generated = visual.frame.locator("#runtime");
     await expect(generated).toHaveText("made by script");
 
@@ -161,7 +158,6 @@ test.describe("HTML Visual mode", () => {
     page,
   }) => {
     const visual = await openVisual(page);
-    await visual.turnOnEditText();
     const heading = visual.frame.getByRole("heading");
     await heading.click();
     await page.keyboard.press("ControlOrMeta+a");
@@ -179,7 +175,6 @@ test.describe("HTML Visual mode", () => {
 
   test("S6: Escape reverts the text and leaves the file alone", async ({ page }) => {
     const visual = await openVisual(page);
-    await visual.turnOnEditText();
     const heading = visual.frame.getByRole("heading");
 
     await visual.typeThenCancel(heading, " extra");
@@ -191,7 +186,6 @@ test.describe("HTML Visual mode", () => {
 
   test("S7: messages from another window or with a wrong nonce write nothing", async ({ page }) => {
     const visual = await openVisual(page);
-    await visual.turnOnEditText();
     await expect(visual.frameElement).toHaveAttribute("sandbox", /^allow-scripts$/);
     const start = SLIDES_HTML.indexOf("Quarterly review");
     const range = { start, end: start + "Quarterly review".length };

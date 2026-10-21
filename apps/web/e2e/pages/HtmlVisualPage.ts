@@ -19,10 +19,6 @@ export class HtmlVisualPage {
     return this.page.getByTestId("center-file-leaf__view--source");
   }
 
-  get editToggle(): Locator {
-    return this.page.getByTestId("html-visual__edit-toggle");
-  }
-
   get notice(): Locator {
     return this.page.getByTestId("html-visual__notice");
   }
@@ -39,13 +35,6 @@ export class HtmlVisualPage {
     await test.step("Switch to Visual mode", async () => {
       await this.visualButton.click();
       await expect(this.frameElement).toBeVisible();
-    });
-  }
-
-  async turnOnEditText(): Promise<void> {
-    await test.step("Turn on Edit text", async () => {
-      await this.editToggle.click();
-      await expect(this.editToggle).toHaveAttribute("aria-pressed", "true");
     });
   }
 

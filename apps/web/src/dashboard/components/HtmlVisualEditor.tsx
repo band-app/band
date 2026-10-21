@@ -32,7 +32,7 @@ function newNonce(): string {
 
 /**
  * The page in a sandboxed iframe (scripts only, no same-origin, so it cannot
- * reach Band's cookies, token or storage). With "Edit text" on, a click on text
+ * reach Band's cookies, token or storage). Clicking text
  * the hub annotated makes it editable inside the page, and the committed text
  * comes back as a message. This component patches the text range in the source
  * and saves it.
@@ -51,8 +51,9 @@ export function HtmlVisualEditor({
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [loadCount, setLoadCount] = useState(0);
   const [fetchTick, setFetchTick] = useState(0);
-  const [editing, setEditing] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
+  // Text is editable whenever the file can be saved and the page was annotated.
+  const editing = canEdit && !unavailable;
   const [notice, setNotice] = useState<string | null>(null);
   const getSourceRef = useRef(getSource);
   getSourceRef.current = getSource;
@@ -147,7 +148,6 @@ export function HtmlVisualEditor({
           return;
         case VISUAL_EDIT_MESSAGE.unavailable:
           setUnavailable(true);
-          setEditing(false);
           setNotice("This file is too large to edit visually. Use the code view.");
           return;
         case VISUAL_EDIT_MESSAGE.commit: {
@@ -194,27 +194,13 @@ export function HtmlVisualEditor({
 
   return (
     <div data-testid="html-visual" className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1 text-xs">
-        <button
-          type="button"
-          data-testid="html-visual__edit-toggle"
-          aria-pressed={editing}
-          disabled={!canEdit || unavailable}
-          onClick={() => setEditing((v) => !v)}
-          className={`rounded px-2 py-0.5 transition-colors disabled:opacity-50 ${
-            editing
-              ? "bg-selection text-foreground"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-          }`}
-        >
-          Edit text
-        </button>
-        {notice && (
+      {notice && (
+        <div className="shrink-0 border-b px-2 py-1 text-xs">
           <output data-testid="html-visual__notice" className="text-muted-foreground">
             {notice}
           </output>
-        )}
-      </div>
+        </div>
+      )}
       <div className="min-h-0 flex-1">
         {src && (
           <iframe
