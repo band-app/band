@@ -95,6 +95,8 @@ export interface HostView {
   usable: boolean;
   /** How far the host's agents reach through the relay (the stored level, else the default for the host). */
   trust: HostTrust;
+  /** Per-agent command overrides (`{ agentId: binary }`) that replace the agent definition's command on this host. */
+  agentCommands: Record<string, string>;
 }
 
 /** Why `removeHost` refused. */
@@ -398,6 +400,7 @@ export class TokenService {
       info: null,
       version: null,
       trust,
+      agentCommands: null,
       createdAt: at,
     });
     const token = newToken("worker_bootstrap");
@@ -570,6 +573,7 @@ export class TokenService {
       trust:
         h.trust ??
         defaultHostTrust({ ephemeral: h.mode === "ephemeral" || h.info?.mode === "ephemeral" }),
+      agentCommands: h.agentCommands ?? {},
     }));
   }
 

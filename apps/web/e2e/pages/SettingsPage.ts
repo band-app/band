@@ -559,6 +559,57 @@ export class SettingsPage {
     return this.hostRow(hostId).getByTestId("settings__host-trust-select");
   }
 
+  /** The command field of a coding agent in a worker's Agent commands section (admin tokens). */
+  hostAgentCommandInput(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-input`);
+  }
+
+  /** What an agent runs on a worker, as the row prints it. */
+  hostAgentCommandEffective(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-effective`);
+  }
+
+  /** The not found warning for an agent's overridden command on a worker. */
+  hostAgentCommandNotFound(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-not-found`);
+  }
+
+  /** The status dot of an agent on a worker: `data-state` is found, missing or unknown. */
+  hostAgentCommandStatus(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-status`);
+  }
+
+  /** Opens an agent's row on a worker so its command field shows. */
+  async openHostAgentCommand(hostId: string, agentId: string): Promise<void> {
+    const input = this.hostAgentCommandInput(hostId, agentId);
+    if (await input.isVisible()) return;
+    await this.hostRow(hostId)
+      .getByTestId(`settings__host-agent-command-${agentId}-toggle`)
+      .click();
+    await expect(input).toBeVisible();
+  }
+
+  /** Types a command for an agent on a worker and saves it. */
+  async setHostAgentCommand(hostId: string, agentId: string, command: string): Promise<void> {
+    await test.step(`Set ${agentId} on ${hostId} to ${command}`, async () => {
+      await this.openHostAgentCommand(hostId, agentId);
+      await this.hostAgentCommandInput(hostId, agentId).fill(command);
+      await this.hostRow(hostId)
+        .getByTestId(`settings__host-agent-command-${agentId}-save`)
+        .click();
+    });
+  }
+
+  /** Clears an agent's override on a worker. */
+  async clearHostAgentCommand(hostId: string, agentId: string): Promise<void> {
+    await test.step(`Clear ${agentId} on ${hostId}`, async () => {
+      await this.openHostAgentCommand(hostId, agentId);
+      await this.hostRow(hostId)
+        .getByTestId(`settings__host-agent-command-${agentId}-clear`)
+        .click();
+    });
+  }
+
   /** The trust level badge of a worker row (tokens without the admin flag). */
   hostTrustBadge(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-trust");

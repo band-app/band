@@ -1,0 +1,1 @@
+ALTER TABLE `hosts` ADD `agent_commands` text;

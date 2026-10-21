@@ -768,6 +768,21 @@ enum HostsCmd {
         #[arg(value_parser = ["restricted", "standard", "admin"])]
         level: String,
     },
+    /// Set the binary an agent runs as on one worker, or clear it (admin token only)
+    #[command(name = "set-agent-command")]
+    SetAgentCommand {
+        /// Worker (id or name)
+        #[arg(value_name = "WORKER")]
+        host: String,
+        /// Coding agent id from Settings > Agents (for example `claude-code`)
+        agent_id: String,
+        /// Binary name or absolute path, with no arguments. Omit with --clear
+        #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+        command: Option<String>,
+        /// Go back to the agent's global command
+        #[arg(long)]
+        clear: bool,
+    },
     /// Show what admin workers did across workers (admin token only)
     Audit {
         /// How many of the newest entries to show
@@ -1289,6 +1304,16 @@ fn main() {
         Commands::Workers { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
             HostsCmd::Trust { host, level } => cmd_hosts_trust(&host, &level),
+            HostsCmd::SetAgentCommand {
+                host,
+                agent_id,
+                command,
+                clear,
+            } => cmd_hosts_set_agent_command(
+                &host,
+                &agent_id,
+                if clear { None } else { command.as_deref() },
+            ),
             HostsCmd::Audit { limit } => cmd_hosts_audit(limit),
             HostsCmd::Remove { id } => cmd_hosts_remove(&id),
             HostsCmd::Evacuate { host, to, add_host } => cmd_hosts_evacuate(&host, &to, add_host),
@@ -4283,6 +4308,27 @@ fn cmd_hosts_trust(host: &str, level: &str) -> Result<CommandResult, String> {
     Ok(CommandResult {
         text: format!("Worker {host_id} is now {level}\n"),
         json: serde_json::json!({"ok": true, "hostId": host_id, "trust": level}),
+    })
+}
+
+fn cmd_hosts_set_agent_command(
+    host: &str,
+    agent_id: &str,
+    command: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let host_id = target_host_id(&client, host)?;
+    client.trpc_mutate(
+        "workers.setAgentCommand",
+        &serde_json::json!({"hostId": host_id, "agentId": agent_id, "command": command}),
+    )?;
+    let text = match command {
+        Some(c) => format!("{agent_id} runs as {c} on worker {host_id}\n"),
+        None => format!("{agent_id} on worker {host_id} uses the global command again\n"),
+    };
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"ok": true, "hostId": host_id, "agentId": agent_id, "command": command}),
     })
 }
 

@@ -87,6 +87,11 @@ function binary(def: AcpAgentDefinition, names: string[], path: string, extra: s
   return null;
 }
 
+/** Why a configured command cannot start: it is on no directory of the PATH. */
+function notFound(command: string): string {
+  return `The command "${command}" was not found or is not executable`;
+}
+
 /**
  * Resolves the launch for an agent definition, or returns a message saying
  * why it can't start (for instance, OpenCode isn't installed).
@@ -95,15 +100,25 @@ export async function resolveAcpLaunch(def: AcpAgentDefinition): Promise<AcpLaun
   const path = await shellPath();
   const env: Record<string, string> = { ...AGENT_DISPATCH_ENV, PATH: path };
 
-  const testAgent = process.env.BAND_TEST_ACP_AGENT;
-  if (testAgent) {
-    return { command: process.execPath, args: [testAgent], env };
+  // Claude Code and Codex are launched through an adapter that takes the agent's binary from an
+  // environment variable. The lookup is the same whichever adapter (or stand-in) runs.
+  const agentBinary =
+    def.type === "claude-code"
+      ? { variable: "CLAUDE_CODE_EXECUTABLE", names: ["claude"] }
+      : def.type === "codex"
+        ? { variable: "CODEX_PATH", names: ["codex"] }
+        : null;
+  if (agentBinary) {
+    const found = binary(def, agentBinary.names, path);
+    if (def.command && !found) return notFound(def.command);
+    if (found) env[agentBinary.variable] = found;
   }
+
+  const testAgent = process.env.BAND_TEST_ACP_AGENT;
+  if (testAgent) return { command: process.execPath, args: [testAgent], env };
 
   switch (def.type) {
     case "claude-code": {
-      const claude = binary(def, ["claude"], path);
-      if (claude) env.CLAUDE_CODE_EXECUTABLE = claude;
       return {
         command: nodeFor(path),
         args: [adapterScript("@agentclientprotocol/claude-agent-acp", "claude-agent-acp")],
@@ -111,8 +126,6 @@ export async function resolveAcpLaunch(def: AcpAgentDefinition): Promise<AcpLaun
       };
     }
     case "codex": {
-      const codex = binary(def, ["codex"], path);
-      if (codex) env.CODEX_PATH = codex;
       return {
         command: nodeFor(path),
         args: [adapterScript("@agentclientprotocol/codex-acp", "codex-acp")],

@@ -2690,6 +2690,73 @@ fn hosts_trust_sets_the_level_and_audit_lists_the_log() {
 }
 
 #[test]
+fn hosts_set_agent_command_sets_and_clears_the_override() {
+    let env = TestEnv::new();
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    settings["codingAgents"] = serde_json::json!([
+        {"id": "claude-code", "type": "claude-code", "label": "Claude Code"}
+    ]);
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+
+    let set = env.band(&[
+        "workers",
+        "set-agent-command",
+        "Local",
+        "claude-code",
+        "claude-auto",
+    ]);
+    assert!(set.status.success(), "stderr: {}", stderr(&set));
+    assert!(
+        stdout(&set).contains("claude-auto"),
+        "stdout: {}",
+        stdout(&set)
+    );
+
+    let listed = json_of(&env.band(&["workers", "list", "--output", "json"]));
+    assert_eq!(
+        listed["hosts"][0]["agentCommands"]["claude-code"], "claude-auto",
+        "hosts: {listed}"
+    );
+    assert_eq!(
+        listed["hosts"][0]["agentCommandStates"][0]["effective"], "claude-auto",
+        "hosts: {listed}"
+    );
+
+    let bad = env.band(&[
+        "workers",
+        "set-agent-command",
+        "Local",
+        "claude-code",
+        "claude --yolo",
+    ]);
+    assert!(!bad.status.success());
+    assert!(
+        stderr(&bad).contains("no arguments"),
+        "stderr: {}",
+        stderr(&bad)
+    );
+
+    let cleared = env.band(&[
+        "workers",
+        "set-agent-command",
+        "Local",
+        "claude-code",
+        "--clear",
+    ]);
+    assert!(cleared.status.success(), "stderr: {}", stderr(&cleared));
+    let listed = json_of(&env.band(&["workers", "list", "--output", "json"]));
+    assert!(
+        listed["hosts"][0]["agentCommands"]
+            .as_object()
+            .is_some_and(|m| m.is_empty()),
+        "hosts: {listed}"
+    );
+}
+
+#[test]
 fn hosts_alias_works_and_stays_out_of_help() {
     let env = TestEnv::new();
 

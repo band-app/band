@@ -18,6 +18,7 @@ import {
 // (`const t = terminalService` at the top would get `undefined`), always
 // dereference at call time. The `via` enum below is deliberately NOT imported
 // from `worktree-service` for exactly this reason — see `cronjobVia`.
+import { commandFor } from "./_utils/agent-command";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { listedMainHostOf } from "./_utils/repo-host-policy";
 import { agentSessionService } from "./agent-session-service";
@@ -770,7 +771,7 @@ export class CronjobService {
       // cursor-cli). The job's own agent when it names one, else the default.
       const agentDef = settingsService.getAgentDefinition(job.agent);
       const invocation = cliHeadlessInvocation(agentDef.type, job.prompt, {
-        command: agentDef.command,
+        command: commandFor(worktree.host.id, agentDef),
       });
       if (invocation.unsupported) {
         log.warn(

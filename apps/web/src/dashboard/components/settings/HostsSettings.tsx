@@ -8,6 +8,7 @@ import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
 import { useIsAdmin } from "./DevicesSettings";
 import { EvacuateHostDialog } from "./EvacuateHostDialog";
+import { HostAgentCommands } from "./HostAgentCommands";
 import { HostVersionLine } from "./HostVersionLine";
 import { ProvisionHostRow } from "./ProvisionHostRow";
 import { SettingsRow } from "./SettingsRow";
@@ -288,6 +289,13 @@ export function HostsSettings() {
                   </div>
                 ) : null}
                 {host.usable ? <HostVersionLine host={host} isAdmin={isAdmin} /> : null}
+                {host.usable ? (
+                  <HostAgentCommands
+                    host={host}
+                    isAdmin={isAdmin}
+                    onChanged={() => void refresh()}
+                  />
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span data-testid="settings__host-status" className="text-xs text-muted-foreground">

@@ -69,6 +69,7 @@ import {
   SettingsQueries,
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
+import { commandFor, launchFailure } from "./_utils/agent-command";
 import { agentExtraDirs, openSharedDir } from "./_utils/shared-dir";
 // FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in method bodies.
 import { agentLoginService } from "./agent-login-service";
@@ -246,8 +247,8 @@ function definitionFor(chat: Pick<ChatSession, "agent">): CodingAgentDefinition 
   return resolveAgentDefinition(settings.load(), chat.agent);
 }
 
-function launchDefinition(def: CodingAgentDefinition): AcpAgentDefinition {
-  return { type: def.type, label: def.label, command: def.command };
+function launchDefinition(def: CodingAgentDefinition, hostId: string): AcpAgentDefinition {
+  return { type: def.type, label: def.label, command: commandFor(hostId, def) };
 }
 
 function emit(chatId: string, event: ChatEvent): void {
@@ -696,8 +697,8 @@ async function ensureProcess(
   const generation = ++rt.generation;
   rt.starting = (async () => {
     const host = hostRegistry.hostFor(rt.worktreeId);
-    const resolved = await host.acp.resolveLaunch(launchDefinition(def));
-    if (typeof resolved === "string") throw new Error(resolved);
+    const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
+    if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
     const launch = await withAgentLogin(resolved, def.type, {
       worktreeId: rt.worktreeId,
       chatLoginId: chatService.get(rt.chatId)?.loginId,
@@ -1126,7 +1127,7 @@ export class AgentSessionService {
         id: def.id,
         type: def.type,
         label: def.label,
-        command: def.command,
+        command: commandFor(worktree.host.id, def),
         model: def.model,
       },
       cwd: worktree.worktree.path,
@@ -1748,8 +1749,8 @@ export class AgentSessionService {
     host: Host = hostRegistry.local,
     cwd = bandHome(),
   ): Promise<CatalogEntry> {
-    const resolved = await host.acp.resolveLaunch(launchDefinition(def));
-    if (typeof resolved === "string") throw new Error(resolved);
+    const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
+    if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
     const launch = await withAgentLogin(resolved, def.type);
     let commands: acp.AvailableCommand[] = [];
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {
@@ -1817,8 +1818,8 @@ export class AgentSessionService {
     prompt: string,
     host: Host = hostRegistry.local,
   ): Promise<string> {
-    const resolved = await host.acp.resolveLaunch(launchDefinition(def));
-    if (typeof resolved === "string") throw new Error(resolved);
+    const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
+    if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
     const launch = await withAgentLogin(resolved, def.type);
     let sessionId: string | null = null;
     let text = "";

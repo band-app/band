@@ -31,6 +31,9 @@ export const hosts = sqliteTable(
     // How far the host's agents reach through the relay. Null means nobody set it: the effective
     // level is then `restricted` for an ephemeral or runner-started host and `standard` otherwise.
     trust: text("trust", { enum: ["restricted", "standard", "admin"] }),
+    // Per-agent binary name or path (`{ "<agentId>": "claude-auto" }`) that replaces the agent
+    // definition's `command` on this host. Null means no overrides.
+    agentCommands: text("agent_commands", { mode: "json" }).$type<Record<string, string>>(),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("hosts_created_at_idx").on(t.createdAt)],

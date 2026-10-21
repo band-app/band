@@ -13,6 +13,10 @@ import { describeHostVersion } from "../../services/_utils/host-version";
 import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";
 import { agentLoginService } from "../../services/agent-login-service";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
+import {
+  AgentCommandError,
+  hostAgentCommandService,
+} from "../../services/host-agent-command-service";
 import { hostTrustService } from "../../services/host-trust-service";
 import { agentHostView } from "../../services/relay-scope";
 import { releaseCheckService } from "../../services/release-check-service";
@@ -88,12 +92,19 @@ export const hostsRouter = t.router({
       // An ephemeral worker the hub could not store before it exits stays up, and says why.
       const latest = releaseCheckService.status().latest;
       return {
-        hosts: hosts.map((h) => ({
-          ...h,
-          sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
-          ...describeHostVersion(h, HUB_VERSION, latest),
-          update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
-        })),
+        hosts: await Promise.all(
+          hosts.map(async (h) => ({
+            ...h,
+            sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+            ...describeHostVersion(h, HUB_VERSION, latest),
+            update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
+            // Command names and paths are admin detail, like the update error above.
+            agentCommands: ctx.admin ? h.agentCommands : {},
+            agentCommandStates: (await hostAgentCommandService.states(h, ctx.admin)).map((state) =>
+              ctx.admin ? state : { ...state, override: null, effective: null },
+            ),
+          })),
+        ),
       };
     }),
 
@@ -213,6 +224,34 @@ export const hostsRouter = t.router({
       }
       emit({ kind: "host-status-changed", hostId: input.hostId });
       return { hostId: input.hostId, trust: input.trust };
+    }),
+
+  /**
+   * Sets the binary name or path an agent runs as on one worker, or clears it with `null`. No
+   * arguments: the hub never parses a shell line. Admin device tokens only, and refused to agents.
+   */
+  setAgentCommand: adminProcedure
+    .input(
+      z.object({
+        hostId: z.string().min(1),
+        agentId: z.string().min(1),
+        command: z.string().max(4096).nullable(),
+      }),
+    )
+    .mutation(({ input }) => {
+      try {
+        const command = hostAgentCommandService.setAgentCommand(
+          input.hostId,
+          input.agentId,
+          input.command,
+        );
+        return { hostId: input.hostId, agentId: input.agentId, command };
+      } catch (err) {
+        if (err instanceof AgentCommandError) {
+          throw new TRPCError({ code: err.code, message: err.message });
+        }
+        throw err;
+      }
     }),
 
   /** What admin hosts did across hosts: time, calling host, chat, procedure and target. Newest first. */

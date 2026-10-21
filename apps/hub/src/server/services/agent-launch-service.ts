@@ -15,6 +15,7 @@ import { cliInvocation } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import type { AgentMode, AgentSessionRecord } from "@band-app/shared/agent-sessions";
 import { WorktreeNotFoundError } from "../errors";
+import { commandFor } from "./_utils/agent-command";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 import { chatService } from "./chat-service";
@@ -76,10 +77,13 @@ export class AgentLaunchService {
       throw new WorktreeNotFoundError(input.worktreeId);
     }
     const agentDef = settingsService.getAgentDefinition(input.agentDefinitionId);
+    const hostId = worktreeService.resolve(input.worktreeId)?.host.id ?? "local";
     const requested = input.mode ?? settingsService.defaultAgentMode();
 
     if (requested === "tui") {
-      const invocation = cliInvocation(agentDef.type, input.prompt, { command: agentDef.command });
+      const invocation = cliInvocation(agentDef.type, input.prompt, {
+        command: commandFor(hostId, agentDef),
+      });
       if (!invocation.unsupported) {
         return this.launchTui(
           input,
