@@ -191,6 +191,13 @@ function RepoCronjobs({ repo, onOpenCronjobs }: { repo: RepoInfo; onOpenCronjobs
   if (jobs.isLoading) {
     return <p className="px-4 py-3 text-xs text-muted-foreground">Loading…</p>;
   }
+  if (jobs.isError) {
+    return (
+      <p role="alert" className="px-4 py-3 text-xs text-destructive">
+        Could not list cronjobs: {errorText(jobs.error)}
+      </p>
+    );
+  }
   const mine = (jobs.data?.jobs ?? []).filter((j) => j.worktreeId && worktreeIds.has(j.worktreeId));
   if (mine.length === 0) {
     return (
