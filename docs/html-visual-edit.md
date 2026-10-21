@@ -8,6 +8,10 @@ An element is editable when its only text is one text node from the source and i
 
 Edits are plain text. The new text has `&`, `<` and `>` escaped, and non-breaking spaces written as `&nbsp;`. The white space around the text in the source stays as it was.
 
+## Comment to the agent
+
+Select text in the page with the mouse, or Alt+click any element (an image, or text a script made). A small box opens next to it. Type what should change and press Send to agent (or Cmd/Ctrl+Enter). The comment goes straight to the worktree's last-focused chat, or its first chat, or a new one, as a new message. The message holds the comment, the element's selector, the line of the file its text is on (for source text), the selected text and the element's HTML. Text a script generated is marked as such, since it is not in the file as written.
+
 ## How it works
 
 - The preview route `/api/worktree-preview/<worktreeId>/<grant>/<path>` takes `?band-edit=<nonce>` for an HTML file. The hub parses the source with parse5 and adds `data-band-src="<start>:<end>"` to each editable element. The numbers are UTF-16 offsets of the text node in the original file, measured before any attribute is inserted. One script is appended. The signed grant covers the same directory as before, and every other file is served unchanged. `services/_utils/html-visual-edit.ts` has the annotation and the page script. Files above 2 MB are served unannotated, and the page tells the viewer that edit mode is unavailable.
@@ -17,4 +21,4 @@ Edits are plain text. The new text has `&`, `<` and `>` escaped, and non-breakin
 
 Tests: `apps/hub/tests/worktree-preview-edit.test.ts`, `apps/web/e2e/html-visual-edit.spec.ts`.
 
-Not done: style or attribute editing, editing script-generated text, rich text inside an edit, and the desktop browser tab (the Preview button still opens that).
+Not done: style or attribute editing, editing script-generated text, a review step before a comment is sent, rich text inside an edit, and the desktop browser tab (the Preview button still opens that).

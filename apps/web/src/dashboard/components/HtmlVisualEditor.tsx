@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { patchHtmlText, VISUAL_EDIT_MESSAGE, type VisualEditCommit } from "../lib/html-visual-edit";
+import {
+  buildCommentMessage,
+  type CommentTarget,
+  patchHtmlText,
+  VISUAL_EDIT_MESSAGE,
+  type VisualEditCommit,
+} from "../lib/html-visual-edit";
+import type { SendToChatDetail } from "../lib/selection-to-chat";
 
 interface HtmlVisualEditorProps {
   worktreeId: string;
@@ -52,6 +59,10 @@ export function HtmlVisualEditor({
   const [loadCount, setLoadCount] = useState(0);
   const [fetchTick, setFetchTick] = useState(0);
   const [unavailable, setUnavailable] = useState(false);
+  const [target, setTarget] = useState<CommentTarget | null>(null);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
   // Text is editable whenever the file can be saved and the page was annotated.
   const editing = canEdit && !unavailable;
   const [notice, setNotice] = useState<string | null>(null);
@@ -153,6 +164,14 @@ export function HtmlVisualEditor({
           if (data.active === true) pageEditingRef.current = true;
           else flushPendingReload();
           return;
+        case VISUAL_EDIT_MESSAGE.target: {
+          const incoming = data as unknown as CommentTarget;
+          if (incoming?.rect && incoming.context) {
+            setTarget(incoming);
+            setComment("");
+          }
+          return;
+        }
         case VISUAL_EDIT_MESSAGE.unavailable:
           setUnavailable(true);
           setNotice("This file is too large to edit visually. Use the code view.");
@@ -211,6 +230,39 @@ export function HtmlVisualEditor({
     return () => window.removeEventListener("message", onMessage);
   }, [nonce, sendMode, flushPendingReload]);
 
+  const closeComment = useCallback(() => {
+    setTarget(null);
+    setComment("");
+    frameRef.current?.contentWindow?.postMessage(
+      { type: VISUAL_EDIT_MESSAGE.clearTarget, nonce },
+      "*",
+    );
+  }, [nonce]);
+
+  const sendComment = useCallback(async () => {
+    if (!target || !comment.trim() || sending) return;
+    setSending(true);
+    try {
+      const text = buildCommentMessage(
+        filePath,
+        await getSourceRef.current().catch(() => null),
+        target,
+        comment,
+      );
+      const ok = await new Promise<boolean>((resolve) => {
+        window.dispatchEvent(
+          new CustomEvent<SendToChatDetail>("band:send-to-chat", {
+            detail: { worktreeId, text, done: resolve },
+          }),
+        );
+      });
+      setNotice(ok ? "Sent to the agent." : "The comment could not be sent.");
+      if (ok) closeComment();
+    } finally {
+      setSending(false);
+    }
+  }, [target, comment, sending, filePath, worktreeId, closeComment]);
+
   const src = baseUrl ? `${baseUrl}?band-edit=${nonce}&r=${loadCount}` : undefined;
 
   return (
@@ -222,7 +274,55 @@ export function HtmlVisualEditor({
           </output>
         </div>
       )}
-      <div className="min-h-0 flex-1">
+      <div ref={stageRef} className="relative min-h-0 flex-1">
+        {target && (
+          <div
+            data-testid="html-visual__comment"
+            className="absolute z-10 flex w-80 flex-col gap-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-md"
+            style={{
+              top: Math.max(4, target.rect.y + target.rect.h + 8),
+              left: Math.max(
+                4,
+                Math.min(target.rect.x, (stageRef.current?.clientWidth ?? 800) - 330),
+              ),
+            }}
+          >
+            <textarea
+              // biome-ignore lint/a11y/noAutofocus: the popover opens on the user's selection to take a comment
+              autoFocus
+              data-testid="html-visual__comment-input"
+              aria-label="Comment for the agent"
+              placeholder="What should change here?"
+              value={comment}
+              rows={3}
+              onChange={(e) => setComment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") closeComment();
+                else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void sendComment();
+              }}
+              className="w-full resize-none rounded border bg-background p-1.5 text-xs"
+            />
+            <div className="flex items-center justify-end gap-2 text-xs">
+              <button
+                type="button"
+                data-testid="html-visual__comment-cancel"
+                onClick={closeComment}
+                className="rounded px-2 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="html-visual__comment-send"
+                disabled={!comment.trim() || sending}
+                onClick={() => void sendComment()}
+                className="rounded bg-selection px-2 py-0.5 text-foreground disabled:opacity-50"
+              >
+                Send to agent
+              </button>
+            </div>
+          </div>
+        )}
         {src && (
           <iframe
             key={src}

@@ -143,6 +143,7 @@ export {
   buildLineReference,
   type ChatInsertDetail,
   type SelectionToChatDetail,
+  type SendToChatDetail,
   type TerminalInsertDetail,
 } from "./lib/selection-to-chat";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";

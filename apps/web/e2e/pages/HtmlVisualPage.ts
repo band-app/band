@@ -114,4 +114,44 @@ export class HtmlVisualPage {
       .locator("body")
       .evaluate(() => (window as unknown as { __bandMarked?: boolean }).__bandMarked === true);
   }
+
+  get commentBox(): Locator {
+    return this.page.getByTestId("html-visual__comment");
+  }
+
+  get commentInput(): Locator {
+    return this.page.getByTestId("html-visual__comment-input");
+  }
+
+  get commentSend(): Locator {
+    return this.page.getByTestId("html-visual__comment-send");
+  }
+
+  /** Drag across the start of an element's text, as a person selects it with the mouse. */
+  async dragSelect(target: Locator): Promise<void> {
+    await test.step("Select text by dragging", async () => {
+      const box = await target.boundingBox();
+      if (!box) throw new Error("The element to select has no box");
+      const y = box.y + box.height / 2;
+      await this.page.mouse.move(box.x + 3, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(box.x + 70, y, { steps: 6 });
+      await this.page.mouse.up();
+    });
+  }
+
+  /** Alt+click an element to comment on it, whatever it holds. */
+  async altClick(target: Locator): Promise<void> {
+    await test.step("Alt+click the element", async () => {
+      await target.click({ modifiers: ["Alt"] });
+    });
+  }
+
+  async sendComment(text: string): Promise<void> {
+    await test.step(`Send the comment ${JSON.stringify(text)}`, async () => {
+      await expect(this.commentBox).toBeVisible();
+      await this.commentInput.fill(text);
+      await this.commentSend.click();
+    });
+  }
 }

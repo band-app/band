@@ -12,10 +12,12 @@ import {
   QuickOpenDialog,
   recordWorktreeAccess,
   SearchFilesDialog,
+  type SendToChatDetail,
   useCapabilities,
   WorktreePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
+import { chatFetch } from "../lib/direct-chat";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/layout-section-actions";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { trpc } from "../lib/trpc-client";
@@ -645,6 +647,47 @@ export function SharedWorktreeLayout() {
     };
     window.addEventListener("band:add-to-terminal", handler);
     return () => window.removeEventListener("band:add-to-terminal", handler);
+  }, []);
+
+  // "Send to chat" — post a message to the worktree's last-focused chat (the
+  // first chat, or a new one) and bring that chat forward.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<SendToChatDetail>).detail;
+      if (!detail?.worktreeId || !detail.text) return;
+      const { worktreeId, text, done } = detail;
+      void (async () => {
+        try {
+          let chatId: string | undefined;
+          try {
+            chatId = (await trpc.panelFocus.get.query({ worktreeId })).chat;
+          } catch {
+            // fall through to the chat list
+          }
+          if (!chatId) {
+            const { chats } = await trpc.chats.list.query({ worktreeId });
+            chatId = chats[0]?.id;
+          }
+          if (!chatId) {
+            chatId = (await trpc.chats.create.mutate({ worktreeId })).chat.id;
+          }
+          activateLeafOfKind(worktreeId, "chat");
+          const res = await chatFetch(() => worktreeId, chatId)(
+            `/api/chats/${encodeURIComponent(chatId)}/messages`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ worktreeId, text }),
+            },
+          );
+          done(res.ok);
+        } catch {
+          done(false);
+        }
+      })();
+    };
+    window.addEventListener("band:send-to-chat", handler);
+    return () => window.removeEventListener("band:send-to-chat", handler);
   }, []);
 
   // "Add to Chat" — surface a chat leaf then dispatch the scoped insert.
