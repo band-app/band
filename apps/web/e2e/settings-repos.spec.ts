@@ -20,6 +20,7 @@ import {
   createTmpHome,
   resetClientState,
   type ServerHandle,
+  seedHostWorktree,
   seedSettings,
   seedState,
   startServer,
@@ -38,12 +39,14 @@ const FEATURE = "feat/one";
 const MCP_SCOPED = "scoped-to-alpha";
 const MCP_ALL = "for-every-repo";
 const CRON_NAME = "nightly-alpha";
+const CRON_OFF_PRIMARY = "nightly-alpha-offline-main";
 
 let server: ServerHandle;
 let tmpHome: string;
 let remotesDir: string;
 let remoteUrl: string;
 let cronId: string;
+let offPrimaryCronId: string;
 let offlineHostId: string;
 
 interface RepoRow {
@@ -128,9 +131,38 @@ test.beforeAll(async () => {
       labels: [],
     })
   ).hostId;
+  // The default branch of BUSY on that worker too. `repos.list` leaves it out, because the primary
+  // is the hub's own machine, but a cronjob on it still runs and belongs on the repo page.
+  seedHostWorktree(tmpHome, {
+    repo: BUSY,
+    name: "main",
+    branch: "main",
+    path: `/tmp/fake/${BUSY}-on-offline`,
+    hostId: offlineHostId,
+  });
+  await trpcMutate(server.url, TOKEN, "cronjobs.create", {
+    name: CRON_OFF_PRIMARY,
+    prompt: "Check main on the other worker",
+    cronExpression: "0 8 * * *",
+    worktreeId: toWorktreeId(BUSY, "main", offlineHostId),
+  });
+  offPrimaryCronId =
+    (
+      await trpcQuery<{ jobs: { id: string; name: string }[] }>(server.url, TOKEN, "cronjobs.list")
+    ).jobs.find((j) => j.name === CRON_OFF_PRIMARY)?.id ?? "";
+  expect(offPrimaryCronId).not.toBe("");
 });
 
 test.beforeEach(() => resetClientState(tmpHome));
+
+// The workers tests change REMOTE's host list and checkpoint setting; put both back even when one fails.
+test.afterEach(async () => {
+  await trpcMutate(server.url, TOKEN, "repos.update", {
+    name: REMOTE,
+    allowedHostIds: null,
+    checkpointsEnabled: null,
+  });
+});
 
 test.afterAll(async () => {
   await server.close();
@@ -295,7 +327,30 @@ test("allowed workers and the primary worker save at once and show after a reloa
   await settings.setRepoAllowedMode(REMOTE, "all");
   await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds ?? null).toBeNull();
   await expect(settings.repoLimitedNote(REMOTE)).toHaveCount(0);
-  await trpcMutate(server.url, TOKEN, "repos.update", { name: REMOTE, checkpointsEnabled: null });
+});
+
+test("limiting a repo can turn its checkpoints off, and asks nothing once they are set (S3)", async ({
+  page,
+}) => {
+  const settings = new SettingsPage(page, server.url, TOKEN);
+  await settings.goto();
+  await settings.openRepoSettings(REMOTE);
+
+  // "Turn checkpoints off" limits the repo and leaves the setting on the default, off for it.
+  await settings.setRepoAllowedMode(REMOTE, "only");
+  await settings.confirmLimit(false);
+  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.length).toBe(1);
+  expect((await repoRow(REMOTE))?.checkpointsSetting ?? null).toBeNull();
+  await settings.setRepoAllowedMode(REMOTE, "all");
+  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds ?? null).toBeNull();
+
+  // With a stored choice, limiting changes no checkpoint, so it saves without asking.
+  await trpcMutate(server.url, TOKEN, "repos.update", { name: REMOTE, checkpointsEnabled: true });
+  await settings.goto();
+  await settings.openRepoSettings(REMOTE);
+  await settings.setRepoAllowedMode(REMOTE, "only");
+  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.length).toBe(1);
+  await expect(settings.confirmLimitDialog()).toHaveCount(0);
 });
 
 test("a repo page lists the MCP servers and cronjobs that reach it, with links (S5)", async ({
@@ -307,9 +362,10 @@ test("a repo page lists the MCP servers and cronjobs that reach it, with links (
 
   await expect(settings.repoMcpServers(BUSY)).toHaveCount(2);
   await expect(settings.repoMcpServer(BUSY, MCP_SCOPED)).toBeVisible();
-  await expect(settings.repoCronjobs(BUSY)).toHaveCount(1);
-  await expect(settings.repoCronjobs(BUSY)).toHaveAttribute("data-cronjob", cronId);
-  await expect(settings.repoCronjobs(BUSY)).toHaveAttribute("data-enabled", "true");
+  // The feature worktree's job, and the job on the default branch of a worker that is not primary.
+  await expect(settings.repoCronjobs(BUSY)).toHaveCount(2);
+  await expect(settings.repoCronjob(BUSY, cronId)).toHaveAttribute("data-enabled", "true");
+  await expect(settings.repoCronjob(BUSY, offPrimaryCronId)).toBeVisible();
 
   // On another repo's page the scoped server and the cronjob are absent.
   await settings.backToRepos();

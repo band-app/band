@@ -272,8 +272,14 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
     }
   };
 
-  // "Only these" starts from one worker: the primary, else one that holds a clone, else any usable one.
-  const firstWorker = primary ?? (repo.clones ?? [])[0]?.hostId ?? usable[0]?.id;
+  // "Only these" starts from one worker the hub still knows: the primary, else one that holds a
+  // clone, else any usable one.
+  const known = (id: string | null | undefined) =>
+    id && hosts.data?.some((h) => h.id === id) ? id : undefined;
+  const firstWorker =
+    known(primary) ??
+    (repo.clones ?? []).map((c) => known(c.hostId)).find(Boolean) ??
+    usable[0]?.id;
   const limit = (keepCheckpoints: boolean) => {
     if (!firstWorker) return;
     void save({

@@ -664,6 +664,11 @@ export class SettingsPage {
     return this.repoPage(name).getByTestId("settings-repo__cronjob");
   }
 
+  /** One cronjob listed on a repo page, by its id. */
+  repoCronjob(name: string, cronjobId: string): Locator {
+    return this.repoCronjobs(name).and(this.page.locator(`[data-cronjob="${cronjobId}"]`));
+  }
+
   /** One MCP server listed on a repo page. */
   repoMcpServer(name: string, server: string): Locator {
     return this.repoMcpServers(name).and(this.page.locator(`[data-server="${server}"]`));
@@ -679,10 +684,7 @@ export class SettingsPage {
   /** Clicks "Open in Cronjobs" on a cronjob of a repo page. */
   async openCronjobsFromRepo(name: string, cronjobId: string): Promise<void> {
     await test.step(`Open cronjob ${cronjobId} in Cronjobs from ${name}'s page`, async () => {
-      await this.repoCronjobs(name)
-        .and(this.page.locator(`[data-cronjob="${cronjobId}"]`))
-        .getByTestId("settings-repo__open-cronjobs")
-        .click();
+      await this.repoCronjob(name, cronjobId).getByTestId("settings-repo__open-cronjobs").click();
     });
   }
 
