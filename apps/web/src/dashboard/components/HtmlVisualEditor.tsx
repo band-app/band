@@ -1,3 +1,4 @@
+import { Button, Textarea } from "@band-app/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildCommentMessage,
@@ -278,7 +279,7 @@ export function HtmlVisualEditor({
         {target && (
           <div
             data-testid="html-visual__comment"
-            className="absolute z-10 flex w-80 flex-col gap-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-md"
+            className="absolute z-10 flex w-80 flex-col gap-2 rounded-md border bg-popover p-3 text-popover-foreground shadow-md"
             style={{
               top: Math.max(4, target.rect.y + target.rect.h + 8),
               left: Math.max(
@@ -287,7 +288,7 @@ export function HtmlVisualEditor({
               ),
             }}
           >
-            <textarea
+            <Textarea
               // biome-ignore lint/a11y/noAutofocus: the popover opens on the user's selection to take a comment
               autoFocus
               data-testid="html-visual__comment-input"
@@ -300,26 +301,27 @@ export function HtmlVisualEditor({
                 if (e.key === "Escape") closeComment();
                 else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void sendComment();
               }}
-              className="w-full resize-none rounded border bg-background p-1.5 text-xs"
+              className="resize-none text-sm"
             />
-            <div className="flex items-center justify-end gap-2 text-xs">
-              <button
+            <div className="flex items-center justify-end gap-2">
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 data-testid="html-visual__comment-cancel"
                 onClick={closeComment}
-                className="rounded px-2 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                size="xs"
                 data-testid="html-visual__comment-send"
                 disabled={!comment.trim() || sending}
                 onClick={() => void sendComment()}
-                className="rounded bg-selection px-2 py-0.5 text-foreground disabled:opacity-50"
               >
                 Send to agent
-              </button>
+              </Button>
             </div>
           </div>
         )}
