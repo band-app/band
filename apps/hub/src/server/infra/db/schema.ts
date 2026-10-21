@@ -132,10 +132,6 @@ export const repos = sqliteTable("repos", {
   // Defaults to 1 (true) so existing rows behave the same after migration.
   // See issue #458.
   hasOrigin: integer("has_origin", { mode: "boolean" }).notNull().default(true),
-  // A meta repo (borko, epic-veda) is where work in other repos is started from. The flag
-  // only groups and defaults; it changes no behaviour. Set by `repos.update` and kept across
-  // the whole-tree rewrite by `RepoQueries.saveAll`.
-  meta: integer("meta", { mode: "boolean" }).notNull().default(false),
   // The hosts the repo may run on, as JSON host ids; null means every host. A hard rule:
   // worktree creation, placement and cloning refuse any other host.
   allowedHostIds: text("allowed_host_ids", { mode: "json" }).$type<string[]>(),

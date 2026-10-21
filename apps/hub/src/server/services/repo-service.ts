@@ -118,8 +118,6 @@ export class RepoService {
       defaultBranch: string;
       label: string | undefined;
       kind: RepoKind;
-      /** Whether the repo is a meta repo, where work in other repos is started from. */
-      meta: boolean;
       /** The hosts the repo may run on, or null for every host. */
       allowedHostIds: string[] | null;
       /** The host whose default-branch checkout is listed as a worktree, once one is known. */
@@ -285,7 +283,6 @@ export class RepoService {
         defaultBranch: repo.defaultBranch,
         label: repo.label,
         kind: repo.kind,
-        meta: repo.meta ?? false,
         allowedHostIds: repo.allowedHostIds ?? null,
         primaryHostId: primaryHostOf({ ...repo, worktrees }),
         mainMissing: mainMissingOf({ ...repo, worktrees }),
@@ -1022,11 +1019,6 @@ export class RepoService {
     if (!this.queries.setAutoContinue(name, enabled)) {
       throw new RepoInputError(`Unknown repo "${name}"`);
     }
-  }
-
-  /** Marks or unmarks `name` as a meta repo. */
-  setMeta(name: string, meta: boolean): void {
-    if (!this.queries.setMeta(name, meta)) throw new RepoInputError(`Unknown repo "${name}"`);
   }
 
   /**

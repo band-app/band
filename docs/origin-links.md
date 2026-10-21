@@ -1,12 +1,12 @@
-# Origin links and meta repos
+# Origin links
 
 A worktree records where it was started from. This replaces the removed projects feature (implementation plan, section 15).
 
 ## What is stored
 
-Three nullable columns on `worktrees`: `origin_worktree_id`, `origin_chat_id` and `origin_terminal_id`. They hold plain ids, with no foreign key, because the origin can be on any repo and host. `repos.meta` is a boolean on the repo.
+Three nullable columns on `worktrees`: `origin_worktree_id`, `origin_chat_id` and `origin_terminal_id`. They hold plain ids, with no foreign key, because the origin can be on any repo and host.
 
-`RepoQueries.saveAll` rewrites the whole repo and worktree tables, so it copies the origin columns and the meta flag from the rows it replaces and ignores what its snapshot says. They change only through `RepoQueries.setOrigin` and `setMeta`.
+`RepoQueries.saveAll` rewrites the whole repo and worktree tables, so it copies the origin columns from the rows it replaces and ignores what its snapshot says. They change only through `RepoQueries.setOrigin`.
 
 ## How the origin is set
 
@@ -41,27 +41,23 @@ A chat on a worker creates worktrees on that worker only. A chat on the hub's ma
 - `origin`: `{ worktreeId, chatId?, terminalId?, removed, repo?, branch? }` or `null`. `removed` is true when the origin worktree no longer exists. The ids stay so a view can say "parent removed". `repo` and `branch` are present while it exists.
 - `children`: the ids of worktrees whose origin is this one, across repos and hosts.
 
-Each repo also has `meta`.
-
 ## CLI
 
 ```sh
 band worktrees create <repo> <branch> [--origin <worktree id> | --no-origin]
 band worktrees set-origin <repo> <name> [--host <h>] (--origin <worktree id> | --none)
 band worktrees list            # ORIGIN column
-band repos set <repo> --meta true|false
-band repos list                # META column
 ```
 
 ## Tests
 
-`apps/hub/tests/origin-links.test.ts` (explicit origins, the tree, removal, meta), `origin-links-relay.test.ts` (a real worker: a chat through the `band` MCP server, a shell through the relay, forged identity), and `worktrees_create_records_the_origin_and_list_shows_it` and `repos_set_meta_persists_and_lists` in `apps/cli/tests/integration.rs`.
+`apps/hub/tests/origin-links.test.ts` (explicit origins, the tree, removal), `origin-links-relay.test.ts` (a real worker: a chat through the `band` MCP server, a shell through the relay, forged identity), and `worktrees_create_records_the_origin_and_list_shows_it` in `apps/cli/tests/integration.rs`.
 
 ## Sidebar
 
 The sidebar has a Group by switch: Repo, Origin or Host. The choice is kept per device in localStorage (`band.sidebar.group-by`) and defaults to Repo.
 
-- Repo is the list by repo. A meta repo shows a "meta" badge.
+- Repo is the list by repo.
 - Origin has each repo's main worktree at the top level. A worktree nests under the one that started it, across repos. A worktree with no origin nests under its repo's main on the same host, and so does one whose parent was removed, which also shows a "parent removed" hint. A worktree on a host with no main of its repo stays at the top level. Every row shows the repo avatar, the repo name and a gray host tag. A chevron collapses a subtree, and the choice is kept per device. Repo view shows the host tag only for a repo with worktrees on more than one host.
 - Host groups by worker (the hub's own machine first) with its online state, then by repo.
 - Pinned is the first section in all three views. Each pin shows the worktrees started from it, all the way down, and those leave the normal tree, so nothing is listed twice. A pin with children has a chevron that uses the same collapsed set as the Origin view. The label filter applies to pins and their children: a pin shows only when its repo has the selected label. "Collapse all" folds the groups of the current view, the Pinned section and every pin with children.

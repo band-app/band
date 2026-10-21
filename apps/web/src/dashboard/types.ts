@@ -78,8 +78,6 @@ export interface RepoInfo {
    * GitHub has no avatar for; the UI then shows its folder icon.
    */
   avatar?: RepoAvatarInfo | null;
-  /** True for a meta repo, where work in other repos is started from. */
-  meta?: boolean;
   /** The hosts the repo may run on, or null for every host. */
   allowedHostIds?: string[] | null;
   /** The host whose default-branch checkout is listed as a worktree. */

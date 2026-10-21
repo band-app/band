@@ -75,8 +75,6 @@ export interface RepoState {
    * next sync pass and sticks until the remote configuration changes.
    */
   hasOrigin: boolean;
-  /** Whether the repo is a meta repo. Read-only here: `RepoQueries.setMeta` changes it. */
-  meta?: boolean;
   /** The hosts the repo may run on; absent means every host. Read-only here: `setHostPolicy` writes it. */
   allowedHostIds?: string[];
   /** The host whose default-branch checkout is listed as a worktree. Read-only here: `setHostPolicy` writes it. */
@@ -262,7 +260,6 @@ export class RepoQueries {
       label: row.label ?? undefined,
       kind: (row.kind ?? "git") as RepoKind,
       hasOrigin: row.hasOrigin,
-      meta: row.meta,
       ...(row.allowedHostIds ? { allowedHostIds: row.allowedHostIds } : {}),
       ...(row.primaryHostId ? { primaryHostId: row.primaryHostId } : {}),
       ...(row.checkpointsEnabled != null ? { checkpointsEnabled: row.checkpointsEnabled } : {}),
@@ -294,13 +291,12 @@ export class RepoQueries {
         .from(repoHostsTable)
         .where(ne(repoHostsTable.hostId, "local"))
         .all();
-      // Origins and the meta flag are written by their own calls, so the rewrite keeps what
+      // Origins are written by their own calls, so the rewrite keeps what
       // the database holds instead of what a possibly stale snapshot says.
       const kept = new Map(
         tx
           .select({
             name: reposTable.name,
-            meta: reposTable.meta,
             allowedHostIds: reposTable.allowedHostIds,
             primaryHostId: reposTable.primaryHostId,
             checkpointsEnabled: reposTable.checkpointsEnabled,
@@ -355,7 +351,6 @@ export class RepoQueries {
             sortOrder: i,
             kind: repo.kind,
             hasOrigin: repo.hasOrigin,
-            meta: kept.get(repo.name)?.meta ?? false,
             // A repo new to the database may carry its policy; one that exists keeps what is stored.
             allowedHostIds: kept.has(repo.name)
               ? (kept.get(repo.name)?.allowedHostIds ?? null)
@@ -561,13 +556,6 @@ export class RepoQueries {
   setHasOrigin(name: string, hasOrigin: boolean): void {
     const db = getDb();
     db.update(reposTable).set({ hasOrigin }).where(eq(reposTable.name, name)).run();
-  }
-
-  /** Marks or unmarks a repo as a meta repo. Returns false when no repo has that name. */
-  setMeta(name: string, meta: boolean): boolean {
-    return (
-      getDb().update(reposTable).set({ meta }).where(eq(reposTable.name, name)).run().changes > 0
-    );
   }
 
   /**

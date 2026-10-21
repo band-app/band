@@ -513,40 +513,20 @@ fn repos_remove_unregisters_repo() {
 }
 
 #[test]
-fn repos_set_meta_persists_and_lists() {
+fn repos_set_rejects_the_removed_meta_flag_and_list_has_no_meta_column() {
     let env = TestEnv::new();
 
     let output = env.band(&["repos", "set", "my-repo", "--meta", "true"]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("--meta"), "{}", stderr(&output));
 
-    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
-    let repo = listed["repos"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["name"] == "my-repo")
-        .expect("my-repo in list");
-    assert_eq!(repo["meta"], true);
     let text = stdout(&env.band(&["repos", "list"]));
-    assert!(text.contains("META") && text.contains("yes"), "{text}");
-
-    // Another change that rewrites the repo tree keeps the flag.
-    let created = env.band(&["worktrees", "create", "my-repo", "feat/meta-check"]);
-    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    assert!(!text.contains("META"), "{text}");
     let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
-    assert_eq!(listed["repos"][0]["meta"], true);
+    assert!(listed["repos"][0].get("meta").is_none(), "{listed}");
 
-    let output = env.band(&["repos", "set", "my-repo", "--meta", "false"]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-    let listed = json_of(&env.band(&["repos", "list", "--output", "json"]));
-    assert_eq!(listed["repos"][0]["meta"], false);
-
-    // Nothing to change, and an unknown repo, both fail.
+    // Nothing to change fails.
     assert!(!env.band(&["repos", "set", "my-repo"]).status.success());
-    assert!(!env
-        .band(&["repos", "set", "nope", "--meta", "true"])
-        .status
-        .success());
 }
 
 #[test]

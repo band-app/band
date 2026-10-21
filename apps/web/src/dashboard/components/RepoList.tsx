@@ -131,7 +131,7 @@ import type {
 } from "../types";
 import { AgentStatusIndicator, isActiveAgentStatus } from "./AgentStatusIndicator";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
-import { GroupedWorktrees, MetaBadge, WorktreeRowView } from "./GroupedWorktrees";
+import { GroupedWorktrees, WorktreeRowView } from "./GroupedWorktrees";
 import { MainMissingRow } from "./MainMissingRow";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { NewWorktreeDialog } from "./NewWorktreeForm";
@@ -486,7 +486,6 @@ function SortableRepo({
                     treatment on `WorktreeCard`'s label tooltip. */}
                 <TooltipContent side="right">{repo.name}</TooltipContent>
               </Tooltip>
-              {repo.meta && <MetaBadge repoName={repo.name} />}
             </div>
             {/* The "+" and "⋮" buttons are revealed on hover (or keyboard
                 focus) to keep the header uncluttered while scanning the list;

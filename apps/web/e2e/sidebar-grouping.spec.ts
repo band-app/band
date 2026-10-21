@@ -102,7 +102,6 @@ test.beforeAll(async () => {
   seedState(tmpHome, { repos });
   server = await startServer({ tmpHome });
 
-  await trpcMutate(server.url, TOKEN, "repos.update", { name: "borko", meta: true });
   await createFrom({ repo: "svc", branch: "alpha", origin: "borko-main" });
   await createFrom({ repo: "svc", branch: "beta", origin: "borko-main" });
   await trpcMutate(server.url, TOKEN, "chats.create", {
@@ -195,7 +194,6 @@ test("Origin mode nests what started what across repos, with the repo name on ev
   await expect(sidebar.row("lib-gamma")).toContainText("lib");
   await expect(sidebar.row("svc-alpha")).toContainText("svc");
   await expect(sidebar.row("borko-main")).toContainText("borko");
-  await expect(sidebar.metaBadge("borko")).toBeVisible();
 
   // Every row has the repo avatar (a folder here, the repos have no GitHub owner) and a gray host tag.
   await expect(sidebar.repoAvatar(sidebar.row("svc-solo"), "svc")).toBeVisible();
@@ -252,7 +250,6 @@ test("Repo mode lists each worktree under its repo, and Host mode groups by work
   const sidebar = await open(page, "borko-main");
   await expect(sidebar.repoModeCard("svc-alpha")).toBeVisible();
   await expect(sidebar.repoModeCard("lib-gamma")).toBeVisible();
-  await expect(sidebar.metaBadge("borko")).toBeVisible();
   // The hub has more than one host, so every card carries its host's name.
   await expect(sidebar.hostTag(sidebar.repoModeCard("svc-alpha"))).toHaveText("This hub");
   await expect(sidebar.hostTag(sidebar.repoModeCard(remote1))).toHaveText("e2e-box");
