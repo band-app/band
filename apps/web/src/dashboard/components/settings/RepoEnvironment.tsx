@@ -2,20 +2,58 @@ import { Button } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useHostsList } from "../../hooks/use-update-status";
+import { Chip, Hint, RepoRow } from "./repo-page-ui";
 
 type RepoEnvironment = Awaited<ReturnType<typeof trpc.environment.forRepo.query>>;
+type Environment = NonNullable<RepoEnvironment["environment"]>;
+type ImageStatus = Awaited<ReturnType<typeof trpc.environment.imageStatus.query>>;
 
-function Summary({ label, value }: { label: string; value: string | undefined }) {
-  if (!value) return null;
-  return (
-    <div className="flex gap-2 text-xs">
-      <dt className="w-20 shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words font-mono">{value}</dd>
-    </div>
-  );
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** "just now", "5 minutes ago", "3 hours ago" or "2 days ago". */
+function ago(epochMs: number): string {
+  const minutes = Math.round((Date.now() - epochMs) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${plural(minutes, "minute")} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${plural(hours, "hour")} ago`;
+  return `${plural(Math.round(hours / 24), "day")} ago`;
 }
 
-type ImageStatus = Awaited<ReturnType<typeof trpc.environment.imageStatus.query>>;
+/** What the file asks for in one line, such as "install, start, 2 terminals, requires node >=24". */
+function summaryOf(environment: Environment): string {
+  const parts: string[] = [];
+  const build = environment.build;
+  if (build?.devcontainer) parts.push("devcontainer");
+  else if (build?.dockerfile) parts.push("Dockerfile");
+  else if (build?.image) parts.push(`image ${build.image}`);
+  if (environment.install) parts.push("install");
+  if (environment.start) parts.push("start");
+  if (environment.teardown) parts.push("teardown");
+  if (environment.terminals?.length) parts.push(plural(environment.terminals.length, "terminal"));
+  const services = Object.keys(environment.services ?? {}).length;
+  if (services) parts.push(plural(services, "service"));
+  if (environment.secrets?.length) parts.push(plural(environment.secrets.length, "secret"));
+  if (environment.isolation) parts.push(`${environment.isolation} isolation`);
+  const requires = Object.entries(environment.requires ?? {})
+    .map(([tool, range]) => `${tool} ${range}`)
+    .join(", ");
+  if (requires) parts.push(`requires ${requires}`);
+  return parts.join(", ") || "nothing";
+}
+
+/** The file's commands in full, shown as the summary's tooltip. */
+function detailsOf(environment: Environment): string {
+  return [
+    environment.install ? `install: ${environment.install}` : "",
+    environment.start ? `start: ${environment.start}` : "",
+    environment.teardown ? `teardown: ${environment.teardown}` : "",
+    ...(environment.terminals ?? []).map((t) => `${t.name}: ${t.command}`),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 /**
  * The repo's environment image: the current one (what a runner boots), the
@@ -24,6 +62,8 @@ type ImageStatus = Awaited<ReturnType<typeof trpc.environment.imageStatus.query>
  */
 function EnvironmentImage({ repoName }: { repoName: string }) {
   const queryClient = useQueryClient();
+  const hosts = useHostsList();
+  const hostName = (id: string) => hosts.data?.find((h) => h.id === id)?.name;
   const queryKey = ["environment.imageStatus", repoName];
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -51,16 +91,29 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
   }
 
   const latest = data?.latest ?? null;
+  const current = data?.current ?? null;
   const building = latest?.status === "building";
+  const builtOn = current ? (hostName(current.hostId) ?? current.hostId) : null;
   return (
-    <div
-      className="space-y-2"
-      data-testid="settings-repo__environment-image"
-      data-status={latest?.status ?? "none"}
-      data-current={data?.current?.image ?? ""}
+    <RepoRow
+      label="Image"
+      description="What a runner boots for this repo."
+      testId="settings-repo__environment-image"
     >
-      <div className="flex items-center justify-between gap-3">
-        <h4 className="text-xs font-medium">Image</h4>
+      <span
+        className="contents"
+        data-testid="settings-repo__environment-image-state"
+        data-status={latest?.status ?? "none"}
+        data-current={current?.image ?? ""}
+      >
+        <Hint>
+          {building
+            ? "Building…"
+            : current
+              ? `Current: built ${ago(current.endedAt ?? current.startedAt)} on ${builtOn}`
+              : "No image built yet"}
+        </Hint>
+        {latest?.status === "failed" ? <Chip tone="warn">last build failed</Chip> : null}
         <Button
           type="button"
           variant="outline"
@@ -69,12 +122,12 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
           onClick={build}
           data-testid="settings-repo__environment-image-build"
         >
-          {building ? "Building…" : "Build image"}
+          Build now
         </Button>
-      </div>
+      </span>
       {notice ? (
         <p
-          className="text-xs text-muted-foreground"
+          className="w-full text-xs text-muted-foreground"
           data-testid="settings-repo__environment-image-notice"
         >
           {notice}
@@ -82,28 +135,26 @@ function EnvironmentImage({ repoName }: { repoName: string }) {
       ) : null}
       {error ? (
         <p
-          className="text-xs text-destructive"
+          className="w-full text-xs text-destructive"
           data-testid="settings-repo__environment-image-error"
         >
           {error}
         </p>
       ) : null}
-      <dl className="space-y-1">
-        <Summary label="Current" value={data?.current?.image ?? "none (no build has finished)"} />
-        <Summary
-          label="Last build"
-          value={latest ? `${latest.status}${latest.error ? `: ${latest.error}` : ""}` : "never"}
-        />
-      </dl>
       {latest?.log ? (
-        <pre
-          className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-[11px]"
-          data-testid="settings-repo__environment-image-log"
-        >
-          {latest.log}
-        </pre>
+        <details className="w-full">
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            Log of the last build{latest.error ? `: ${latest.error}` : ""}
+          </summary>
+          <pre
+            className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-[11px]"
+            data-testid="settings-repo__environment-image-log"
+          >
+            {latest.log}
+          </pre>
+        </details>
       ) : null}
-    </div>
+    </RepoRow>
   );
 }
 
@@ -124,104 +175,70 @@ export function RepoEnvironmentDetails({ repoName }: { repoName: string }) {
   }
   if (data.source === null) {
     return (
-      <p
-        className="px-4 py-3 text-xs text-muted-foreground"
-        data-testid="settings-repo__environment-none"
-      >
-        No .band/environment.json in this repo.
-      </p>
+      <RepoRow label="File" description=".band/environment.json" readOnly>
+        <Hint testId="settings-repo__environment-none">
+          No .band/environment.json in this repo.
+        </Hint>
+      </RepoRow>
     );
   }
 
   const environment = data.environment;
-  const build = environment?.build;
   return (
-    <div className="space-y-3 px-4 py-3">
-      <p className="break-all font-mono text-xs text-muted-foreground">{data.source}</p>
+    <>
+      <RepoRow
+        label="File"
+        description={<span className="break-all font-mono">{data.source}</span>}
+        readOnly
+      >
+        {data.issues.length > 0 ? (
+          <>
+            <Chip tone="warn">{plural(data.issues.length, "problem")}</Chip>
+            <ul className="w-full space-y-0.5" data-testid="settings-repo__environment-issues">
+              {data.issues.map((issue) => (
+                <li key={`${issue.path}:${issue.message}`} className="text-xs">
+                  {issue.path ? <span className="font-mono">{issue.path}</span> : null}
+                  {issue.path ? ": " : null}
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <Chip tone="ok" testId="settings-repo__environment-valid">
+            valid
+          </Chip>
+        )}
+        {environment ? (
+          <span title={detailsOf(environment)}>
+            <Hint testId="settings-repo__environment-summary">{summaryOf(environment)}</Hint>
+          </span>
+        ) : null}
+      </RepoRow>
 
-      {data.issues.length > 0 ? (
-        <ul
-          className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3"
-          data-testid="settings-repo__environment-issues"
-        >
-          {data.issues.map((issue) => (
-            <li key={`${issue.path}:${issue.message}`} className="text-xs">
-              {issue.path ? <span className="font-mono">{issue.path}</span> : null}
-              {issue.path ? ": " : null}
-              {issue.message}
-            </li>
+      {environment?.requires && data.hosts.length > 0 ? (
+        <RepoRow label="Workers that satisfy it" description="From each worker's tools.">
+          {data.hosts.map((host) => (
+            <span
+              key={host.id}
+              data-testid="settings-repo__environment-host"
+              data-meets={host.meets}
+            >
+              <Chip tone={host.meets ? "ok" : "warn"}>
+                {host.name}
+                {host.status === "online" ? "" : ` (${host.status})`}
+                {host.meets
+                  ? ""
+                  : `: ${host.unmet
+                      .map((u) => `${u.tool} ${u.range} (has ${u.found ?? "none"})`)
+                      .join(", ")}`}
+              </Chip>
+            </span>
           ))}
-        </ul>
-      ) : (
-        <p className="text-xs text-muted-foreground" data-testid="settings-repo__environment-valid">
-          Valid.
-        </p>
-      )}
-
-      {environment ? (
-        <dl className="space-y-1" data-testid="settings-repo__environment-summary">
-          <Summary label="Build" value={build?.devcontainer ?? build?.dockerfile ?? build?.image} />
-          <Summary label="Install" value={environment.install} />
-          <Summary label="Start" value={environment.start} />
-          <Summary label="Teardown" value={environment.teardown} />
-          <Summary label="Isolation" value={environment.isolation} />
-          <Summary
-            label="Terminals"
-            value={environment.terminals?.map((t) => `${t.name}: ${t.command}`).join("\n")}
-          />
-          <Summary label="Secrets" value={environment.secrets?.join(", ")} />
-          <Summary
-            label="Services"
-            value={
-              environment.services
-                ? Object.entries(environment.services)
-                    .map(([name, image]) => `${name} (${image})`)
-                    .join(", ")
-                : undefined
-            }
-          />
-          <Summary
-            label="Requires"
-            value={
-              environment.requires
-                ? Object.entries(environment.requires)
-                    .map(([tool, range]) => `${tool} ${range}`)
-                    .join(", ")
-                : undefined
-            }
-          />
-        </dl>
+        </RepoRow>
       ) : null}
 
       {environment?.build ? <EnvironmentImage repoName={repoName} /> : null}
-
-      {data.hosts.length > 0 && environment?.requires ? (
-        <div className="space-y-1">
-          <h4 className="text-xs font-medium">Workers</h4>
-          <ul className="divide-y divide-border rounded-md border border-border">
-            {data.hosts.map((host) => (
-              <li
-                key={host.id}
-                className="flex items-start justify-between gap-3 px-3 py-2 text-xs"
-                data-testid="settings-repo__environment-host"
-                data-meets={host.meets}
-              >
-                <span className="min-w-0 truncate">
-                  {host.name}
-                  {host.status === "online" ? "" : ` (${host.status})`}
-                </span>
-                <span className={host.meets ? "text-muted-foreground" : "text-destructive"}>
-                  {host.meets
-                    ? "Meets requires"
-                    : host.unmet
-                        .map((u) => `${u.tool} ${u.range} (has ${u.found ?? "none"})`)
-                        .join(", ")}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 }

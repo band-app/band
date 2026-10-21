@@ -3,6 +3,7 @@ import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { Chip, Hint, RepoRow, SELECT_CLASS } from "./repo-page-ui";
 import { SettingsRow } from "./SettingsRow";
 
 export type AgentLoginList = Awaited<ReturnType<typeof trpc.agentLogins.list.query>>;
@@ -287,8 +288,9 @@ export function AgentLoginsSettings() {
 }
 
 /**
- * The repo page's Agents rows: for each agent with at least one login, which login it uses in this
- * repo. "Use the default" follows the agent's default from Agent logins.
+ * The repo page's Agents rows: one per coding agent Band can hold a login for, with the login it
+ * uses in this repo. "Use the default" follows the agent's default from Agent logins; another pick
+ * is an override, marked with a chip. An agent with no logins says where to add one.
  */
 export function RepoLoginOverrides({ repoName }: { repoName: string }) {
   const queryClient = useQueryClient();
@@ -306,14 +308,13 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
       </p>
     );
   }
-  const rows = agents.filter((a) => data.logins.some((l) => l.agentType === a.type));
-  if (rows.length === 0) {
+  if (agents.length === 0) {
     return (
       <p
         className="px-4 py-3 text-xs text-muted-foreground"
         data-testid="settings-repo__logins-none"
       >
-        No agent logins yet. Add one in Agent logins.
+        No coding agent that takes a login is set up. Enable one in Coding Agents.
       </p>
     );
   }
@@ -333,23 +334,33 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
   };
 
   return (
-    <div className="divide-y divide-border" data-testid="settings-repo__logins">
-      {rows.map((agent) => {
+    <>
+      {agents.map((agent) => {
+        const own = data.logins.filter((l) => l.agentType === agent.type);
         const current =
           data.repoOverrides.find((o) => o.agentType === agent.type && o.repo === repoName)
             ?.loginId ?? "";
         const fallback = data.logins.find((l) => l.id === data.defaults[agent.type]);
         const id = `settings-repo-${repoName}-login-${agent.type}`;
+        if (own.length === 0) {
+          return (
+            <RepoRow
+              key={agent.type}
+              label={agent.label}
+              description="No logins yet."
+              testId="settings-repo__login-row"
+            >
+              <Hint>Add one in Agent logins</Hint>
+            </RepoRow>
+          );
+        }
         return (
-          <SettingsRow
+          <RepoRow
             key={agent.type}
             htmlFor={id}
             label={agent.label}
-            description={
-              current
-                ? "Overrides the default for this repo."
-                : `Default: ${fallback?.label ?? "none (the machine's own login)"}.`
-            }
+            description={`Default: ${fallback?.label ?? "none (the machine's own login)"}.`}
+            testId="settings-repo__login-row"
           >
             <select
               id={id}
@@ -359,18 +370,21 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
               data-repo={repoName}
               value={current}
               onChange={(e) => void change(agent.type, e.target.value)}
-              className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+              className={SELECT_CLASS}
             >
               <option value="">Use the default</option>
-              {data.logins
-                .filter((l) => l.agentType === agent.type)
-                .map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.label}
-                  </option>
-                ))}
+              {own.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label}
+                </option>
+              ))}
             </select>
-          </SettingsRow>
+            {current ? (
+              <Chip tone="scoped" testId="settings-repo__login-override-chip">
+                override
+              </Chip>
+            ) : null}
+          </RepoRow>
         );
       })}
       {error ? (
@@ -378,6 +392,6 @@ export function RepoLoginOverrides({ repoName }: { repoName: string }) {
           {error}
         </p>
       ) : null}
-    </div>
+    </>
   );
 }

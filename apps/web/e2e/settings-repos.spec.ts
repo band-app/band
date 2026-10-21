@@ -159,13 +159,13 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await settings.openDialog("repos");
 
   await expect(settings.repoRows()).toHaveCount(3);
-  await expect(settings.repoCell(REMOTE, "url")).toHaveText(remoteUrl);
-  await expect(settings.repoCell(BUSY, "workers")).toHaveAttribute("data-allowed", "all");
-  await expect(settings.repoCell(LIMITED, "workers")).toHaveAttribute("data-allowed", "local");
-  await expect(settings.repoCell(BUSY, "worktrees")).toHaveText("1");
-  await expect(settings.repoCell(BUSY, "checkpoints")).toHaveAttribute("data-enabled", "true");
-  await expect(settings.repoCell(LIMITED, "checkpoints")).toHaveAttribute("data-enabled", "false");
-  await expect(settings.repoCell(BUSY, "logins")).toHaveAttribute("data-overrides", "0");
+  await expect(settings.reposNavCount()).toHaveText("3");
+  await expect(settings.repoRowUrl(REMOTE)).toHaveText(remoteUrl);
+  // Only a repo limited to some workers says which.
+  await expect(settings.repoRow(LIMITED)).toHaveAttribute("data-limited", "true");
+  await expect(settings.repoRowLimited(LIMITED)).toBeVisible();
+  await expect(settings.repoRow(BUSY)).toHaveAttribute("data-limited", "false");
+  await expect(settings.repoRowLimited(BUSY)).toHaveCount(0);
 
   // The worker and label filters narrow the table.
   await settings.filterReposByLabel(LABEL_WORK);
@@ -217,27 +217,56 @@ test("the label picked on a repo page is saved and shows after a reload (S3)", a
   await expect.poll(async () => (await repoRow(REMOTE))?.label ?? null).toBeNull();
 });
 
-test("allowed workers and the primary worker are saved and show after a reload (S3)", async ({
+test("allowed workers and the primary worker save at once and show after a reload (S3)", async ({
   page,
 }) => {
   const settings = new SettingsPage(page, server.url, TOKEN);
   await settings.goto();
   await settings.openRepoSettings(REMOTE);
-  await settings.repoHosts(REMOTE).expectAllHosts();
+  await expect(settings.repoAllowedMode(REMOTE)).toHaveValue("all");
+  await expect(settings.repoAddWorkerButton(REMOTE)).toHaveCount(0);
 
-  await settings.repoHosts(REMOTE).chooseOnly(["local"]);
-  await settings.repoHosts(REMOTE).choosePrimary("local");
-  await settings.saveRepoHosts(REMOTE);
-  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds).toEqual(["local"]);
+  // "Only these" limits the repo to one worker at once, with no Save step.
+  await settings.setRepoAllowedMode(REMOTE, "only");
+  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.length).toBe(1);
+  const first = (await repoRow(REMOTE))?.allowedHostIds?.[0] ?? "";
   await expect(settings.repoLimitedNote(REMOTE)).toBeVisible();
+  await expect(settings.repoWorkerRows(REMOTE)).toHaveCount(1);
+  // The last allowed worker cannot be removed, and with one worker there is nowhere to continue.
+  await expect(settings.repoRemoveWorkerButton(REMOTE, first)).toBeDisabled();
+  await expect(settings.autoContinueSwitch(REMOTE)).toBeDisabled();
+
+  // The dialog's filter has focus, narrows the list, and the allowed worker is greyed out.
+  await settings.openAddWorker(REMOTE);
+  await expect(settings.addWorkerOption(first)).toHaveAttribute("data-added", "true");
+  await settings.closeAddWorker();
+  await settings.openAddWorker(REMOTE, "e2e-offline");
+  await expect(settings.addWorkerOptions()).toHaveCount(1);
+  await settings.addWorkerOption(offlineHostId).click();
+  await expect(settings.addWorkerDialog()).toBeHidden();
+  await expect
+    .poll(async () => (await repoRow(REMOTE))?.allowedHostIds?.slice().sort())
+    .toEqual([first, offlineHostId].sort());
+  await expect(settings.autoContinueSwitch(REMOTE)).toBeEnabled();
+
+  // The Primary switch moves the default-branch worktree to another worker.
+  await settings.makeRepoPrimary(REMOTE, offlineHostId);
+  await expect.poll(async () => (await repoRow(REMOTE))?.primaryHostId).toBe(offlineHostId);
 
   await settings.goto();
   await settings.openRepoSettings(REMOTE);
-  await settings.repoHosts(REMOTE).expectOnly(["local"], "local");
+  await expect(settings.repoAllowedMode(REMOTE)).toHaveValue("only");
+  await expect(settings.repoWorkerRows(REMOTE)).toHaveCount(2);
+  await expect(settings.repoClone(REMOTE, offlineHostId)).toHaveAttribute("data-primary", "true");
 
-  await settings.repoHosts(REMOTE).chooseAllHosts();
-  await settings.saveRepoHosts(REMOTE);
-  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds).toBeNull();
+  // Removing the primary hands it to the worker that stays.
+  await settings.removeRepoWorker(REMOTE, offlineHostId);
+  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds).toEqual([first]);
+  await expect.poll(async () => (await repoRow(REMOTE))?.primaryHostId).toBe(first);
+
+  await settings.setRepoAllowedMode(REMOTE, "all");
+  await expect.poll(async () => (await repoRow(REMOTE))?.allowedHostIds ?? null).toBeNull();
+  await expect(settings.repoLimitedNote(REMOTE)).toHaveCount(0);
 });
 
 test("a repo page lists the MCP servers and cronjobs that reach it, with links (S5)", async ({

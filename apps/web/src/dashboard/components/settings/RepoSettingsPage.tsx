@@ -11,28 +11,13 @@ import type { RepoInfo } from "../../types";
 import { RepoLoginOverrides } from "./AgentLoginsSettings";
 import { RepoBrowserProfileSelect } from "./BrowserProfilesSettings";
 import { useIsAdmin } from "./DevicesSettings";
-import { AutoContinueSwitch, CheckpointsSwitch, RepoHostsEditor } from "./RepoControls";
+import { AutoContinueSwitch, CheckpointsSwitch } from "./RepoControls";
 import { RepoEnvironmentDetails } from "./RepoEnvironment";
 import { repoWorktreeCount } from "./ReposOverview";
-import { SettingsRow } from "./SettingsRow";
-import { SettingsPageContext, SettingsSection } from "./SettingsSection";
+import { RepoWorkers } from "./RepoWorkers";
+import { Chip, Hint, RepoRow, RepoSection, SELECT_CLASS } from "./repo-page-ui";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
-const SECTIONS = [
-  { id: "general", title: "General" },
-  { id: "workers", title: "Workers" },
-  { id: "agents", title: "Agents" },
-  { id: "environment", title: "Environment" },
-  { id: "continuity", title: "Continuity" },
-  { id: "browser", title: "Browser" },
-  { id: "mcp", title: "MCP servers" },
-  { id: "automation", title: "Automation" },
-] as const;
-
-type SectionId = (typeof SECTIONS)[number]["id"];
-
-const sectionDomId = (id: SectionId) => `settings-repo-section-${id}`;
 
 /** The repo's one label, picked from the labels made in Settings > Labels. */
 function RepoLabelSelect({ repo }: { repo: RepoInfo }) {
@@ -41,7 +26,7 @@ function RepoLabelSelect({ repo }: { repo: RepoInfo }) {
   const labels = settings.labels ?? [];
   const id = `settings-repo-${repo.name}-label`;
   return (
-    <SettingsRow
+    <RepoRow
       htmlFor={id}
       label="Label"
       description="One per repo. Filters and groups repos in the sidebar. Labels are made in Labels."
@@ -53,7 +38,7 @@ function RepoLabelSelect({ repo }: { repo: RepoInfo }) {
         value={repo.label ?? ""}
         disabled={updateLabel.isPending}
         onChange={(e) => updateLabel.mutate({ name: repo.name, label: e.target.value || null })}
-        className="h-8 min-w-40 rounded-md border border-border bg-background px-2 text-sm"
+        className={SELECT_CLASS}
       >
         <option value="">No label</option>
         {labels.map((l) => (
@@ -62,63 +47,7 @@ function RepoLabelSelect({ repo }: { repo: RepoInfo }) {
           </option>
         ))}
       </select>
-    </SettingsRow>
-  );
-}
-
-/** Each worker that holds the repo or one of its worktrees: its folder and its worktree count. */
-function RepoWorkerList({ repo }: { repo: RepoInfo }) {
-  const hosts = useHostsList();
-  const counts = new Map<string, number>();
-  for (const w of repo.worktrees) {
-    if (w.path === repo.path) continue;
-    const host = w.hostId ?? "local";
-    counts.set(host, (counts.get(host) ?? 0) + 1);
-  }
-  const clones = repo.clones ?? [];
-  const ids = [...new Set([...clones.map((c) => c.hostId), ...counts.keys()])];
-  if (ids.length === 0) {
-    return (
-      <p
-        className="px-4 py-3 text-xs text-muted-foreground"
-        data-testid="settings-repo__clones-none"
-      >
-        Not cloned anywhere yet. The first worktree on a worker clones it.
-      </p>
-    );
-  }
-  return (
-    <ul className="divide-y divide-border" data-testid="settings-repo__clones">
-      {ids.map((hostId) => {
-        const host = hosts.data?.find((h) => h.id === hostId);
-        const path = clones.find((c) => c.hostId === hostId)?.path;
-        const count = counts.get(hostId) ?? 0;
-        return (
-          <li
-            key={hostId}
-            className="flex items-center justify-between gap-3 px-4 py-2.5"
-            data-testid="settings-repo__clone"
-            data-host={hostId}
-            data-worktrees={count}
-          >
-            <div className="min-w-0">
-              <div className="text-sm">
-                {host?.name ?? hostId}
-                {host ? (
-                  <span className="ml-2 text-xs text-muted-foreground">{host.status}</span>
-                ) : null}
-              </div>
-              <div className="truncate font-mono text-xs text-muted-foreground">
-                {path ?? "no clone recorded"}
-              </div>
-            </div>
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {count} worktree{count === 1 ? "" : "s"}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+    </RepoRow>
   );
 }
 
@@ -145,48 +74,57 @@ function RepoMcpServers({ repoName, onOpenMcp }: { repoName: string; onOpenMcp: 
   if (reached.length === 0) {
     return (
       <p className="px-4 py-3 text-xs text-muted-foreground" data-testid="settings-repo__mcp-none">
-        No MCP server reaches this repo's chats. Servers are set up in MCP.
+        No MCP server reaches this repo's chats.
       </p>
     );
   }
   return (
-    <ul className="divide-y divide-border">
-      {reached.map((server) => (
-        <li
-          key={server.id}
-          className="flex items-center justify-between gap-3 px-4 py-2.5"
-          data-testid="settings-repo__mcp-server"
-          data-server={server.name}
-        >
-          <div className="min-w-0">
-            <div className="truncate text-sm">{server.name}</div>
-            <div className="text-xs text-muted-foreground">
-              {server.scopeRepos ? "Scoped to this repo" : "All repos"}
-              {server.scopeHosts ? ", some workers only" : ""}
-            </div>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="settings-repo__open-mcp"
-            onClick={onOpenMcp}
+    <ul className="divide-y divide-dashed divide-border px-4 py-1">
+      {reached.map((server) => {
+        const others = (server.scopeRepos ?? []).filter((r) => r !== repoName).length;
+        return (
+          <li
+            key={server.id}
+            className="flex items-center justify-between gap-3 py-2.5"
+            data-testid="settings-repo__mcp-server"
+            data-server={server.name}
           >
-            Open in MCP
-          </Button>
-        </li>
-      ))}
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-semibold">{server.name}</span>
+              {server.scopeRepos ? (
+                <Chip tone="scoped">
+                  {others === 0
+                    ? "this repo only"
+                    : `this repo and ${others} other${others === 1 ? "" : "s"}`}
+                </Chip>
+              ) : (
+                <Chip>all repos</Chip>
+              )}
+              {server.scopeHosts ? <Chip tone="scoped">some workers</Chip> : null}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="settings-repo__open-mcp"
+              onClick={onOpenMcp}
+            >
+              Open in MCP
+            </Button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
-/** The cronjobs of this repo's worktrees. */
+/** The cronjobs of this repo's worktrees, with their schedule, worktree and whether they run. */
 function RepoCronjobs({ repo, onOpenCronjobs }: { repo: RepoInfo; onOpenCronjobs?: () => void }) {
   const jobs = useQuery({
     queryKey: ["cronjobs.list"],
     queryFn: () => trpc.cronjobs.list.query(),
   });
-  const worktreeIds = new Set<string>(
-    repo.worktrees.map((w) => toWorktreeId(repo.name, w.name, w.hostId ?? "local")),
+  const worktreeNames = new Map<string, string>(
+    repo.worktrees.map((w) => [toWorktreeId(repo.name, w.name, w.hostId ?? "local"), w.name]),
   );
   if (jobs.isLoading) {
     return <p className="px-4 py-3 text-xs text-muted-foreground">Loading…</p>;
@@ -198,7 +136,9 @@ function RepoCronjobs({ repo, onOpenCronjobs }: { repo: RepoInfo; onOpenCronjobs
       </p>
     );
   }
-  const mine = (jobs.data?.jobs ?? []).filter((j) => j.worktreeId && worktreeIds.has(j.worktreeId));
+  const mine = (jobs.data?.jobs ?? []).filter(
+    (j) => j.worktreeId && worktreeNames.has(j.worktreeId),
+  );
   if (mine.length === 0) {
     return (
       <p
@@ -210,19 +150,23 @@ function RepoCronjobs({ repo, onOpenCronjobs }: { repo: RepoInfo; onOpenCronjobs
     );
   }
   return (
-    <ul className="divide-y divide-border">
+    <ul className="divide-y divide-dashed divide-border px-4 py-1">
       {mine.map((job) => (
         <li
           key={`${job.fileKey}:${job.id}`}
-          className="flex items-center justify-between gap-3 px-4 py-2.5"
+          className="flex items-center justify-between gap-3 py-2.5"
           data-testid="settings-repo__cronjob"
           data-cronjob={job.id}
+          data-enabled={job.enabled ? "true" : "false"}
         >
           <div className="min-w-0">
-            <div className="truncate text-sm">{job.name}</div>
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold">{job.name}</span>
+              <Chip tone={job.enabled ? "ok" : "neutral"}>{job.enabled ? "on" : "off"}</Chip>
+            </div>
             <div className="truncate text-xs text-muted-foreground">
-              <span className="font-mono">{job.cronExpression}</span> · {job.worktreeId}
-              {job.enabled ? "" : " · disabled"}
+              <span className="font-mono">{job.cronExpression}</span> ·{" "}
+              {worktreeNames.get(job.worktreeId ?? "") ?? job.worktreeId}
             </div>
           </div>
           {onOpenCronjobs ? (
@@ -241,7 +185,10 @@ function RepoCronjobs({ repo, onOpenCronjobs }: { repo: RepoInfo; onOpenCronjobs
   );
 }
 
-/** Remove, at the top of the page. Disabled while the repo has worktrees; asks before it removes. */
+/**
+ * Remove, at the top of the page. Disabled while the repo has worktrees, with the reason as its
+ * tooltip; asks before it removes.
+ */
 function RemoveRepo({ repo, onRemoved }: { repo: RepoInfo; onRemoved: () => void }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
@@ -276,22 +223,28 @@ function RemoveRepo({ repo, onRemoved }: { repo: RepoInfo; onRemoved: () => void
           </Button>
         </div>
       ) : (
-        <Button
-          size="sm"
-          variant="outline"
-          aria-label={`Remove ${repo.name}`}
-          data-testid="settings-repo__remove"
-          disabled={worktrees > 0}
-          onClick={() => setConfirming(true)}
+        // A disabled button gets no pointer events, so the tooltip sits on a wrapper.
+        <span
+          title={
+            worktrees > 0
+              ? `Remove its ${worktrees} worktree${worktrees === 1 ? "" : "s"} first`
+              : undefined
+          }
+          data-testid="settings-repo__remove-reason"
         >
-          Remove repo…
-        </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            aria-label={`Remove ${repo.name}`}
+            data-testid="settings-repo__remove"
+            disabled={worktrees > 0}
+            onClick={() => setConfirming(true)}
+          >
+            Remove repo…
+          </Button>
+        </span>
       )}
-      {worktrees > 0 ? (
-        <p className="text-xs text-muted-foreground" data-testid="settings-repo__in-use">
-          Remove its {worktrees} worktree{worktrees === 1 ? "" : "s"} first.
-        </p>
-      ) : null}
       {error ? (
         <p role="alert" className="text-xs text-destructive">
           {error}
@@ -314,7 +267,7 @@ interface Props {
 /**
  * One repo's settings, opened from the Repos overview: label, workers, agent logins, environment,
  * continuity and browser profile, plus read-only views of the MCP servers and cronjobs that reach
- * it. Each control saves through the procedure it used before this page existed.
+ * it. Every control saves when it changes.
  */
 export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Props) {
   const { repos, isLoading } = useRepos();
@@ -347,144 +300,130 @@ export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Pr
     );
   }
 
-  const workerName = (id: string) => hosts.data?.find((h) => h.id === id)?.name ?? id;
-  const scrollTo = (id: SectionId) =>
-    document.getElementById(sectionDomId(id))?.scrollIntoView({ block: "start" });
+  const workerName = (id: string) => hosts.data?.find((h) => h.id === id)?.name?.trim() || id;
 
   return (
-    <SettingsPageContext.Provider value={false}>
-      <div className="space-y-6" data-testid="settings-repo" data-repo={repo.name}>
-        <header className="space-y-3">
-          {crumbs}
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              <h1 className="text-xl font-semibold" data-testid="settings-repo__title">
-                {repo.name}
-              </h1>
-              <p className="break-all font-mono text-xs text-muted-foreground">
-                {repo.remoteUrl ?? "No remote"}
-              </p>
-            </div>
-            <RemoveRepo repo={repo} onRemoved={onBack} />
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {SECTIONS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className="rounded-full bg-muted px-2.5 py-0.5 text-xs hover:bg-accent"
-                onClick={() => scrollTo(s.id)}
-              >
-                {s.title}
-              </button>
-            ))}
-          </div>
-          {repo.allowedHostIds ? (
-            <p
-              className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
-              data-testid="settings-repo__limited-note"
-            >
-              This repo is limited to{" "}
-              {repo.allowedHostIds.map(workerName).join(", ") || "no worker"}. Checkpoints are off
-              by default for a limited repo, and it continues only on another allowed worker.
+    <div className="space-y-4" data-testid="settings-repo" data-repo={repo.name}>
+      <header className="space-y-1">
+        {crumbs}
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold" data-testid="settings-repo__title">
+              {repo.name}
+            </h1>
+            <p className="break-all font-mono text-xs text-muted-foreground">
+              {repo.remoteUrl ?? "No remote"}
             </p>
-          ) : null}
-        </header>
-
-        <div id={sectionDomId("general")}>
-          <SettingsSection title="General">
-            <RepoLabelSelect repo={repo} />
-            <SettingsRow label="Remote" description="The repo's identity on the hub.">
-              <span
-                className={
-                  repo.remoteUrl
-                    ? "block max-w-80 break-all text-right font-mono text-xs text-muted-foreground"
-                    : "block max-w-80 text-right text-xs text-muted-foreground"
-                }
-                data-testid="settings-repo__url"
-              >
-                {repo.remoteUrl ?? "No remote. This repo lives on one worker only."}
-              </span>
-            </SettingsRow>
-            <SettingsRow label="Default branch" description="New worktrees branch from it.">
-              <span className="font-mono text-xs" data-testid="settings-repo__branch">
-                {repo.defaultBranch}
-              </span>
-            </SettingsRow>
-          </SettingsSection>
+          </div>
+          <RemoveRepo repo={repo} onRemoved={onBack} />
         </div>
+      </header>
 
-        <div id={sectionDomId("workers")}>
-          <SettingsSection
-            title="Workers"
-            description="Where this repo may run, and where each worker keeps its clone."
+      {repo.allowedHostIds ? (
+        <p
+          className="rounded-lg border border-warning/40 bg-warning-bg px-3 py-2 text-xs"
+          data-testid="settings-repo__limited-note"
+        >
+          This repo is limited to{" "}
+          <b>{repo.allowedHostIds.map(workerName).join(", ") || "no worker"}</b>. Checkpoints are
+          off by default for a limited repo, and it cannot continue on a worker it isn't allowed on.
+        </p>
+      ) : null}
+
+      <RepoSection
+        title="General"
+        description="How the repo is named and shown."
+        from="from Repos, Labels"
+      >
+        <RepoLabelSelect repo={repo} />
+        <RepoRow label="Remote" description="The repo's identity on the hub." readOnly>
+          <span
+            className={
+              repo.remoteUrl ? "break-all font-mono text-xs" : "text-xs text-muted-foreground"
+            }
+            data-testid="settings-repo__url"
           >
-            <RepoHostsEditor repo={repo} />
-            <RepoWorkerList repo={repo} />
-          </SettingsSection>
-        </div>
+            {repo.remoteUrl ?? "No remote. This repo lives on one worker only."}
+          </span>
+        </RepoRow>
+        <RepoRow label="Default branch" description="New worktrees branch from it." readOnly>
+          <span className="font-mono text-xs" data-testid="settings-repo__branch">
+            {repo.defaultBranch}
+          </span>
+          <Hint>Read from origin/HEAD</Hint>
+        </RepoRow>
+      </RepoSection>
 
-        <div id={sectionDomId("agents")}>
-          <SettingsSection
-            title="Agents"
-            description="Which login each coding agent uses in this repo."
-          >
-            <RepoLoginOverrides repoName={repo.name} />
-          </SettingsSection>
-        </div>
+      <RepoSection
+        title="Workers"
+        description="Where this repo may run and where each worker keeps its clone. The primary worker holds the default-branch worktree."
+        from="from Repos"
+        testId="settings-repo__workers"
+      >
+        <RepoWorkers repo={repo} />
+      </RepoSection>
 
-        <div id={sectionDomId("environment")}>
-          <SettingsSection
-            title="Environment"
-            description="What .band/environment.json in this repo asks for, checked against the workers."
-          >
-            <RepoEnvironmentDetails repoName={repo.name} />
-          </SettingsSection>
-        </div>
+      <RepoSection
+        title="Agents"
+        description="Which login each coding agent uses in this repo."
+        from="from Agent logins"
+      >
+        <RepoLoginOverrides repoName={repo.name} />
+      </RepoSection>
 
-        <div id={sectionDomId("continuity")}>
-          <SettingsSection
-            title="Continuity"
-            description="What happens when a worker goes offline."
-          >
-            <CheckpointsSwitch repo={repo} />
-            <AutoContinueSwitch repo={repo} />
-          </SettingsSection>
-        </div>
+      <RepoSection
+        title="Environment"
+        description={
+          <>
+            What <span className="font-mono">.band/environment.json</span> in this repo asks for,
+            checked against the workers.
+          </>
+        }
+        from="from Environment"
+      >
+        <RepoEnvironmentDetails repoName={repo.name} />
+      </RepoSection>
 
-        <div id={sectionDomId("browser")}>
-          <SettingsSection title="Browser">
-            <SettingsRow
-              variant="responsive"
-              label="Default profile"
-              description="New browser tabs in any worktree of this repo open with it."
-            >
-              <RepoBrowserProfileSelect repoName={repo.name} />
-            </SettingsRow>
-          </SettingsSection>
-        </div>
+      <RepoSection
+        title="Continuity"
+        description="What happens when a worker goes offline."
+        from="from Repos"
+      >
+        <CheckpointsSwitch repo={repo} />
+        <AutoContinueSwitch repo={repo} />
+      </RepoSection>
 
-        <div id={sectionDomId("mcp")}>
-          <SettingsSection
-            title="MCP servers"
-            description="Servers this repo's chats get. Servers are set up in MCP."
-          >
-            {admin ? (
-              <RepoMcpServers repoName={repo.name} onOpenMcp={onOpenMcp} />
-            ) : (
-              <p className="px-4 py-3 text-xs text-muted-foreground">
-                Listing MCP servers needs an admin token.
-              </p>
-            )}
-          </SettingsSection>
-        </div>
+      <RepoSection
+        title="Browser"
+        description="The cookie profile new browser tabs in this repo open with."
+        from="from Browser"
+      >
+        <RepoRow label="Default profile" description="Applies to every worktree of this repo.">
+          <RepoBrowserProfileSelect repoName={repo.name} />
+        </RepoRow>
+      </RepoSection>
 
-        <div id={sectionDomId("automation")}>
-          <SettingsSection title="Automation" description="Cronjobs in this repo's worktrees.">
-            <RepoCronjobs repo={repo} onOpenCronjobs={onOpenCronjobs} />
-          </SettingsSection>
-        </div>
-      </div>
-    </SettingsPageContext.Provider>
+      <RepoSection
+        title="MCP servers"
+        description="Servers this repo's chats get. Servers are set up in MCP."
+        from="view of MCP"
+      >
+        {admin ? (
+          <RepoMcpServers repoName={repo.name} onOpenMcp={onOpenMcp} />
+        ) : (
+          <p className="px-4 py-3 text-xs text-muted-foreground">
+            Listing MCP servers needs an admin token.
+          </p>
+        )}
+      </RepoSection>
+
+      <RepoSection
+        title="Automation"
+        description="Cronjobs in this repo's worktrees."
+        from="view of Cronjobs"
+      >
+        <RepoCronjobs repo={repo} onOpenCronjobs={onOpenCronjobs} />
+      </RepoSection>
+    </div>
   );
 }

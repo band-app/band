@@ -29,6 +29,7 @@ import { isDesktop } from "../../lib/is-desktop";
 import { useToolbarOverflow } from "../../lib/toolbar-overflow";
 import { trpc } from "../../lib/trpc-client";
 import { useAdapter, useCapabilities } from "../context";
+import { useRepos } from "../hooks/use-repos";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { useRestartTerminalDaemon } from "../hooks/use-terminal-daemon";
@@ -296,6 +297,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
     if (!open) setRepoPage(null);
   }, [open]);
   const toolbar = useToolbarOverflow();
+  const { repos } = useRepos();
   const [navQuery, setNavQuery] = useState("");
   const isAdmin = useIsAdmin();
   const availableSections = SETTINGS_SECTIONS.filter(
@@ -737,11 +739,19 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                         setRepoPage(null);
                       }}
                       className={cn(
-                        "rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap transition-colors hover:bg-accent/60",
+                        "flex items-center rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap transition-colors hover:bg-accent/60",
                         active === section.id && "bg-accent font-medium text-accent-foreground",
                       )}
                     >
                       {section.title}
+                      {section.id === "repos" && repos.length > 0 ? (
+                        <span
+                          className="ml-auto pl-2 text-[11px] font-normal text-muted-foreground"
+                          data-testid="settings-page__repos-count"
+                        >
+                          {repos.length}
+                        </span>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -1534,21 +1544,24 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                 </SettingsPageContext.Provider>
               </div>
             </div>
-            {/* The footer sits on the bottom screen edge, so it clears the home indicator. */}
-            <DialogFooter
-              data-testid="settings-page__footer"
-              className="border-t border-border px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-end"
-            >
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleSaveAndClose}
-                disabled={!isDirty}
-                aria-label="Save"
+            {/* The footer sits on the bottom screen edge, so it clears the home indicator. Every
+                control on the Repos pages saves at once, so they have no Save. */}
+            {active === "repos" ? null : (
+              <DialogFooter
+                data-testid="settings-page__footer"
+                className="border-t border-border px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-end"
               >
-                Save
-              </Button>
-            </DialogFooter>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSaveAndClose}
+                  disabled={!isDirty}
+                  aria-label="Save"
+                >
+                  Save
+                </Button>
+              </DialogFooter>
+            )}
           </main>
         </div>
         <RestartTerminalDaemonDialog

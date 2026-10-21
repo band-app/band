@@ -103,11 +103,10 @@ test("adds, defaults, overrides and removes a login without ever showing its sec
   const override = settingsPage.repoLoginOverride("claude-code", "logins");
   await settingsPage.expectRowVisible(override);
   await settingsPage.setRepoLoginOverride("claude-code", "logins", "Spare");
-  // The override shows after a reload, and in the overview's Logins column.
+  // The override shows after a reload, marked with a chip.
   await settingsPage.goto();
-  await settingsPage.openDialog("repos");
-  await expect(settingsPage.repoCell("logins", "logins")).toContainText("Spare");
-  await settingsPage.openRepo("logins");
+  await settingsPage.openRepoSettings("logins");
+  await expect(settingsPage.repoLoginOverrideChip("logins")).toBeVisible();
   await expect
     .poll(() => settingsPage.repoLoginOverrideLabel("claude-code", "logins"))
     .toBe("Spare");
@@ -118,6 +117,7 @@ test("adds, defaults, overrides and removes a login without ever showing its sec
   // Removing a login clears the override that used it.
   await settingsPage.openRepoSettings("logins");
   await expect(override).toHaveValue("");
+  await expect(settingsPage.repoLoginOverrideChip("logins")).toHaveCount(0);
 });
 
 test("a chat can pick a login, and the agent gets it", async ({ page }) => {

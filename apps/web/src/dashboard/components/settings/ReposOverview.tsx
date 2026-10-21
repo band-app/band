@@ -1,10 +1,10 @@
 import { Input } from "@band-app/ui";
+import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRepos } from "../../hooks/use-repos";
 import { useSettingsQuery } from "../../hooks/use-settings-query";
 import { useHostsList } from "../../hooks/use-update-status";
 import type { LabelDefinition, RepoInfo } from "../../types";
-import { useAgentLogins, useLoginAgents } from "./AgentLoginsSettings";
 
 /** The worktrees a repo counts as in use: every listed worktree but the hub's own checkout. */
 export function repoWorktreeCount(repo: RepoInfo): number {
@@ -26,17 +26,16 @@ function matchesQuery(repo: RepoInfo, labels: LabelDefinition[], query: string):
 const ALL = "";
 
 /**
- * Settings > Repos: every repo on the hub in one table, with the settings people scan for. The
- * filter has focus when the page opens, and Enter opens the first repo that matches it. A row opens
- * the repo's page. Repos are added from the Repos panel in the sidebar.
+ * Settings > Repos: every repo on the hub in one list, each with its label colour, name, remote
+ * and, for a repo limited to some workers, which ones. The filter has focus when the page opens,
+ * and Enter opens the first repo that matches it. A row opens the repo's page. Repos are added
+ * from the Repos panel in the sidebar.
  */
 export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
   const { repos } = useRepos();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
   const hosts = useHostsList();
-  const logins = useAgentLogins();
-  const loginAgents = useLoginAgents();
   const [query, setQuery] = useState("");
   const [worker, setWorker] = useState(ALL);
   const [label, setLabel] = useState(ALL);
@@ -53,15 +52,6 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
       (worker === ALL || allowsWorker(repo, worker)) &&
       (label === ALL || repo.label === label),
   );
-
-  const overridesOf = (repoName: string) =>
-    (logins.data?.repoOverrides ?? [])
-      .filter((o) => o.repo === repoName)
-      .map((o) => {
-        const agent = loginAgents.find((a) => a.type === o.agentType)?.label ?? o.agentType;
-        const login = logins.data?.logins.find((l) => l.id === o.loginId)?.label ?? o.loginId;
-        return `${agent}: ${login}`;
-      });
 
   return (
     <div className="space-y-3" data-testid="settings-repos">
@@ -120,105 +110,48 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
           No repo matches the filters.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Repo</th>
-                <th className="px-3 py-2 font-medium">Remote</th>
-                <th className="px-3 py-2 font-medium">Workers</th>
-                <th className="px-3 py-2 font-medium">Worktrees</th>
-                <th className="px-3 py-2 font-medium">Checkpoints</th>
-                <th className="px-3 py-2 font-medium">Logins</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {visible.map((repo) => {
-                const repoLabel = labels.find((l) => l.id === repo.label);
-                const checkpoints = repo.checkpointsEnabled ?? !repo.allowedHostIds;
-                const overrides = overridesOf(repo.name);
-                return (
-                  <tr
-                    key={repo.name}
-                    className="cursor-pointer align-middle hover:bg-accent/40"
-                    data-testid="settings-repos__row"
-                    data-repo={repo.name}
-                    onClick={() => onOpen(repo.name)}
-                  >
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 text-left font-medium hover:underline"
-                        data-testid="settings-repos__open"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpen(repo.name);
-                        }}
-                      >
-                        {repoLabel ? (
-                          <span
-                            aria-hidden
-                            className="size-2.5 shrink-0 rounded-[3px]"
-                            style={{ backgroundColor: repoLabel.color }}
-                          />
-                        ) : null}
-                        {repo.name}
-                      </button>
-                    </td>
-                    <td
-                      className="max-w-56 truncate px-3 py-2 font-mono text-xs text-muted-foreground"
-                      title={repo.remoteUrl}
+        <ul className="overflow-hidden rounded-xl border border-border divide-y divide-border">
+          {visible.map((repo) => {
+            const repoLabel = labels.find((l) => l.id === repo.label);
+            const limitedTo = repo.allowedHostIds?.map(workerName).join(", ");
+            return (
+              <li key={repo.name}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/40"
+                  data-testid="settings-repos__row"
+                  data-repo={repo.name}
+                  data-limited={repo.allowedHostIds ? "true" : "false"}
+                  onClick={() => onOpen(repo.name)}
+                >
+                  <span
+                    aria-hidden
+                    className="size-2.5 shrink-0 rounded-[3px]"
+                    style={repoLabel ? { backgroundColor: repoLabel.color } : undefined}
+                  />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-semibold">{repo.name}</span>
+                    <span
+                      className="truncate font-mono text-xs text-muted-foreground"
                       data-testid="settings-repos__url"
                     >
                       {repo.remoteUrl ?? "no remote"}
-                    </td>
-                    <td
-                      className="px-3 py-2 text-xs"
-                      data-testid="settings-repos__workers"
-                      data-allowed={repo.allowedHostIds ? repo.allowedHostIds.join(",") : "all"}
+                    </span>
+                  </span>
+                  {limitedTo ? (
+                    <span
+                      className="shrink-0 text-xs text-muted-foreground"
+                      data-testid="settings-repos__limited"
                     >
-                      {repo.allowedHostIds
-                        ? `${repo.allowedHostIds.map(workerName).join(", ") || "none"} only`
-                        : "all workers"}
-                    </td>
-                    <td className="px-3 py-2 text-xs" data-testid="settings-repos__worktrees">
-                      {repoWorktreeCount(repo)}
-                    </td>
-                    <td
-                      className="px-3 py-2 text-xs"
-                      data-testid="settings-repos__checkpoints"
-                      data-enabled={checkpoints ? "true" : "false"}
-                    >
-                      {checkpoints ? "on" : "off"}
-                    </td>
-                    <td
-                      className="px-3 py-2 text-xs"
-                      data-testid="settings-repos__logins"
-                      data-overrides={logins.data ? overrides.length : undefined}
-                    >
-                      {logins.isError || logins.isLoading ? (
-                        <span
-                          className="text-muted-foreground"
-                          title={
-                            logins.isError
-                              ? "Reading login overrides needs an admin token."
-                              : undefined
-                          }
-                        >
-                          —
-                        </span>
-                      ) : overrides.length > 0 ? (
-                        overrides.join(", ")
-                      ) : (
-                        <span className="text-muted-foreground">defaults</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      {limitedTo} only
+                    </span>
+                  ) : null}
+                  <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

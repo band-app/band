@@ -1,7 +1,7 @@
 /**
- * Page object for the "Available on" and "Primary host" fields (`RepoHostsFields.tsx`) that the
- * Add repo dialog and a repo row in Settings > Repos both show. It is built on the element that
- * contains the fields, so each owner scopes it to its own copy.
+ * Page object for the "Available on" and "Primary host" fields (`RepoHostsFields.tsx`) of the
+ * Add repo dialog. It is built on the element that contains the fields. A repo's page in Settings
+ * > Repos has its own Workers controls (`SettingsPage.ts`).
  */
 
 import { expect, type Locator, test } from "@playwright/test";

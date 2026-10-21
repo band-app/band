@@ -21,8 +21,9 @@ interface Props {
 }
 
 /**
- * "Available on: All hosts | Only: [hosts]" and "Primary host". Used by the Add repo dialog and
- * Settings > Repos. Narrowing the hosts moves the primary host onto one that is still allowed.
+ * "Available on: All hosts | Only: [hosts]" and "Primary host", in the Add repo dialog. A repo's
+ * page in Settings > Repos has its own controls (`settings/RepoWorkers.tsx`). Narrowing the hosts
+ * moves the primary host onto one that is still allowed.
  */
 export function RepoHostsFields({ hosts, value, onChange, idPrefix, disabled }: Props) {
   const only = value.allowedHostIds !== null;

@@ -1,41 +1,23 @@
-import { Button, Switch } from "@band-app/ui";
+import { Switch } from "@band-app/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
-import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
-import { RepoHostsFields, type RepoHostsValue, repoHostsValid } from "../RepoHostsFields";
 import { useIsAdmin } from "./DevicesSettings";
-import { SettingsRow } from "./SettingsRow";
+import { Hint, RepoRow } from "./repo-page-ui";
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Where a repo may run and which worker lists its default branch, with a Save button. */
-export function RepoHostsEditor({ repo }: { repo: RepoInfo }) {
+/** Saves one continuity field through `repos.update` and refreshes the repo list. */
+function useRepoSwitch(repoName: string, field: "checkpointsEnabled" | "autoContinue") {
   const queryClient = useQueryClient();
-  const hosts = useHostsList();
-  const stored: RepoHostsValue = {
-    allowedHostIds: repo.allowedHostIds ?? null,
-    primaryHostId: repo.primaryHostId ?? "",
-  };
-  const [edit, setEdit] = useState<RepoHostsValue | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const value = edit ?? stored;
-  const options = (hosts.data ?? [])
-    .filter((h) => h.usable)
-    .map((h) => ({ id: h.id, name: h.name }));
-
-  const save = async () => {
+  const change = async (next: boolean) => {
     setError(null);
     setSaving(true);
     try {
-      await trpc.repos.update.mutate({
-        name: repo.name,
-        allowedHostIds: value.allowedHostIds,
-        primaryHostId: value.primaryHostId || null,
-      });
-      setEdit(null);
+      await trpc.repos.update.mutate({ name: repoName, [field]: next });
       await queryClient.invalidateQueries({ queryKey: ["repos"] });
     } catch (err) {
       setError(errorText(err));
@@ -43,42 +25,7 @@ export function RepoHostsEditor({ repo }: { repo: RepoInfo }) {
       setSaving(false);
     }
   };
-
-  return (
-    <div className="space-y-2 px-4 py-3" data-testid="settings-repo__hosts">
-      <RepoHostsFields
-        hosts={options}
-        value={value}
-        onChange={setEdit}
-        idPrefix={`settings-repo-${repo.name}`}
-        disabled={saving}
-      />
-      {edit ? (
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
-            Reset
-          </Button>
-          <Button
-            size="sm"
-            data-testid="settings-repo__hosts-save"
-            disabled={saving || !repoHostsValid(value)}
-            onClick={save}
-          >
-            Save workers
-          </Button>
-        </div>
-      ) : null}
-      {error ? (
-        <p
-          role="alert"
-          className="text-xs text-destructive"
-          data-testid="settings-repo__hosts-error"
-        >
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
+  return { error, saving, change };
 }
 
 /**
@@ -88,56 +35,16 @@ export function RepoHostsEditor({ repo }: { repo: RepoInfo }) {
  * machines.
  */
 export function CheckpointsSwitch({ repo }: { repo: RepoInfo }) {
-  const queryClient = useQueryClient();
   const admin = useIsAdmin();
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { error, saving, change } = useRepoSwitch(repo.name, "checkpointsEnabled");
   const enabled = repo.checkpointsEnabled ?? !repo.allowedHostIds;
   const followsDefault = (repo.checkpointsSetting ?? null) === null;
-
-  const change = async (next: boolean) => {
-    setError(null);
-    setSaving(true);
-    try {
-      await trpc.repos.update.mutate({ name: repo.name, checkpointsEnabled: next });
-      await queryClient.invalidateQueries({ queryKey: ["repos"] });
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const id = `settings-repo-${repo.name}-checkpoints`;
   return (
-    <SettingsRow
+    <RepoRow
       htmlFor={id}
       label="Checkpoints on the hub"
-      description={
-        <span
-          data-testid="settings-repo__checkpoints-note"
-          data-default={followsDefault ? (enabled ? "all-workers" : "limited") : "stored"}
-        >
-          {enabled
-            ? "The hub keeps recent copies of this repo's uncommitted work, so a worktree stays readable when its worker goes offline and can be restored on another worker."
-            : "The hub stores nothing for this repo. If a worker goes offline its uncommitted work cannot be restored elsewhere."}
-          {followsDefault
-            ? enabled
-              ? " On by default because the repo is available on all workers."
-              : " Off by default because the repo is limited to chosen workers."
-            : ""}
-          {admin ? "" : " Changing this needs an admin token."}
-          {error ? (
-            <span
-              role="alert"
-              className="block text-destructive"
-              data-testid="settings-repo__checkpoints-error"
-            >
-              {error}
-            </span>
-          ) : null}
-        </span>
-      }
+      description="Recent snapshots of each worktree, so another worker can continue it."
     >
       <Switch
         id={id}
@@ -147,69 +54,75 @@ export function CheckpointsSwitch({ repo }: { repo: RepoInfo }) {
         data-testid="settings-repo__checkpoints-switch"
         onCheckedChange={(next: boolean) => void change(next)}
       />
-    </SettingsRow>
+      <span
+        className="text-xs text-muted-foreground"
+        data-testid="settings-repo__checkpoints-note"
+        data-default={followsDefault ? (enabled ? "all-workers" : "limited") : "stored"}
+      >
+        {followsDefault
+          ? enabled
+            ? "On by default for a repo allowed on all workers"
+            : "Off by default for a limited repo, so its code stays on its workers"
+          : enabled
+            ? "On"
+            : "Off"}
+      </span>
+      {admin ? null : <Hint>Changing this needs an admin token.</Hint>}
+      {error ? (
+        <p
+          role="alert"
+          className="w-full text-xs text-destructive"
+          data-testid="settings-repo__checkpoints-error"
+        >
+          {error}
+        </p>
+      ) : null}
+    </RepoRow>
   );
 }
 
 /**
  * Whether a worktree whose worker is offline continues on another worker without a prompt. It
- * applies while the newest checkpoint is younger than 30 minutes; an older one always asks.
+ * applies while the newest checkpoint is younger than 30 minutes; an older one always asks. A repo
+ * with one allowed worker has nowhere to continue, so the switch is off and disabled there.
  */
 export function AutoContinueSwitch({ repo }: { repo: RepoInfo }) {
-  const queryClient = useQueryClient();
   const admin = useIsAdmin();
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const enabled = repo.autoContinue ?? false;
+  const { error, saving, change } = useRepoSwitch(repo.name, "autoContinue");
   const singleWorker = repo.allowedHostIds?.length === 1;
-
-  const change = async (next: boolean) => {
-    setError(null);
-    setSaving(true);
-    try {
-      await trpc.repos.update.mutate({ name: repo.name, autoContinue: next });
-      await queryClient.invalidateQueries({ queryKey: ["repos"] });
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
+  const enabled = !singleWorker && (repo.autoContinue ?? false);
   const id = `settings-repo-${repo.name}-auto-continue`;
   return (
-    <SettingsRow
+    <RepoRow
       htmlFor={id}
       label="Continue automatically"
       description={
-        <span data-testid="settings-repo__auto-continue-note">
-          When a worktree's worker is offline and you message, open a terminal in or start an agent
-          there, Band continues it on another allowed worker without asking, if its checkpoint is
-          younger than 30 minutes. An older checkpoint always asks. Needs checkpoints.
-          {singleWorker
-            ? " This repo has one allowed worker, so there is none to continue on."
-            : ""}
-          {admin ? "" : " Changing this needs an admin token."}
-          {error ? (
-            <span
-              role="alert"
-              className="block text-destructive"
-              data-testid="settings-repo__auto-continue-error"
-            >
-              {error}
-            </span>
-          ) : null}
-        </span>
+        singleWorker
+          ? "Needs another allowed worker."
+          : "Move a worktree to another worker when its worker is offline, if the checkpoint is under 30 minutes old."
       }
     >
       <Switch
         id={id}
         checked={enabled}
-        disabled={!admin || saving}
+        disabled={!admin || saving || singleWorker}
         aria-label={`Continue on another worker automatically for ${repo.name}`}
         data-testid="settings-repo__auto-continue-switch"
         onCheckedChange={(next: boolean) => void change(next)}
       />
-    </SettingsRow>
+      {singleWorker ? (
+        <Hint testId="settings-repo__auto-continue-unavailable">Unavailable</Hint>
+      ) : null}
+      {admin || singleWorker ? null : <Hint>Changing this needs an admin token.</Hint>}
+      {error ? (
+        <p
+          role="alert"
+          className="w-full text-xs text-destructive"
+          data-testid="settings-repo__auto-continue-error"
+        >
+          {error}
+        </p>
+      ) : null}
+    </RepoRow>
   );
 }
