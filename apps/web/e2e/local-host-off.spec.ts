@@ -157,6 +157,20 @@ test("the host picker offers Local next to a worker when local worktrees are on"
   await expect
     .poll(() => worktreePage.newWorktreeHostOptionValues())
     .toEqual(["local", ...hub.workerIds]);
+
+  // The dialog opens on the branch, shows no roots text and keeps base branch behind More options.
+  await expect(worktreePage.newWorktreeBranchInput).toBeFocused();
+  await expect(worktreePage.newWorktreeDialog).not.toContainText("Must be inside");
+  await expect(worktreePage.newWorktreeBaseInput).toHaveCount(0);
+  await worktreePage.openNewWorktreeMoreOptions();
+  await expect(worktreePage.newWorktreeBaseInput).toHaveAttribute("placeholder", /\S/);
+
+  // A name that needs slugging shows one muted note, and Create stays enabled.
+  await worktreePage.fillNewWorktreeBranch("My Feature");
+  await expect(worktreePage.newWorktreeSlugNote).toContainText("my-feature");
+  await expect(
+    worktreePage.newWorktreeDialog.getByRole("button", { name: "Create" }),
+  ).toBeEnabled();
 });
 
 test("the host picker does not offer Local when local worktrees are off", async ({ page }) => {

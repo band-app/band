@@ -170,9 +170,7 @@ test("the Hosts screen shows what the worker offers and removes it once offline"
   await expect(settingsPage.hostRow(hostId)).toHaveCount(0);
 });
 
-test("the New Worktree dialog lists the worker's roots and explains a bad path", async ({
-  page,
-}) => {
+test("the New worktree dialog explains a bad path in the error popover", async ({ page }) => {
   const { hostId, root, handle } = await joinWorker();
   worker = handle;
 
@@ -185,17 +183,20 @@ test("the New Worktree dialog lists the worker's roots and explains a bad path",
     hostRepoPath: "~/not-here",
     branch: "bad-path",
   });
-  await expect(worktreePage.newWorktreeHostRoots).toContainText(root);
+  await expect(worktreePage.newWorktreeDialog).not.toContainText("Must be inside");
 
   // `~` is the worker's home, which is not under its root, so the error names the root.
   await worktreePage.submitNewWorktree();
-  await expect(worktreePage.newWorktreeError).toContainText("not-here");
-  await expect(worktreePage.newWorktreeError).toContainText(root);
+  const refusal = await worktreePage.openNewWorktreeError();
+  await expect(refusal).toContainText("not-here");
+  await expect(refusal).toContainText(root);
+  await expect(worktreePage.newWorktreeDialog).toBeVisible();
+  await expect(worktreePage.newWorktreeHostPathInput).toHaveValue("~/not-here");
 
   // A relative path is refused with the instruction to use an absolute one.
   await worktreePage.newWorktreeHostPathInput.fill("proj");
   await worktreePage.submitNewWorktree();
-  await expect(worktreePage.newWorktreeError).toContainText("absolute path");
+  await expect(await worktreePage.openNewWorktreeError()).toContainText("absolute path");
 });
 
 /** Issues a bootstrap token through the API and starts a worker with it. */
