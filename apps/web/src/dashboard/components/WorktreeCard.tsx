@@ -21,7 +21,6 @@ import {
   Folder,
   FolderOpen,
   GitCompareArrows,
-  Home,
   Link2Off,
   Loader,
   Moon,
@@ -63,6 +62,7 @@ import { GitStatusIndicator } from "./GitStatusIndicator";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { RepoAvatar } from "./RepoAvatar";
+import { RootStar } from "./RootStar";
 import { SetParentDialog } from "./SetParentDialog";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorktreeLabel } from "./WorktreeLabel";
@@ -379,54 +379,35 @@ export const WorktreeCard = memo(function WorktreeCard({
           <Tooltip delayDuration={800}>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                {isRoot ? (
-                  // On the root card the house is AgentStatusIndicator's idle
-                  // fallback (the slot other cards use for the branch glyph),
-                  // so an active agent's status dot replaces the house rather
-                  // than sitting beside it.
-                  <AgentStatusIndicator
-                    agent={status?.agent}
-                    tabStatuses={status?.tabStatuses}
-                    isActive={isActive}
-                    fallback={
-                      <Home
-                        data-testid="worktree-card__home-icon"
-                        className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
-                      />
-                    }
-                  />
-                ) : (
-                  <AgentStatusIndicator
-                    agent={status?.agent}
-                    tabStatuses={status?.tabStatuses}
-                    isActive={isActive}
-                  />
-                )}
+                <AgentStatusIndicator agent={status?.agent} tabStatuses={status?.tabStatuses} />
                 {showRepoName ? (
                   // Pinned section: stack the branch name over the repo name
                   // as a compact two-line block so a mixed list of pinned cards
                   // stays scannable without a long, mid-truncated
                   // `repo/branch` string on one line. Shared with the ⌘K
                   // worktree picker via `WorktreeLabel`.
-                  <WorktreeLabel
-                    name={worktree.name}
-                    repoName={repoName}
-                    isActive={isActive}
-                    hostTag={hostTagText}
-                    repoIcon={
-                      <RepoAvatar
-                        avatar={repoAvatar}
-                        className="size-3 shrink-0 rounded-sm"
-                        testId={`worktree-label__avatar--${repoName}`}
-                        fallback={
-                          <Folder
-                            data-testid={`worktree-label__avatar-fallback--${repoName}`}
-                            className="size-3 shrink-0 text-muted-foreground"
-                          />
-                        }
-                      />
-                    }
-                  />
+                  <>
+                    <WorktreeLabel
+                      name={worktree.name}
+                      repoName={repoName}
+                      isActive={isActive}
+                      hostTag={hostTagText}
+                      repoIcon={
+                        <RepoAvatar
+                          avatar={repoAvatar}
+                          className="size-3 shrink-0 rounded-sm"
+                          testId={`worktree-label__avatar--${repoName}`}
+                          fallback={
+                            <Folder
+                              data-testid={`worktree-label__avatar-fallback--${repoName}`}
+                              className="size-3 shrink-0 text-muted-foreground"
+                            />
+                          }
+                        />
+                      }
+                    />
+                    {isRoot && <RootStar />}
+                  </>
                 ) : (
                   <>
                     <span
@@ -434,6 +415,7 @@ export const WorktreeCard = memo(function WorktreeCard({
                     >
                       {worktree.name}
                     </span>
+                    {isRoot && <RootStar />}
                     {hostTagText && (
                       <span
                         data-testid="worktree-label__host"

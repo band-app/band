@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { Home, Pin, PinOff } from "lucide-react";
+import { Pin, PinOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCapabilities } from "../context";
 import { usePinnedWorktrees } from "../hooks/use-pinned-worktrees";
@@ -19,6 +19,7 @@ import { useRepos } from "../hooks/use-repos";
 import { getRecentWorktreeOrder, recordWorktreeAccess } from "../lib/recent-worktrees";
 import { useDashboardStore } from "../stores/index";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
+import { RootStar } from "./RootStar";
 import { WorktreeLabel } from "./WorktreeLabel";
 
 interface WorktreeEntry {
@@ -30,8 +31,8 @@ interface WorktreeEntry {
   branch: string;
   /**
    * True when this worktree is the repo's main checkout (its default-branch
-   * worktree, and the repo is a git repo). Marked with a house icon
-   * instead of the branch glyph, mirroring the repo-list root card.
+   * worktree, and the repo is a git repo). Marked with a star
+   * after its title, mirroring the repo-list root card.
    */
   isRoot: boolean;
 }
@@ -167,27 +168,16 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
                   // repo-list rows.
                   className="group touch-manipulation [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:gap-3"
                 >
-                  {/* Root worktrees get a house icon (the same identity marker
-                      as the repo-list root card); an active agent's status
-                      dot replaces it via the fallback slot. */}
-                  <AgentStatusIndicator
-                    agent={agent}
-                    isActive={isActive}
-                    fallback={
-                      entry.isRoot ? (
-                        <Home
-                          data-testid={`worktree-picker__home-icon--${entry.worktreeId}`}
-                          className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
-                        />
-                      ) : undefined
-                    }
-                  />
+                  <AgentStatusIndicator agent={agent} />
                   <WorktreeLabel
                     name={entry.name}
                     repoName={entry.repoName}
                     isActive={isActive}
                     tone="switcher"
                   />
+                  {entry.isRoot && (
+                    <RootStar testId={`worktree-picker__root-star--${entry.worktreeId}`} />
+                  )}
                   <div className="ml-auto flex items-center gap-2">
                     {isActive && (
                       <span className="shrink-0 text-xs text-muted-foreground">current</span>

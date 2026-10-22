@@ -120,9 +120,13 @@ test("the sidebar card shows a distinct mark for each state", async ({ page }, t
     await page.mouse.move(0, 0);
   }
 
-  // Idle shows no mark.
+  // Idle shows the faint dot.
   await worktree.setAgentStatus(WORKTREE, "idle");
-  await expect(worktree.agentStatusDot(WORKTREE)).toHaveCount(0);
+  await expect(worktree.agentStatusDot(WORKTREE)).toHaveAttribute("data-status", "idle");
+  await expect(worktree.agentStatusDot(WORKTREE).getByRole("img")).toHaveAttribute(
+    "aria-label",
+    "No agent activity",
+  );
 });
 
 test("the worktree picker shows the same marks", async ({ page }, testInfo) => {

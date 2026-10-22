@@ -101,15 +101,39 @@ export class WorktreePage {
     return this.worktreeCard(worktreeId).getByTestId("worktree-card__deleting");
   }
 
-  /** The root (default-branch) worktree card's house icon — the identity
-   *  marker `AgentStatusIndicator` renders as its idle fallback for the root
-   *  card. `data-testid` set on the lucide `Home` glyph in `WorktreeCard`.
-   *  Scoped to the card so it never matches another repo's root. Present
-   *  only while the root agent is idle; a live status replaces it with the
-   *  status dot — mirroring how the branch glyph is replaced on non-root
-   *  cards. */
-  rootWorktreeHomeIcon(worktreeId: string): Locator {
-    return this.worktreeCard(worktreeId).getByTestId("worktree-card__home-icon");
+  /** The gray star after the root (default-branch) worktree's title. Scoped to the card. */
+  rootWorktreeStar(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).getByTestId("worktree-card__root-star");
+  }
+
+  /** The "Repository root" tooltip, shown after hovering a root star. */
+  rootStarTooltip(): Locator {
+    return this.page.getByTestId("worktree-card__root-star-tooltip");
+  }
+
+  /** The branch or house glyphs the left slot used to show when idle. Matches by lucide's
+   *  class names because the glyphs no longer carry a test id. Scoped to the card. */
+  legacyIdentityIcons(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).locator(
+      "svg.lucide-git-branch, svg.lucide-house, svg.lucide-home",
+    );
+  }
+
+  /** A worktree card inside the Pinned section. */
+  pinnedWorktreeCard(worktreeId: string): Locator {
+    return this.page
+      .getByTestId("repo-list__pinned")
+      .getByTestId(`repo-list__worktree-card--${worktreeId}`);
+  }
+
+  /** The agent status mark of a card inside the Pinned section. */
+  pinnedAgentStatus(worktreeId: string): Locator {
+    return this.pinnedWorktreeCard(worktreeId).getByTestId("worktree-card__agent-status");
+  }
+
+  /** The root star of a card inside the Pinned section. */
+  pinnedRootStar(worktreeId: string): Locator {
+    return this.pinnedWorktreeCard(worktreeId).getByTestId("worktree-card__root-star");
   }
 
   /** The "uncommitted changes" mark of a worktree card's git status
@@ -119,8 +143,8 @@ export class WorktreePage {
   }
 
   /** The agent status dot inside a worktree card. `data-testid` set on the
-   *  dot `<span>` in `AgentStatusIndicator`, shown only when the agent status
-   *  is not idle. Its `data-status` is the state. Scoped to the card. */
+   *  mark `<span>` in `AgentStatusIndicator`, always shown (a faint dot
+   *  with `data-status="idle"` when there is no activity). Its `data-status` is the state. Scoped to the card. */
   agentStatusDot(worktreeId: string): Locator {
     return this.worktreeCard(worktreeId).getByTestId("worktree-card__agent-status");
   }

@@ -22,6 +22,19 @@ name: S1 repos and worktrees on the home screen
 - assertVisible:
     id: home__worktree-beta-main
     text: ".*main.*This hub.*"
+# No agent runs yet: every row shows the faint idle dot, and only the root has the star.
+- assertVisible:
+    id: home__state-alpha-feat-mobile
+    text: "No agent activity"
+- assertVisible:
+    id: home__state-alpha-main
+    text: "No agent activity"
+- assertVisible:
+    id: worktree__root-star-alpha-main
+- assertVisible:
+    id: worktree__root-star-beta-main
+- assertNotVisible:
+    id: worktree__root-star-alpha-feat-mobile
 - takeScreenshot: s1-repos-and-worktrees
 # Collapse a repo; the choice is kept after a restart.
 - tapOn:

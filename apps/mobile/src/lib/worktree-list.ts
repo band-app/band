@@ -136,7 +136,7 @@ export interface WorktreeRow {
   /** True when the worktree is not on the hub's own host, so the row carries a host tag. */
   remote: boolean;
   pinned: boolean;
-  /** The repo's main worktree, which the web marks with a house instead of a branch. */
+  /** The repo's main worktree, which the web and the mobile row mark with a star after its name. */
   main: boolean;
   /** The row is the single folder of a plain (non-git) repo. */
   plain: boolean;

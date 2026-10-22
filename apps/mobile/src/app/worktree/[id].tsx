@@ -378,7 +378,7 @@ function NeighbourPage({
 }) {
   return (
     <View style={[local.neighbour, { width, height }]} testID={`worktree__neighbour-${direction}`}>
-      <StateIcon state={tab.shown} />
+      {tab.shown !== "idle" ? <StateIcon state={tab.shown} /> : null}
       {direction === "prev" ? <Icon icon={ChevronLeft} color={colors.mutedForeground} /> : null}
       {tab.kind === "chat" ? (
         <AgentIcon type={tab.agentType} size={16} color={colors.mutedForeground} />

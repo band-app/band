@@ -1,4 +1,12 @@
-import { ArrowUp, CircleAlert, CircleCheck, GitMerge, Loader, Moon } from "lucide-react-native";
+import {
+  ArrowUp,
+  CircleAlert,
+  CircleCheck,
+  GitMerge,
+  Loader,
+  Moon,
+  Star,
+} from "lucide-react-native";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import type { CiTone, PullRequestTone, WorktreeRow } from "../lib/worktree-list";
 import { colors, tints, tones } from "../theme";
@@ -142,11 +150,22 @@ export function WorktreeRowView({
       ]}
     >
       <View style={{ width: row.depth * 16 }} />
-      <StateIcon state={row.shown} main={row.main} />
+      <StateIcon state={row.shown} testID={`home__state-${row.id}`} />
       <View style={styles.body}>
-        <Text style={[styles.name, attention && styles.nameStrong]} numberOfLines={1}>
-          {row.name}
-        </Text>
+        <View style={styles.title}>
+          <Text style={[styles.name, attention && styles.nameStrong]} numberOfLines={1}>
+            {row.name}
+          </Text>
+          {row.main ? (
+            <View
+              accessibilityLabel="Repository root"
+              testID={`worktree__root-star-${row.id}`}
+              style={styles.star}
+            >
+              <Star size={12} color={colors.mutedForeground} />
+            </View>
+          ) : null}
+        </View>
         {row.subtitle ? (
           <Text style={styles.sub} numberOfLines={1} testID={`home__subtitle-${row.id}`}>
             {row.subtitle}
@@ -202,7 +221,9 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.6 },
   body: { flex: 1, gap: 1, minWidth: 0 },
-  name: { color: colors.foreground, fontSize: 16 },
+  title: { alignItems: "center", flexDirection: "row", gap: 6 },
+  star: { flexShrink: 0 },
+  name: { flexShrink: 1, color: colors.foreground, fontSize: 16 },
   nameStrong: { fontWeight: "600" },
   sub: { color: colors.mutedForeground, fontSize: 12.5 },
   meta: { alignItems: "center", flexDirection: "row", gap: 6 },
