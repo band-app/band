@@ -176,7 +176,7 @@ export function NewWorktreeDialog({
                 <div className="relative">
                   <Input
                     id="branch-name"
-                  data-testid="new-worktree-form__branch"
+                    data-testid="new-worktree-form__branch"
                     placeholder="feat/my-branch"
                     value={branch}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
@@ -294,72 +294,23 @@ export function NewWorktreeDialog({
               )}
               <p role="alert" className="sr-only">
                 {serverError?.message}
-||||||| e5fed232
-              </>
-            )}
-            <Label htmlFor="branch-name">Branch name</Label>
-            <Input
-              id="branch-name"
-              placeholder="feature/my-branch"
-              value={branch}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              autoFocus
-            />
-            {branch && slug !== branch && !slugError && (
-              <p className="text-xs text-muted-foreground">
-                Will be created as: <code>{slug}</code>
               </p>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
               <Button
                 type="submit"
-              data-testid="new-worktree-form__submit"
+                data-testid="new-worktree-form__submit"
                 disabled={!slug || !!slugError || createWorktreeMutation.isPending}
               >
                 Create
               </Button>
             </DialogFooter>
           </Collapsible>
-||||||| e5fed232
-            )}
-            <Label htmlFor="base-branch">Base branch (optional)</Label>
-            <Input
-              id="base-branch"
-              placeholder="main"
-              value={base}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBase(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-            <Label htmlFor="initial-prompt">Initial prompt (optional)</Label>
-            <Textarea
-              id="initial-prompt"
-              placeholder="Describe the task for the coding agent..."
-              value={prompt}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
-              rows={3}
-            />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={!slug || !!slugError || createWorktreeMutation.isPending}
-            >
-              Create
-            </Button>
-          </DialogFooter>
         </form>
-  </DialogContent>
+      </DialogContent>
     </Dialog>
-  )
+  );
 }
 
 /** An error icon that opens a popover with the message, so no error text sits inline. */
