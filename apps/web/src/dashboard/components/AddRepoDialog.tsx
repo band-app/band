@@ -56,8 +56,6 @@ function crumbsOf(path: string): Array<{ name: string; path: string }> {
 type Mode = "worker" | "url";
 
 export interface AddRepoFormProps {
-  /** The label the new repo gets: the sidebar's label filter, so the repo stays in view. */
-  label?: string | null;
   /** Opens Settings > Hosts, where a worker is added. Shown in the no-worker notice when set. */
   onOpenHosts?: () => void;
   onAdded?: (repoName: string) => void;
@@ -70,7 +68,7 @@ export interface AddRepoFormProps {
  * the remote and default branch the worker reads) or by its remote URL (with the default branch the
  * hub resolves). A folder outside the worker's roots needs an explicit confirmation in the preview.
  */
-export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddRepoFormProps) {
+export function AddRepoForm({ onOpenHosts, onAdded, active = true }: AddRepoFormProps) {
   const capabilities = useCapabilities();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<Mode>("worker");
@@ -184,7 +182,6 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
       const repo = await trpc.repos.addFromWorker.mutate({
         hostId,
         path,
-        ...(label ? { label } : {}),
         ...(addRoot ? { addRoot: true } : {}),
         allowedHostIds: hostsValue.allowedHostIds,
         ...(hostsValue.primaryHostId ? { primaryHostId: hostsValue.primaryHostId } : {}),
@@ -238,7 +235,6 @@ export function AddRepoForm({ label, onOpenHosts, onAdded, active = true }: AddR
       const repo = await trpc.repos.addByUrl.mutate({
         remoteUrl: remoteUrl.trim(),
         defaultBranch: defaultBranch.trim() || undefined,
-        ...(label ? { label } : {}),
         allowedHostIds: hostsValue.allowedHostIds,
         ...(hostsValue.primaryHostId ? { primaryHostId: hostsValue.primaryHostId } : {}),
       });

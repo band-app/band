@@ -23,6 +23,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, CircleAlert } from "lucide-react";
 import { useState } from "react";
 import { trpc } from "../../lib/trpc-client";
+import { useGroupFilter } from "../hooks/use-group-filter";
+import { useGroups } from "../hooks/use-groups";
 import { useHostNames } from "../hooks/use-host-names";
 import { useCreateWorktree } from "../hooks/use-repo-mutations";
 import { useRepos } from "../hooks/use-repos";
@@ -30,6 +32,11 @@ import { useDashboardStore } from "../stores/index";
 
 interface Props {
   repoName: string;
+  /**
+   * The group the worktree joins (null for none). Without it the sidebar's group filter decides,
+   * and with no filter the worktree joins its origin's group.
+   */
+  groupId?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -43,7 +50,12 @@ function conflictedWorktreeId(error: unknown): string | undefined {
   return typeof id === "string" ? id : undefined;
 }
 
-export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
+export function NewWorktreeDialog({
+  repoName,
+  groupId: explicitGroupId,
+  open,
+  onOpenChange,
+}: Props) {
   const [chosenHostId, setHostId] = useState(LOCAL_HOST_ID);
   const [hostRepoPath, setHostRepoPath] = useState("");
   const [branch, setBranch] = useState("");
@@ -52,6 +64,12 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
   const [moreOpen, setMoreOpen] = useState(false);
   const createWorktreeMutation = useCreateWorktree();
   const { repos } = useRepos();
+  // A worktree made while the sidebar is filtered to a group joins that group.
+  const [groupFilter] = useGroupFilter();
+  const groups = useGroups();
+  const filteredGroupId =
+    groupFilter && groups.some((g) => g.id === groupFilter) ? groupFilter : undefined;
+  const groupId = explicitGroupId !== undefined ? explicitGroupId : filteredGroupId;
   const hosts = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.workers.list.query()).hosts,
@@ -107,6 +125,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
         base: base.trim() || undefined,
         prompt: prompt.trim() || undefined,
         host: remote ? { hostId, hostRepoPath: hostRepoPath.trim() || undefined } : undefined,
+        groupId,
       });
     } catch {
       // The error shows in the dialog, which stays open.
@@ -157,6 +176,7 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
                 <div className="relative">
                   <Input
                     id="branch-name"
+                  data-testid="new-worktree-form__branch"
                     placeholder="feat/my-branch"
                     value={branch}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
@@ -274,22 +294,72 @@ export function NewWorktreeDialog({ repoName, open, onOpenChange }: Props) {
               )}
               <p role="alert" className="sr-only">
                 {serverError?.message}
+||||||| e5fed232
+              </>
+            )}
+            <Label htmlFor="branch-name">Branch name</Label>
+            <Input
+              id="branch-name"
+              placeholder="feature/my-branch"
+              value={branch}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus
+            />
+            {branch && slug !== branch && !slugError && (
+              <p className="text-xs text-muted-foreground">
+                Will be created as: <code>{slug}</code>
               </p>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
               <Button
                 type="submit"
+              data-testid="new-worktree-form__submit"
                 disabled={!slug || !!slugError || createWorktreeMutation.isPending}
               >
                 Create
               </Button>
             </DialogFooter>
           </Collapsible>
+||||||| e5fed232
+            )}
+            <Label htmlFor="base-branch">Base branch (optional)</Label>
+            <Input
+              id="base-branch"
+              placeholder="main"
+              value={base}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBase(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <Label htmlFor="initial-prompt">Initial prompt (optional)</Label>
+            <Textarea
+              id="initial-prompt"
+              placeholder="Describe the task for the coding agent..."
+              value={prompt}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={!slug || !!slugError || createWorktreeMutation.isPending}
+            >
+              Create
+            </Button>
+          </DialogFooter>
         </form>
-      </DialogContent>
+  </DialogContent>
     </Dialog>
-  );
+  )
 }
 
 /** An error icon that opens a popover with the message, so no error text sits inline. */

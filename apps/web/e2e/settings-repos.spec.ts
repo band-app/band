@@ -1,7 +1,7 @@
 /**
  * Settings > Repos: the overview of every repo and one page per repo. The overview lists each
  * repo's remote and, for a limited repo, its workers, and its filter has focus so typing a name and
- * pressing Enter opens that repo. A repo page saves its label and workers at once through the
+ * pressing Enter opens that repo. A repo page saves its workers at once through the
  * existing procedures (the Repos pages have no Save button), lists the MCP servers and cronjobs
  * that reach the repo, and keeps Remove disabled while the repo has worktrees.
  *
@@ -33,8 +33,6 @@ const TOKEN = "e2e-settings-repos-token";
 const BUSY = "alpha-busy";
 const LIMITED = "beta-limited";
 const REMOTE = "gamma-remote";
-const LABEL_WORK = "lbl_e2e_work";
-const LABEL_HOME = "lbl_e2e_home";
 const FEATURE = "feat/one";
 const MCP_SCOPED = "scoped-to-alpha";
 const MCP_ALL = "for-every-repo";
@@ -51,7 +49,6 @@ let offlineHostId: string;
 
 interface RepoRow {
   name: string;
-  label?: string | null;
   allowedHostIds: string[] | null;
   primaryHostId: string | null;
   checkpointsSetting?: boolean | null;
@@ -67,20 +64,13 @@ test.beforeAll(async () => {
   remoteUrl = join(remotesDir, `${REMOTE}.git`);
   git(remotesDir, ["init", "--bare", "-b", "main", remoteUrl], remotesDir);
 
-  seedSettings(tmpHome, {
-    tokenSecret: TOKEN,
-    labels: [
-      { id: LABEL_WORK, name: "Work", color: "#3b82f6" }, // theme-lint-ignore-line: seeded user data
-      { id: LABEL_HOME, name: "Home", color: "#22c55e" }, // theme-lint-ignore-line: seeded user data
-    ],
-  });
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   seedState(tmpHome, {
     repos: [
       {
         name: BUSY,
         path: `/tmp/fake/${BUSY}`,
         defaultBranch: "main",
-        label: LABEL_WORK,
         worktrees: [
           { branch: "main", path: `/tmp/fake/${BUSY}` },
           { branch: FEATURE, path: `/tmp/fake/${BUSY}-feature` },
@@ -204,11 +194,7 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await expect(settings.repoRow(BUSY)).toHaveAttribute("data-limited", "false");
   await expect(settings.repoRowLimited(BUSY)).toHaveCount(0);
 
-  // The worker and label filters narrow the list.
-  await settings.filterReposByLabel(LABEL_WORK);
-  await expect(settings.repoRows()).toHaveCount(1);
-  await expect(settings.repoRow(BUSY)).toBeVisible();
-  await settings.filterReposByLabel("");
+  // The worker filter narrows the list.
   await settings.filterReposByWorker("local");
   await expect(settings.repoRows()).toHaveCount(3);
   await settings.filterReposByWorker(offlineHostId);
@@ -216,8 +202,8 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await expect(settings.repoRow(LIMITED)).toHaveCount(0);
   await settings.filterReposByWorker("");
 
-  // The text filter matches a label name and a remote URL too.
-  await settings.filterRepos("Work");
+  // The text filter matches a repo name and a remote URL.
+  await settings.filterRepos("busy");
   await expect(settings.repoRows()).toHaveCount(1);
   await expect(settings.repoRow(BUSY)).toBeVisible();
   await settings.filterRepos("-remote.git");
@@ -241,23 +227,6 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await settings.goto();
   await settings.openDialog("general");
   await expect(settings.footer).toBeVisible();
-});
-
-test("the label picked on a repo page is saved and shows after a reload (S3)", async ({ page }) => {
-  const settings = new SettingsPage(page, server.url, TOKEN);
-  await settings.goto();
-  await settings.openRepoSettings(REMOTE);
-  await expect(settings.repoLabelSelect(REMOTE)).toHaveValue("");
-
-  await settings.setRepoLabel(REMOTE, LABEL_HOME);
-  await expect.poll(async () => (await repoRow(REMOTE))?.label).toBe(LABEL_HOME);
-
-  await settings.goto();
-  await settings.openRepoSettings(REMOTE);
-  await expect(settings.repoLabelSelect(REMOTE)).toHaveValue(LABEL_HOME);
-
-  await settings.setRepoLabel(REMOTE, "");
-  await expect.poll(async () => (await repoRow(REMOTE))?.label ?? null).toBeNull();
 });
 
 test("allowed workers and the primary worker save at once and show after a reload (S3)", async ({

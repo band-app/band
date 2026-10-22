@@ -140,10 +140,10 @@ const RULES: KeyRule[] = [
   // Shared across devices.
   exact("band-recent-worktrees", [jsonPart("all")]),
   exact("band.repos-list.collapsed-repos", [jsonPart("all")]),
-  exact("band.repos-list.collapsed-labels", [jsonPart("all")]),
+  exact("band.repos-list.collapsed-groups", [jsonPart("all")]),
   exact("band.repos-list.collapsed-pinned", [jsonPart("all")]),
-  exact("band.repos-list.label-filter", [rawPart("all")]),
-  exact("band.repos-list.label-last-worktree", [jsonPart("all")]),
+  exact("band.repos-list.group-filter", [rawPart("all")]),
+  exact("band.repos-list.group-last-worktree", [jsonPart("all")]),
   // The hooks version whose install banner the user dismissed.
   exact("band:agent-hooks-banner-dismissed", [rawPart("all")]),
   // Appearance: preset, colors, fonts and sizes. The mode (`band-theme`) stays on the device.
@@ -182,8 +182,8 @@ const RULES: KeyRule[] = [
   exact("band.mobile.collapsed-repos", [jsonPart("device")]),
   // How the mobile worktree list is grouped: repo, origin or host.
   exact("band.mobile.group-by", [rawPart("device")]),
-  // The label the mobile worktree list is filtered to (a label id; unset means All).
-  exact("band.mobile.label-filter", [rawPart("device")]),
+  // The group the mobile worktree list is filtered to (a group id; unset means All).
+  exact("band.mobile.group-filter", [rawPart("device")]),
 ];
 
 export interface MatchedKey {

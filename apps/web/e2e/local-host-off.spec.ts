@@ -195,11 +195,7 @@ test("Settings > Hosts leaves Local out and shows what each worker reports (S5)"
   await settings.expectRowVisible(settings.hostRow(worker));
   await expect(settings.hostRow("local")).toHaveCount(0);
   // The agents are the ones the worker found and checked, not the configured list.
-  await expect(settings.hostAgents(worker)).toContainText("claude-code 7.7.7");
-  await expect(settings.hostRow(worker).getByTestId("settings__host-os")).toContainText(
-    process.platform,
-  );
-  await expect(settings.hostRow(worker).getByTestId("settings__host-capabilities")).toContainText(
-    "Git",
-  );
+  await expect(await settings.hostAgents(worker)).toContainText("claude-code 7.7.7");
+  await expect(await settings.hostOs(worker)).toContainText(process.platform);
+  await expect(await settings.hostCapabilities(worker)).toContainText("Git");
 });

@@ -22,6 +22,7 @@ interface FileReply {
 }
 interface Worktree {
   name: string;
+  groupId?: string | null;
   path: string;
   hostId?: string;
   supersededBy?: string;
@@ -49,6 +50,8 @@ interface MoveReply {
 let w: World;
 let a: Worker;
 let b: Worker;
+// The group the S3 restore test makes; the move test reuses it.
+let groupId = "";
 
 const findWorktree = async (repo: string, name: string, hostId?: string) =>
   (await w.q<ReposList>("repos.list")).repos
@@ -169,6 +172,9 @@ describe("offline view, restore and supersede (S2, S3)", () => {
   }, 90_000);
 
   it("restores on worker B with the work present, the session resumed and the chats moved (S3)", async () => {
+    const { group } = await w.m<{ group: { id: string } }>("groups.create", { name: "Restored" });
+    groupId = group.id;
+    await w.m("worktrees.setGroup", { worktreeId: wt(), groupId });
     const result = await w.m<MoveReply>("checkpoints.restore", {
       worktreeId: wt(),
       toHostId: b.hostId,
@@ -176,6 +182,8 @@ describe("offline view, restore and supersede (S2, S3)", () => {
     restored = result.worktreeId;
     expect(restored).toBe(`proj-feat-x@${b.hostId}`);
     expect(result.supersededId).toBe(wt());
+    // The restored copy stays in the group of the one it replaces (S5).
+    expect((await findWorktree("proj", "feat-x", b.hostId))?.groupId).toBe(groupId);
 
     const path = w.worktreePath(b, "proj", "feat-x");
     expect(readFileSync(join(path, "hello.txt"), "utf8")).toBe(
@@ -246,6 +254,7 @@ describe("offline view, restore and supersede (S2, S3)", () => {
 describe("move to host and evacuate (S4)", () => {
   it("moves a worktree and removes the source only after the target has it", async () => {
     const wt = await w.createWorktree(a, "proj", "feat-m");
+    await w.m("worktrees.setGroup", { worktreeId: wt, groupId });
     const src = w.worktreePath(a, "proj", "feat-m");
     appendFileSync(join(src, "hello.txt"), "moving\n");
     writeFileSync(join(src, "new.txt"), "new\n");
@@ -258,6 +267,7 @@ describe("move to host and evacuate (S4)", () => {
       sourceRemoved: true,
     });
 
+    expect((await findWorktree("proj", "feat-m", b.hostId))?.groupId).toBe(groupId);
     const dst = w.worktreePath(b, "proj", "feat-m");
     expect(readFileSync(join(dst, "hello.txt"), "utf8")).toBe("hello\nmoving\n");
     expect(readFileSync(join(dst, "new.txt"), "utf8")).toBe("new\n");

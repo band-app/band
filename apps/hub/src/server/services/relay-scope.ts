@@ -67,9 +67,10 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "repos.gitInit",
   "repos.promoteToGit",
   "repos.update",
-  "repos.updateLabel",
   "repos.reorder",
   "repos.remove",
+  "groups.list",
+  "worktrees.setGroup",
   "hosts.list",
   "hosts.forAgents",
   "workers.list",
@@ -121,6 +122,8 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure.startsWith("agentLogins.") ||
   procedure === "hosts.setTrust" ||
   procedure === "hosts.audit" ||
+  procedure === "hosts.setAgentCommand" ||
+  procedure === "workers.setAgentCommand" ||
   procedure === "workers.setTrust" ||
   procedure === "workers.audit";
 
@@ -131,7 +134,6 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
  */
 const AGENT_SETTABLE_SETTINGS = new Set([
   "agents",
-  "labels",
   "notifications",
   "defaultCodingAgent",
   "theme",
@@ -242,6 +244,7 @@ const SCOPE_FROM_HEADERS = new Set([
   "subscriptions.create",
   "subscriptions.list",
   "repos.list",
+  "groups.list",
   "hosts.list",
   "hosts.forAgents",
   "workers.list",
@@ -541,12 +544,7 @@ function checkChosenId(procedure: string, input: unknown, lookups: ScopeLookups)
 }
 
 /** Repo procedures that act on one existing repo, by the `name` in their input. */
-const REPO_BY_NAME_PROCEDURES = new Set([
-  "repos.update",
-  "repos.updateLabel",
-  "repos.remove",
-  "repos.promoteToGit",
-]);
+const REPO_BY_NAME_PROCEDURES = new Set(["repos.update", "repos.remove", "repos.promoteToGit"]);
 
 /**
  * Repo management from a worker. The one limit is a repo's allowed hosts: an agent may not act on a
@@ -713,6 +711,12 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
       }
     }
     return { ok: true };
+  }
+  if (procedure === "worktrees.setGroup") {
+    // `withChildren` would move worktrees the relay never checked, so only the one named moves.
+    if ((input as { withChildren?: unknown } | null)?.withChildren) {
+      return deny(403, `${procedure}: withChildren is not available from a worker`);
+    }
   }
   if (procedure === "worktrees.remove") {
     const { hostId, ...rest } = (input ?? {}) as Record<string, unknown>;

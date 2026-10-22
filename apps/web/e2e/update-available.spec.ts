@@ -160,6 +160,20 @@ test.describe("a newer release exists", () => {
     await expect(update.workerVersion(behind.hostId)).toHaveAttribute("data-version", "0.49.0");
     await expect(update.workerError(behind.hostId)).toContainText("EACCES");
 
+    // Settings > Workers shows the failure as an icon with a popover, never as text in the row.
+    const settings = new SettingsPage(page, server.url, TOKEN);
+    await settings.goto();
+    await settings.openDialog("hosts");
+    const row = settings.hostRow(behind.hostId);
+    await settings.expectRowVisible(row);
+    await expect(row).not.toContainText("EACCES");
+    await expect(settings.hostUpdateErrorIcon(behind.hostId)).toHaveAccessibleName("Update failed");
+    await expect(await settings.openHostUpdateError(behind.hostId)).toContainText("EACCES");
+    await settings.dismissHostUpdateError(behind.hostId);
+    await expect(settings.hostUpdateErrorIcon(behind.hostId)).toHaveCount(0);
+    await update.goto();
+    await update.openPanel();
+
     // The retry installs, the worker restarts and reconnects on the hub's version.
     await update.updateButton(behind.hostId).click();
     await update.confirmUpdate();

@@ -216,6 +216,16 @@ export class TokenQueries {
     return Number(result.changes ?? 0) > 0;
   }
 
+  /** Stores a host's per-agent command overrides (null for none). Returns false when there is no such host. */
+  setHostAgentCommands(id: string, commands: Record<string, string> | null): boolean {
+    const result = this.db()
+      .update(hosts)
+      .set({ agentCommands: commands && Object.keys(commands).length > 0 ? commands : null })
+      .where(eq(hosts.id, id))
+      .run();
+    return Number(result.changes ?? 0) > 0;
+  }
+
   /** Sets a host's status and, when the worker was last heard from, its last-seen time. */
   setHostStatus(id: string, status: HostRow["status"], lastSeenAt?: number): void {
     this.db()

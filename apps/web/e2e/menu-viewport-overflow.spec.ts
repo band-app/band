@@ -7,13 +7,13 @@
  * room is in viewport pixels, while the app zoom (CSS `zoom` on <html>, set
  * with Ctrl+=) scales every CSS pixel inside the menu. Before the fix a
  * 130% menu came out 30% taller than the room it was given and ran off the
- * window, and the repo menu's "Set label" submenu had no cap at all. The
+ * window, and the sidebar's group filter menu had no cap at all. The
  * zoom also scaled `vh`, so the 70vh command palette and the 80vh toolbar
  * dialogs ran past the bottom edge. The chat's model submenus are covered in
  * chat-model-submenu-overflow.spec.ts.
  *
- * Real server, no tRPC mocking, no stubs: the labels and coding agents are
- * seeded into settings.json.
+ * Real server, no tRPC mocking, no stubs: the groups are seeded into the
+ * database and the coding agents into settings.json.
  */
 
 import { mkdirSync } from "node:fs";
@@ -39,12 +39,12 @@ import { WorktreePage } from "./pages/WorktreePage";
 const TOKEN = "e2e-menu-viewport-overflow-token";
 const REPO = "menuoverflow";
 const pad = (n: number) => String(n).padStart(2, "0");
-const LABELS = Array.from({ length: 30 }, (_, i) => ({
-  id: `label-${pad(i + 1)}`,
-  name: `Label ${pad(i + 1)}`,
+const GROUPS = Array.from({ length: 30 }, (_, i) => ({
+  id: `group-${pad(i + 1)}`,
+  name: `Group ${pad(i + 1)}`,
   color: "#3b82f6",
 }));
-const LAST_LABEL = LABELS[LABELS.length - 1];
+const LAST_GROUP = GROUPS[GROUPS.length - 1];
 const AGENTS = Array.from({ length: 30 }, (_, i) => ({
   id: `agent-${pad(i + 1)}`,
   type: "claude-code",
@@ -68,13 +68,13 @@ test.beforeAll(async () => {
         name: REPO,
         path: repoDir,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: repoDir }],
+        worktrees: [{ branch: "main", path: repoDir, groupId: LAST_GROUP.id }],
       },
     ],
+    groups: GROUPS,
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
-    labels: LABELS,
     codingAgents: AGENTS,
     defaultCodingAgent: AGENTS[0].id,
   });
@@ -90,31 +90,28 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("the repo menu's Set label submenu stays inside the window and scrolls to its last label", async ({
+test("the group filter menu stays inside the window and scrolls to its last group", async ({
   page,
 }) => {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   await worktreePage.goto(toWorktreeId(REPO, "main", "local"));
   await worktreePage.zoomInBy(3);
 
-  await worktreePage.openRepoContextMenu(REPO);
-  await expect(worktreePage.contextMenu.first()).toBeVisible();
-  await worktreePage.openSetLabelSubmenu();
-  await expectInsideViewport(worktreePage.labelSubmenu, viewport);
+  await worktreePage.openGroupFilter();
+  await expectInsideViewport(worktreePage.groupFilterMenu, viewport);
 
-  const last = worktreePage.labelSubmenuOption(LAST_LABEL.name);
-  await worktreePage.focusLastLabelSubmenuOption();
+  const last = worktreePage.groupFilterOption(LAST_GROUP.name);
+  await worktreePage.focusLastGroupFilterOption();
   await expect(last).toBeFocused();
   await expect(last).toBeInViewport({ ratio: 1 });
 
-  await worktreePage.scrollLabelSubmenuToTop();
-  await expect(worktreePage.labelSubmenuOption(LABELS[0].name)).toBeInViewport();
+  await worktreePage.scrollGroupFilterToTop();
+  await expect(worktreePage.groupFilterOption(GROUPS[0].name)).toBeInViewport();
   await expect(last).not.toBeInViewport();
-  await worktreePage.clickLabelSubmenuOption(LAST_LABEL.name);
+  await worktreePage.clickGroupFilterOption(LAST_GROUP.name);
 
-  // Filtering the sidebar by that label still shows the repo.
-  await worktreePage.selectLabelFilter(LAST_LABEL.id);
-  await expect(worktreePage.repoHeader(REPO)).toBeVisible();
+  // Filtering the sidebar by that group still shows the repo's worktree.
+  await expect(worktreePage.worktreeCard(toWorktreeId(REPO, "main", "local"))).toBeVisible();
 });
 
 test("the Default agent select stays inside the window and scrolls to its last agent", async ({

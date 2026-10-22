@@ -18,7 +18,6 @@ import {
 import {
   bandHome,
   type CodingAgentDefinition,
-  type LabelDefinition,
   type NotificationSettings,
   type Settings,
 } from "../infra/db/queries/settings";
@@ -51,7 +50,7 @@ const worktreeQueriesForIdentity = new WorktreeQueries();
 // already import from `services/state` get the types alongside the
 // state-level helpers below. The canonical home is
 // `server/infra/db/queries/settings`.
-export type { CodingAgentDefinition, LabelDefinition, NotificationSettings, Settings };
+export type { CodingAgentDefinition, NotificationSettings, Settings };
 export { bandHome };
 
 // Repo types + the kind reconciliation helper live in the Infra layer

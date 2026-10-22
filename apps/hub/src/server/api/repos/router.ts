@@ -37,11 +37,9 @@ export const reposRouter = t.router({
     await repoService.gitInit(input.path);
   }),
 
-  add: publicProcedure
-    .input(z.object({ path: z.string(), label: z.string().optional() }))
-    .mutation(async ({ input }) => {
-      return repoService.add(input);
-    }),
+  add: publicProcedure.input(z.object({ path: z.string() })).mutation(async ({ input }) => {
+    return repoService.add(input);
+  }),
 
   /**
    * Adds the repo that a folder on a host holds (the folder picker of a worker). The hub stores
@@ -55,7 +53,6 @@ export const reposRouter = t.router({
         hostId: z.string().min(1),
         path: z.string().min(1),
         name: z.string().min(1).max(100).optional(),
-        label: z.string().optional(),
         addRoot: z.boolean().optional(),
         allowedHostIds: hostIds.nullable().optional(),
         primaryHostId: z.string().min(1).optional(),
@@ -80,7 +77,6 @@ export const reposRouter = t.router({
         remoteUrl: z.string().trim().min(1).max(500),
         defaultBranch: z.string().trim().min(1).max(200).optional(),
         name: z.string().min(1).max(100).optional(),
-        label: z.string().optional(),
         allowedHostIds: hostIds.nullable().optional(),
         primaryHostId: z.string().min(1).optional(),
       }),
@@ -206,13 +202,6 @@ export const reposRouter = t.router({
       } catch (err) {
         throw repoErrorToTrpc(err);
       }
-    }),
-
-  updateLabel: publicProcedure
-    .input(z.object({ name: z.string(), label: z.string().nullable() }))
-    .mutation(({ input }) => {
-      repoService.updateLabel(input);
-      return { ok: true };
     }),
 });
 

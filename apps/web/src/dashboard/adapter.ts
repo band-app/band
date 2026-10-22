@@ -47,7 +47,6 @@ export interface DashboardAdapter {
   listRepos(): Promise<RepoInfo[]>;
   removeRepo(name: string): Promise<void>;
   reorderRepos(names: string[]): Promise<void>;
-  updateRepoLabel(name: string, label: string | null): Promise<void>;
   gitInit(path: string): Promise<void>;
   /**
    * Promote a "plain" repo to "git": runs `git init` in the repo
@@ -69,6 +68,8 @@ export interface DashboardAdapter {
     prompt?: string,
     agentMode?: AgentMode,
     host?: { hostId: string; hostRepoPath?: string },
+    /** The group to put the worktree in. Without it the worktree joins its origin's group. */
+    groupId?: string | null,
   ): Promise<{ hostId?: string }>;
   removeWorktree(repo: string, name: string, hostId?: string): Promise<void>;
   setWorktreePinned(repo: string, name: string, pinned: boolean, hostId?: string): Promise<void>;

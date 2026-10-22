@@ -9,6 +9,7 @@ import { agentModeFromVia } from "./settings-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 import { syncService } from "./sync-service";
 import { systemService } from "./system-service";
+import { worktreeGroupService } from "./worktree-group-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("setup");
@@ -62,6 +63,7 @@ export async function runFirstTimeSetup(): Promise<void> {
   // The sync goes first: it repairs repo kinds, and the steps after it only add remote URLs
   // with focused writes that it must not overwrite from a stale snapshot.
   forgetLocalWorktrees();
+  convertLegacyLabels();
   const repoSync = ensureRepoStateInSync()
     .then(() => ensureRepoRemotes())
     .then(() => migrateRepoCronjobs());
@@ -191,6 +193,18 @@ function migrateRepoCronjobs(): void {
   } catch (err) {
     log.warn(
       "Failed to move repo-scoped cronjobs to worktrees at boot: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/** Repo labels of an older install become groups with the same ids, and settings.json loses `labels`. */
+function convertLegacyLabels(): void {
+  try {
+    worktreeGroupService.convertLegacyLabels();
+  } catch (err) {
+    log.warn(
+      "Failed to convert repo labels to groups at boot: %s",
       err instanceof Error ? err.message : String(err),
     );
   }

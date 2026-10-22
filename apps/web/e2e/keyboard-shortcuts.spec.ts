@@ -42,7 +42,7 @@ const REPO_A = "shortcuts-history-a";
 const REPO_B = "shortcuts-history-b";
 const REPO_CHAT = "shortcuts-show-chat";
 const REPO_SPLIT = "shortcuts-palette-split";
-const LABEL = "label-shortcuts";
+const GROUP = "group-shortcuts";
 const WORKTREE = toWorktreeId(REPO, BRANCH, "local");
 const WORKTREE_A = toWorktreeId(REPO_A, BRANCH, "local");
 const WORKTREE_B = toWorktreeId(REPO_B, BRANCH, "local");
@@ -72,14 +72,18 @@ test.beforeAll(async () => {
     };
   };
   const repos = [REPO, REPO_A, REPO_B, REPO_CHAT, REPO_SPLIT].map(makeRepo);
-  // Only repo A carries the label, so filtering by it hides repo B.
+  // Only repo A's worktree is in the group, so filtering by it hides repo B's.
   seedState(tmpHome, {
-    repos: repos.map((p) => (p.name === REPO_A ? { ...p, label: LABEL } : p)),
+    repos: repos.map((p) =>
+      p.name === REPO_A
+        ? { ...p, worktrees: p.worktrees.map((wt) => ({ ...wt, groupId: GROUP })) }
+        : p,
+    ),
+    groups: [{ id: GROUP, name: "Shortcuts", color: "#8b5cf6" }],
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     useWebGLTerminalRenderer: false,
-    labels: [{ id: LABEL, name: "Shortcuts", color: "#8b5cf6" }],
   });
   server = await startServer({ tmpHome });
 });
@@ -208,18 +212,18 @@ test("the palette's Split Right splits a terminal tab into nested panes", async 
   await expect(worktreePage.terminalTabs()).toHaveCount(1);
 });
 
-test("the palette's Show All Repos clears the label filter", async ({ page }) => {
+test("the palette's Show All Repos clears the group filter", async ({ page }) => {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   const palette = new CommandPalette(page);
   await worktreePage.goto(WORKTREE_A);
   await worktreePage.waitForReady();
 
-  await worktreePage.selectLabelFilter(LABEL);
-  await expect(worktreePage.repoHeader(REPO_A)).toBeVisible();
-  await expect(worktreePage.repoHeader(REPO_B)).toBeHidden();
+  await worktreePage.selectGroupFilter(GROUP);
+  await expect(worktreePage.worktreeCard(WORKTREE_A)).toBeVisible();
+  await expect(worktreePage.worktreeCard(WORKTREE_B)).toBeHidden();
 
   await palette.open();
   await palette.run("show-all-repos");
 
-  await expect(worktreePage.repoHeader(REPO_B)).toBeVisible();
+  await expect(worktreePage.worktreeCard(WORKTREE_B)).toBeVisible();
 });

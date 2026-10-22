@@ -9,12 +9,12 @@
  *
  * Each test restarts the real server on the same HOME and port, then opens
  * `/` the way the desktop shell does:
- *   - the worktree, the selected label, the active center tab, the right
+ *   - the worktree, the selected group, the active center tab, the right
  *     sidepanel tab and the sidebar width all come back, in the same browser and in a new one with
  *     empty localStorage (the values come from the server);
  *   - a worktree deleted while Band was closed leaves the app on `/`;
- *   - when another device picked a different label, the label and the
- *     worktree still agree: the label's last worktree opens.
+ *   - when another device picked a different group, the group and the
+ *     worktree still agree: the group's last worktree opens.
  *
  * The desktop window's size, position and maximized state are restored by
  * the Electron main process (`apps/desktop/src/main/window.ts`), which this
@@ -40,8 +40,8 @@ import {
 import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-restore-session-token";
-const LABEL_ALPHA = "lbl_alpha";
-const LABEL_BETA = "lbl_beta";
+const GROUP_ALPHA = "grp_alpha";
+const GROUP_BETA = "grp_beta";
 const WS_ALPHA = toWorktreeId("alpha", "main", "local");
 const WS_BETA = toWorktreeId("beta", "main", "local");
 const WS_GAMMA = toWorktreeId("gamma", "main", "local");
@@ -68,23 +68,21 @@ function createRepo(name: string): string {
   return dir;
 }
 
-function repo(name: string, label?: string) {
+function repo(name: string, groupId?: string) {
   const path = createRepo(name);
-  return { name, path, defaultBranch: "main", label, worktrees: [{ branch: "main", path }] };
+  return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path, groupId }] };
 }
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    repos: [repo("alpha", LABEL_ALPHA), repo("beta", LABEL_BETA), repo("gamma")],
-  });
-  seedSettings(tmpHome, {
-    tokenSecret: TOKEN,
-    labels: [
-      { id: LABEL_ALPHA, name: "Alpha", color: "#8b5cf6" },
-      { id: LABEL_BETA, name: "Beta", color: "#3b82f6" },
+    repos: [repo("alpha", GROUP_ALPHA), repo("beta", GROUP_BETA), repo("gamma")],
+    groups: [
+      { id: GROUP_ALPHA, name: "Alpha", color: "#8b5cf6" },
+      { id: GROUP_BETA, name: "Beta", color: "#3b82f6" },
     ],
   });
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
 
@@ -96,14 +94,14 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("a restart reopens the worktree, label, active tab and right sidepanel tab", async ({
+test("a restart reopens the worktree, group, active tab and right sidepanel tab", async ({
   page,
   browser,
 }) => {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   await worktreePage.goto(WS_ALPHA);
   await worktreePage.waitForReady();
-  await worktreePage.selectLabelFilter(LABEL_BETA);
+  await worktreePage.selectGroupFilter(GROUP_BETA);
   await worktreePage.switchWorktree(WS_BETA);
   await expect(page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(WS_BETA)}`));
   await worktreePage.waitForReady();
@@ -131,7 +129,7 @@ test("a restart reopens the worktree, label, active tab and right sidepanel tab"
   await worktreePage.launch();
   await expect(page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(WS_BETA)}`));
   await worktreePage.waitForReady();
-  await expect(worktreePage.labelFilterTrigger()).toHaveText("Beta");
+  await expect(worktreePage.groupFilterTrigger()).toHaveText("Beta");
   await expect(worktreePage.fileTabContainer(FILE)).toHaveAttribute("data-selected", "true");
   await expect(worktreePage.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
   await expect.poll(() => worktreePage.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
@@ -142,7 +140,7 @@ test("a restart reopens the worktree, label, active tab and right sidepanel tab"
     const fresh = new WorktreePage(await context.newPage(), server.url, TOKEN);
     await fresh.launch();
     await fresh.waitForReady();
-    await expect(fresh.labelFilterTrigger()).toHaveText("Beta");
+    await expect(fresh.groupFilterTrigger()).toHaveText("Beta");
     await expect(fresh.fileTabContainer(FILE)).toHaveAttribute("data-selected", "true");
     await expect(fresh.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
     await expect.poll(() => fresh.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
@@ -174,39 +172,39 @@ test("a worktree deleted while Band was closed leaves the app on /", async ({ pa
     .toBeNull();
 });
 
-test("a label another device picked opens that label's last worktree", async ({
+test("a group another device picked opens that group's last worktree", async ({
   page,
   browser,
 }) => {
   const desktop = new WorktreePage(page, server.url, TOKEN);
   await desktop.goto(WS_ALPHA);
   await desktop.waitForReady();
-  await desktop.selectLabelFilter(LABEL_ALPHA);
+  await desktop.selectGroupFilter(GROUP_ALPHA);
   await expect.poll(() => desktop.readServerClientState(null, "band:last-worktree")).toBe(WS_ALPHA);
   // Otherwise the desktop's write could land after the phone's and win.
   await expect
-    .poll(() => desktop.readServerClientState(null, "band.repos-list.label-filter"))
-    .toBe(LABEL_ALPHA);
+    .poll(() => desktop.readServerClientState(null, "band.repos-list.group-filter"))
+    .toBe(GROUP_ALPHA);
 
-  // The phone switches the shared label filter to Beta and opens a Beta
+  // The phone switches the shared group filter to Beta and opens a Beta
   // worktree, which becomes Beta's last worktree.
   const context = await browser.newContext(PHONE);
   try {
     const phone = new WorktreePage(await context.newPage(), server.url, TOKEN);
     await phone.launch();
-    await phone.selectLabelFilter(LABEL_BETA);
+    await phone.selectGroupFilter(GROUP_BETA);
     await phone.switchWorktree(WS_BETA);
     await expect
-      .poll(() => phone.readServerClientState(null, "band.repos-list.label-last-worktree"))
-      .toEqual({ [LABEL_BETA]: WS_BETA });
+      .poll(() => phone.readServerClientState(null, "band.repos-list.group-last-worktree"))
+      .toEqual({ [GROUP_BETA]: WS_BETA });
     await expect
-      .poll(() => phone.readServerClientState(null, "band.repos-list.label-filter"))
-      .toBe(LABEL_BETA);
+      .poll(() => phone.readServerClientState(null, "band.repos-list.group-filter"))
+      .toBe(GROUP_BETA);
   } finally {
     await context.close();
   }
 
-  // The desktop itself is still on Alpha: only the label says Beta.
+  // The desktop itself is still on Alpha: only the group says Beta.
   await expect.poll(() => desktop.readServerClientState(null, "band:last-worktree")).toBe(WS_ALPHA);
 
   server = await server.restart();
@@ -214,5 +212,5 @@ test("a label another device picked opens that label's last worktree", async ({
   await desktop.launch();
   await expect(page).toHaveURL(new RegExp(`/worktree/${encodeURIComponent(WS_BETA)}`));
   await desktop.waitForReady();
-  await expect(desktop.labelFilterTrigger()).toHaveText("Beta");
+  await expect(desktop.groupFilterTrigger()).toHaveText("Beta");
 });

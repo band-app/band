@@ -36,6 +36,7 @@ import { bandHome, resolveAgentDefinition, SettingsQueries } from "../infra/db/q
 import { TokenQueries } from "../infra/db/queries/tokens";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
+import { commandFor, launchFailure } from "./_utils/agent-command";
 import { type AgentLoginOption, agentLoginService } from "./agent-login-service";
 import {
   agentSessionService,
@@ -438,9 +439,9 @@ async function launchProblem(host: Host, def: CodingAgentDefinition): Promise<st
     const launch = await host.acp.resolveLaunch({
       type: def.type,
       label: def.label,
-      command: def.command,
+      command: commandFor(host.id, def),
     });
-    return typeof launch === "string" ? launch : null;
+    return typeof launch === "string" ? launchFailure(host.id, launch) : null;
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }

@@ -51,9 +51,9 @@ JSON output: `{"repos": [{"name": "...", "path": "...", "kind": "git", "worktree
 ### Register an existing repository as a repo
 
 ```sh
-band repos add <path> [--label <string>]
-band repos add --url <url> [--branch <branch>] [--label <string>]
-band repos add --from <worker> <path> [--add-root] [--label <string>]
+band repos add <path>
+band repos add --url <url> [--branch <branch>]
+band repos add --from <worker> <path> [--add-root]
 ```
 
 A repo is identified by its remote URL and default branch. The hub keeps no path of its own for a repo, and each worker maps the URL to a folder.
@@ -92,17 +92,19 @@ band worktrees list [repo]
 ```
 
 Text output is a table whose last column, `ORIGIN`, is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone).
-JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "worktreeId": "...", "path": "...", "origin": {"worktreeId": "...", "chatId": "...", "removed": false} | null, "children": ["<worktree id>"]}]}`
+JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "worktreeId": "...", "path": "...", "origin": {"worktreeId": "...", "chatId": "...", "removed": false} | null, "groupId": "<group id>" | null, "children": ["<worktree id>"]}]}`
 
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-worker] [--isolation worktree|container|vm] [--worker-repo-path <string>] [--worker <worker>] [--origin <worktree id> | --no-origin]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-worker] [--isolation worktree|container|vm] [--worker-repo-path <string>] [--worker <worker>] [--origin <worktree id> | --no-origin] [--group <id|name>]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
 
 **Origin.** A worktree records the worktree it was started from. Inside a Band chat or terminal the new worktree's origin is the current one (`$BAND_WORKTREE_ID`), and on a worker the hub also records the chat or terminal. `--origin <worktree id>` names another parent. `--no-origin` records none. A chat can do the same through the `worktrees_create` tool of its built-in `band` MCP server.
+
+**Group.** A worktree is in at most one group. `--group <id or name>` puts the new worktree in that group (a name matches without regard to case). Without it the worktree joins its origin's group, if the origin has one. An unknown group fails the command before anything is created.
 
 **Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.
 
@@ -162,6 +164,26 @@ band worktrees set-origin <repo> <name> [--worker <worker>] (--origin <worktree 
 ```
 
 The parent is the worktree this one was started from. The sidebar shows it in Group by: Origin. `--origin` sets a parent by hand (no chat or terminal is recorded), `--none` removes it. The hub refuses the worktree itself and any of its descendants as the parent, and an unknown worktree id.
+
+### Set a worktree's group
+
+```sh
+band worktrees set-group <worktree id> <group id|name> [--with-children]
+band worktrees set-group <worktree id> --none [--with-children]
+```
+
+Moves a worktree into a group, or out of its group with `--none`. `--with-children` also moves every worktree started from it, and theirs in turn, on any repo and host. The command prints each worktree that moved. `band worktrees list --output json` shows each worktree's `groupId` (null when ungrouped). An agent may run this command for worktrees on its own host.
+
+### List and manage groups
+
+```sh
+band groups list
+band groups create <name> [--color <color>]
+band groups rename <group id|name> <new name>
+band groups remove <group id|name>
+```
+
+Groups are the sections of the sidebar. `list` shows each group's id, name and color in sidebar order. `create` prints the new group's id. `remove` deletes the group and leaves its worktrees ungrouped. An agent on a worker may list groups but cannot create, rename or remove them.
 
 ### Remove a worktree (git worktree + state cleanup)
 
@@ -263,6 +285,15 @@ band workers trust <worker> restricted|standard|admin
 ```
 
 Sets how far the agents on a worker reach through the relay. `restricted` keeps them to their own worktrees (no worktree creation, repo changes or cronjobs). `standard` is the default for a static worker: its own worker, plus worktrees on other workers when Settings > Agents allows it. `admin` lets them work on any worker (chats, terminals, worktrees, cronjobs), change hub settings and manage repos; tokens, the vault and trust levels stay out of every agent's reach. A runner-started or ephemeral worker starts at `restricted`. Needs a person's admin token, never an agent's.
+
+### Set the command an agent runs as on a worker
+
+```sh
+band workers set-agent-command <worker> <agentId> <command>
+band workers set-agent-command <worker> <agentId> --clear
+```
+
+Replaces the agent's global command on one worker, for chats, terminal sessions, cronjobs and usage readers. `<command>` is a binary name or an absolute path with no arguments (put arguments in a wrapper script). `--clear` goes back to the global command. `band workers list --output json` returns `agentCommands` and, per agent, `agentCommandStates` with `effective` and `found` (false when the worker has no such binary on its PATH). Needs a person's admin token, never an agent's.
 
 ### Show what admin workers did
 

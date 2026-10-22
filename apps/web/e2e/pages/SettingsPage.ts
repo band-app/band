@@ -50,7 +50,7 @@ export type SettingsNavId =
   | "agent-hooks"
   | "context"
   | "runners"
-  | "labels"
+  | "groups"
   | "agents"
   | "usage"
   | "notifications"
@@ -241,12 +241,71 @@ export class SettingsPage {
     });
   }
 
-  /** "Add label" button — rendered in both the empty state and the row
-   *  appended after existing labels. Used to anchor on the Labels section
-   *  in tests that don't want to depend on the localised "No labels yet"
-   *  copy. The empty-state button is the first one in DOM order. */
-  addLabelButton(): Locator {
-    return this.dialog.getByRole("button", { name: "Add label" });
+  /** Settings > Groups: the "Add group" button, shown with and without groups. */
+  addGroupButton(): Locator {
+    return this.dialog.getByTestId("settings-groups__add");
+  }
+
+  /** Settings > Groups: the row of a group, by id. */
+  groupRow(groupId: string): Locator {
+    return this.dialog.locator(`[data-testid="settings-groups__row"][data-group-id="${groupId}"]`);
+  }
+
+  /** Settings > Groups: every group row, in the order shown. */
+  groupRows(): Locator {
+    return this.dialog.getByTestId("settings-groups__row");
+  }
+
+  /** The name field of a group row. */
+  groupNameInput(groupId: string): Locator {
+    return this.groupRow(groupId).getByTestId("settings-groups__name");
+  }
+
+  /** The color dot of a group row. Its inline `background-color` is the group's color. */
+  groupDot(groupId: string): Locator {
+    return this.groupRow(groupId).getByTestId("settings-groups__dot");
+  }
+
+  /** Adds a group through the name dialog. The new row appears at the end of the list. */
+  async addGroup(name: string): Promise<void> {
+    await test.step(`Add the group ${name}`, async () => {
+      await this.addGroupButton().click();
+      await this.page.getByTestId("group-dialog__name").fill(name);
+      await this.page.getByTestId("group-dialog__submit").click();
+      await expect(this.page.getByTestId("group-dialog")).toBeHidden();
+    });
+  }
+
+  /** Renames a group: types the new name and presses Enter. */
+  async renameGroup(groupId: string, name: string): Promise<void> {
+    await test.step(`Rename group ${groupId} to ${name}`, async () => {
+      const input = this.groupNameInput(groupId);
+      await input.fill(name);
+      await input.press("Enter");
+    });
+  }
+
+  /** Picks one of the preset colors of a group row, by its lowercase name ("red", "green"). */
+  async setGroupColor(groupId: string, preset: string): Promise<void> {
+    await test.step(`Set the color of group ${groupId} to ${preset}`, async () => {
+      await this.groupRow(groupId).getByTestId(`settings-groups__color--${preset}`).click();
+    });
+  }
+
+  /** Moves a group one place up or down. */
+  async moveGroup(groupId: string, direction: "up" | "down"): Promise<void> {
+    await test.step(`Move group ${groupId} ${direction}`, async () => {
+      await this.groupRow(groupId).getByTestId(`settings-groups__move-${direction}`).click();
+    });
+  }
+
+  /** Deletes a group and confirms. */
+  async deleteGroup(groupId: string): Promise<void> {
+    await test.step(`Delete group ${groupId}`, async () => {
+      await this.groupRow(groupId).getByTestId("settings-groups__delete").click();
+      await this.page.getByTestId("group-delete-dialog__confirm").click();
+      await expect(this.page.getByTestId("group-delete-dialog")).toBeHidden();
+    });
   }
 
   /** The install banner for Claude Code hooks (`DashboardShell.tsx`). */
@@ -491,13 +550,76 @@ export class SettingsPage {
   /** The row of one worker by id, matched on the id the row prints. */
   hostRow(hostId: string): Locator {
     return this.hostRows().filter({
-      has: this.page.getByTestId("settings__host-id").getByText(hostId, { exact: true }),
+      has: this.page.getByTestId(`settings__host-details--${hostId}`),
+    });
+  }
+
+  /** Opens the details popover of a worker row (id, labels, last seen, agents, roots, OS, capabilities). */
+  async openHostDetails(hostId: string): Promise<Locator> {
+    return test.step(`Open the details of worker ${hostId}`, async () => {
+      const popover = this.page.getByTestId("settings__host-details");
+      if (!(await popover.isVisible())) {
+        await this.hostRow(hostId).getByTestId(`settings__host-details--${hostId}`).click();
+      }
+      await expect(popover).toBeVisible();
+      return popover;
     });
   }
 
   /** The trust level selector of a worker row (admin tokens). Set in `HostsSettings.tsx`. */
   hostTrustSelect(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-trust-select");
+  }
+
+  /** The command field of a coding agent in a worker's Agent commands section (admin tokens). */
+  hostAgentCommandInput(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-input`);
+  }
+
+  /** What an agent runs on a worker, as the row prints it. */
+  hostAgentCommandEffective(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-effective`);
+  }
+
+  /** The not found warning for an agent's overridden command on a worker. */
+  hostAgentCommandNotFound(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-not-found`);
+  }
+
+  /** The status dot of an agent on a worker: `data-state` is found, missing or unknown. */
+  hostAgentCommandStatus(hostId: string, agentId: string): Locator {
+    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-status`);
+  }
+
+  /** Opens an agent's row on a worker so its command field shows. */
+  async openHostAgentCommand(hostId: string, agentId: string): Promise<void> {
+    const input = this.hostAgentCommandInput(hostId, agentId);
+    if (await input.isVisible()) return;
+    await this.hostRow(hostId)
+      .getByTestId(`settings__host-agent-command-${agentId}-toggle`)
+      .click();
+    await expect(input).toBeVisible();
+  }
+
+  /** Types a command for an agent on a worker and saves it. */
+  async setHostAgentCommand(hostId: string, agentId: string, command: string): Promise<void> {
+    await test.step(`Set ${agentId} on ${hostId} to ${command}`, async () => {
+      await this.openHostAgentCommand(hostId, agentId);
+      await this.hostAgentCommandInput(hostId, agentId).fill(command);
+      await this.hostRow(hostId)
+        .getByTestId(`settings__host-agent-command-${agentId}-save`)
+        .click();
+    });
+  }
+
+  /** Clears an agent's override on a worker. */
+  async clearHostAgentCommand(hostId: string, agentId: string): Promise<void> {
+    await test.step(`Clear ${agentId} on ${hostId}`, async () => {
+      await this.openHostAgentCommand(hostId, agentId);
+      await this.hostRow(hostId)
+        .getByTestId(`settings__host-agent-command-${agentId}-clear`)
+        .click();
+    });
   }
 
   /** The trust level badge of a worker row (tokens without the admin flag). */
@@ -567,13 +689,6 @@ export class SettingsPage {
     });
   }
 
-  /** Picks a label in the overview's label filter. An empty id shows every repo. */
-  async filterReposByLabel(labelId: string): Promise<void> {
-    await test.step(`Filter repos by label ${labelId || "(any)"}`, async () => {
-      await this.dialog.getByTestId("settings-repos__label-filter").selectOption(labelId);
-    });
-  }
-
   /** The remote shown under a repo's name in the overview. */
   repoRowUrl(name: string): Locator {
     return this.repoRow(name).getByTestId("settings-repos__url");
@@ -626,15 +741,9 @@ export class SettingsPage {
     return this.repoPage(name).getByTestId("settings-repo__branch");
   }
 
-  /** The label picker on a repo page. Its value is the label id. */
-  repoLabelSelect(name: string): Locator {
+  /** The label picker repo pages used to have. Groups replaced it, so it must not be there. */
+  repoLabelPicker(name: string): Locator {
     return this.repoPage(name).getByTestId("settings-repo__label");
-  }
-
-  async setRepoLabel(name: string, labelId: string): Promise<void> {
-    await test.step(`Set the label of ${name} to ${labelId || "none"}`, async () => {
-      await this.repoLabelSelect(name).selectOption(labelId);
-    });
   }
 
   /** The workers listed on a repo page, each with `data-host` and `data-primary`. */
@@ -860,14 +969,49 @@ export class SettingsPage {
     });
   }
 
-  /** The agents line of a worker row. `data-testid` set in `HostsSettings.tsx`. */
-  hostAgents(hostId: string): Locator {
-    return this.hostRow(hostId).getByTestId("settings__host-agents");
+  /** The agents line in a worker's details popover, which it opens. `data-testid` set in `HostsSettings.tsx`. */
+  async hostAgents(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-agents");
   }
 
-  /** The roots line of a worker row. */
-  hostRoots(hostId: string): Locator {
-    return this.hostRow(hostId).getByTestId("settings__host-roots");
+  /** The roots line in a worker's details popover. */
+  async hostRoots(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-roots");
+  }
+
+  /** The OS line in a worker's details popover. */
+  async hostOs(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-os");
+  }
+
+  /** The capabilities line in a worker's details popover. */
+  async hostCapabilities(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-capabilities");
+  }
+
+  /** The error icon of a worker row's failed update. */
+  hostUpdateErrorIcon(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-update-error-icon");
+  }
+
+  /** The error icon of a worker the hub refused. */
+  hostUpdateRequiredIcon(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-update-required-icon");
+  }
+
+  /** Opens the failed-update popover and returns its message. */
+  async openHostUpdateError(hostId: string): Promise<Locator> {
+    await this.hostUpdateErrorIcon(hostId).click();
+    return this.page.getByTestId("settings__host-update-error");
+  }
+
+  /** Clicks Dismiss in the failed-update popover. */
+  async dismissHostUpdateError(hostId: string): Promise<void> {
+    await test.step(`Dismiss the failed update of ${hostId}`, async () => {
+      const dismiss = this.page.getByTestId("settings__host-update-dismiss");
+      if (!(await dismiss.isVisible())) await this.hostUpdateErrorIcon(hostId).click();
+      await dismiss.click();
+    });
   }
 
   /** Clicks Remove on a worker row. */

@@ -524,6 +524,8 @@ describe("trust levels", () => {
         ["tokens.createDevice", { label: "mine", admin: true }],
         ["vault.list", {}],
         ["hosts.setTrust", { hostId: b.hostId, trust: "admin" }],
+        ["hosts.setAgentCommand", { hostId: a.hostId, agentId: "claude-code", command: "evil" }],
+        ["workers.setAgentCommand", { hostId: b.hostId, agentId: "claude-code", command: "evil" }],
       ] as const) {
         const res = await shell.call("trpc", `/trpc/${proc}`, input);
         expect(res.status, proc).toBe(403);

@@ -4,7 +4,7 @@
  * the folder picker, read its remote URL and branch in the preview, confirm that it is outside the
  * worker's roots, and find the repo in Settings > Repos. Other cases: a folder with no remote says
  * it stays on that worker, By URL shows the default branch the hub read from a local bare remote,
- * a label filter labels the new repo, Settings > Repos has no Add repo, and a second server with
+ * Settings > Repos has no Add repo, and a second server with
  * the hub's local host off and no worker shows the "no worker online" notice and still adds a repo
  * by URL. Real hub and worker, local bare repos as remotes, never the real `~/.band`.
  */
@@ -25,13 +25,11 @@ import {
 import { parseWorkerCommand, startWorker, type WorkerHandle } from "./helpers/worker";
 import { AddRepoPage } from "./pages/AddRepoPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { WorktreePage } from "./pages/WorktreePage";
 
 test.use({ viewport: { width: 1280, height: 900 } });
 test.describe.configure({ mode: "serial" });
 
 const TOKEN = "e2e-repos-add-repo-token";
-const LABEL = "work";
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -87,9 +85,7 @@ async function trpc(url: string, path: string, input: unknown): Promise<unknown>
 async function findRepo(
   url: string,
   name: string,
-): Promise<
-  { name: string; remoteUrl?: string; defaultBranch?: string; label?: string } | undefined
-> {
+): Promise<{ name: string; remoteUrl?: string; defaultBranch?: string } | undefined> {
   const res = await fetch(`${url}/trpc/repos.list`, {
     headers: { Authorization: `Bearer ${TOKEN}` },
   });
@@ -99,10 +95,7 @@ async function findRepo(
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedSettings(tmpHome, {
-    tokenSecret: TOKEN,
-    labels: [{ id: LABEL, name: "Work", color: "#3b82f6" }],
-  });
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
 
@@ -203,20 +196,6 @@ test("By URL shows the remote's default branch and stores the repo with it", asy
   const repo = await findRepo(server.url, "by-url-origin");
   expect(repo?.remoteUrl).toBe(origin);
   expect(repo?.defaultBranch).toBe("trunk");
-});
-
-test("a repo added from the Repos panel under a label filter gets that label", async ({ page }) => {
-  const worktreePage = new WorktreePage(page, server.url, TOKEN);
-  const settingsPage = new SettingsPage(page, server.url, TOKEN);
-  await settingsPage.goto();
-  await worktreePage.selectLabelFilter(LABEL);
-  const addRepo = new AddRepoPage(page);
-  await addRepo.open();
-  await addRepo.chooseUrl();
-  await addRepo.addByUrl(bareRemote("labelled-origin"), "main");
-  await expect(addRepo.closed()).toBeHidden();
-  // Its label keeps it in the filtered list.
-  expect((await findRepo(server.url, "labelled-origin"))?.label).toBe(LABEL);
 });
 
 test("Settings > Repos removes a repo that has no worktrees", async ({ page }) => {

@@ -10,8 +10,8 @@
  */
 
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { LABEL_FILTER_KEY } from "../dashboard/hooks/use-label-filter";
-import { readLabelLastWorktrees } from "../dashboard/hooks/use-label-last-worktree";
+import { GROUP_FILTER_KEY } from "../dashboard/hooks/use-group-filter";
+import { readGroupLastWorktrees } from "../dashboard/hooks/use-group-last-worktree";
 import type { RepoInfo } from "../dashboard/types";
 import { clientStorage } from "./client-state";
 
@@ -47,26 +47,26 @@ export function recordLastWorktree(worktreeId: string | null): void {
  * The worktree to open when the app starts on `/`, or null to stay there.
  * Call it after the global client state is hydrated.
  *
- * Starts from this device's last worktree. When a label is selected and the
- * worktree isn't under it (the label filter is shared between devices, so
- * another device may have changed it), the label's own last worktree wins,
- * the same one switching to that label would open; it also stands in when
+ * Starts from this device's last worktree. When a group is selected and the
+ * worktree isn't in it (the group filter is shared between devices, so
+ * another device may have changed it), the group's own last worktree wins,
+ * the same one switching to that group would open; it also stands in when
  * the last worktree was deleted. A device last on `/` stays there.
  */
 export function pickStartWorktree(repos: readonly RepoInfo[]): string | null {
-  const labelOf = new Map<string, string | undefined>();
+  const groupOf = new Map<string, string | null | undefined>();
   for (const repo of repos) {
     for (const wt of repo.worktrees) {
-      labelOf.set(toWorktreeId(repo.name, wt.name, wt.hostId), repo.label);
+      groupOf.set(toWorktreeId(repo.name, wt.name, wt.hostId), wt.groupId);
     }
   }
 
   const last = clientStorage.getItem(LAST_WORKTREE_KEY);
-  const label = clientStorage.getItem(LABEL_FILTER_KEY);
+  const group = clientStorage.getItem(GROUP_FILTER_KEY);
   if (!last) return null;
-  if (label && labelOf.get(last) !== label) {
-    const labelled = readLabelLastWorktrees()[label];
-    if (labelled && labelOf.get(labelled) === label) return labelled;
+  if (group && groupOf.get(last) !== group) {
+    const remembered = readGroupLastWorktrees()[group];
+    if (remembered && groupOf.get(remembered) === group) return remembered;
   }
-  return labelOf.has(last) ? last : null;
+  return groupOf.has(last) ? last : null;
 }

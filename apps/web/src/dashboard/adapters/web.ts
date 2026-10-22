@@ -71,10 +71,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.repos.reorder.mutate({ names });
   }
 
-  async updateRepoLabel(name: string, label: string | null): Promise<void> {
-    await this.trpc.repos.updateLabel.mutate({ name, label });
-  }
-
   async gitInit(path: string): Promise<void> {
     await this.trpc.repos.gitInit.mutate({ path });
   }
@@ -90,6 +86,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
     prompt?: string,
     agentMode?: AgentMode,
     host?: { hostId: string; hostRepoPath?: string },
+    groupId?: string | null,
   ): Promise<{ hostId?: string }> {
     const res = await this.trpc.worktrees.create.mutate({
       repo,
@@ -99,6 +96,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
       agentMode,
       hostId: host?.hostId,
       hostRepoPath: host?.hostRepoPath,
+      ...(groupId !== undefined ? { groupId } : {}),
     });
     return { hostId: res.hostId };
   }

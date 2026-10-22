@@ -3,9 +3,7 @@ import { Button } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
-import { useUpdateRepoLabel } from "../../hooks/use-repo-mutations";
 import { useRepos } from "../../hooks/use-repos";
-import { useSettingsQuery } from "../../hooks/use-settings-query";
 import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
 import { RepoLoginOverrides } from "./AgentLoginsSettings";
@@ -15,39 +13,7 @@ import { AutoContinueSwitch, CheckpointsSwitch } from "./RepoControls";
 import { RepoEnvironmentDetails } from "./RepoEnvironment";
 import { repoWorktreeCount } from "./ReposOverview";
 import { RepoWorkers } from "./RepoWorkers";
-import { Chip, errorText, Hint, RepoRow, RepoSection, SELECT_CLASS } from "./repo-page-ui";
-
-/** The repo's one label, picked from the labels made in Settings > Labels. */
-function RepoLabelSelect({ repo }: { repo: RepoInfo }) {
-  const { settings } = useSettingsQuery();
-  const updateLabel = useUpdateRepoLabel();
-  const labels = settings.labels ?? [];
-  const id = `settings-repo-${repo.name}-label`;
-  return (
-    <RepoRow
-      htmlFor={id}
-      label="Label"
-      description="One per repo. Filters and groups repos in the sidebar. Labels are made in Labels."
-    >
-      <select
-        id={id}
-        aria-label={`Label for ${repo.name}`}
-        data-testid="settings-repo__label"
-        value={repo.label ?? ""}
-        disabled={updateLabel.isPending}
-        onChange={(e) => updateLabel.mutate({ name: repo.name, label: e.target.value || null })}
-        className={SELECT_CLASS}
-      >
-        <option value="">No label</option>
-        {labels.map((l) => (
-          <option key={l.id} value={l.id}>
-            {l.name}
-          </option>
-        ))}
-      </select>
-    </RepoRow>
-  );
-}
+import { Chip, errorText, Hint, RepoRow, RepoSection } from "./repo-page-ui";
 
 /** The MCP servers this repo's chats get: enabled, and scoped to every repo or to this one. */
 function RepoMcpServers({ repoName, onOpenMcp }: { repoName: string; onOpenMcp: () => void }) {
@@ -337,12 +303,7 @@ export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Pr
         </p>
       ) : null}
 
-      <RepoSection
-        title="General"
-        description="How the repo is named and shown."
-        from="from Repos, Labels"
-      >
-        <RepoLabelSelect repo={repo} />
+      <RepoSection title="General" description="How the repo is named and shown." from="from Repos">
         <RepoRow label="Remote" description="The repo's identity on the hub." readOnly>
           <span
             className={

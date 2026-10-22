@@ -76,9 +76,9 @@ describe("repo and worktree rename migration", () => {
 
     migrate(db, { migrationsFolder: migrationsDir });
 
-    expect(all("SELECT name, path, label FROM repos")).toEqual([
-      { name: "proj", path: "/repos/proj", label: "work" },
-    ]);
+    // The label became the group id of the repo's worktrees (`worktree_groups` migration).
+    expect(all("SELECT name, path FROM repos")).toEqual([{ name: "proj", path: "/repos/proj" }]);
+    expect(all("SELECT group_id FROM worktrees")).toEqual([{ group_id: "work" }]);
     expect(all("SELECT repo_name, name, path FROM worktrees")).toEqual([
       { repo_name: "proj", name: "feat", path: "/repos/proj-feat" },
     ]);

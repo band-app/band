@@ -2,11 +2,14 @@ import {
   buildOriginTree,
   buildPinnedTree,
   entriesOf,
+  type GroupDefinition,
+  groupEntries,
   hostIdOf,
   type OriginTree as SharedOriginTree,
   type PinnedTree as SharedPinnedTree,
   type WorktreeEntry as SharedWorktreeEntry,
   sortRepoWorktrees,
+  UNGROUPED_KEY,
   withoutPinned,
 } from "@band-app/shared/sidebar-tree";
 import { useSyncExternalStore } from "react";
@@ -18,9 +21,10 @@ export type WorktreeEntry = SharedWorktreeEntry<RepoInfo>;
 export type OriginTree = SharedOriginTree<RepoInfo>;
 export type PinnedTree = SharedPinnedTree<RepoInfo>;
 
-export type GroupBy = "repo" | "origin" | "host";
+export type GroupBy = "groups" | "repo" | "origin" | "host";
 
 export const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
+  { value: "groups", label: "Groups" },
   { value: "repo", label: "Repo" },
   { value: "origin", label: "Origin" },
   { value: "host", label: "Worker" },
@@ -37,11 +41,13 @@ const LOCAL_HOST = "local";
 function readGroupBy(): GroupBy {
   try {
     const value = window.localStorage.getItem(GROUP_BY_KEY);
-    if (value === "origin" || value === "host" || value === "repo") return value;
+    if (value === "groups" || value === "origin" || value === "host" || value === "repo") {
+      return value;
+    }
   } catch {
     // Storage blocked: fall back to the default.
   }
-  return "repo";
+  return "groups";
 }
 
 let current: GroupBy | null = null;
@@ -68,7 +74,7 @@ export function setGroupBy(value: GroupBy): void {
 }
 
 export function useGroupBy(): [GroupBy, (value: GroupBy) => void] {
-  const value = useSyncExternalStore(subscribe, getSnapshot, () => "repo" as GroupBy);
+  const value = useSyncExternalStore(subscribe, getSnapshot, () => "groups" as GroupBy);
   return [value, setGroupBy];
 }
 
@@ -92,6 +98,23 @@ export type GroupedRow =
       parentRemoved: boolean;
       /** Set on the rows of the Pinned section. */
       pinned?: boolean;
+      /**
+       * Groups view: the worktree was started from one in another group, so it is a top-level row
+       * here. The row shows a chip that selects that parent.
+       */
+      fromParent?: { worktreeId: string; name: string };
+    }
+  | {
+      kind: "group";
+      key: string;
+      /** Null for the Ungrouped section. */
+      groupId: string | null;
+      name: string;
+      color: string | null;
+      collapsed: boolean;
+      count: number;
+      /** The group filter shows this group alone: its header stays and cannot collapse. */
+      filtered: boolean;
     }
   | {
       kind: "host";
@@ -159,24 +182,21 @@ export function buildPinnedRows(
   return rows;
 }
 
-/**
- * The Origin view: each repo's main worktree at the top level, with everything started from it
- * nested under it. A worktree with no origin, or whose origin is gone, nests under its repo's main
- * on the same host. Children are listed in repo order. A collapsed parent hides its subtree.
- */
-export function buildOriginRows(
-  repos: RepoInfo[],
+/** The rows of an origin tree, a worktree followed by its subtree unless it is collapsed. */
+function originTreeRows(
+  tree: OriginTree,
   isCollapsed: (id: string) => boolean,
-): GroupedRow[] {
-  const tree = buildOriginTree(entriesOf(repos));
+  fromParentOf?: (entry: WorktreeEntry) => WorktreeRow["fromParent"],
+): WorktreeRow[] {
   const { entries, childrenOf, roots, hasLiveOrigin } = tree;
-  const rows: GroupedRow[] = [];
+  const rows: WorktreeRow[] = [];
   const seen = new Set<string>();
   const visit = (entry: WorktreeEntry, depth: number) => {
     if (seen.has(entry.worktreeId)) return;
     seen.add(entry.worktreeId);
     const kids = childrenOf.get(entry.worktreeId) ?? [];
     const collapsed = kids.length > 0 && isCollapsed(entry.worktreeId);
+    const fromParent = fromParentOf?.(entry);
     rows.push({
       kind: "worktree",
       key: entry.worktreeId,
@@ -185,6 +205,7 @@ export function buildOriginRows(
       childCount: kids.length,
       collapsed,
       parentRemoved: !hasLiveOrigin(entry) && entry.worktree.origin?.removed === true,
+      ...(fromParent ? { fromParent } : {}),
     });
     if (collapsed) {
       hide(entry.worktreeId);
@@ -203,6 +224,76 @@ export function buildOriginRows(
   for (const root of roots) visit(root, 0);
   // A cycle among origins would hide its members: show anything left at the top level.
   for (const entry of entries) visit(entry, 0);
+  return rows;
+}
+
+/**
+ * The Origin view: each repo's main worktree at the top level, with everything started from it
+ * nested under it. A worktree with no origin, or whose origin is gone, nests under its repo's main
+ * on the same host. Children are listed in repo order. A collapsed parent hides its subtree.
+ */
+export function buildOriginRows(
+  repos: RepoInfo[],
+  isCollapsed: (id: string) => boolean,
+): GroupedRow[] {
+  return originTreeRows(buildOriginTree(entriesOf(repos)), isCollapsed);
+}
+
+export interface GroupRowsInput {
+  /** The repos to list: the group filter applied and the pinned worktrees left out. */
+  repos: RepoInfo[];
+  /** Every repo, to name the parent of a worktree whose parent is in another group or pinned. */
+  allRepos: RepoInfo[];
+  groups: readonly GroupDefinition[];
+  /** The group the filter shows alone, or null for every group. */
+  filter: string | null;
+  isGroupCollapsed: (id: string) => boolean;
+  isOriginCollapsed: (id: string) => boolean;
+}
+
+/**
+ * The Groups view: a header per group in the order the groups are defined, then Ungrouped. Under
+ * each header the group's worktrees as an origin tree, so a child nests under its parent when both
+ * are in the group. A child whose parent is in another group is a top-level row with a `fromParent`
+ * chip. A group filter shows that group alone, under its header.
+ */
+export function buildGroupRows(input: GroupRowsInput): GroupedRow[] {
+  const { repos, allRepos, groups, filter, isGroupCollapsed, isOriginCollapsed } = input;
+  const parents = new Map(entriesOf(allRepos).map((e) => [e.worktreeId, e]));
+  const rows: GroupedRow[] = [];
+  for (const section of groupEntries(entriesOf(repos), groups, filter)) {
+    const inGroup = new Set(section.entries.map((e) => e.worktreeId));
+    // A worktree started from one in another group is a top-level row here, not part of its main's.
+    const parentElsewhere = (entry: WorktreeEntry) => {
+      const parentId = entry.worktree.origin?.worktreeId;
+      return !!parentId && parentId !== entry.worktreeId && !inGroup.has(parentId);
+    };
+    const tree = buildOriginTree(section.entries, {
+      keepAtTop: (entry) =>
+        parentElsewhere(entry) && parents.has(entry.worktree.origin!.worktreeId),
+    });
+    const groupKey = section.group?.id ?? UNGROUPED_KEY;
+    const collapsed = !filter && isGroupCollapsed(groupKey);
+    rows.push({
+      kind: "group",
+      key: `group:${groupKey}`,
+      groupId: section.group?.id ?? null,
+      name: section.group?.name ?? "Ungrouped",
+      color: section.group?.color ?? null,
+      collapsed,
+      count: section.entries.length,
+      filtered: !!filter,
+    });
+    if (collapsed) continue;
+    rows.push(
+      ...originTreeRows(tree, isOriginCollapsed, (entry) => {
+        const origin = entry.worktree.origin;
+        if (!origin || tree.hasLiveOrigin(entry)) return undefined;
+        const parent = parents.get(origin.worktreeId);
+        return parent ? { worktreeId: parent.worktreeId, name: parent.worktree.name } : undefined;
+      }),
+    );
+  }
   return rows;
 }
 

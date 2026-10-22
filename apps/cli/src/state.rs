@@ -13,8 +13,6 @@ pub struct Settings {
     pub web_server_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notifications: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub labels: Option<serde_json::Value>,
     #[serde(rename = "tokenSecret", skip_serializing_if = "Option::is_none")]
     pub token_secret: Option<String>,
     #[serde(rename = "autoStartTunnel", skip_serializing_if = "Option::is_none")]

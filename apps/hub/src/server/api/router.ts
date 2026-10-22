@@ -56,6 +56,7 @@ import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
 import { environmentRouter } from "./environment/router";
 import { followRouter } from "./follow/router";
+import { groupsRouter } from "./groups/router";
 import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
 import { hostRequestsRouter } from "./host-requests/router";
@@ -99,6 +100,7 @@ export const appRouter = t.router({
   chat: chatRouter,
   browsers: browsersRouter,
   browserProfiles: browserProfilesRouter,
+  groups: groupsRouter,
   panelFocus: panelFocusRouter,
   clientState: clientStateRouter,
   tasks: tasksRouter,
