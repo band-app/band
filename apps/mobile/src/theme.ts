@@ -32,6 +32,21 @@ export const colors = {
   grab: dynamic("#d6d3d1", "#44403c"),
 };
 
+/**
+ * The fills of a repo's fallback avatar, in the order of `--repo-avatar-1..6` in the web's
+ * `globals.css`. `repoAvatarColorIndex` (`@band-app/shared/repo-avatar`) picks one by name.
+ */
+export const repoAvatarColors: ColorValue[] = [
+  dynamic("#6366f1", "#818cf8"),
+  dynamic("#0ea5e9", "#38bdf8"),
+  dynamic("#16a34a", "#4ade80"),
+  dynamic("#d97706", "#fbbf24"),
+  dynamic("#db2777", "#f472b6"),
+  dynamic("#64748b", "#94a3b8"),
+];
+/** The letter on a fallback avatar. */
+export const repoAvatarForeground = dynamic("#fafaf9", "#0c0a09");
+
 /** `light` or `dark`, for the few places that need the value (blur tint, status bar). */
 export function useScheme(): "light" | "dark" {
   return useColorScheme() === "light" ? "light" : "dark";

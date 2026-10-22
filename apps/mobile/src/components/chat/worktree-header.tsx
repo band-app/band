@@ -2,8 +2,10 @@ import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ChatTab } from "../../lib/chat/use-worktree-tabs";
+import { useHubSession } from "../../lib/hub-session";
 import { colors, tones } from "../../theme";
 import { BackGlyph, ChevronGlyph, DotsGlyph, Glass, GlassCircle } from "../glass";
+import { RepoAvatar } from "../repo-avatar";
 import { StateIcon } from "../state-icon";
 
 const DOT_COLOR = {
@@ -20,6 +22,7 @@ const DOT_COLOR = {
  */
 export function WorktreeHeader({
   repo,
+  avatar,
   branch,
   tabs,
   active,
@@ -27,6 +30,7 @@ export function WorktreeHeader({
   onMore,
 }: {
   repo: string;
+  avatar?: string | null;
   branch: string;
   tabs: ChatTab[];
   active: string | null;
@@ -34,6 +38,7 @@ export function WorktreeHeader({
   onMore: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { hub } = useHubSession();
   const index = tabs.findIndex((t) => t.id === active);
   const tab = index >= 0 ? tabs[index] : undefined;
   const where = [repo, branch, tab ? `${index + 1} of ${tabs.length}` : null]
@@ -60,9 +65,12 @@ export function WorktreeHeader({
               </Text>
               <ChevronGlyph direction="down" size={7} />
             </View>
-            <Text style={styles.where} numberOfLines={1} testID="worktree__branch">
-              {where}
-            </Text>
+            <View style={styles.line2}>
+              <RepoAvatar name={repo} src={avatar} base={hub.url} token={hub.token} size={12} />
+              <Text style={styles.where} numberOfLines={1} testID="worktree__branch">
+                {where}
+              </Text>
+            </View>
           </Glass>
         </Pressable>
         <GlassCircle label="More" onPress={onMore} testID="worktree__more">
@@ -97,7 +105,8 @@ const styles = StyleSheet.create({
   pill: { alignItems: "center", height: 48, justifyContent: "center", paddingHorizontal: 14 },
   line1: { alignItems: "center", flexDirection: "row", gap: 6, maxWidth: "100%" },
   name: { color: colors.foreground, flexShrink: 1, fontSize: 15, fontWeight: "600" },
-  where: { color: colors.mutedForeground, fontSize: 11.5, marginTop: -1 },
+  line2: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: -1, maxWidth: "100%" },
+  where: { color: colors.mutedForeground, fontSize: 11.5, flexShrink: 1 },
   dots: { flexDirection: "row", gap: 6, justifyContent: "center", paddingTop: 8 },
   dot: { borderRadius: 3, height: 6, width: 6 },
   dotCurrent: { borderRadius: 3, width: 18 },

@@ -229,6 +229,24 @@ test("the overview lists every repo, and Enter in the focused filter opens the m
   await expect(settings.footer).toBeVisible();
 });
 
+test("every overview row and the repo page header show an avatar (S3)", async ({ page }) => {
+  const settings = new SettingsPage(page, server.url, TOKEN);
+  await settings.goto();
+  await settings.openDialog("repos");
+
+  // None of these repos is on GitHub, so each shows its initial on a coloured square.
+  for (const name of [BUSY, LIMITED, REMOTE]) {
+    await expect(settings.repoRowAvatar(name)).toHaveText(name[0].toUpperCase());
+  }
+  // The same name gives the same colour in a row and in the page header.
+  const rowColor = await settings.repoRowAvatar(BUSY).getAttribute("data-color-index");
+  await settings.openRepo(BUSY);
+  await expect(settings.repoPageAvatar(BUSY)).toHaveText("A");
+  await expect(settings.repoPageAvatar(BUSY)).toHaveAttribute("data-color-index", rowColor ?? "");
+  const box = await settings.repoPageAvatar(BUSY).boundingBox();
+  expect(Math.round(box?.width ?? 0)).toBe(38);
+});
+
 test("allowed workers and the primary worker save at once and show after a reload (S3)", async ({
   page,
 }) => {

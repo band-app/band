@@ -694,6 +694,26 @@ export class SettingsPage {
     return this.repoRow(name).getByTestId("settings-repos__url");
   }
 
+  /** A repo's avatar square in its overview row: the fallback initial, or the image once loaded. */
+  repoRowAvatar(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__avatar-fallback");
+  }
+
+  /** The GitHub owner's image in a repo's overview row. Absent for a repo without one. */
+  repoRowAvatarImage(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__avatar");
+  }
+
+  /** The 38 px fallback avatar beside the name in the open repo page's header. */
+  repoPageAvatar(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__avatar-fallback");
+  }
+
+  /** The GitHub owner's image in the open repo page's header. */
+  repoPageAvatarImage(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__avatar");
+  }
+
   /** The "<workers> only" mark of a limited repo's overview row. Absent for an unlimited repo. */
   repoRowLimited(name: string): Locator {
     return this.repoRow(name).getByTestId("settings-repos__limited");
