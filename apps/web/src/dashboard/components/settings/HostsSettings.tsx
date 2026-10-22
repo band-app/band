@@ -67,6 +67,12 @@ function osOf(host: HostList[number]): string {
   return typeof info.arch === "string" ? `${info.os} ${info.arch}` : info.os;
 }
 
+/** Status pill colors by worker status. Anything not listed reads as muted. */
+const STATUS_PILL: Record<string, string> = {
+  online: "bg-success-bg text-success",
+  lost: "bg-warning-bg text-warning",
+};
+
 const TRUST_LEVELS = ["restricted", "standard", "admin"] as const;
 type TrustLevel = (typeof TRUST_LEVELS)[number];
 
@@ -339,7 +345,10 @@ export function HostsSettings() {
                 {host.usable ? <HostVersionLine host={host} isAdmin={isAdmin} /> : null}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <span data-testid="settings__host-status" className="text-xs text-muted-foreground">
+                <span
+                  data-testid="settings__host-status"
+                  className={`rounded-full px-2.5 py-0.5 text-xs ${STATUS_PILL[host.status] ?? "bg-muted text-muted-foreground"}`}
+                >
                   {host.status}
                 </span>
                 {host.id !== "local" &&
