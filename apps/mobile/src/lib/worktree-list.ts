@@ -129,6 +129,8 @@ export interface WorktreeRow {
   repo: string;
   /** The repo's display title. */
   repoTitle: string;
+  /** The repo's avatar, for the worktree screen's header. */
+  repoAvatar?: { src: string; label: string } | null;
   name: string;
   branch: string;
   hostId: string;
@@ -239,6 +241,7 @@ function toRow(
     id,
     repo: repo.name,
     repoTitle: repo.name,
+    repoAvatar: repo.avatar ?? null,
     name: worktree.name,
     branch: worktree.branch,
     hostId,

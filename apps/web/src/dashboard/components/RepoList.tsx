@@ -403,24 +403,12 @@ function SortableRepo({
                 )
               ) : (
                 // Git repo: the GitHub owner's avatar when `origin` is
-                // on GitHub, else the open/closed folder.
+                // on GitHub, else an initial on a coloured square.
                 <RepoAvatar
+                  name={repo.name}
                   avatar={repo.avatar}
                   className="size-4"
                   testId={`repo-list__repo-avatar--${repo.name}`}
-                  fallback={
-                    collapsed ? (
-                      <Folder
-                        data-testid={`repo-list__repo-folder--${repo.name}`}
-                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
-                      />
-                    ) : (
-                      <FolderOpen
-                        data-testid={`repo-list__repo-folder--${repo.name}`}
-                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
-                      />
-                    )
-                  }
                 />
               )}
               <Tooltip>
@@ -1311,9 +1299,9 @@ export function RepoList({ groupFilter }: RepoListProps) {
               ) : activeDragId ? (
                 <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
                   <RepoAvatar
+                    name={activeDragId}
                     avatar={repos.find((p) => p.name === activeDragId)?.avatar}
                     className="size-3.5"
-                    fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
                   />
                   <span className="text-[13px] font-semibold text-foreground">{activeDragId}</span>
                 </div>

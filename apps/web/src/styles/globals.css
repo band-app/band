@@ -133,6 +133,15 @@
   --chart-3: oklch(0.398 0 0);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  /* Fallback repo avatar: six fills (picked by repoAvatarColorIndex in
+     @band-app/shared) with one shared letter colour. */
+  --repo-avatar-1: oklch(0.55 0.2 275);
+  --repo-avatar-2: oklch(0.58 0.14 235);
+  --repo-avatar-3: oklch(0.55 0.15 150);
+  --repo-avatar-4: oklch(0.6 0.15 65);
+  --repo-avatar-5: oklch(0.57 0.2 350);
+  --repo-avatar-6: oklch(0.5 0.03 255);
+  --repo-avatar-foreground: oklch(0.985 0 0);
   /* Fonts and sizes. The Appearance settings override these on <html>
      (lib/theme/apply.ts). */
   --font-ui:
@@ -237,6 +246,15 @@
 }
 
 .dark {
+  /* Fallback repo avatar: six fills (picked by repoAvatarColorIndex in
+     @band-app/shared) with one shared letter colour. */
+  --repo-avatar-1: oklch(0.62 0.17 275);
+  --repo-avatar-2: oklch(0.65 0.12 235);
+  --repo-avatar-3: oklch(0.62 0.14 150);
+  --repo-avatar-4: oklch(0.68 0.14 65);
+  --repo-avatar-5: oklch(0.64 0.18 350);
+  --repo-avatar-6: oklch(0.58 0.03 255);
+  --repo-avatar-foreground: oklch(0.145 0 0);
   /* Switch native UI (scrollbars, form controls) to dark mode so the
      Chromium overlay scrollbar uses a dark track + light thumb instead of
      the default light track that looks washed-out on dark backgrounds.

@@ -85,7 +85,7 @@ export class SidebarGroupingPage {
   /** The repo avatar (or its folder fallback) on an Origin row. */
   repoAvatar(row: Locator, repo: string): Locator {
     return row.locator(
-      `[data-testid="worktree-label__avatar--${repo}"], [data-testid="worktree-label__avatar-fallback--${repo}"]`,
+      `[data-testid="worktree-label__avatar--${repo}"], [data-testid="worktree-label__avatar--${repo}-fallback"]`,
     );
   }
 

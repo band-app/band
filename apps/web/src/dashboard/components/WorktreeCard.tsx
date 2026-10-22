@@ -18,7 +18,6 @@ import {
   Clipboard,
   CloudOff,
   CornerUpLeft,
-  Folder,
   FolderOpen,
   GitCompareArrows,
   Home,
@@ -415,15 +414,11 @@ export const WorktreeCard = memo(function WorktreeCard({
                     hostTag={hostTagText}
                     repoIcon={
                       <RepoAvatar
+                        name={repoName}
                         avatar={repoAvatar}
                         className="size-3 shrink-0 rounded-sm"
+                        textClassName="text-[7px]"
                         testId={`worktree-label__avatar--${repoName}`}
-                        fallback={
-                          <Folder
-                            data-testid={`worktree-label__avatar-fallback--${repoName}`}
-                            className="size-3 shrink-0 text-muted-foreground"
-                          />
-                        }
                       />
                     }
                   />
