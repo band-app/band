@@ -1,6 +1,6 @@
-import { Button, Input } from "@band-app/ui";
+import { Button, Input, Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Plus } from "lucide-react";
+import { Copy, Info, Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
@@ -104,6 +104,67 @@ function formatTime(at: number | null): string {
 /** The hub URL a worker dials: the one this page reaches the hub at. */
 function hubUrl(): string {
   return crossOriginHub()?.origin ?? window.location.origin;
+}
+
+/**
+ * The details of a worker row (id, labels, last seen, agents, roots, OS, capabilities) behind an
+ * info icon, so the row itself stays short at any width.
+ */
+function HostDetailsPopover({ host }: { host: HostList[number] }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Details of ${host.name}`}
+          data-testid={`settings__host-details--${host.id}`}
+          className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
+        >
+          <Info className="size-3.5" aria-hidden="true" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-80 space-y-1.5 text-xs"
+        data-testid="settings__host-details"
+      >
+        <div>
+          <span className="text-muted-foreground">ID </span>
+          <span data-testid="settings__host-id" className="break-all">
+            {host.id}
+          </span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Labels </span>
+          {host.labels.length > 0 ? host.labels.join(", ") : "None"}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Last seen </span>
+          {formatTime(host.lastSeenAt)}
+        </div>
+        {host.usable ? (
+          <>
+            <div data-testid="settings__host-agents">
+              <span className="text-muted-foreground">Agents </span>
+              {agentSummary(host)}
+            </div>
+            <div data-testid="settings__host-roots" className="break-all">
+              <span className="text-muted-foreground">Roots </span>
+              {host.roots.length > 0 ? host.roots.join(", ") : "any path"}
+            </div>
+            <div data-testid="settings__host-os">
+              <span className="text-muted-foreground">OS </span>
+              {osOf(host)}
+            </div>
+            <div data-testid="settings__host-capabilities">
+              <span className="text-muted-foreground">Capabilities </span>
+              {capabilitySummary(host)}
+            </div>
+          </>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 /**
@@ -256,40 +317,18 @@ export function HostsSettings() {
               key={host.id}
               data-testid="settings__host"
               data-status={host.status}
-              className="flex items-start justify-between gap-3 px-3 py-2 text-sm"
+              className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-3 py-2 text-sm"
             >
-              <div className="min-w-0">
-                <div className="truncate" data-testid="settings__host-name">
-                  {host.name}
+              <div className="min-w-[16rem] flex-1 basis-64">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate" data-testid="settings__host-name">
+                    {host.name}
+                  </span>
+                  <HostDetailsPopover host={host} />
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  <span data-testid="settings__host-id">{host.id}</span>
-                  {" · "}
-                  {host.labels.length > 0 ? host.labels.join(", ") : "No labels"}
-                  {" · "}
-                  Last seen {formatTime(host.lastSeenAt)}
-                </div>
-                {host.usable ? (
-                  <div className="text-xs text-muted-foreground">
-                    <span data-testid="settings__host-agents">Agents: {agentSummary(host)}</span>
-                    {" · "}
-                    <span data-testid="settings__host-roots">
-                      Roots: {host.roots.length > 0 ? host.roots.join(", ") : "any path"}
-                    </span>
-                  </div>
-                ) : null}
-                {host.usable ? (
-                  <div className="text-xs text-muted-foreground">
-                    <span data-testid="settings__host-os">OS: {osOf(host)}</span>
-                    {" · "}
-                    <span data-testid="settings__host-capabilities">
-                      Capabilities: {capabilitySummary(host)}
-                    </span>
-                  </div>
-                ) : null}
                 {host.usable ? <HostVersionLine host={host} isAdmin={isAdmin} /> : null}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <span data-testid="settings__host-status" className="text-xs text-muted-foreground">
                   {host.status}
                 </span>

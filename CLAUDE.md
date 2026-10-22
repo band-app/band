@@ -149,6 +149,10 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 
 - `apps/desktop/tests/app-protocol.test.ts`, `navigation-guard.test.ts`, `hub-choice.test.ts` and `ui-paths.test.ts` cover the `app://` handler (hosts, CSP, deep links, traversal), the navigation rules, the hub choice storage and validation (against a real HTTP server on another port) and the UI path lookup, with no Electron. The Electron-bound code is covered by `apps/web/e2e-desktop/desktop-hub-picker.spec.ts` (local hub, remote hub with no local spawn, live switching, per-hub storage, CSP, navigation guard, `<webview>` attach). Still untested: the macOS folder picker and the other macOS shell IPC, terminals and browser-pane page loads over `app://` in the e2e (the app spawns real PTYs only in the hub's own tests), cookie import (`ChromeImportDialog.tsx`, Keychain), and the updater toast, which needs a packaged app. The existing desktop unit tests for guest policy, chrome-import and the updater still pass and none of their code changed.
 
+## UI errors
+
+Show an error as an icon with a popover (destructive color, `aria-label` naming the problem), never as inline text. A row stays short at any width. Settings > Workers does this now. Other screens still print some errors inline.
+
 ## UI colors
 
 Use the semantic tokens in `apps/web/src/styles/globals.css` (`bg-selection`, `text-success`, `text-git-added`, `var(--syntax-keyword)`), not Tailwind palette classes or color literals, so Settings > Appearance restyles every surface. `scripts/check-theme-tokens.mjs` fails `pnpm lint` and CI on `bg-blue-500`, `dark:text-red-400`, `#ff0000` or `rgba(...)` in `.ts` and `.tsx` files. A color that must stay fixed takes `theme-lint-ignore-line: <reason>` or `theme-lint-ignore-file: <reason>`. The token list and the theme runtime are in `docs/appearance.md`.

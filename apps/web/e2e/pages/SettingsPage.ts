@@ -491,7 +491,19 @@ export class SettingsPage {
   /** The row of one worker by id, matched on the id the row prints. */
   hostRow(hostId: string): Locator {
     return this.hostRows().filter({
-      has: this.page.getByTestId("settings__host-id").getByText(hostId, { exact: true }),
+      has: this.page.getByTestId(`settings__host-details--${hostId}`),
+    });
+  }
+
+  /** Opens the details popover of a worker row (id, labels, last seen, agents, roots, OS, capabilities). */
+  async openHostDetails(hostId: string): Promise<Locator> {
+    return test.step(`Open the details of worker ${hostId}`, async () => {
+      const popover = this.page.getByTestId("settings__host-details");
+      if (!(await popover.isVisible())) {
+        await this.hostRow(hostId).getByTestId(`settings__host-details--${hostId}`).click();
+      }
+      await expect(popover).toBeVisible();
+      return popover;
     });
   }
 
@@ -860,14 +872,49 @@ export class SettingsPage {
     });
   }
 
-  /** The agents line of a worker row. `data-testid` set in `HostsSettings.tsx`. */
-  hostAgents(hostId: string): Locator {
-    return this.hostRow(hostId).getByTestId("settings__host-agents");
+  /** The agents line in a worker's details popover, which it opens. `data-testid` set in `HostsSettings.tsx`. */
+  async hostAgents(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-agents");
   }
 
-  /** The roots line of a worker row. */
-  hostRoots(hostId: string): Locator {
-    return this.hostRow(hostId).getByTestId("settings__host-roots");
+  /** The roots line in a worker's details popover. */
+  async hostRoots(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-roots");
+  }
+
+  /** The OS line in a worker's details popover. */
+  async hostOs(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-os");
+  }
+
+  /** The capabilities line in a worker's details popover. */
+  async hostCapabilities(hostId: string): Promise<Locator> {
+    return (await this.openHostDetails(hostId)).getByTestId("settings__host-capabilities");
+  }
+
+  /** The error icon of a worker row's failed update. */
+  hostUpdateErrorIcon(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-update-error-icon");
+  }
+
+  /** The error icon of a worker the hub refused. */
+  hostUpdateRequiredIcon(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-update-required-icon");
+  }
+
+  /** Opens the failed-update popover and returns its message. */
+  async openHostUpdateError(hostId: string): Promise<Locator> {
+    await this.hostUpdateErrorIcon(hostId).click();
+    return this.page.getByTestId("settings__host-update-error");
+  }
+
+  /** Clicks Dismiss in the failed-update popover. */
+  async dismissHostUpdateError(hostId: string): Promise<void> {
+    await test.step(`Dismiss the failed update of ${hostId}`, async () => {
+      const dismiss = this.page.getByTestId("settings__host-update-dismiss");
+      if (!(await dismiss.isVisible())) await this.hostUpdateErrorIcon(hostId).click();
+      await dismiss.click();
+    });
   }
 
   /** Clicks Remove on a worker row. */

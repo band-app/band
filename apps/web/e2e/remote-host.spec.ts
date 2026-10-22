@@ -156,8 +156,8 @@ test("the Hosts screen shows what the worker offers and removes it once offline"
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
   await settingsPage.openDialog("hosts");
-  await expect(settingsPage.hostAgents(hostId)).toContainText("claude-code");
-  await expect(settingsPage.hostRoots(hostId)).toContainText(root);
+  await expect(await settingsPage.hostAgents(hostId)).toContainText("claude-code");
+  await expect(await settingsPage.hostRoots(hostId)).toContainText(root);
 
   // An online host cannot be removed.
   await expect(settingsPage.hostRemoveButton(hostId)).toBeDisabled();
