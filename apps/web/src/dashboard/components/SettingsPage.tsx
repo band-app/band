@@ -1081,7 +1081,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                                 <AgentIcon type={known.type} className="size-4 shrink-0" />
                                 <AccordionTriggerInline
                                   aria-label={`Toggle advanced settings for ${known.label}`}
-                                  className="flex-1 rounded-md text-left text-sm font-medium"
+                                  className="min-w-0 flex-1 truncate whitespace-nowrap rounded-md text-left text-sm font-medium"
                                 >
                                   {known.label}
                                 </AccordionTriggerInline>

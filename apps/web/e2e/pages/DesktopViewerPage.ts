@@ -46,7 +46,7 @@ export class DesktopViewerPage {
     return this.page
       .getByTestId("settings__host")
       .filter({
-        has: this.page.getByTestId("settings__host-id").getByText(hostId, { exact: true }),
+        has: this.page.getByTestId(`settings__host-details--${hostId}`),
       })
       .getByTestId("settings__host-open-desktop");
   }

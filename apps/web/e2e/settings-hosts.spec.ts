@@ -102,7 +102,8 @@ test("creates a worker bootstrap token and lists its offline host", async ({ pag
   const row = settingsPage.hostRow(hostId);
   await settingsPage.expectRowVisible(row);
   await expect(row).toHaveAttribute("data-status", "offline");
-  await expect(row).toContainText("os=linux, gpu");
+  await expect(row).not.toContainText("os=linux");
+  await expect(await settingsPage.openHostDetails(hostId)).toContainText("os=linux, gpu");
 
   // Closing the panel drops the secret from the page. A worker spends it on its first exchange.
   await expect(settingsPage.bootstrapToken()).toBeVisible();
