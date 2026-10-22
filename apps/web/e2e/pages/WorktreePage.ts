@@ -449,9 +449,9 @@ export class WorktreePage {
     return this.page.getByTestId(`repo-list__repo-avatar--${repoName}`);
   }
 
-  /** The folder icon a git repo header shows when it has no avatar. */
-  repoFolderIcon(repoName: string): Locator {
-    return this.page.getByTestId(`repo-list__repo-folder--${repoName}`);
+  /** The initial on a coloured square a git repo header shows when it has no avatar. */
+  repoFallbackAvatar(repoName: string): Locator {
+    return this.page.getByTestId(`repo-list__repo-avatar--${repoName}-fallback`);
   }
 
   /** Decoded width of a repo's avatar image; 0 when it did not decode. */

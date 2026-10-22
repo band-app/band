@@ -2,8 +2,8 @@
  * GitHub repo avatars in the sidebar.
  *
  * A git repo whose `origin` is on github.com shows its owner's avatar in
- * the repo header instead of the folder icon. A repo on another host
- * keeps the folder, and so does a GitHub repo whose avatar cannot be
+ * the repo header instead of the fallback. A repo on another host
+ * shows the initial on a coloured square, and so does a GitHub repo whose avatar cannot be
  * fetched (GitHub down or offline, nothing cached).
  *
  * Real production binary, real git repos with real remotes, github.com
@@ -28,6 +28,7 @@ import {
   startServer,
 } from "./helpers/server";
 import { CronjobsDialog } from "./pages/CronjobsDialog";
+import { SettingsPage } from "./pages/SettingsPage";
 import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-repo-avatars-token";
@@ -84,25 +85,26 @@ test.afterAll(async () => {
 });
 
 test.describe("GitHub repo avatars", () => {
-  test("a GitHub repo shows its owner's avatar instead of the folder icon", async ({ page }) => {
+  test("a GitHub repo shows its owner's avatar instead of the fallback", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
     await worktreePage.goto(toWorktreeId(GITHUB_REPO, "main", "local"));
 
     await expect(worktreePage.repoAvatar(GITHUB_REPO)).toBeVisible();
     await expect(worktreePage.repoAvatar(GITHUB_REPO)).toHaveAttribute("alt", "acme-org/widgets");
     expect(await worktreePage.readRepoAvatarNaturalWidth(GITHUB_REPO)).toBe(1);
-    await expect(worktreePage.repoFolderIcon(GITHUB_REPO)).toHaveCount(0);
+    await expect(worktreePage.repoFallbackAvatar(GITHUB_REPO)).toHaveCount(0);
   });
 
-  test("a repo hosted elsewhere keeps the folder icon", async ({ page }) => {
+  test("a repo hosted elsewhere shows its initial on a coloured square", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
     await worktreePage.goto(toWorktreeId(GITLAB_REPO, "main", "local"));
 
-    await expect(worktreePage.repoFolderIcon(GITLAB_REPO)).toBeVisible();
+    await expect(worktreePage.repoFallbackAvatar(GITLAB_REPO)).toBeVisible();
+    await expect(worktreePage.repoFallbackAvatar(GITLAB_REPO)).toHaveText("T");
     await expect(worktreePage.repoAvatar(GITLAB_REPO)).toHaveCount(0);
   });
 
-  test("a GitHub repo whose avatar cannot be fetched falls back to the folder icon", async ({
+  test("a GitHub repo whose avatar cannot be fetched falls back to the initial square", async ({
     page,
   }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
@@ -111,7 +113,7 @@ test.describe("GitHub repo avatars", () => {
     // Positive anchor: the neighbouring GitHub repo's avatar rendered, so
     // the repo list has loaded its avatar data.
     await expect(worktreePage.repoAvatar(GITHUB_REPO)).toBeVisible();
-    await expect(worktreePage.repoFolderIcon(UNREACHABLE_REPO)).toBeVisible();
+    await expect(worktreePage.repoFallbackAvatar(UNREACHABLE_REPO)).toBeVisible();
     // The failed image is removed rather than left as a broken glyph.
     await expect(worktreePage.repoAvatar(UNREACHABLE_REPO)).toHaveCount(0);
   });
@@ -126,5 +128,34 @@ test.describe("GitHub repo avatars", () => {
     // Positive anchor: the GitLab repo's option rendered, without an avatar.
     await expect(cronjobs.repoOption(GITLAB_REPO)).toBeVisible();
     await expect(cronjobs.repoAvatar(GITLAB_REPO)).toHaveCount(0);
+  });
+
+  test("Settings > Repos shows the avatar image for a GitHub repo and the initial otherwise", async ({
+    page,
+  }) => {
+    const settings = new SettingsPage(page, server.url, TOKEN);
+    await settings.goto();
+    await settings.openDialog("repos");
+
+    await expect(settings.repoRowAvatarImage(GITHUB_REPO)).toBeVisible();
+    await expect(settings.repoRowAvatar(GITHUB_REPO)).toHaveCount(0);
+    await expect(settings.repoRowAvatar(GITLAB_REPO)).toHaveText("T");
+    await expect(settings.repoRowAvatarImage(GITLAB_REPO)).toHaveCount(0);
+
+    await settings.openRepo(GITHUB_REPO);
+    await expect(settings.repoPageAvatarImage(GITHUB_REPO)).toBeVisible();
+  });
+
+  test("a repo keeps its fallback colour across a reload", async ({ page }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(toWorktreeId(GITLAB_REPO, "main", "local"));
+    const before = await worktreePage
+      .repoFallbackAvatar(GITLAB_REPO)
+      .getAttribute("data-color-index");
+    await page.reload();
+    await expect(worktreePage.repoFallbackAvatar(GITLAB_REPO)).toHaveAttribute(
+      "data-color-index",
+      before ?? "",
+    );
   });
 });

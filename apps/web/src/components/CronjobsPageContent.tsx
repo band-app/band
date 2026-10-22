@@ -569,9 +569,9 @@ function CronjobDialog({
                 {repos.map((p) => (
                   <SelectItem key={p.name} value={p.name}>
                     <RepoAvatar
+                      name={p.name}
                       avatar={p.avatar}
                       className="size-4"
-                      fallback={null}
                       testId={`cronjobs__repo-avatar--${p.name}`}
                     />
                     {p.name}

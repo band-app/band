@@ -1,7 +1,7 @@
-import { Folder } from "lucide-react-native";
+import { repoAvatarColorIndex, repoAvatarInitial } from "@band-app/shared/repo-avatar";
 import { useState } from "react";
-import { Image, StyleSheet, View } from "react-native";
-import { colors } from "../theme";
+import { Image, StyleSheet, Text, View } from "react-native";
+import { repoAvatarColors, repoAvatarForeground } from "../theme";
 
 /** Up to two letters of a name, for an avatar with no picture. */
 export function initials(name: string): string {
@@ -18,10 +18,11 @@ export function avatarColor(name: string): string {
 }
 
 /**
- * A repo's icon: the GitHub owner's avatar the hub serves (with the device token), else a colored
- * lucide folder, as on the web.
+ * A repo's icon: the GitHub owner's avatar the hub serves (with the device token), else the
+ * repo's initial on a colour picked from its name, as on the web.
  */
 export function RepoAvatar({
+  name,
   src,
   base,
   token,
@@ -50,14 +51,21 @@ export function RepoAvatar({
       />
     );
   }
-  // The web falls back to the lucide folder when a repo has no avatar.
+  const fill = repoAvatarColors[repoAvatarColorIndex(name)];
   return (
-    <View style={[styles.letter, box]}>
-      <Folder size={size * 0.8} color={colors.mutedForeground} />
+    <View
+      style={[styles.letter, box, { backgroundColor: fill }]}
+      testID={`repo-avatar-fallback-${name}`}
+      accessibilityElementsHidden
+    >
+      <Text style={[styles.initial, { fontSize: size * 0.55, color: repoAvatarForeground }]}>
+        {repoAvatarInitial(name)}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   letter: { alignItems: "center", justifyContent: "center" },
+  initial: { fontWeight: "600" },
 });
