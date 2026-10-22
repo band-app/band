@@ -59,6 +59,8 @@ export class PrChecksPanelPage {
   readonly mergeButton: Locator;
   readonly mergeMenu: Locator;
   readonly mergeConfirmButton: Locator;
+  readonly mergeConfirm: Locator;
+  readonly mergeCancelButton: Locator;
   readonly failingBanner: Locator;
   readonly failingCount: Locator;
   readonly fixButton: Locator;
@@ -107,6 +109,8 @@ export class PrChecksPanelPage {
     this.noReview = page.getByTestId("pr-checks__no-review");
     this.mergeButton = page.getByTestId("pr-checks__merge");
     this.mergeMenu = page.getByTestId("pr-checks__merge-menu");
+    this.mergeConfirm = page.getByTestId("pr-checks__merge-confirm");
+    this.mergeCancelButton = page.getByTestId("pr-checks__merge-cancel");
     this.mergeConfirmButton = page.getByTestId("pr-checks__merge-confirm-button");
     this.failingBanner = page.getByTestId("pr-checks__failing-banner");
     this.failingCount = page.getByTestId("pr-checks__failing-count");
@@ -277,6 +281,14 @@ export class PrChecksPanelPage {
   async openFixAgent(): Promise<void> {
     await test.step("Open the fix agent's tab from the banner", async () => {
       await this.openAgentLink.click();
+    });
+  }
+
+  /** Pick a merge method from the menu and stop at the confirm box. */
+  async openMergeConfirm(method: MergeMethod): Promise<void> {
+    await test.step(`Open the merge confirm (${method})`, async () => {
+      await this.mergeMenu.click();
+      await this.page.getByTestId(`pr-checks__merge-method--${method}`).click();
     });
   }
 

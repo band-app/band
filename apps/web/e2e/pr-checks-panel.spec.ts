@@ -590,6 +590,30 @@ test("merging from the menu runs gh pr merge with the chosen method", async ({ p
     .toEqual([["pr", "merge", "700", "--rebase", "--repo", "github.com/acme/widgets"]]);
 });
 
+test("the merge confirm replaces the button in place and names the method", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, READY_BRANCH, "local"));
+  await expect(panel.mergeButton).toBeEnabled();
+
+  await panel.openMergeConfirm("rebase");
+
+  await expect(panel.mergeConfirm).toContainText("Rebase and merge #700?");
+  await expect(panel.mergeConfirmButton).toBeFocused();
+  await expect(panel.mergeButton).toHaveCount(0);
+  const box = await panel.mergeConfirm.boundingBox();
+  expect(box?.height).toBe(32);
+
+  await panel.mergeCancelButton.click();
+  await expect(panel.mergeConfirm).toHaveCount(0);
+  await expect(panel.mergeButton).toBeVisible();
+
+  await panel.openMergeConfirm("squash");
+  await expect(panel.mergeConfirm).toContainText("Squash and merge #700?");
+  await page.keyboard.press("Escape");
+  await expect(panel.mergeConfirm).toHaveCount(0);
+  await expect(panel.mergeButton).toBeVisible();
+});
+
 test("a branch without a pull request lists its GitHub Actions jobs", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
   await panel.goto(toWorktreeId(REPO, "main", "local"));
