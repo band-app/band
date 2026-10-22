@@ -1,6 +1,16 @@
-import { Button, Input, Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Info, Plus } from "lucide-react";
+import { Copy, Info, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
@@ -370,16 +380,27 @@ export function HostsSettings() {
                   </Button>
                 )}
                 {host.id !== "local" && admin && host.status !== "disposed" && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Move all worktrees on ${host.name}`}
-                    data-testid="settings__host-evacuate"
-                    onClick={() => setEvacuating(host.id)}
-                  >
-                    Move all worktrees on this worker…
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`More actions for ${host.name}`}
+                        data-testid="settings__host-menu"
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        data-testid="settings__host-evacuate"
+                        onClick={() => setEvacuating(host.id)}
+                      >
+                        Move all worktrees on this worker…
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
                 {host.id !== "local" && (
                   <Button
@@ -387,11 +408,12 @@ export function HostsSettings() {
                     variant="outline"
                     size="sm"
                     aria-label={`Remove worker ${host.name}`}
+                    title="Remove worker"
                     data-testid="settings__host-remove"
                     disabled={host.status === "online" || host.status === "lost"}
                     onClick={() => void removeHost(host)}
                   >
-                    Remove
+                    <Trash2 className="size-4" />
                   </Button>
                 )}
               </div>
