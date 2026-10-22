@@ -378,7 +378,7 @@ export const WorktreeCard = memo(function WorktreeCard({
               a card to read the truncated label. */}
           <Tooltip delayDuration={800}>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+              <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
                 {isRoot ? (
                   // On the root card the house is AgentStatusIndicator's idle
                   // fallback (the slot other cards use for the branch glyph),
@@ -479,35 +479,6 @@ export const WorktreeCard = memo(function WorktreeCard({
               )}
             </StatusIcon>
           )}
-          {/* The host is offline: an icon only, the details are in its tooltip. */}
-          {hostOffline && !superseded && !isDeleting && (
-            <Tooltip delayDuration={300}>
-              <TooltipTrigger asChild>
-                <span
-                  data-testid="worktree-card__offline"
-                  data-checkpoint={lastCheckpointAt !== null ? "true" : "false"}
-                  role="img"
-                  aria-label={`${hostLabelText} is offline`}
-                  className="flex shrink-0 items-center ml-auto pl-2 text-muted-foreground"
-                >
-                  <CloudOff className="size-3.5" />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="right" data-testid="worktree-card__offline-details">
-                <div>{hostLabelText} is offline</div>
-                <div>
-                  {hostSeen.lastSeenAt !== null
-                    ? `Last seen ${timeAgo(hostSeen.lastSeenAt)}`
-                    : "Never seen"}
-                </div>
-                <div>
-                  {lastCheckpointAt !== null
-                    ? `Last checkpoint ${timeAgo(lastCheckpointAt)}`
-                    : "No checkpoint"}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          )}
           {/* The work of this worktree continued here from another host's checkpoint. */}
           {worktree.continuedFrom && !isDeleting && continuedIconShown && (
             <ContinuedFromIcon
@@ -562,7 +533,7 @@ export const WorktreeCard = memo(function WorktreeCard({
             </StatusIcon>
           )}
           <div
-            className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex group-focus-within:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
+            className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex group-focus-within:flex"} items-center gap-2 shrink-0 pl-2`}
           >
             <SetupStatusIndicator setup={setupStatus} />
             {/* Plain (non-git) repos have no branch state to surface —
@@ -582,6 +553,35 @@ export const WorktreeCard = memo(function WorktreeCard({
               <CIStatusIndicator ci={branchStatus.ci} />
             )}
           </div>
+          {/* The host is offline: an icon only, the details are in its tooltip. */}
+          {hostOffline && !superseded && !isDeleting && (
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <span
+                  data-testid="worktree-card__offline"
+                  data-checkpoint={lastCheckpointAt !== null ? "true" : "false"}
+                  role="img"
+                  aria-label={`${hostLabelText} is offline`}
+                  className="flex shrink-0 items-center pl-2 text-muted-foreground"
+                >
+                  <CloudOff className="size-3.5" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right" data-testid="worktree-card__offline-details">
+                <div>{hostLabelText} is offline</div>
+                <div>
+                  {hostSeen.lastSeenAt !== null
+                    ? `Last seen ${timeAgo(hostSeen.lastSeenAt)}`
+                    : "Never seen"}
+                </div>
+                <div>
+                  {lastCheckpointAt !== null
+                    ? `Last checkpoint ${timeAgo(lastCheckpointAt)}`
+                    : "No checkpoint"}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
