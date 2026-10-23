@@ -386,14 +386,44 @@ export class WorktreePage {
     return this.newWorktreeDialog.getByTestId("new-worktree-form__host-path");
   }
 
-  /** The roots of the chosen remote host, listed under the path field. */
-  get newWorktreeHostRoots(): Locator {
-    return this.newWorktreeDialog.getByTestId("new-worktree-form__host-roots");
+  /** The "More options" toggle: base branch and, for a remote worker, its folder. */
+  get newWorktreeMoreOptions(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__more-options");
   }
 
-  /** The error the dialog shows when creating the worktree is refused. */
-  get newWorktreeError(): Locator {
+  /** Opens "More options" when it is closed. */
+  async openNewWorktreeMoreOptions(): Promise<void> {
+    if ((await this.newWorktreeDialog.getByTestId("new-worktree-form__base").count()) === 0) {
+      await this.newWorktreeMoreOptions.click();
+    }
+    await expect(this.newWorktreeDialog.getByTestId("new-worktree-form__base")).toBeVisible();
+  }
+
+  /** The base branch field, inside "More options". */
+  get newWorktreeBaseInput(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__base");
+  }
+
+  /** The one muted line naming the branch a typed name will be created as. */
+  get newWorktreeSlugNote(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__slug");
+  }
+
+  /** The error icon beside Create, shown when the hub refuses the create. */
+  get newWorktreeErrorIcon(): Locator {
     return this.newWorktreeDialog.getByTestId("new-worktree-form__error");
+  }
+
+  /** The hub's refusal message, read by opening the error popover beside Create. */
+  get newWorktreeError(): Locator {
+    return this.page.getByTestId("new-worktree-form__error-message");
+  }
+
+  /** Opens the popover beside Create and returns its message. */
+  async openNewWorktreeError(): Promise<Locator> {
+    await this.newWorktreeErrorIcon.click();
+    await expect(this.newWorktreeError).toBeVisible();
+    return this.newWorktreeError;
   }
 
   /** Opens the New Worktree dialog, picks a remote host and fills the path and branch, without submitting. */
@@ -408,29 +438,41 @@ export class WorktreePage {
       await this.addWorktreeMenuItem.click();
       await expect(this.newWorktreeDialog).toBeVisible();
       await this.newWorktreeHostSelect.selectOption(opts.hostId);
+      await this.openNewWorktreeMoreOptions();
       await this.newWorktreeHostPathInput.fill(opts.hostRepoPath);
-      await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
+      await this.newWorktreeBranchInput.fill(opts.branch);
     });
   }
 
   /** The branch name field of the open New Worktree dialog. */
   get newWorktreeBranchInput(): Locator {
-    return this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" });
+    return this.newWorktreeDialog.getByRole("textbox", { name: "Branch", exact: true });
   }
 
   /** Fills the branch name of the open New Worktree dialog. */
   async fillNewWorktreeBranch(branch: string): Promise<void> {
-    await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(branch);
+    await this.newWorktreeDialog.getByRole("textbox", { name: "Branch", exact: true }).fill(branch);
   }
 
-  /** The "<branch> is already on <host>" line under the branch name. */
+  /** The error icon at the end of the branch field. */
   get newWorktreeSlugError(): Locator {
     return this.newWorktreeDialog.getByTestId("new-worktree-form__slug-error");
   }
 
-  /** "Open it": opens the worktree that already holds the branch on another host. */
+  /** The "<branch> is already on <host>" message, in the branch error popover. */
+  get newWorktreeSlugErrorMessage(): Locator {
+    return this.page.getByTestId("new-worktree-form__slug-error-message");
+  }
+
+  /** Opens the branch error popover. */
+  async openNewWorktreeSlugError(): Promise<void> {
+    await this.newWorktreeSlugError.click();
+    await expect(this.newWorktreeSlugErrorMessage).toBeVisible();
+  }
+
+  /** "Open it", in the branch error popover: opens the worktree that already holds the branch. */
   get newWorktreeOpenExisting(): Locator {
-    return this.newWorktreeDialog.getByTestId("new-worktree-form__open-existing");
+    return this.page.getByTestId("new-worktree-form__open-existing");
   }
 
   /** The note on a card whose host the repo is no longer allowed on. */
@@ -440,7 +482,7 @@ export class WorktreePage {
 
   /** Clicks Create in the New Worktree dialog. */
   async submitNewWorktree(): Promise<void> {
-    await this.newWorktreeDialog.getByRole("button", { name: "Create" }).click();
+    await this.newWorktreeDialog.getByRole("button", { name: "Create", exact: true }).click();
   }
 
   /** Opens the New Worktree dialog from the repo's context menu, picks a host and creates the worktree. */
@@ -455,9 +497,10 @@ export class WorktreePage {
       await this.addWorktreeMenuItem.click();
       await expect(this.newWorktreeDialog).toBeVisible();
       await this.newWorktreeHostSelect.selectOption(opts.hostId);
+      await this.openNewWorktreeMoreOptions();
       await this.newWorktreeHostPathInput.fill(opts.hostRepoPath);
-      await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
-      await this.newWorktreeDialog.getByRole("button", { name: "Create" }).click();
+      await this.newWorktreeBranchInput.fill(opts.branch);
+      await this.newWorktreeDialog.getByRole("button", { name: "Create", exact: true }).click();
       await expect(this.newWorktreeDialog).toBeHidden();
     });
   }
