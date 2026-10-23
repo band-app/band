@@ -106,7 +106,7 @@ export class ChatOwner {
       subscribe: (chatId, listener) => this.subscribe(chatId, listener),
       sharedUrl: (chatId, filename) => {
         const worktreeId = this.store.ownedChat(chatId)?.info.worktreeId ?? "";
-        return `/api/shared/${encodeURIComponent(worktreeId)}/${encodeURIComponent(filename)}`;
+        return `/api/shared/${encodeURIComponent(worktreeId)}/${encodeURIComponent(chatId)}/${encodeURIComponent(filename)}`;
       },
       changed: (chatId) => this.publishLive(chatId),
     });

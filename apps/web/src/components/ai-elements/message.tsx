@@ -5,8 +5,9 @@ import { memo, useCallback, useState } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
 import { hubAssetUrl } from "../../lib/hub-config";
-
+import { parseSharedFileUrl, sharedFilePath } from "../../lib/shared-file";
 import { streamdownPlugins } from "../streamdown-components";
+import { getWorktreeLeafActions } from "../WorktreeCenter";
 import {
   fileLinkComponents,
   fileLinkRehypePlugins,
@@ -94,6 +95,16 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
   const isText = isTextMediaType(part.mediaType);
   const canPreview = isImage || isText;
   const filename = part.filename ?? "File";
+  const shared = parseSharedFileUrl(part.url);
+
+  // A file an agent shared opens in a center tab; anything else previews in an overlay.
+  const openInTab = useCallback(() => {
+    if (!shared) return false;
+    const actions = getWorktreeLeafActions(shared.worktreeId);
+    if (!actions) return false;
+    actions.openFile(sharedFilePath(shared.chatId, shared.name), { preview: false });
+    return true;
+  }, [shared]);
 
   const handleDownload = useCallback(
     (e: React.MouseEvent) => {
@@ -105,11 +116,13 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
 
   if (isImage) {
     return (
-      <>
+      <div className="relative w-fit max-w-xs" data-testid="message__file-card">
         <button
           type="button"
           data-testid="message__image-preview-button"
-          onClick={() => setOverlayOpen(true)}
+          onClick={() => {
+            if (!openInTab()) setOverlayOpen(true);
+          }}
           className="group/img relative max-w-xs cursor-pointer overflow-hidden rounded-md"
         >
           <img
@@ -123,32 +136,55 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
             <Expand className="size-6 text-white opacity-0 drop-shadow-md transition-opacity group-hover/img:opacity-100" />
           </div>
         </button>
+        <button
+          type="button"
+          aria-label="Download file"
+          data-testid="message__file-card-download"
+          onClick={handleDownload}
+          className="absolute right-1.5 top-1.5 rounded bg-background/80 p-1 text-muted-foreground hover:text-foreground"
+        >
+          <Download className="size-3.5" />
+        </button>
         <FilePreviewOverlay open={overlayOpen} onOpenChange={setOverlayOpen} part={part} />
-      </>
+      </div>
     );
   }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => canPreview && setOverlayOpen(true)}
+      <div
+        data-testid="message__file-card"
         className={cn(
-          "flex max-w-sm items-center gap-2 rounded-md border border-border/30 bg-muted/30 px-3 py-2 transition-colors",
-          canPreview && "cursor-pointer hover:bg-muted/50",
+          "flex max-w-sm items-center gap-2 rounded-md border border-border/30 bg-muted/30 transition-colors",
+          (canPreview || shared) && "hover:bg-muted/50",
         )}
       >
-        <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-left text-base">{filename}</span>
-        <span className="shrink-0 text-sm text-muted-foreground">{part.mediaType}</span>
         <button
           type="button"
+          data-testid="message__file-card-open"
+          onClick={() => {
+            if (openInTab()) return;
+            if (canPreview) setOverlayOpen(true);
+          }}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 text-left",
+            (canPreview || shared) && "cursor-pointer",
+          )}
+        >
+          <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-base">{filename}</span>
+          <span className="shrink-0 text-sm text-muted-foreground">{part.mediaType}</span>
+        </button>
+        <button
+          type="button"
+          aria-label="Download file"
+          data-testid="message__file-card-download"
           onClick={handleDownload}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="mr-2 shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Download className="size-3.5" />
         </button>
-      </button>
+      </div>
       {canPreview && (
         <FilePreviewOverlay open={overlayOpen} onOpenChange={setOverlayOpen} part={part} />
       )}

@@ -64,7 +64,7 @@ export function turnUsage(res: acp.PromptResponse, ctx: TurnUsageContext): TurnU
 
 /** File sharing note appended to a session's first prompt. */
 export function sharedDirNote(sharedDir: string): string {
-  return `[File sharing: to send a file to the user, write or copy it to ${sharedDir}/ and it will appear as a downloadable file card in the chat.]`;
+  return `[File sharing: to send a file to the user, write or copy it to ${sharedDir}/ and it will appear as a file card in this chat.]`;
 }
 
 /** Stop reasons that end a turn without an answer: the chat shows `failed`. */

@@ -31,11 +31,18 @@ export function uploadsLocation(home: string, worktreeId: string) {
   };
 }
 
-/** The first-turn file-sharing hint's path segment: `<shared>/<worktreeId>/`. */
+/** Where the hub or the loopback worker keeps a worktree's shared files (`<dir>/<chatId>/<name>`). */
+export function sharedLocation(home: string, worktreeId: string): string {
+  return isRemoteLoopback
+    ? join(realpathSync(tmpdir()), ".band-shared", worktreeId)
+    : join(home, ".band", "shared", worktreeId);
+}
+
+/** The first-turn file-sharing hint's path segment: `<shared>/<worktreeId>/<chatId>/`. */
 export function sharedDirHintPattern(worktreeId: string): RegExp {
   const root = isRemoteLoopback ? ".band-shared" : "shared";
   return new RegExp(
-    `^\\[File sharing: to send a file to the user, write or copy it to .*/${root}/${worktreeId}/ `,
+    `^\\[File sharing: to send a file to the user, write or copy it to .*/${root}/${worktreeId}/[^/ ]+/ `,
   );
 }
 export const TEST_TOKEN = "acp-chat-test-token";

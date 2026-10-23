@@ -17,7 +17,7 @@ import {
   pushQueuedMessage,
   removeQueuedMessage,
 } from "./_utils/queued-message-store";
-import { openSharedDir } from "./_utils/shared-dir";
+import { openSharedDir, sharedFileUrl } from "./_utils/shared-dir";
 import { emitTurnEnded } from "./_utils/turn-events";
 import { agentSessionService, findOption } from "./agent-session-service";
 // FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in function bodies.
@@ -325,9 +325,9 @@ async function runTask(task: InternalTask): Promise<void> {
   if (task.model) await applyTurnChoice(chatId, "model", task.model);
   if (task.mode) await applyTurnChoice(chatId, "mode", task.mode);
 
-  // Per-worktree shared directory: files the agent drops here become
-  // download cards in the chat. A remote worktree's directory is on its worker.
-  const shared = await openSharedDir(task.worktreeId);
+  // Per-chat shared directory: files the agent drops here become
+  // file cards in this chat only. A remote worktree's directory is on its worker.
+  const shared = await openSharedDir(task.worktreeId, chatId);
   const seenShared = new Set(await shared.list());
   const announce = (names: Iterable<string>) => {
     for (const filename of names) {
@@ -336,7 +336,7 @@ async function runTask(task: InternalTask): Promise<void> {
       agentSessionService.record(chatId, {
         type: "file",
         mediaType: mimeTypeFromFilename(filename),
-        url: `/api/shared/${encodeURIComponent(task.worktreeId)}/${encodeURIComponent(filename)}`,
+        url: sharedFileUrl(task.worktreeId, chatId, filename),
         filename,
       });
     }

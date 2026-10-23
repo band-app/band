@@ -1,9 +1,11 @@
 import type { Entry } from "@band-app/client/transcript";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
+import { useRouter } from "expo-router";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react-native";
 import { memo, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { type ChatRow, copyText } from "../../lib/chat/rows";
+import { sharedFileWorktree } from "../../lib/files/shared";
 import { chatColors, colors, tones } from "../../theme";
 import { Icon } from "../icon";
 import { useAssetSource, useChat, useOpen } from "./chat-context";
@@ -12,8 +14,17 @@ import { ToolCall, ToolGroup } from "./tool-call";
 
 function FileView({ file }: { file: ChatEventFile }) {
   const source = useAssetSource(file.url);
+  const router = useRouter();
+  const worktreeId = sharedFileWorktree(file.url);
+  const open = worktreeId
+    ? () =>
+        router.push({
+          pathname: "/worktree/[id]/shared",
+          params: { id: worktreeId, url: file.url, name: file.filename ?? "File" },
+        })
+    : undefined;
   if (file.mediaType.startsWith("image/")) {
-    return (
+    const image = (
       <Image
         source={source}
         style={styles.image}
@@ -22,14 +33,28 @@ function FileView({ file }: { file: ChatEventFile }) {
         testID="chat__image"
       />
     );
+    return open ? (
+      <Pressable accessibilityRole="button" onPress={open} testID="chat__file-open">
+        {image}
+      </Pressable>
+    ) : (
+      image
+    );
   }
-  return (
+  const card = (
     <View style={styles.file}>
       <Text style={styles.fileName} numberOfLines={1}>
         {file.filename ?? "File"}
       </Text>
       <Text style={styles.fileType}>{file.mediaType}</Text>
     </View>
+  );
+  return open ? (
+    <Pressable accessibilityRole="button" onPress={open} testID="chat__file-open">
+      {card}
+    </Pressable>
+  ) : (
+    card
   );
 }
 

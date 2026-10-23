@@ -145,6 +145,7 @@ import {
 } from "../lib/leaf-instance-ids";
 import { pathInside } from "../lib/path-inside";
 import { usePollInterval } from "../lib/poll-interval";
+import { isSharedFilePath } from "../lib/shared-file";
 import {
   initialIndex,
   orderByRecency,
@@ -190,6 +191,7 @@ import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 import { setPerWorktreeState } from "./per-worktree-state-store";
+import { SharedFileLeaf } from "./SharedFileLeaf";
 // `crossPanelHandlers` is a module-level mutable registry exported from
 // SharedWorktreeLayout. Importing it closes an ESM cycle (SharedWorktreeLayout
 // → WorktreeCenter → SharedWorktreeLayout), but we only read it inside
@@ -1228,7 +1230,21 @@ function useActiveFileTracking(
   }, [visible, tabActive, worktreeId, filePath]);
 }
 
-function FileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
+function FileLeaf(props: LayoutPanelProps<FileLeafParams>) {
+  const { worktreeId: hostWorktreeId } = usePanelVisibility();
+  const filePath = props.params.filePath ?? "";
+  if (isSharedFilePath(filePath)) {
+    return (
+      <SharedFileLeaf
+        worktreeId={hostWorktreeId ?? props.params.worktreeId ?? ""}
+        filePath={filePath}
+      />
+    );
+  }
+  return <WorktreeFileLeaf {...props} />;
+}
+
+function WorktreeFileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
   const { visible, worktreeId: hostWorktreeId } = usePanelVisibility();
   const worktreeIdRaw = hostWorktreeId ?? params.worktreeId ?? "";
   const filePathRaw = params.filePath ?? "";

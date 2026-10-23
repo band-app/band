@@ -160,3 +160,14 @@ describe("changeListItems", () => {
     assert.equal(countChanges(changes), 4);
   });
 });
+
+describe("shared files", () => {
+  it("reads the worktree from a card URL in either form", async () => {
+    const { sharedFileWorktree } = await import("../src/lib/files/shared.ts");
+    assert.equal(sharedFileWorktree("/api/shared/band-main/chat1/a.md"), "band-main");
+    assert.equal(sharedFileWorktree("/api/shared/band-main/a.md?token=x"), "band-main");
+    assert.equal(sharedFileWorktree("/api/shared/band-feat%40h-1/c/a.png"), "band-feat@h-1");
+    assert.equal(sharedFileWorktree("/api/uploads/band-main/a.png"), null);
+    assert.equal(sharedFileWorktree("/api/shared/band-main"), null);
+  });
+});
