@@ -93,8 +93,17 @@ export class WorkerLinkService {
     this.server = new LinkServer({ authenticate: (hello) => this.authenticate(hello) });
     this.server.on("session", (session: ServerSession) => this.onSession(session));
     this.server.on("connected", (session: ServerSession) => void this.onConnected(session));
-    this.server.on("disconnected", (session: ServerSession) =>
-      this.setStatus(session.workerId, "offline", this.now()),
+    this.server.on("disconnected", (session: ServerSession) => {
+      const close = session.lastClose;
+      if (close) {
+        log.info(
+          `link of ${session.workerId} closed (code ${close.code}${close.reason ? `, ${close.reason}` : ""})`,
+        );
+      }
+      this.setStatus(session.workerId, "offline", this.now());
+    });
+    this.server.on("fault", (session: ServerSession, reason: string) =>
+      log.warn(`link of ${session.workerId}: ${reason}`),
     );
     this.server.on("lost", (session: ServerSession) =>
       this.setStatus(session.workerId, "lost", this.now()),

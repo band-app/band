@@ -241,7 +241,8 @@ export class LinkServer extends EventEmitter {
         resumed,
         wsPing: true,
       });
-    } catch {
+    } catch (err) {
+      this.emit("fault", session, `attach failed: ${err instanceof Error ? err.message : err}`);
       ws.terminate();
       return;
     }
@@ -259,6 +260,7 @@ export class LinkServer extends EventEmitter {
       this.expiry.set(session.workerId, t);
     });
     session.on("lost", () => this.emit("lost", session));
+    session.on("fault", (reason: string) => this.emit("fault", session, reason));
   }
 
   private dropSession(session: ServerSession, reason: string): void {

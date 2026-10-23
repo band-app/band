@@ -69,7 +69,10 @@ const AGENT_TYPES = ["claude-code", "codex", "opencode", "gemini-cli", "cursor-c
 
 export interface WorkerOptions {
   /** Link client settings to override, such as a faster redial for a test. */
-  link?: Pick<LinkClientOptions, "reconnect" | "heartbeatMisses" | "handshakeTimeoutMs">;
+  link?: Pick<
+    LinkClientOptions,
+    "reconnect" | "heartbeatMisses" | "handshakeTimeoutMs" | "stableMs" | "freshAfterShortResumes"
+  >;
   /**
    * The `credential.helper` value (git's `!` form) that runs this worker's helper. With it the
    * worker puts git credential settings in its own environment, which the git commands, agents
@@ -391,10 +394,40 @@ export class Worker {
           ),
         );
     });
-    client.on("disconnected", () => {
-      disconnectedSince = Date.now();
-      log.warn("lost the hub link, redialing");
-    });
+    // A link that keeps failing would write thousands of lines. Each kind logs at most once per
+    // interval, and the line says how many it left out.
+    const intervalMs = Number(process.env.BAND_WORKER_LINK_LOG_MS) || 60_000;
+    const last = new Map<string, { at: number; skipped: number }>();
+    const logLimited = (kind: string, fields: Record<string, unknown>, msg: string) => {
+      const now = Date.now();
+      const seen = last.get(kind);
+      if (seen && now - seen.at < intervalMs) {
+        seen.skipped++;
+        return;
+      }
+      last.set(kind, { at: now, skipped: 0 });
+      log.warn(seen?.skipped ? { ...fields, repeated: seen.skipped } : fields, msg);
+    };
+    client.on(
+      "disconnected",
+      (uptimeMs: number, close: { code: number; reason: string } | null) => {
+        disconnectedSince = Date.now();
+        logLimited(
+          "disconnected",
+          { uptimeMs, closeCode: close?.code, closeReason: close?.reason },
+          "lost the hub link, redialing",
+        );
+      },
+    );
+    client.on("dialFailed", (reason: string) =>
+      logLimited("dialFailed", { reason }, "could not reach the hub, will retry"),
+    );
+    client.on("freshSession", () =>
+      log.warn("resumed sessions keep ending at once, the next connect starts a fresh session"),
+    );
+    client.session.on("fault", (reason: string) =>
+      logLimited("fault", { reason }, "cut the hub link after a protocol fault"),
+    );
     client.on("rejected", (reason: string, code?: string) => {
       log.error({ reason }, "the hub rejected this worker");
       // The first connect handles its own refusal, in `start`.
