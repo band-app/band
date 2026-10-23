@@ -8,7 +8,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@band-app/ui";
-import { ChevronRight, Circle, Folder, Palette, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Circle, Palette, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCapabilities } from "../context";
 import { type CollapseState, UNGROUPED_KEY } from "../hooks/use-collapse-state";
 import { GROUP_COLOR_PRESETS } from "../lib/group-colors";
@@ -367,9 +367,10 @@ export function GroupedWorktrees({
                   }`}
                 >
                   <RepoAvatar
+                    name={row.repo.name}
                     avatar={row.repo.avatar}
                     className="size-3.5"
-                    fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
+                    textClassName="text-[8px]"
                   />
                   <span className="truncate text-[12px] font-semibold text-foreground/80">
                     {row.repo.name}

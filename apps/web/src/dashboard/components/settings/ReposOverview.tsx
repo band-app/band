@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRepos } from "../../hooks/use-repos";
 import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
+import { RepoAvatar } from "../RepoAvatar";
 
 /** The worktrees a repo counts as in use: every listed worktree but the hub's own checkout. */
 export function repoWorktreeCount(repo: RepoInfo): number {
@@ -101,6 +102,13 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
                   data-limited={repo.allowedHostIds ? "true" : "false"}
                   onClick={() => onOpen(repo.name)}
                 >
+                  <RepoAvatar
+                    name={repo.name}
+                    avatar={repo.avatar}
+                    className="size-5"
+                    textClassName="text-[11px]"
+                    testId="settings-repos__avatar"
+                  />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-semibold">{repo.name}</span>
                     <span

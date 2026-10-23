@@ -42,6 +42,27 @@ export class CheckpointsPage {
     return this.card(worktreeId).getByTestId("worktree-card__offline");
   }
 
+  /** The offline icon's right edge and the card's right padding edge, in page pixels. */
+  async offlineIconGeometry(worktreeId: string): Promise<{
+    iconRight: number;
+    cardRight: number;
+    paddingRight: number;
+  }> {
+    const icon = this.offlineIcon(worktreeId);
+    const card = this.card(worktreeId);
+    const iconBox = await icon.boundingBox();
+    const cardBox = await card.boundingBox();
+    const paddingRight = await card.evaluate((el) =>
+      Number.parseFloat(getComputedStyle(el).paddingRight),
+    );
+    if (!iconBox || !cardBox) throw new Error(`No box for ${worktreeId}`);
+    return {
+      iconRight: iconBox.x + iconBox.width,
+      cardRight: cardBox.x + cardBox.width,
+      paddingRight,
+    };
+  }
+
   /** The tooltip with the worker's last seen time and the checkpoint age. */
   get offlineDetails(): Locator {
     return this.page.getByTestId("worktree-card__offline-details");

@@ -101,6 +101,14 @@ test.describe("slash-command dropdown ranking", () => {
       .toEqual(COMMANDS.map((c) => `/${c.name}`));
   });
 
+  test("rows show no icon", async ({ page }) => {
+    const chatPane = await openChat(page);
+    await chatPane.typeMessage("/");
+
+    await expect.poll(() => chatPane.slashCommandNames()).toHaveLength(COMMANDS.length);
+    expect(await chatPane.slashCommandIconCount()).toBe(0);
+  });
+
   test("/loop puts the exact command first, then prefix, name and description matches", async ({
     page,
   }) => {

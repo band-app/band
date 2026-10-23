@@ -1,6 +1,5 @@
 import { filterSkills, getCommandContext, type SlashCommandSkill } from "@band-app/client/composer";
 import { cn } from "@band-app/ui";
-import { Command as CommandIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePromptInputContext } from "./prompt-input";
 
@@ -126,7 +125,6 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
               handleSelect(skill);
             }}
           >
-            <CommandIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
                 <span className="font-medium" data-testid="slash-command-suggestions__name">
