@@ -388,15 +388,14 @@ function SortableRepo({
                 // Plain repo: agent-status dot when the agent is
                 // working / needs attention, otherwise a repo-sized
                 // (size-4) Folder icon. Inlined rather than routing
-                // through AgentStatusIndicator's fallback so the idle
-                // icon can match a git repo's folder size — using the
-                // indicator's size-3 fallback would make plain headers
-                // read as nested worktree cards (see #427 review).
+                // through AgentStatusIndicator's idle dot so the idle
+                // icon can match a git repo's folder size — the faint dot
+                // would make plain headers read as nested worktree cards
+                // (see #427 review).
                 plainAgent && isActiveAgentStatus(plainAgent.status) ? (
                   <AgentStatusIndicator
                     agent={plainAgent}
                     tabStatuses={statuses.get(plainWorktreeId)?.tabStatuses}
-                    isActive={plainIsActive}
                   />
                 ) : (
                   <Folder className="size-4 shrink-0 text-muted-foreground" />

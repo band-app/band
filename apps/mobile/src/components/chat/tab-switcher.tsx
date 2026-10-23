@@ -145,7 +145,7 @@ function TabRow({
               {tab.summary}
             </Text>
           </View>
-          <StateIcon state={tab.shown} />
+          {tab.shown !== "idle" ? <StateIcon state={tab.shown} /> : null}
         </Pressable>
       </Animated.View>
     </View>
