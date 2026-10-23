@@ -44,6 +44,7 @@
         "esbuild",
         "@agentclientprotocol/claude-agent-acp",
         "@agentclientprotocol/codex-acp",
+        "@anthropic-ai/sdk",
         "@vscode/ripgrep",
         "node-pty"
       ]
@@ -63,6 +64,7 @@
         "@agentclientprotocol/claude-agent-acp",
         "@agentclientprotocol/codex-acp",
         "@agentclientprotocol/sdk",
+        "@anthropic-ai/sdk",
         "@vscode/ripgrep",
         "@xterm/addon-serialize",
         "@xterm/addon-unicode11",
