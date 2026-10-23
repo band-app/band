@@ -101,7 +101,7 @@ test("the group filter menu stays inside the window and scrolls to its last grou
   await expectInsideViewport(worktreePage.groupFilterMenu, viewport);
 
   const last = worktreePage.groupFilterOption(LAST_GROUP.name);
-  await worktreePage.focusLastGroupFilterOption();
+  await worktreePage.focusGroupFilterOption(LAST_GROUP.name);
   await expect(last).toBeFocused();
   await expect(last).toBeInViewport({ ratio: 1 });
 

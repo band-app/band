@@ -282,22 +282,16 @@ test("only the primary host's default-branch worktree is listed in every groupin
   const app = new TwoHostsPage(page, server.url, TOKEN);
   const settings = new SettingsPage(page, server.url, TOKEN);
   await app.open(mainA);
-  for (const mode of ["repo", "origin", "host"] as const) {
-    await app.groupBy(mode);
-    await expect(app.card(mainA)).toBeVisible();
-    await expect(app.card(mainB)).toHaveCount(0);
-  }
+  await expect(app.card(mainA)).toBeVisible();
+  await expect(app.card(mainB)).toHaveCount(0);
 
   // Making B the primary switches which one is listed. Nothing moves on disk.
   await settings.openRepoSettings(repoName);
   await settings.makeRepoPrimary(repoName, b.id);
   await expect.poll(async () => (await repoRow(repoName))?.primaryHostId).toBe(b.id);
   await settings.closeDialog();
-  for (const mode of ["repo", "origin", "host"] as const) {
-    await app.groupBy(mode);
-    await expect(app.card(mainB)).toBeVisible();
-    await expect(app.card(mainA)).toHaveCount(0);
-  }
+  await expect(app.card(mainB)).toBeVisible();
+  await expect(app.card(mainA)).toHaveCount(0);
 });
 
 test("worktrees on a host that stopped being allowed are flagged and still open (S5)", async ({
@@ -313,7 +307,6 @@ test("worktrees on a host that stopped being allowed are flagged and still open 
   });
   const app = new TwoHostsPage(page, server.url, TOKEN);
   await app.open(onA);
-  await app.groupBy("repo");
   await expect(app.worktree.notAllowedMark(onA)).toBeVisible();
   await expect(app.card(onA)).toBeVisible();
   // It opens: the page is on that worktree and its files are still there.

@@ -2,8 +2,10 @@
  * Turns `repos.list` and the status state into the sections the home screen shows. Pure, so the
  * ordering, filtering and badge rules are covered by node:test. They follow the web sidebar
  * (`apps/web/src/dashboard`): a Pinned section first (the pins in their order, each with the
- * worktrees started from it), a Group by choice of Repo, Origin or Host, repos under group headers
- * with a group filter, a PR tag colored by CI state, and the older CI icon for a branch with no PR.
+ * worktrees started from it), one collapsible section per worktree group holding that group's
+ * worktrees as an origin tree, a group filter that leaves the layout alone, a PR tag colored by CI
+ * state, and the older CI icon for a branch with no PR. While the hub defines no group the
+ * worktrees sit under their repos.
  * The ordering and nesting come from `@band-app/shared/sidebar-tree`, which the web sidebar uses too.
  */
 
@@ -11,6 +13,7 @@ import {
   buildOriginTree,
   buildPinnedTree,
   entriesOf,
+  groupEntries,
   sortRepoWorktrees,
   type WorktreeEntry,
   withoutPinned,
@@ -63,18 +66,6 @@ export interface GroupDefinition {
 export interface HostLike {
   id: string;
   name?: string | null;
-}
-
-export type GroupBy = "repo" | "origin" | "host";
-
-export const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: "repo", label: "Repo" },
-  { value: "origin", label: "Origin" },
-  { value: "host", label: "Worker" },
-];
-
-export function parseGroupBy(raw: string | null): GroupBy {
-  return raw === "origin" || raw === "host" ? raw : "repo";
 }
 
 const LOCAL_HOST = "local";
@@ -153,20 +144,24 @@ export interface WorktreeRow {
   ciTone: CiTone | null;
   dirty: boolean;
   ahead: number;
-  /** Nesting level in the Origin view. */
+  /** Nesting level under the worktree it was started from. */
   depth: number;
+  /** The worktree it was started from, when that one exists. */
+  parentId: string | null;
+  /** The group it is in, or null for Ungrouped. */
+  groupId: string | null;
 }
 
 export interface RepoSection {
-  /** Collapse key: the repo name, or `host:<id>` in the Host view; `pinned` for Pinned. */
+  /** Collapse key: the repo name, `group:<id>` (`group:none` for Ungrouped) or `pinned`. */
   name: string;
   title: string;
-  kind: "pinned" | "repo" | "host" | "origin";
+  kind: "pinned" | "repo" | "group" | "top";
   /** The repo's name, for its avatar. */
   repo?: string;
   avatar?: { src: string; label: string } | null;
-  /** Set on the first repo section of a group: the colored header drawn above it. */
-  groupHeader?: { id: string | null; name: string; color: string | null };
+  /** Set on a group section: the dot beside its title. */
+  group?: { id: string | null; color: string | null };
   collapsed: boolean;
   /** Rows in the section before filtering; the header shows it. */
   total: number;
@@ -180,7 +175,6 @@ export interface ListOptions {
   hosts: readonly HostLike[];
   collapsed: ReadonlySet<string>;
   query: string;
-  groupBy?: GroupBy;
   /** The groups from `repos.list`. */
   groups?: readonly GroupDefinition[];
   /** A group id: only that group's worktrees show. Null or unset shows every worktree. */
@@ -267,6 +261,8 @@ function toRow(
     dirty: branchStatus?.git?.dirty === true,
     ahead: branchStatus?.git?.ahead ?? 0,
     depth: 0,
+    parentId: worktree.origin && !worktree.origin.removed ? worktree.origin.worktreeId : null,
+    groupId: worktree.groupId ?? null,
   };
 }
 
@@ -309,7 +305,7 @@ function treeRows(
 }
 
 function section(
-  base: Pick<RepoSection, "name" | "title" | "kind" | "repo" | "avatar" | "groupHeader">,
+  base: Pick<RepoSection, "name" | "title" | "kind" | "repo" | "avatar" | "group">,
   all: WorktreeRow[],
   shownRows: WorktreeRow[],
   collapsed: boolean,
@@ -326,14 +322,13 @@ function section(
 export function buildSections(repos: readonly RepoLike[], options: ListOptions): RepoSection[] {
   const now = options.now ?? Date.now();
   const filtering = options.query.trim() !== "";
-  const groupBy = options.groupBy ?? "repo";
   const groups = options.groups ?? [];
   const groupFilter = options.groupFilter ?? null;
   const rowOf = (e: Entry) => toRow(e.repo, e.worktree, options.statuses, options.hosts, now);
   const visible = (row: WorktreeRow) => matches(row, options.query);
 
-  // The group filter narrows the pins, the Origin view and the Host view too. It works per
-  // worktree, so a repo stays with only the worktrees that are in the group.
+  // The group filter narrows the pins too. It works per worktree, so a repo stays with only the
+  // worktrees that are in the group.
   const kept = groupFilter
     ? repos
         .map((r) => ({ ...r, worktrees: r.worktrees.filter((w) => w.groupId === groupFilter) }))
@@ -365,102 +360,78 @@ export function buildSections(repos: readonly RepoLike[], options: ListOptions):
   const { repos: rest, reposWithPinned } = withoutPinned(sorted, pinnedTree);
   const restEntries = entriesOf(rest);
 
-  if (groupBy === "host") {
-    const rows = restEntries.map((e) => rowOf(e));
-    const hostIds = [...new Set(rows.map((r) => r.hostId))].sort(
-      (a, b) => Number(b === LOCAL_HOST) - Number(a === LOCAL_HOST),
+  if (groups.length > 0) {
+    // A worktree started from one in another group stays at the top of its own group.
+    const known = new Set(entriesOf(repos as RepoLike[]).map((e) => e.worktreeId));
+    // Worktrees in no group come first as plain rows with no header.
+    const parts = groupEntries(
+      restEntries,
+      groups.map((g) => ({ ...g, color: g.color ?? "" })),
+      groupFilter,
     );
-    for (const hostId of hostIds) {
-      const mine = rows.filter((r) => r.hostId === hostId);
-      const shown = mine.filter(visible).map((r) => ({ ...r, subtitle: withRepo(r) }));
+    const ordered = [...parts.filter((p) => !p.group), ...parts.filter((p) => p.group)];
+    for (const part of ordered) {
+      const inGroup = new Set(part.entries.map((e) => e.worktreeId));
+      const tree = buildOriginTree(part.entries, {
+        keepAtTop: (entry) => {
+          const parentId = entry.worktree.origin?.worktreeId;
+          return !!parentId && !inGroup.has(parentId) && known.has(parentId);
+        },
+      });
+      const all = treeRows(tree.entries, tree.roots, tree.childrenOf, rowOf).map((r) => ({
+        ...r,
+        subtitle: withRepo(r),
+      }));
+      const shown = all.filter(visible);
+      // A search shows only the groups it matches. Plain top-level rows show only while there are some.
       if (filtering && shown.length === 0) continue;
-      const key = `host:${hostId}`;
-      sections.push(
-        section(
-          { name: key, title: hostLabel(hostId, options.hosts), kind: "host" },
-          mine,
-          shown,
-          !filtering && options.collapsed.has(key),
-        ),
-      );
-    }
-    return sections;
-  }
-
-  if (groupBy === "origin") {
-    const tree = buildOriginTree(restEntries);
-    const all = treeRows(tree.entries, tree.roots, tree.childrenOf, rowOf).map((r) => ({
-      ...r,
-      subtitle: withRepo(r),
-    }));
-    const shown = all.filter(visible);
-    if (all.length > 0 && (!filtering || shown.length > 0)) {
-      sections.push(
-        section({ name: "origin", title: "Origin", kind: "origin" }, all, shown, false),
-      );
-    }
-    return sections;
-  }
-
-  const showHeaders = groups.length > 0 && !groupFilter;
-  const knownGroups = new Set(groups.map((g) => g.id));
-  // A worktree whose group is gone counts as Ungrouped. With no headers there is one bucket.
-  const buckets: { group: GroupDefinition | null; repos: RepoLike[] }[] = showHeaders
-    ? [...groups.map((g): GroupDefinition | null => g), null]
-        .map((group) => ({
-          group,
-          // A repo with no worktrees left (all pinned, or none yet) goes with Ungrouped.
-          repos: rest.flatMap((r) => {
-            const mine = r.worktrees.filter((w) =>
-              group ? w.groupId === group.id : !w.groupId || !knownGroups.has(w.groupId),
-            );
-            const empty = !group && r.worktrees.length === 0;
-            return mine.length > 0 || empty ? [{ ...r, worktrees: mine }] : [];
-          }),
-        }))
-        .filter((bucket) => bucket.repos.length > 0)
-    : [{ group: null, repos: rest }];
-  for (const bucket of buckets) {
-    let first = true;
-    for (const repo of bucket.repos) {
-      const mine = repo.worktrees.map((worktree) =>
-        rowOf({
-          worktreeId: toWorktreeId(repo.name, worktree.name, worktree.hostId),
-          repo,
-          worktree,
-        }),
-      );
-      const shown = mine.filter(visible);
-      // A filter shows only the repos it matches, so an empty repo header is noise there.
-      if (filtering && shown.length === 0) continue;
-      // A repo whose worktrees are all pinned has nothing left to list, so it gets no header.
-      if (mine.length === 0 && reposWithPinned.has(repo.name)) continue;
-      // The same repo can appear under several groups, so its collapse key names the group.
-      const key = showHeaders ? `${bucket.group?.id ?? "none"}:${repo.name}` : repo.name;
+      if (!part.group && all.length === 0) continue;
+      const key = `group:${part.group?.id ?? "none"}`;
       sections.push(
         section(
           {
             name: key,
-            title: repo.name,
-            kind: "repo",
-            repo: repo.name,
-            avatar: repo.avatar ?? null,
-            groupHeader:
-              showHeaders && first
-                ? {
-                    id: bucket.group?.id ?? null,
-                    name: bucket.group?.name ?? "Ungrouped",
-                    color: bucket.group?.color ?? null,
-                  }
-                : undefined,
+            title: part.group?.name ?? "",
+            kind: part.group ? "group" : "top",
+            group: { id: part.group?.id ?? null, color: part.group?.color ?? null },
           },
-          mine,
+          all,
           shown,
-          !filtering && options.collapsed.has(key),
+          // Rows with no group have no header to fold.
+          part.group !== null && !filtering && options.collapsed.has(key),
         ),
       );
-      first = false;
     }
+    return sections;
+  }
+
+  for (const repo of rest) {
+    const mine = repo.worktrees.map((worktree) =>
+      rowOf({
+        worktreeId: toWorktreeId(repo.name, worktree.name, worktree.hostId),
+        repo,
+        worktree,
+      }),
+    );
+    const shown = mine.filter(visible);
+    // A search shows only the repos it matches, so an empty repo header is noise there.
+    if (filtering && shown.length === 0) continue;
+    // A repo whose worktrees are all pinned has nothing left to list, so it gets no header.
+    if (mine.length === 0 && reposWithPinned.has(repo.name)) continue;
+    sections.push(
+      section(
+        {
+          name: repo.name,
+          title: repo.name,
+          kind: "repo",
+          repo: repo.name,
+          avatar: repo.avatar ?? null,
+        },
+        mine,
+        shown,
+        !filtering && options.collapsed.has(repo.name),
+      ),
+    );
   }
   return sections;
 }

@@ -14,6 +14,25 @@ export function parseCollapsed(raw: string | null): ReadonlySet<string> {
   }
 }
 
+/** The raw value with every name in `names` collapsed or expanded; null when nothing is collapsed. */
+export function setCollapsedMany(
+  raw: string | null,
+  names: readonly string[],
+  collapsed: boolean,
+): string | null {
+  const next = new Set(parseCollapsed(raw));
+  for (const name of names) {
+    if (collapsed) next.add(name);
+    else next.delete(name);
+  }
+  return next.size === 0 ? null : JSON.stringify([...next].sort());
+}
+
+/** True when every name is collapsed. An empty list counts as not collapsed. */
+export function allCollapsed(collapsed: ReadonlySet<string>, names: readonly string[]): boolean {
+  return names.length > 0 && names.every((n) => collapsed.has(n));
+}
+
 /** The raw value after flipping `repo`; null (no key) when nothing is collapsed. */
 export function toggleCollapsed(raw: string | null, repo: string): string | null {
   const next = new Set(parseCollapsed(raw));

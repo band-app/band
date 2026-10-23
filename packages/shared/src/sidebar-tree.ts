@@ -36,9 +36,6 @@ export interface WorktreeEntry<R extends SidebarRepo = SidebarRepo> {
   worktree: WorktreeOf<R>;
 }
 
-/** Sentinel id for the "Ungrouped" section, which has no real group id. */
-export const UNGROUPED_KEY = "__ungrouped";
-
 export function hostIdOf(worktree: { hostId?: string }): string {
   return worktree.hostId || LOCAL_HOST;
 }

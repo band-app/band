@@ -6,7 +6,6 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { SidebarPinsDragPage } from "./SidebarPinsDragPage";
-import type { WorktreePage } from "./WorktreePage";
 
 /** The key of the Ungrouped section in test ids. */
 export const UNGROUPED = "__ungrouped";
@@ -44,8 +43,9 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
         '[data-testid^="repo-list__group-header--"], [data-testid^="repo-list__grouped-row--"]',
       )
       .evaluateAll((els) => {
-        const result: Record<string, string[]> = {};
-        let current = "";
+        // Worktrees in no group are plain rows above the first header.
+        const result: Record<string, string[]> = { __ungrouped: [] };
+        let current = "__ungrouped";
         for (const el of els) {
           const id = el.getAttribute("data-testid") ?? "";
           if (id.startsWith("repo-list__group-header--")) {
@@ -67,6 +67,144 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
       .locator('[data-testid^="repo-list__group-header--"]')
       .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? ""))
       .then((ids) => ids.map((id) => id.replace("repo-list__group-header--", "")));
+  }
+
+  /** Drags a worktree's row onto another worktree's row (middle), or beside it (top or bottom). */
+  async dragToWorktree(
+    worktreeId: string,
+    targetId: string,
+    position: "top" | "middle" | "bottom" = "middle",
+  ): Promise<void> {
+    await test.step(`Drag ${worktreeId} onto ${targetId} (${position})`, async () => {
+      await this.drag(this.row(worktreeId), this.row(targetId), position);
+    });
+  }
+
+  /** The old group-by trigger, which no longer exists. */
+  get groupByTrigger(): Locator {
+    return this.groupsPage.getByTestId("repos-panel__group-by");
+  }
+
+  /** "New group…" in the open group filter menu. */
+  get newGroupMenuItem(): Locator {
+    return this.groupsPage.getByTestId("dashboard__group-filter-new-group");
+  }
+
+  /** The worktree card inside the drag preview. */
+  previewCard(worktreeId: string): Locator {
+    return this.dragPreview.getByTestId(`repo-list__worktree-card--${worktreeId}`);
+  }
+
+  /** The worktree card inside a list row. */
+  rowCard(worktreeId: string): Locator {
+    return this.row(worktreeId).getByTestId(`repo-list__worktree-card--${worktreeId}`);
+  }
+
+  /** The card the drag preview shows, or nothing while no drag is on. */
+  get dragPreview(): Locator {
+    return this.groupsPage.getByTestId("repo-list__drag-overlay");
+  }
+
+  /** Picks a row up and moves over `target` without letting go, so the preview and highlight show. */
+  async holdDrag(source: Locator, target: Locator): Promise<void> {
+    await test.step("Pick a row up and hold it over another", async () => {
+      const from = await source.boundingBox();
+      const to = await target.boundingBox();
+      expect(from).not.toBeNull();
+      expect(to).not.toBeNull();
+      const startX = from!.x + Math.min(40, from!.width / 2);
+      const startY = from!.y + from!.height / 2;
+      await this.groupsPage.mouse.move(startX, startY);
+      await this.groupsPage.mouse.down();
+      await this.groupsPage.mouse.move(startX + 12, startY + 12, { steps: 4 });
+      await this.groupsPage.mouse.move(
+        to!.x + Math.min(40, to!.width / 2),
+        to!.y + to!.height / 2,
+        {
+          steps: 12,
+        },
+      );
+    });
+  }
+
+  async dropHeld(): Promise<void> {
+    await this.groupsPage.mouse.up();
+  }
+
+  /** The draggable wrapper of a row, which carries the drop highlight in `data-drop-zone`. */
+  dropTarget(worktreeId: string): Locator {
+    return this.groupsPage.getByTestId(`repo-list__drag-row--${worktreeId}`);
+  }
+
+  async dismissRefusal(): Promise<void> {
+    await this.dropRefusal.getByRole("button", { name: "Dismiss" }).click();
+  }
+
+  /** The depth of a row under its group header. */
+  async depthOf(worktreeId: string): Promise<number> {
+    return Number(await this.row(worktreeId).getAttribute("data-depth"));
+  }
+
+  /**
+   * Drags a worktree's row to the top level, where it is in no group. The target is the top-level
+   * strip, or the top of `besideRow` when plain rows exist and the strip is not drawn.
+   */
+  async dragToTopLevel(worktreeId: string, besideRow?: string): Promise<void> {
+    await test.step(`Drag ${worktreeId} to the top level`, async () => {
+      if (besideRow) {
+        await this.drag(this.row(worktreeId), this.row(besideRow), "top");
+        return;
+      }
+      await this.drag(
+        this.row(worktreeId),
+        this.groupsPage.getByTestId("repo-list__top-level-drop"),
+        "middle",
+      );
+    });
+  }
+
+  /** Drags a group's header above or below another group's header. */
+  async dragGroup(groupId: string, targetId: string, position: "top" | "bottom"): Promise<void> {
+    await test.step(`Drag the group ${groupId} ${position === "top" ? "above" : "below"} ${targetId}`, async () => {
+      await this.drag(this.groupHeader(groupId), this.groupHeader(targetId), position);
+    });
+  }
+
+  /** Picks Move up or Move down in a group header's menu. */
+  async moveGroupFromMenu(groupId: string, direction: "up" | "down"): Promise<void> {
+    await test.step(`Move the group ${groupId} ${direction} from its menu`, async () => {
+      await this.openGroupMenu(groupId);
+      await this.groupsPage.getByTestId(`repo-list__group-action--move-${direction}`).click();
+    });
+  }
+
+  moveMenuItem(direction: "up" | "down"): Locator {
+    return this.groupsPage.getByTestId(`repo-list__group-action--move-${direction}`);
+  }
+
+  get toggleAllButton(): Locator {
+    return this.groupsPage.getByTestId("repos-panel__toggle-all");
+  }
+
+  /** The aria label the toggle-all button shows: "Collapse all" or "Expand all". */
+  async toggleAllLabel(): Promise<string | null> {
+    return this.toggleAllButton.getAttribute("aria-label");
+  }
+
+  /** Clicks the collapse-all / expand-all button once. */
+  async clickToggleAll(): Promise<void> {
+    await test.step("Click the collapse-all / expand-all button", async () => {
+      await this.toggleAllButton.click();
+    });
+  }
+
+  /** The left edge of the Pinned header, a group header or an ungrouped row. */
+  async leftEdge(locator: Locator): Promise<number> {
+    return (await locator.boundingBox())?.x ?? Number.NaN;
+  }
+
+  get pinnedHeaderLocator(): Locator {
+    return this.pinnedHeader;
   }
 
   /** Drags a worktree's row onto a group's header. */
@@ -137,24 +275,14 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
     });
   }
 
-  /** Makes a group from the Group by menu. */
+  /** Makes a group from the group filter's "New group…" item. */
   async createGroup(name: string): Promise<void> {
-    await test.step(`Create the group ${name} from the Group by menu`, async () => {
-      await this.groupByTrigger.click();
-      await this.groupsPage.getByTestId("repos-panel__new-group").click();
+    await test.step(`Create the group ${name} from the group filter`, async () => {
+      await this.groupsPage.getByTestId("dashboard__group-filter-trigger").click();
+      await this.groupsPage.getByTestId("dashboard__group-filter-new-group").click();
       await this.groupsPage.getByTestId("group-dialog__name").fill(name);
       await this.groupsPage.getByTestId("group-dialog__submit").click();
       await expect(this.groupsPage.getByTestId("group-dialog")).toBeHidden();
-    });
-  }
-
-  /** Creates a worktree from a repo's menu in the Repo view: Add worktree, then the branch name. */
-  async addWorktreeFromRepoMenu(worktreePage: WorktreePage, repo: string, branch: string) {
-    await test.step(`Create ${branch} in ${repo} from the repo menu`, async () => {
-      await worktreePage.openRepoContextMenu(repo);
-      await worktreePage.addWorktreeMenuItem.click();
-      await this.groupsPage.getByTestId("new-worktree-form__branch").fill(branch);
-      await this.groupsPage.getByTestId("new-worktree-form__submit").click();
     });
   }
 

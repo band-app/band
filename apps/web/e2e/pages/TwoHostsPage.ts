@@ -7,7 +7,7 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { DesktopViewerPage } from "./DesktopViewerPage";
-import { type GroupByMode, SidebarGroupingPage } from "./SidebarGroupingPage";
+import { SidebarGroupingPage } from "./SidebarGroupingPage";
 import { WorktreePage } from "./WorktreePage";
 
 export class TwoHostsPage {
@@ -43,10 +43,6 @@ export class TwoHostsPage {
     await test.step("Go back in the browser history", async () => {
       await this.page.goBack();
     });
-  }
-
-  async groupBy(mode: GroupByMode): Promise<void> {
-    await this.sidebar.selectMode(mode);
   }
 
   /** The sidebar card of a worktree, in whichever grouping is on. */

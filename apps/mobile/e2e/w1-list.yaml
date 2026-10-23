@@ -1,5 +1,5 @@
 # S1: the home screen lists the hub's repos with their worktrees, branch and host, a Pinned
-# section first, and groups them by repo, origin or host.
+# section first, and lists them under their repos while the hub defines no group.
 appId: app.getband.mobile
 name: S1 repos and worktrees on the home screen
 ---
@@ -57,32 +57,6 @@ name: S1 repos and worktrees on the home screen
     id: home__repo-beta
 - assertVisible:
     id: home__worktree-beta-main
-# Group by: Worker lists the worktrees under "This hub"; Origin and Repo list them again.
-- tapOn:
-    id: home__group-by
-- tapOn:
-    text: Worker
-- extendedWaitUntil:
-    visible:
-      id: "home__repo-host:local"
-    timeout: 10000
-- assertVisible:
-    id: home__worktree-beta-main
-- takeScreenshot: s1-group-by-host
-- tapOn:
-    id: home__group-by
-- tapOn:
-    text: Origin
-# Origin is one flat tree with no repo headers, as on the web.
-- assertVisible:
-    id: home__worktree-beta-main
-- takeScreenshot: s1-group-by-origin
-- tapOn:
-    id: home__group-by
-- tapOn:
-    text: Repo
-- assertVisible:
-    id: home__repo-alpha
 # Search by branch narrows the list.
 - tapOn:
     id: home__search-toggle

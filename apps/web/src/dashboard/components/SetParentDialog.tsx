@@ -89,8 +89,10 @@ export function SetParentDialog({ open, onOpenChange, repoName, worktree }: Prop
         hostId: worktree.hostId,
         origin: parentId,
       });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
+      // Close first: the card that owns this dialog moves in the list once the new parent
+      // shows, and a dialog unmounted while still open leaves the page unclickable.
       onOpenChange(false);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

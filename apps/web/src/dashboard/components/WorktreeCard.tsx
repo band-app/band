@@ -582,7 +582,9 @@ export const WorktreeCard = memo(function WorktreeCard({
         </ContextMenuItem>
         <ContextMenuItem
           data-testid="worktree-card__set-parent"
-          onClick={() => setParentOpen(true)}
+          // A dialog that opens in the same tick as the menu closes can copy the menu's
+          // `pointer-events: none` as the page's original value and leave the page unclickable.
+          onClick={() => requestAnimationFrame(() => setParentOpen(true))}
         >
           <CornerUpLeft />
           Set parent…

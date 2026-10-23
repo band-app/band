@@ -36,7 +36,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   Clipboard,
@@ -64,7 +64,6 @@ import {
   PINNED_COLLAPSE_KEY,
   PINNED_SECTION_ID,
   REPOS_COLLAPSE_KEY,
-  UNGROUPED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
 import { useGroupMutations, useGroups } from "../hooks/use-groups";
@@ -78,25 +77,21 @@ import {
   useReorderWorktrees,
 } from "../hooks/use-repo-mutations";
 import { useRepos } from "../hooks/use-repos";
+import { moveGroupBy } from "../lib/group-order";
 import {
   type DropPlan,
   type DropZone,
-  moveRefusal,
-  planHostViewDrop,
-  planOriginDrop,
+  planGroupReorder,
+  planParentDrop,
   planPinDrop,
   planRepoViewDrop,
   zoneAt,
 } from "../lib/sidebar-drop";
 import {
   buildGroupRows,
-  buildHostRows,
-  buildOriginRows,
-  buildOriginTree,
   buildPinnedRows,
   buildPinnedTree,
   entriesOf,
-  HOST_COLLAPSE_KEY,
   type HostInfoLite,
   hostIdOf,
   hostLabel,
@@ -104,10 +99,10 @@ import {
   ORIGIN_COLLAPSE_KEY,
   repoSpansHosts,
   sortRepoWorktrees,
-  useGroupBy,
   type WorktreeEntry,
   withoutPinned,
 } from "../lib/sidebar-grouping";
+import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type {
@@ -126,15 +121,18 @@ import {
   MoveChildrenDialog,
   PickRepoDialog,
 } from "./GroupDialogs";
-import { GroupedWorktrees, WorktreeRowView } from "./GroupedWorktrees";
+import {
+  GroupedWorktrees,
+  type ListMode,
+  WorktreeEntryCard,
+  WorktreeRowView,
+} from "./GroupedWorktrees";
 import { MainMissingRow } from "./MainMissingRow";
-import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { NewWorktreeDialog } from "./NewWorktreeForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { ProvisioningWorktreeCard } from "./ProvisioningWorktreeCard";
 import { RepoAvatar } from "./RepoAvatar";
 import { DragRow, DropIndicatorContext } from "./SidebarDnd";
-import { useIsAdmin } from "./settings/DevicesSettings";
 import { markRecentActivation, WorktreeCard } from "./WorktreeCard";
 
 /**
@@ -587,7 +585,7 @@ export function RepoList({ groupFilter }: RepoListProps) {
   const removeRepoMutation = useRemoveRepo();
   const reorderReposMutation = useReorderRepos();
   const reorderWorktreesMutation = useReorderWorktrees();
-  const isAdmin = useIsAdmin();
+  const queryClient = useQueryClient();
   const promoteRepoToGitMutation = usePromoteRepoToGit();
   const removeWorktreeMutation = useRemoveWorktree();
 
@@ -608,14 +606,13 @@ export function RepoList({ groupFilter }: RepoListProps) {
   const rawStore = useRawDashboardStore();
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [activeWorktreeDrag, setActiveWorktreeDrag] = useState<WorktreeEntry | null>(null);
+  const [activeInset, setActiveInset] = useState(0);
+  const [activeGroupDrag, setActiveGroupDrag] = useState<GroupDefinition | null>(null);
   const [dropIndicator, setDropIndicator] = useState<{
     overId: string | null;
     zone: DropZone | null;
   }>({ overId: null, zone: null });
   const [dropNotice, setDropNotice] = useState<string | null>(null);
-  const [moveDialog, setMoveDialog] = useState<{ entry: WorktreeEntry; toHostId: string } | null>(
-    null,
-  );
   const containerRef = useRef<HTMLDivElement>(null);
   const keyboardNavRef = useRef(false);
 
@@ -623,12 +620,10 @@ export function RepoList({ groupFilter }: RepoListProps) {
   const groupCollapse = useCollapseState(GROUPS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
   const originCollapse = useCollapseState(ORIGIN_COLLAPSE_KEY);
-  const hostCollapse = useCollapseState(HOST_COLLAPSE_KEY);
-  const [chosenView] = useGroupBy();
-  // With no group defined the Groups view would be one "Ungrouped" list, so the sidebar keeps
+  // With no group defined the list would be one "Ungrouped" section, so the sidebar keeps
   // listing worktrees under their repos until the first group exists.
-  const groupBy = chosenView === "groups" && groups.length === 0 ? "repo" : chosenView;
-  const grouped = groupBy !== "repo";
+  const grouped = groups.length > 0;
+  const mode: ListMode = grouped ? "groups" : "repo";
   const [renamingGroup, setRenamingGroup] = useState<GroupDefinition | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<GroupDefinition | null>(null);
   const [childrenPrompt, setChildrenPrompt] = useState<{
@@ -691,40 +686,28 @@ export function RepoList({ groupFilter }: RepoListProps) {
   );
   const pinnedNavCount = pinnedNavIds.length;
 
-  // The Groups, Origin and Host views list every worktree the group filter lets through, except
-  // the ones the Pinned section shows, in one flat list of rows.
+  // The group list shows every worktree the group filter lets through, except the ones the
+  // Pinned section shows, in one flat list of rows.
   const groupedRepos = useMemo(
     () => withoutPinned(visibleRepos, pinnedTree).repos,
     [visibleRepos, pinnedTree],
   );
-  const groupedRows = useMemo(() => {
-    if (groupBy === "groups") {
-      return buildGroupRows({
-        repos: groupedRepos,
-        allRepos: sortedRepos,
-        groups,
-        filter: groupFilter,
-        isGroupCollapsed: groupCollapse.isCollapsed,
-        isOriginCollapsed: originCollapse.isCollapsed,
-      });
-    }
-    if (groupBy === "origin") return buildOriginRows(groupedRepos, originCollapse.isCollapsed);
-    if (groupBy === "host")
-      return buildHostRows(groupedRepos, hostsQuery.data ?? [], hostCollapse.isCollapsed);
-    return [];
-  }, [
-    groupBy,
-    groupedRepos,
-    sortedRepos,
-    groups,
-    groupFilter,
-    groupCollapse,
-    hostsQuery.data,
-    originCollapse,
-    hostCollapse,
-  ]);
+  const groupedRows = useMemo(
+    () =>
+      grouped
+        ? buildGroupRows({
+            repos: groupedRepos,
+            allRepos: sortedRepos,
+            groups,
+            filter: groupFilter,
+            isGroupCollapsed: groupCollapse.isCollapsed,
+            isOriginCollapsed: originCollapse.isCollapsed,
+          })
+        : [],
+    [grouped, groupedRepos, sortedRepos, groups, groupFilter, groupCollapse, originCollapse],
+  );
   const groupedEntries = useMemo(() => entriesOf(groupedRepos), [groupedRepos]);
-  const originTree = useMemo(() => buildOriginTree(groupedEntries), [groupedEntries]);
+  const allEntries = useMemo(() => entriesOf(sortedRepos), [sortedRepos]);
 
   // Only count worktrees that are actually rendered: collapsed repos and groups hide their
   // worktrees entirely, and keyboard arrow navigation must skip over them so focus never lands on
@@ -801,7 +784,7 @@ export function RepoList({ groupFilter }: RepoListProps) {
   // a chance to run.
   const revealedWorktreeRef = useRef<string | null>(null);
   const revealedAsPinnedRef = useRef<boolean>(false);
-  const revealedGroupByRef = useRef(groupBy);
+  const revealedModeRef = useRef(mode);
   useEffect(() => {
     if (!activeWorktreeId) {
       revealedWorktreeRef.current = null;
@@ -812,11 +795,11 @@ export function RepoList({ groupFilter }: RepoListProps) {
     if (
       revealedWorktreeRef.current === activeWorktreeId &&
       revealedAsPinnedRef.current === isActivePinned &&
-      revealedGroupByRef.current === groupBy
+      revealedModeRef.current === mode
     ) {
       return;
     }
-    revealedGroupByRef.current = groupBy;
+    revealedModeRef.current = mode;
     revealedWorktreeRef.current = activeWorktreeId;
     revealedAsPinnedRef.current = isActivePinned;
     if (isActivePinned) {
@@ -834,10 +817,9 @@ export function RepoList({ groupFilter }: RepoListProps) {
       return;
     }
     if (grouped) {
-      // Open what hides the active worktree: its group, its origin ancestors, or its host and
-      // repo group.
+      // Open what hides the active worktree: its group and its origin ancestors.
       const found = findWorktree(repos, activeWorktreeId);
-      if (found) groupCollapse.expand(found.wt.groupId ?? UNGROUPED_KEY);
+      if (found?.wt.groupId) groupCollapse.expand(found.wt.groupId);
       let id: string | undefined = activeWorktreeId;
       const seen = new Set<string>();
       while (id && !seen.has(id)) {
@@ -847,9 +829,6 @@ export function RepoList({ groupFilter }: RepoListProps) {
         if (!entry) break;
         const parent = entry.wt.origin;
         if (parent && !parent.removed) originCollapse.expand(parent.worktreeId);
-        const hostKey = `host:${entry.wt.hostId || "local"}`;
-        hostCollapse.expand(hostKey);
-        hostCollapse.expand(`${hostKey}/${entry.repo.name}`);
         id = parent && !parent.removed ? parent.worktreeId : undefined;
       }
       keyboardNavRef.current = false;
@@ -867,10 +846,9 @@ export function RepoList({ groupFilter }: RepoListProps) {
   }, [
     activeWorktreeId,
     grouped,
-    groupBy,
+    mode,
     repos,
     originCollapse,
-    hostCollapse,
     displayRepos,
     groupCollapse,
     repoCollapse,
@@ -960,8 +938,8 @@ export function RepoList({ groupFilter }: RepoListProps) {
   const allRepoNames = useMemo(() => displayRepos.map((p) => p.name), [displayRepos]);
 
   // Rows are only candidates for the kind of drag that makes sense: pins among pins, worktrees
-  // within their repo in the Repo view, onto rows and pins in the Origin view, onto rows and host
-  // headers in the Host view. Repo drags keep their own droppables.
+  // within their repo while no group exists, onto rows, pins and group headers once groups exist.
+  // Repo drags keep their own droppables.
   const collisionDetection = useCallback<CollisionDetection>(
     (args) => {
       const activeData = args.active.data.current as
@@ -978,25 +956,35 @@ export function RepoList({ groupFilter }: RepoListProps) {
       const droppableContainers = args.droppableContainers.filter((c) => {
         const kind = kindOf(c);
         if (activeData.kind === "pin") return kind === "pin";
-        if (groupBy === "repo") {
+        if (activeData.kind === "groupmove") {
+          return (
+            kind === "group" && (c.data.current as { groupId?: string | null }).groupId != null
+          );
+        }
+        if (!grouped) {
           return (
             kind === "wt" &&
             (c.data.current as { repoName?: string } | undefined)?.repoName === activeData.repoName
           );
         }
-        if (groupBy === "groups") return kind === "group";
-        if (groupBy === "origin") return kind === "wt" || kind === "pin";
-        return kind === "wt" || kind === "host";
+        return kind === "wt" || kind === "pin" || kind === "group";
       });
       const hits = pointerWithin({ ...args, droppableContainers });
       return hits.length > 0 ? hits : closestCenter({ ...args, droppableContainers });
     },
-    [groupBy],
+    [grouped],
   );
 
   function handleDragStart(event: DragStartEvent) {
-    const data = event.active.data.current as { kind?: string; worktreeId?: string } | undefined;
+    const data = event.active.data.current as
+      | { kind?: string; worktreeId?: string; inset?: number; groupId?: string | null }
+      | undefined;
+    if (data?.kind === "groupmove") {
+      setActiveGroupDrag(groups.find((g) => g.id === data.groupId) ?? null);
+      return;
+    }
     if (data?.kind) {
+      setActiveInset(data.inset ?? 0);
       const entry = [...groupedEntries, ...entriesOf(sortedRepos)].find(
         (e) => e.worktreeId === data.worktreeId,
       );
@@ -1012,13 +1000,13 @@ export function RepoList({ groupFilter }: RepoListProps) {
     if (!over) return null;
     const overKind = (over.data.current as { kind?: string } | undefined)?.kind;
     const activeKind = (active.data.current as { kind?: string } | undefined)?.kind;
-    if (overKind === "host" || overKind === "group") return "into";
+    if (overKind === "group" && activeKind !== "groupmove") return "into";
     if (overKind === "pin" && activeKind === "wt") return "into";
     const start = activatorEvent as Partial<MouseEvent & TouchEvent>;
     const startY =
       start.clientY ?? start.touches?.[0]?.clientY ?? start.changedTouches?.[0]?.clientY;
     if (startY === undefined) return null;
-    const allowInto = groupBy === "origin" && activeKind === "wt" && overKind === "wt";
+    const allowInto = grouped && activeKind === "wt" && overKind === "wt";
     return zoneAt(over.rect, startY + delta.y, allowInto);
   }
 
@@ -1030,7 +1018,7 @@ export function RepoList({ groupFilter }: RepoListProps) {
     );
   }
 
-  function applyPlan(plan: DropPlan, entry: WorktreeEntry | null) {
+  function applyPlan(plan: DropPlan) {
     if (plan.type === "reorder") {
       reorderWorktreesMutation.mutate({
         order: plan.order,
@@ -1039,22 +1027,56 @@ export function RepoList({ groupFilter }: RepoListProps) {
       });
     } else if (plan.type === "refuse") {
       setDropNotice(plan.reason);
-    } else if (plan.type === "move" && entry) {
-      const reason = moveRefusal(entry, plan.toHostId, {
-        hosts: hostsQuery.data ?? [],
-        isAdmin,
-      });
-      if (reason) setDropNotice(reason);
-      else setMoveDialog({ entry, toHostId: plan.toHostId });
+    } else if (plan.type === "parent") {
+      void applyParentPlan(plan);
     }
+  }
+
+  /** Sets the parent first, then the group, which may ask about the worktree's children. */
+  async function applyParentPlan(plan: Extract<DropPlan, { type: "parent" }>) {
+    const entry = allEntries.find((e) => e.worktreeId === plan.worktreeId);
+    if (!entry) return;
+    try {
+      if ((entry.worktree.origin?.worktreeId ?? null) !== plan.origin) {
+        await trpc.worktrees.setOrigin.mutate({ ...plan.worktree, origin: plan.origin });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
+      }
+      moveToGroup(plan.worktreeId, plan.groupId);
+    } catch (err) {
+      setDropNotice(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /**
+   * Drops a worktree on a group header or the top-level strip. Into no group, it also leaves a
+   * parent that sits in a group, because a nested row has to stay in its parent's group.
+   */
+  async function moveToTarget(worktreeId: string, groupId: string | null) {
+    const entry = allEntries.find((e) => e.worktreeId === worktreeId);
+    const parentId = entry?.worktree.origin?.worktreeId;
+    const parent = parentId ? allEntries.find((e) => e.worktreeId === parentId) : undefined;
+    if (entry && groupId === null && parent?.worktree.groupId) {
+      try {
+        await trpc.worktrees.setOrigin.mutate({
+          repo: entry.repo.name,
+          name: entry.worktree.name,
+          hostId: entry.worktree.hostId,
+          origin: null,
+        });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
+      } catch (err) {
+        setDropNotice(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
+    moveToGroup(worktreeId, groupId);
   }
 
   /** Moves a worktree to a group (null for Ungrouped), asking first about its children. */
   function moveToGroup(worktreeId: string, groupId: string | null) {
-    const all = entriesOf(sortedRepos);
-    const entry = all.find((e) => e.worktreeId === worktreeId);
+    const entry = allEntries.find((e) => e.worktreeId === worktreeId);
     if (!entry || (entry.worktree.groupId ?? null) === groupId) return;
-    const children = originDescendants(all, worktreeId).filter(
+    const children = originDescendants(allEntries, worktreeId).filter(
       (e) => (e.worktree.groupId ?? null) !== groupId,
     );
     const group = groups.find((g) => g.id === groupId) ?? null;
@@ -1082,38 +1104,42 @@ export function RepoList({ groupFilter }: RepoListProps) {
     const activeId = activeData.worktreeId;
     if (activeData.kind === "pin") {
       if (overData.worktreeId)
-        applyPlan(planPinDrop(pinnedTree, activeId, overData.worktreeId, zone), null);
+        applyPlan(planPinDrop(pinnedTree, activeId, overData.worktreeId, zone));
       return;
     }
-    if (overData.kind === "group") {
-      moveToGroup(activeId, overData.groupId ?? null);
-      return;
-    }
-    if (groupBy === "repo") {
-      const siblings = entriesOf(displayRepos.filter((r) => r.name === activeData.repoName));
-      if (overData.worktreeId) {
-        applyPlan(planRepoViewDrop(siblings, activeId, overData.worktreeId, zone), null);
+    if (activeData.kind === "groupmove") {
+      const activeGroup = (active.data.current as { groupId?: string | null }).groupId;
+      if (activeGroup && overData.groupId) {
+        const ids = planGroupReorder(
+          groups.map((g) => g.id),
+          activeGroup,
+          overData.groupId,
+          zone,
+        );
+        if (ids) groupMutations.reorder.mutate({ ids });
       }
       return;
     }
-    if (groupBy === "host") {
-      const plan = planHostViewDrop(
-        groupedEntries,
-        activeId,
-        { worktreeId: overData.worktreeId, hostId: overData.hostId ?? "local" },
-        zone,
-      );
-      applyPlan(plan, groupedEntries.find((e) => e.worktreeId === activeId) ?? null);
+    if (overData.kind === "group") {
+      void moveToTarget(activeId, overData.groupId ?? null);
+      return;
+    }
+    if (!grouped) {
+      const siblings = entriesOf(displayRepos.filter((r) => r.name === activeData.repoName));
+      if (overData.worktreeId) {
+        applyPlan(planRepoViewDrop(siblings, activeId, overData.worktreeId, zone));
+      }
       return;
     }
     if (overData.worktreeId) {
-      applyPlan(planOriginDrop(originTree, pinnedTree, activeId, overData.worktreeId, zone), null);
+      applyPlan(planParentDrop(allEntries, activeId, overData.worktreeId, zone));
     }
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveDragId(null);
     setActiveWorktreeDrag(null);
+    setActiveGroupDrag(null);
     setDropIndicator({ overId: null, zone: null });
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -1135,6 +1161,7 @@ export function RepoList({ groupFilter }: RepoListProps) {
   function handleDragCancel() {
     setActiveDragId(null);
     setActiveWorktreeDrag(null);
+    setActiveGroupDrag(null);
     setDropIndicator({ overId: null, zone: null });
   }
 
@@ -1223,8 +1250,7 @@ export function RepoList({ groupFilter }: RepoListProps) {
                         key={row.key}
                         row={row}
                         index={i}
-                        mode={groupBy}
-                        draggable={groupBy === "origin" || groupBy === "groups" || row.depth === 0}
+                        mode={mode}
                         originCollapse={originCollapse}
                         hosts={hostsQuery.data ?? []}
                         statuses={statuses}
@@ -1241,18 +1267,25 @@ export function RepoList({ groupFilter }: RepoListProps) {
 
             {grouped ? (
               <GroupedWorktrees
-                mode={groupBy as "groups" | "origin" | "host"}
                 rows={groupedRows}
                 groupCollapse={groupCollapse}
+                groupOrder={groups.map((g) => g.id)}
                 groupActions={{
                   onRename: setRenamingGroup,
                   onColor: (group, color) => groupMutations.update.mutate({ id: group.id, color }),
                   onDelete: setDeletingGroup,
+                  onMove: (group, delta) => {
+                    const ids = moveGroupBy(
+                      groups.map((g) => g.id),
+                      group.id,
+                      delta,
+                    );
+                    if (ids) groupMutations.reorder.mutate({ ids });
+                  },
                   onAddWorktree: (groupId) => setPickingRepoFor({ groupId }),
                 }}
                 navStart={pinnedNavCount}
                 originCollapse={originCollapse}
-                hostCollapse={hostCollapse}
                 hosts={hostsQuery.data ?? []}
                 statuses={statuses}
                 branchStatuses={branchStatuses}
@@ -1292,8 +1325,36 @@ export function RepoList({ groupFilter }: RepoListProps) {
             the overlay to disappear instantly and the list to look like the new order. */}
             <DragOverlay dropAnimation={null}>
               {activeWorktreeDrag ? (
-                <div className="rounded border bg-background px-2 py-1 text-[13px] font-medium shadow-lg">
-                  {activeWorktreeDrag.worktree.name}
+                // The same card as the list row, so the preview looks like what is being moved.
+                <div
+                  data-testid="repo-list__drag-overlay"
+                  className="rounded-md shadow-lg"
+                  style={{ paddingLeft: activeInset }}
+                >
+                  <WorktreeEntryCard
+                    entry={activeWorktreeDrag}
+                    mode={mode}
+                    isFocused={false}
+                    hosts={hostsQuery.data ?? []}
+                    statuses={statuses}
+                    branchStatuses={branchStatuses}
+                    setupStatuses={setupStatuses}
+                    onShowDeleteDialog={setDeleteDialog}
+                    onTogglePinned={togglePinned}
+                  />
+                </div>
+              ) : activeGroupDrag ? (
+                <div
+                  data-testid="repo-list__group-drag-overlay"
+                  className="flex h-9 items-center gap-2 rounded border bg-background pl-3 pr-4 shadow-lg"
+                >
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: activeGroupDrag.color }}
+                  />
+                  <span className="truncate text-[13px] font-semibold text-foreground/90">
+                    {activeGroupDrag.name}
+                  </span>
                 </div>
               ) : activeDragId ? (
                 <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
@@ -1351,18 +1412,6 @@ export function RepoList({ groupFilter }: RepoListProps) {
           });
         }}
       />
-
-      {moveDialog && (
-        <MoveWorktreeDialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setMoveDialog(null);
-          }}
-          repoName={moveDialog.entry.repo.name}
-          worktree={moveDialog.entry.worktree}
-          initialTarget={moveDialog.toHostId}
-        />
-      )}
 
       <PickRepoDialog
         open={pickingRepoFor !== null}

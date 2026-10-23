@@ -1,22 +1,15 @@
 /**
- * Page object for the sidebar's Group by dropdown (Groups | Repo | Origin | Worker) and the Set parent /
+ * Page object for the sidebar's worktree rows, their nesting under a parent and the Set parent /
  * Remove parent items of a worktree card's context menu.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-
-export type GroupByMode = "groups" | "repo" | "origin" | "host";
 
 export class SidebarGroupingPage {
   readonly startedFrom: Locator;
 
   constructor(private readonly page: Page) {
     this.startedFrom = page.getByTestId("started-from").filter({ visible: true });
-  }
-
-  /** The header's Group by dropdown trigger. */
-  get groupByTrigger(): Locator {
-    return this.page.getByTestId("repos-panel__group-by");
   }
 
   /** Asserts that no header control overlaps the title or sticks out of the header. */
@@ -36,27 +29,10 @@ export class SidebarGroupingPage {
         expect(box!.x).toBeGreaterThanOrEqual(titleBox!.x + titleBox!.width);
         expect(box!.x + box!.width).toBeLessThanOrEqual(headerBox!.x + headerBox!.width + 0.5);
       }
-      // The current mode stays readable: its label is not squeezed to nothing.
-      const modeText = await this.groupByTrigger.locator("span").boundingBox();
-      expect(modeText?.width ?? 0).toBeGreaterThan(10);
     });
   }
 
-  modeItem(mode: GroupByMode): Locator {
-    return this.page.getByTestId(`repos-panel__group-by--${mode}`);
-  }
-
-  async selectMode(mode: GroupByMode): Promise<void> {
-    await test.step(`Group the sidebar by ${mode}`, async () => {
-      await this.groupByTrigger.click();
-      await this.modeItem(mode).click();
-      await expect(this.groupByTrigger).toHaveAccessibleName(
-        new RegExp(`Group by: ${mode === "host" ? "worker" : mode}`, "i"),
-      );
-    });
-  }
-
-  /** A worktree row of the Origin or Host view. */
+  /** A worktree row of the group list. */
   row(worktreeId: string): Locator {
     return this.page.getByTestId(`repo-list__grouped-row--${worktreeId}`);
   }
@@ -67,14 +43,6 @@ export class SidebarGroupingPage {
 
   parentRemovedHint(worktreeId: string): Locator {
     return this.page.getByTestId(`repo-list__parent-removed--${worktreeId}`);
-  }
-
-  hostHeader(hostId: string): Locator {
-    return this.page.getByTestId(`repo-list__host-header--${hostId}`);
-  }
-
-  hostRepoHeader(hostId: string, repo: string): Locator {
-    return this.page.getByTestId(`repo-list__host-repo-header--${hostId}--${repo}`);
   }
 
   /** The gray host tag inside a worktree row or repo-mode card. */

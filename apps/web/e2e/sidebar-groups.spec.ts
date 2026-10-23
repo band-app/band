@@ -1,5 +1,5 @@
 /**
- * The sidebar's Groups view (worktree groups replaced repo labels).
+ * The sidebar's group list (worktree groups replaced repo labels).
  *
  * Real production hub against a temp `~/.band/`, with two real git repos. Three groups are seeded
  * (Alpha, Beta, and none for Ungrouped), and Alpha holds a parent worktree with two children. The
@@ -153,12 +153,12 @@ async function open(page: import("@playwright/test").Page, worktreeId = "app-mai
   return { sidebar: new SidebarGroupsPage(page), worktreePage };
 }
 
-test("the default view lists each group's worktrees as an origin tree, then Ungrouped (S6)", async ({
+test("the default view lists plain top-level rows, then each group's worktrees as an origin tree (S6, S12)", async ({
   page,
 }) => {
   const { sidebar } = await open(page);
-  await expect(sidebar.groupByTrigger).toHaveAccessibleName(/Group by: Groups/);
-  await expect.poll(() => sidebar.headerOrder()).toEqual([ALPHA, BETA, UNGROUPED]);
+  await expect.poll(() => sidebar.headerOrder()).toEqual([ALPHA, BETA]);
+  await expect(sidebar.groupHeader(UNGROUPED)).toHaveCount(0);
   await expect
     .poll(() => sidebar.sections())
     .toEqual({
@@ -168,7 +168,6 @@ test("the default view lists each group's worktrees as an origin tree, then Ungr
     });
   await expect(sidebar.groupHeader(ALPHA)).toContainText("Alpha");
   await expect(sidebar.groupCount(ALPHA)).toHaveText("4");
-  await expect(sidebar.groupCount(UNGROUPED)).toHaveText("1");
   await expect(sidebar.groupDot(ALPHA)).toHaveCSS("background-color", "rgb(139, 92, 246)");
   // A group mixes repos, so every card names its repo.
   await expect(sidebar.row("lib-main")).toContainText("lib");
@@ -194,7 +193,7 @@ test("a group header collapses its worktrees, and the choice survives a reload",
 test("Collapse all folds every group header", async ({ page }) => {
   const { sidebar } = await open(page);
   await sidebar.collapseAll();
-  for (const id of [ALPHA, BETA, UNGROUPED]) {
+  for (const id of [ALPHA, BETA]) {
     await expect(sidebar.groupHeader(id)).toHaveAttribute("aria-expanded", "false");
   }
   await expect(sidebar.row("app-main")).toHaveCount(0);
@@ -257,9 +256,11 @@ test("moving only the parent leaves its children in place with a from-parent chi
   await expect(page).toHaveURL(/\/worktree\/app-parent/);
 });
 
-test("a worktree with no children moves to Ungrouped without a question (S6)", async ({ page }) => {
+test("a worktree with no children moves to the top level without a question (S6, S12)", async ({
+  page,
+}) => {
   const { sidebar } = await open(page);
-  await sidebar.dragToGroup("lib-main", UNGROUPED);
+  await sidebar.dragToTopLevel("lib-main", "lib-loose");
   await expect
     .poll(() => sidebar.sections())
     .toMatchObject({
@@ -306,10 +307,10 @@ test("a group header's menu renames, recolors and deletes the group, and deletin
   expect((await groupsOf())["lib-loose"]).toBeNull();
 });
 
-test("New group in the Group by menu adds an empty group that takes drops", async ({ page }) => {
+test("New group in the group filter adds an empty group that takes drops", async ({ page }) => {
   const { sidebar } = await open(page);
   await sidebar.createGroup("Fresh");
-  await expect.poll(async () => (await sidebar.headerOrder()).length).toBe(4);
+  await expect.poll(async () => (await sidebar.headerOrder()).length).toBe(3);
   const order = await sidebar.headerOrder();
   const fresh = order[2];
   await expect(sidebar.groupHeader(fresh)).toContainText("Fresh");
@@ -321,26 +322,6 @@ test("New group in the Group by menu adds an empty group that takes drops", asyn
       [fresh]: ["0:lib-loose"],
       [UNGROUPED]: [],
     });
-});
-
-test("with the filter on a group, a worktree made from the repo menu lands in that group (S7)", async ({
-  page,
-}) => {
-  const { sidebar, worktreePage } = await open(page);
-  await sidebar.selectMode("repo");
-  await worktreePage.selectGroupFilter(BETA);
-  await expect(sidebar.card("lib-main")).toBeVisible();
-  await expect(sidebar.card("app-main")).toHaveCount(0);
-
-  await sidebar.addWorktreeFromRepoMenu(worktreePage, "lib", "fromfilter");
-  await expect.poll(async () => (await groupsOf())["lib-fromfilter"]).toBe(BETA);
-  await expect(sidebar.card("lib-fromfilter")).toBeVisible();
-
-  // The filter and the new worktree survive a reload.
-  await worktreePage.reload();
-  await expect.poll(() => worktreePage.readGroupFilter()).toBe(BETA);
-  await expect(sidebar.card("lib-fromfilter")).toBeVisible();
-  await expect(sidebar.card("app-main")).toHaveCount(0);
 });
 
 test("a group header's + starts a worktree in that group, filtered or not (S7)", async ({

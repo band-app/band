@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import type { removeRequest } from "./deleting";
 import { useHubSession } from "./hub-session";
+import type { removeFromGroupRequests, setParentRequests } from "./parenting";
 import { type pinRequest, withPinned } from "./pinning";
 import type { GroupDefinition } from "./worktree-list";
 
@@ -75,6 +76,52 @@ export function useRemoveWorktree() {
   return useMutation({
     mutationFn: (request: ReturnType<typeof removeRequest>) =>
       client.worktrees.remove.mutate(request),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Sets or clears a worktree's parent and moves it into the parent's group, then reads the list again. */
+export function useSetParent() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (requests: ReturnType<typeof setParentRequests>) => {
+      await client.worktrees.setOrigin.mutate(requests.origin);
+      if (requests.group) await client.worktrees.setGroup.mutate(requests.group);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Clears a worktree's group (and its parent, when the parent is grouped), then reads the list again. */
+export function useRemoveFromGroup() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (requests: ReturnType<typeof removeFromGroupRequests>) => {
+      if (requests.origin) await client.worktrees.setOrigin.mutate(requests.origin);
+      await client.worktrees.setGroup.mutate(requests.group);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Makes a worktree group; it shows in the filter and the list once the repos are read again. */
+export function useCreateGroup() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => client.groups.create.mutate({ name }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Saves a new group order; the list reads the groups again when the call settles. */
+export function useReorderGroups() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => client.groups.reorder.mutate({ ids }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
   });
 }
