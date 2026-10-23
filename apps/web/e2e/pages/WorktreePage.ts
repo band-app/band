@@ -732,11 +732,10 @@ export class WorktreePage {
     });
   }
 
-  /** Move keyboard focus to the last row of the open group-filter dropdown. */
-  async focusLastGroupFilterOption(): Promise<void> {
-    await test.step("Focus the last group with the keyboard", async () => {
-      await this.groupFilterMenu.getByRole("menuitem").first().focus();
-      await this.page.keyboard.press("End");
+  /** Move keyboard focus to the group named `name` in the open group-filter dropdown. The menu scrolls it into view. */
+  async focusGroupFilterOption(name: string): Promise<void> {
+    await test.step(`Focus the group ${name}`, async () => {
+      await this.groupFilterOption(name).focus();
     });
   }
 
