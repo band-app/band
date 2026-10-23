@@ -1,158 +1,104 @@
-import { createHash } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { accessSync, constants } from "node:fs";
+import { rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { installSkills } from "@band-app/host-local/agents/skills-install";
-import { type CliFetchReply, type LinkSession, METHOD_CLI_FETCH } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
-
-/** How long the hub may take to start answering and to send the binary. */
-const FETCH_TIMEOUT_MS = 120_000;
-
-/** Largest CLI binary the worker accepts. The release build is about 10 MiB. */
-const MAX_CLI_BYTES = 256 * 1024 * 1024;
-
-/** The longest a spawn waits for a sync in flight before it starts without waiting for the CLI. */
-const SPAWN_WAIT_MS = 10_000;
 
 const exeName = process.platform === "win32" ? "band.exe" : "band";
 
+/** The npm package that holds the `band` binary for this platform. */
+export function cliPackageName(platform = process.platform, arch = process.arch): string {
+  return `@band-app/worker-cli-${platform}-${arch}`;
+}
+
+function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Keeps the hub's `band` CLI in `<stateDir>/bin` (plan step 2.8).
+ * Finds the `band` CLI this worker carries, first match wins:
  *
- * On every connect the worker asks the hub for the binary built for this
- * platform and replaces its copy when the SHA-256 differs, so the CLI always
- * matches the hub's version. The agents and terminals the worker starts get
- * that directory first on their PATH. When the hub has no binary for this
- * platform the worker keeps any copy it has and runs without otherwise.
+ *   1. `BAND_CLI_PATH`.
+ *   2. The platform package `@band-app/worker-cli-<platform>-<arch>`, an optional
+ *      dependency of the worker, so npm installs only the one that fits.
+ *   3. `<Resources>/binaries/band` beside the desktop app's bundled worker.
+ *   4. `apps/cli/target/{release,debug}/band` in a checkout.
  */
-export class CliCache {
-  readonly binDir: string;
-  private current: Promise<void> = Promise.resolve();
-
-  constructor(
-    private readonly session: LinkSession,
-    stateDir: string,
-    private readonly log: Logger,
-  ) {
-    this.binDir = join(stateDir, "bin");
+export function resolveCliBinary(
+  here = dirname(fileURLToPath(import.meta.url)),
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (env.BAND_CLI_PATH && isExecutable(env.BAND_CLI_PATH)) return env.BAND_CLI_PATH;
+  try {
+    const pkgJson = createRequire(join(here, "noop.js")).resolve(
+      `${cliPackageName()}/package.json`,
+    );
+    const bin = join(dirname(pkgJson), "bin", exeName);
+    if (isExecutable(bin)) return bin;
+  } catch {
+    // The package is not installed for this platform.
   }
-
-  /** Starts a sync after any sync still running. Never rejects. */
-  sync(): Promise<void> {
-    this.current = this.current.then(() => this.run()).catch(() => undefined);
-    return this.current;
+  // The desktop app ships the worker at <Resources>/worker and the CLI at <Resources>/binaries.
+  const desktop = resolve(here, "..", "binaries", exeName);
+  if (isExecutable(desktop)) return desktop;
+  // apps/worker/src or apps/worker/dist, both two levels below apps/.
+  for (const profile of ["release", "debug"]) {
+    const dev = resolve(here, "..", "..", "cli", "target", profile, exeName);
+    if (isExecutable(dev)) return dev;
   }
+  return null;
+}
 
-  /** The directory to put on PATH, or null while no binary is cached. Waits briefly for a sync in flight. */
-  async dir(): Promise<string | null> {
-    let timer: NodeJS.Timeout | undefined;
-    await Promise.race([
-      this.current,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, SPAWN_WAIT_MS);
-      }),
-    ]);
-    clearTimeout(timer);
-    return (await stat(this.path).catch(() => null)) ? this.binDir : null;
-  }
+/**
+ * The `band` CLI that ships with this worker (no hub involved). The agents and
+ * terminals the worker starts get its directory first on their PATH.
+ */
+export class WorkerCli {
+  private constructor(readonly binary: string) {}
 
-  private get path(): string {
-    return join(this.binDir, exeName);
-  }
-
-  private get shaPath(): string {
-    return `${this.path}.sha256`;
-  }
-
-  private async run(): Promise<void> {
-    try {
-      const have = await this.cachedSha();
-      const reply = await this.session.request<CliFetchReply>(
-        METHOD_CLI_FETCH,
-        { platform: process.platform, arch: process.arch, ...(have && { have }) },
-        { timeoutMs: FETCH_TIMEOUT_MS },
+  /**
+   * Resolves the CLI, drops the copy the old fetch-from-the-hub scheme left in
+   * `<stateDir>/bin` (nothing puts that directory on PATH any more, but a stale
+   * binary there is dead weight), and installs the band skills with it. Returns
+   * null, after one log line, when no CLI can be found.
+   */
+  static async start(stateDir: string, log: Logger): Promise<WorkerCli | null> {
+    await Promise.all(
+      [exeName, `${exeName}.sha256`].map((f) => rm(join(stateDir, "bin", f), { force: true })),
+    ).catch(() => undefined);
+    const binary = resolveCliBinary();
+    if (!binary) {
+      log.warn(
+        { package: cliPackageName() },
+        `no band CLI found: install ${cliPackageName()} or set BAND_CLI_PATH. Agents and terminals on this worker run without band`,
       );
-      if (!reply.available) {
-        this.log.warn({ reason: reply.reason }, "the hub has no band CLI for this worker");
-        return;
-      }
-      if (reply.chan !== undefined) await this.download(reply);
-      // Not awaited: a spawn waits on this sync for the binary, not for the skills.
-      void this.installSkills().catch((err) =>
-        this.log.warn(
+      return null;
+    }
+    log.info({ binary }, "using the band CLI shipped with this worker");
+    const cli = new WorkerCli(binary);
+    // Not awaited: the worker serves while the skills are written.
+    void installSkills({ bandPath: binary })
+      .then((result) => {
+        for (const warning of result.warnings) log.warn({ warning }, "band skills");
+      })
+      .catch((err) =>
+        log.warn(
           { message: err instanceof Error ? err.message : String(err) },
           "could not install the band skills",
         ),
       );
-    } catch (err) {
-      this.log.warn(
-        { message: err instanceof Error ? err.message : String(err) },
-        "could not fetch the band CLI from the hub",
-      );
-    }
+    return cli;
   }
 
-  /** The SHA-256 of the cached binary, or undefined when none is usable. */
-  private async cachedSha(): Promise<string | undefined> {
-    try {
-      const data = await readFile(this.path);
-      const sha = createHash("sha256").update(data).digest("hex");
-      // A copy edited since it was saved is not trusted, so it is fetched again.
-      return (await readFile(this.shaPath, "utf8")).trim() === sha ? sha : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async download(reply: Extract<CliFetchReply, { available: true }>): Promise<void> {
-    const ch = this.session.getChannel(reply.chan as number);
-    if (!ch) throw new Error("the hub's reply had no body channel");
-    if (reply.size > MAX_CLI_BYTES) {
-      ch.reset("too large");
-      throw new Error(`the hub's band CLI is too large (${reply.size} bytes)`);
-    }
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const timer = setTimeout(() => ch.reset("timed out"), FETCH_TIMEOUT_MS);
-    try {
-      for await (const chunk of ch) {
-        size += chunk.byteLength;
-        if (size > MAX_CLI_BYTES) {
-          ch.reset("too large");
-          throw new Error("the band CLI is larger than the hub said");
-        }
-        chunks.push(Buffer.from(chunk));
-      }
-    } finally {
-      clearTimeout(timer);
-      // Ending the worker's side lets the channel close. An open one counts as activity
-      // and would keep an ephemeral worker from ever going idle.
-      ch.end();
-    }
-    const data = Buffer.concat(chunks);
-    const sha = createHash("sha256").update(data).digest("hex");
-    if (data.length !== reply.size || sha !== reply.sha256) {
-      throw new Error("the band CLI arrived damaged");
-    }
-    await mkdir(this.binDir, { recursive: true, mode: 0o700 });
-    // A rename keeps a running `band` from seeing a half-written file.
-    const tmp = `${this.path}.${process.pid}.tmp`;
-    try {
-      await chmod(this.binDir, 0o700);
-      await writeFile(tmp, data, { mode: 0o755 });
-      await chmod(tmp, 0o755);
-      await rename(tmp, this.path);
-    } catch (err) {
-      await rm(tmp, { force: true });
-      throw err;
-    }
-    await writeFile(this.shaPath, `${sha}\n`, { mode: 0o600 });
-    this.log.info({ sha256: sha, bytes: data.length }, "saved the band CLI");
-  }
-
-  /** Writes the band skills for the agents on this machine. A no-op when they are current. */
-  private async installSkills(): Promise<void> {
-    const result = await installSkills({ bandPath: this.path });
-    for (const warning of result.warnings) this.log.warn({ warning }, "band skills");
+  /** The directory to put first on PATH. */
+  async dir(): Promise<string> {
+    return dirname(this.binary);
   }
 }

@@ -318,7 +318,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
       env: o.env === undefined ? undefined : strRecord(o, "env"),
       unsetEnv: o.unsetEnv === undefined ? undefined : strArray(o, "unsetEnv"),
     };
-    // The hub's `band` CLI goes first. A PATH in `options.env` would replace the pool's
+    // The worker's `band` CLI goes first. A PATH in `options.env` would replace the pool's
     // login-shell PATH, so this starts from that PATH unless the hub set one.
     const cliDir = await ctx.cli?.dir();
     if (cliDir) {

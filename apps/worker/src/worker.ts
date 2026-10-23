@@ -30,7 +30,7 @@ import { ActivityTracker } from "./activity.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
 import { ChatOwner } from "./chats/owner.ts";
 import { ChatStore } from "./chats/store.ts";
-import { CliCache } from "./cli.ts";
+import { WorkerCli } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerDirectMethods } from "./direct.ts";
@@ -246,7 +246,7 @@ export class Worker {
       labels: config.labels,
       stateDir: config.stateDir,
       reposDir: config.reposDir,
-      cli: new CliCache(client.session, config.stateDir, log),
+      cli: (await WorkerCli.start(config.stateDir, log)) ?? undefined,
       ownsChats: config.ownChats,
     };
     const registrar = new Registrar(ctx);
@@ -373,7 +373,6 @@ export class Worker {
       disconnectedSince = null;
       this.connectedOnce = true;
       log.info({ workerId: this.workerId, resumed }, "connected to the hub");
-      void ctx.cli?.sync();
       this.chats?.onConnected();
       // Shells that ended while the worker was down: the hub hears of them now.
       void this.terminalDaemon

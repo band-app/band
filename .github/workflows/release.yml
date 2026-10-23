@@ -238,6 +238,14 @@ jobs:
             apps/desktop/dist-builder/latest-mac.yml
           if-no-files-found: error
 
+      # The worker's darwin-arm64 CLI package is made from this binary in `publish`.
+      - name: Upload CLI (darwin-arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-darwin-arm64
+          path: apps/cli/target/release/band
+          if-no-files-found: error
+
       - name: Upload hub bundle
         uses: actions/upload-artifact@v4
         with:
@@ -247,12 +255,54 @@ jobs:
             apps/web/dist/client
           if-no-files-found: error
 
+  # The Linux `band` CLIs that @band-app/worker-cli-linux-* carry. Built at the
+  # release version, so `band --version` matches the worker.
+  cli-linux:
+    name: CLI (${{ matrix.target }})
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Bump version
+        run: node scripts/bump-version.mjs --version "$VERSION"
+
+      - name: Build CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+      - name: Upload CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: apps/cli/target/release/band
+          if-no-files-found: error
+
   # Linux: tag, GitHub release, npm and the Homebrew tap. Needs the macOS
   # job's DMGs, so it runs after it. The tag is pushed here, after the signed
   # build succeeded, so a failed build leaves no tag behind.
   publish:
     name: Publish
-    needs: build
+    needs: [build, cli-linux]
     runs-on: ubuntu-latest
     environment: production
     outputs:
@@ -331,6 +381,30 @@ jobs:
       - name: Publish to npm
         working-directory: apps/hub
         run: pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The worker carries its own band CLI as optional dependencies, one package
+      # per platform, published first so the worker's pinned versions resolve.
+      - name: Download CLI binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: cli-binaries
+
+      - name: Make the worker CLI packages
+        working-directory: apps/worker
+        run: |
+          node scripts/cli-packages.mjs --version "$VERSION" --out "$RUNNER_TEMP/worker-cli" --pin \
+            --binary darwin-arm64="$GITHUB_WORKSPACE/cli-binaries/cli-darwin-arm64/band" \
+            --binary linux-x64="$GITHUB_WORKSPACE/cli-binaries/cli-linux-x64/band" \
+            --binary linux-arm64="$GITHUB_WORKSPACE/cli-binaries/cli-linux-arm64/band"
+
+      - name: Publish worker CLI packages to npm
+        run: |
+          for dir in "$RUNNER_TEMP"/worker-cli/worker-cli-*; do
+            (cd "$dir" && npm publish --access public)
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

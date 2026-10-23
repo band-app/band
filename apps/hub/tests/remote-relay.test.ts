@@ -8,6 +8,7 @@
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,11 +16,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { findCliBinary } from "@band-app/host-local/process/cli-binary";
+import { RPC_METHOD_NOT_FOUND, RpcError } from "@band-app/link";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openStream, STUB_AGENT_PATH, TEST_TOKEN, trpc, turnEnded } from "./helpers/acp-chat";
@@ -33,6 +36,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { connectStandInWorker } from "./helpers/stand-in-worker";
 import { TerminalSocket } from "./helpers/terminal-socket";
 import { waitFor } from "./helpers/wait-for";
 
@@ -100,13 +104,30 @@ const m = <T>(procedure: string, input: unknown) =>
     return trpcData<T>(res);
   });
 
-function startWorkerProcess(w: Omit<Worker, "child" | "exited">, token: string): Worker {
+function startWorkerProcess(
+  w: Omit<Worker, "child" | "exited">,
+  token: string,
+  opts: { bin?: string; env?: NodeJS.ProcessEnv; onOutput?: (chunk: string) => void } = {},
+): Worker {
   const child = spawn(
     process.execPath,
-    [WORKER_BIN, "--hub", server.url, "--token", token, "--root", w.root, "--state-dir", w.state],
+    [
+      opts.bin ?? WORKER_BIN,
+      "--hub",
+      server.url,
+      "--token",
+      token,
+      "--root",
+      w.root,
+      "--state-dir",
+      w.state,
+    ],
     {
       env: {
         ...process.env,
+        // The worker carries its own CLI. Pointing it at the one this checkout built keeps
+        // the lookup deterministic on a machine that also has `band` elsewhere.
+        ...(findCliBinary() ? { BAND_CLI_PATH: findCliBinary() as string } : {}),
         HOME: w.home,
         BAND_HOME: join(w.home, ".band"),
         BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
@@ -114,12 +135,13 @@ function startWorkerProcess(w: Omit<Worker, "child" | "exited">, token: string):
         BAND_TEST_ACP_LOG: w.stubLog,
         BAND_TEST_ACP_HTTP_LOG: w.httpLog,
         BAND_TEST_ACP_SCENARIO: join(w.home, "scenario.json"),
+        ...opts.env,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  child.stdout?.on("data", () => undefined);
-  child.stderr?.on("data", () => undefined);
+  child.stdout?.on("data", (d) => opts.onOutput?.(String(d)));
+  child.stderr?.on("data", (d) => opts.onOutput?.(String(d)));
   const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
   return { ...w, child, exited };
 }
@@ -1129,29 +1151,17 @@ describe("the band CLI through the relay (S2)", () => {
 
 describe("the band CLI on a worker", () => {
   const cli = findCliBinary();
-  const cached = (w: Worker) => join(w.state, "bin", "band");
 
-  it.skipIf(!cli)(
-    "caches the hub's CLI in the worker's state dir and installs the skills",
-    async () => {
-      await waitFor(async () => (existsSync(cached(a)) ? true : undefined), {
-        label: "worker caches the band CLI",
-        timeoutMs: 30_000,
-      });
-      // The same bytes the hub has, saved with the owner-only directory around it.
-      expect(readFileSync(cached(a)).equals(readFileSync(cli as string))).toBe(true);
-      await waitFor(
-        async () => (existsSync(join(a.home, ".agents/skills/band/SKILL.md")) ? true : undefined),
-        { label: "worker installs the band skills", timeoutMs: 30_000 },
-      );
-    },
-  );
+  it.skipIf(!cli)("installs the band skills with the CLI the worker carries (S2)", async () => {
+    await waitFor(
+      async () => (existsSync(join(a.home, ".agents/skills/band/SKILL.md")) ? true : undefined),
+      { label: "worker installs the band skills", timeoutMs: 30_000 },
+    );
+    // Nothing is fetched from the hub into the state dir any more.
+    expect(existsSync(join(a.state, "bin", "band"))).toBe(false);
+  });
 
-  it.skipIf(!cli)("finds band in a terminal and runs it through the relay (S1, S3)", async () => {
-    await waitFor(async () => (existsSync(cached(a)) ? true : undefined), {
-      label: "worker caches the band CLI",
-      timeoutMs: 30_000,
-    });
+  it.skipIf(!cli)("finds band in a terminal and runs it through the relay (S1)", async () => {
     const created = await m<{ terminalId: string }>("terminal.create", {
       worktreeId: WT_A,
     });
@@ -1162,7 +1172,11 @@ describe("the band CLI on a worker", () => {
     });
     try {
       socket.type("echo found=$(command -v band)\r");
-      await socket.waitForOutput(`found=${cached(a)}`);
+      await socket.waitForOutput(`found=${cli}`);
+
+      const version = execFileSync(cli as string, ["--version"], { encoding: "utf8" }).trim();
+      socket.type("echo ver=$(band --version)\r");
+      await socket.waitForOutput(`ver=${version}`);
 
       socket.type(`band chats list ${WT_A} --output json >/dev/null; echo own=$?\r`);
       await socket.waitForOutput("own=0");
@@ -1187,12 +1201,7 @@ describe("the band CLI on a worker", () => {
     }
   });
 
-  it.skipIf(!cli)("gives the agent process band on its PATH (S2)", async () => {
-    await waitFor(async () => (existsSync(cached(a)) ? true : undefined), {
-      label: "worker caches the band CLI",
-      timeoutMs: 30_000,
-    });
-    // Starts an agent after the CLI is cached, so its environment carries the PATH.
+  it.skipIf(!cli)("gives the agent process band on its PATH (S1)", async () => {
     await submit(WT_A, "path-probe");
     const env = readFileSync(a.stubLog, "utf8")
       .split("\n")
@@ -1211,7 +1220,7 @@ describe("the band CLI on a worker", () => {
       )
       .reverse()
       .find((r) => r.env.BAND_TOKEN)?.env;
-    expect(env?.PATH?.split(":")[0]).toBe(join(a.state, "bin"));
+    expect(env?.PATH?.split(":")[0]).toBe(dirname(cli as string));
     expect(env?.BAND_WORKTREE_ID).toBe(WT_A);
     expect(env?.LEAK).toBe(false);
     const out = execFileSync(
@@ -1227,7 +1236,113 @@ describe("the band CLI on a worker", () => {
         },
       },
     );
-    expect(out.split("\n")[0]).toBe(cached(a));
+    expect(out.split("\n")[0]).toBe(cli);
+  });
+
+  it("answers the old cli.fetch call with method-not-found and keeps the session up (S4)", async () => {
+    const standIn = await connectStandInWorker({
+      hubUrl: server.url,
+      adminToken: TEST_TOKEN,
+      name: "old-cli-fetch",
+      version: "0.1.0",
+    });
+    try {
+      const err = await standIn.client.session
+        .request("cli.fetch", { platform: process.platform, arch: process.arch })
+        .then(() => undefined)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RpcError);
+      expect((err as RpcError).code).toBe(RPC_METHOD_NOT_FOUND);
+      // The session is still up: a second request on it gets an answer (also method-not-found).
+      const again = await standIn.client.session
+        .request("cli.fetch", { platform: process.platform, arch: process.arch })
+        .then(() => undefined)
+        .catch((e: unknown) => e);
+      expect((again as RpcError).code).toBe(RPC_METHOD_NOT_FOUND);
+      const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
+      expect(hosts.find((h) => h.id === standIn.hostId)?.status).toBe("online");
+    } finally {
+      await standIn.close();
+    }
+  });
+
+  it("logs one line naming the package and still serves terminals when no CLI resolves (S3)", async () => {
+    // A copy of the worker's source and bin beside no `cli/target`, no `binaries/` and no
+    // platform package, so every step of the lookup misses. node_modules is shared.
+    const copy = tmp("band-relay-nocli-worker-");
+    const src = join(WORKER_BIN, "../..");
+    for (const entry of ["bin", "src", "package.json", "tsconfig.json"]) {
+      cpSync(join(src, entry), join(copy, "apps/worker", entry), { recursive: true });
+    }
+    symlinkSync(join(src, "node_modules"), join(copy, "apps/worker/node_modules"));
+
+    const issued = await issueWorker("nocli");
+    const home = tmp("band-relay-nocli-home-");
+    const root = tmp("band-relay-nocli-root-");
+    makeRepo(join(root, "proj"));
+    writeFileSync(join(home, "scenario.json"), JSON.stringify({ turns: [] }));
+    // A copy left by the old cli.fetch scheme must be removed, not shadow anything.
+    const nocliState = tmp("band-relay-nocli-state-");
+    mkdirSync(join(nocliState, "bin"), { recursive: true });
+    writeFileSync(join(nocliState, "bin", "band"), "#!/bin/sh\necho stale\n", { mode: 0o755 });
+    writeFileSync(join(nocliState, "bin", "band.sha256"), "stale");
+    let output = "";
+    const w = startWorkerProcess(
+      {
+        name: "nocli",
+        hostId: issued.hostId,
+        root,
+        state: nocliState,
+        home,
+        httpLog: join(home, "http-log.jsonl"),
+        stubLog: join(home, "stub-log.jsonl"),
+      },
+      issued.token,
+      {
+        bin: join(copy, "apps/worker/bin/band-worker.mjs"),
+        env: { BAND_CLI_PATH: "" },
+        onOutput: (chunk) => {
+          output += chunk;
+        },
+      },
+    );
+    try {
+      await waitFor(
+        async () => {
+          const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
+          return hosts.find((h) => h.id === issued.hostId)?.status === "online" ? true : undefined;
+        },
+        { label: "worker without a CLI online", timeoutMs: 30_000 },
+      );
+      const lines = output.split("\n").filter((l) => l.includes("no band CLI found"));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("@band-app/worker-cli-");
+      expect(existsSync(join(nocliState, "bin", "band"))).toBe(false);
+      expect(existsSync(join(nocliState, "bin", "band.sha256"))).toBe(false);
+
+      const wt = toWorktreeId("proj", "nocli-a", issued.hostId);
+      await m("worktrees.create", {
+        repo: "proj",
+        branch: "nocli-a",
+        hostId: issued.hostId,
+        hostRepoPath: join(root, "proj"),
+      });
+      const created = await m<{ terminalId: string }>("terminal.create", { worktreeId: wt });
+      const socket = await TerminalSocket.open(server, {
+        worktreeId: wt,
+        terminalId: created.terminalId,
+        token: TEST_TOKEN,
+      });
+      try {
+        socket.type("echo up=$((20+22))\r");
+        await socket.waitForOutput("up=42");
+      } finally {
+        await socket.close();
+      }
+    } finally {
+      w.child.kill("SIGTERM");
+      await w.exited;
+    }
   });
 });
 

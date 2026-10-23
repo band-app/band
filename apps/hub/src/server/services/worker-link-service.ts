@@ -47,7 +47,6 @@ import { placementService } from "./placement-service";
 import { repoService } from "./repo-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
-import { workerCliService } from "./worker-cli-service";
 import { workerLeaseService } from "./worker-lease-service";
 import { workerRelayService } from "./worker-relay-service";
 import { workerUpdateService } from "./worker-update-service";
@@ -249,7 +248,6 @@ export class WorkerLinkService {
   private onSession(session: ServerSession): void {
     this.remoteHost(session.workerId).attachSession(session);
     workerRelayService.attach(session);
-    workerCliService.attach(session);
     gitCredentialService.attach(session);
     ephemeralLifecycleService.attach(session);
     checkpointService.attach(session);

@@ -16,7 +16,16 @@
 ##############################################################################
 
 # ---------------------------------------------------------------------------
-# Stage 1: pack the worker the way npm would publish it, then install the
+# Stage 1: build the Rust `band` CLI the worker puts on its agents' PATH
+# (same stage as docker/Dockerfile).
+# ---------------------------------------------------------------------------
+FROM rust:1-bookworm AS cli-builder
+WORKDIR /src
+COPY apps/cli ./apps/cli
+RUN cargo build --release --manifest-path apps/cli/Cargo.toml
+
+# ---------------------------------------------------------------------------
+# Stage 2: pack the worker the way npm would publish it, then install the
 # tarball. node-pty 1.1.0 ships no linux-x64 prebuild and compiles during the
 # install, so the toolchain is here and not in the runtime stage.
 # ---------------------------------------------------------------------------
@@ -38,7 +47,7 @@ RUN pnpm install --frozen-lockfile --filter "@band-app/worker..." \
  && npm install --omit=dev --no-audit --no-fund /out/band-app-worker-*.tgz
 
 # ---------------------------------------------------------------------------
-# Stage 2: runtime. Same Debian base as the builder, so node-pty's binary
+# Stage 3: runtime. Same Debian base as the builder, so node-pty's binary
 # matches. git is what worktrees are made of. The rest is what an agent
 # usually reaches for.
 # ---------------------------------------------------------------------------
@@ -63,6 +72,11 @@ RUN apt-get update \
 
 COPY --from=builder /opt/band-worker /opt/band-worker
 RUN ln -s /opt/band-worker/node_modules/.bin/band-worker /usr/local/bin/band-worker
+# The worker finds its CLI through BAND_CLI_PATH. It also sits on PATH for a `docker exec`.
+COPY docker/worker-entrypoint.sh /usr/local/bin/band-worker-entrypoint
+RUN chmod +x /usr/local/bin/band-worker-entrypoint
+COPY --from=cli-builder /src/apps/cli/target/release/band /opt/band/band
+RUN ln -s /opt/band/band /usr/local/bin/band
 
 # A fixed non-root uid, so a bind-mounted /work can be chowned to match.
 RUN useradd --uid 10001 --create-home --shell /bin/bash worker \
@@ -85,6 +99,7 @@ RUN git config --global user.email "band-worker@localhost" \
 # session token) lives in the second volume, so a recreated container is still
 # the same host.
 ENV HOME=/home/worker \
+    BAND_CLI_PATH=/opt/band/band \
     BAND_WORKER_ROOTS=/work \
     BAND_WORKER_STATE_DIR=/home/worker/.band/worker
 VOLUME ["/work", "/home/worker/.band/worker"]
@@ -94,4 +109,4 @@ LABEL org.opencontainers.image.title="band-worker" \
       org.opencontainers.image.source="https://github.com/band-app/band" \
       org.opencontainers.image.version="${BAND_VERSION}"
 
-ENTRYPOINT ["band-worker"]
+ENTRYPOINT ["band-worker-entrypoint"]
