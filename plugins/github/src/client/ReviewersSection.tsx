@@ -1,4 +1,7 @@
 import type { Reviewer, ReviewerState } from "@band-app/plugin-api";
+import { Asterisk, Check, Circle, FileDiff, MessageSquare, MinusCircle } from "lucide-react";
+import type { ReactElement } from "react";
+import { useState } from "react";
 import { PanelSection } from "./PanelSection";
 
 const STATE_LABEL: Record<ReviewerState, string> = {
@@ -17,19 +20,32 @@ const STATE_COLOR: Record<ReviewerState, string> = {
   dismissed: "text-muted-foreground",
 };
 
+const STATE_ICON: Record<ReviewerState, ReactElement> = {
+  approved: <Check className="size-3.5" aria-hidden />,
+  changes_requested: <FileDiff className="size-3.5" aria-hidden />,
+  commented: <MessageSquare className="size-3.5" aria-hidden />,
+  pending: <Circle className="size-2.5 fill-current" aria-hidden />,
+  dismissed: <MinusCircle className="size-3.5" aria-hidden />,
+};
+
+/** The image, or the initial letter when there is no URL or it fails to load. */
 export function Avatar({ login, url }: { login: string; url: string | null }) {
-  return url ? (
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  return url && failedUrl !== url ? (
     <img
       src={url}
       alt=""
       loading="lazy"
       referrerPolicy="no-referrer"
+      onError={() => setFailedUrl(url)}
       className="size-5 shrink-0 rounded-full"
+      data-testid="pr-avatar__image"
     />
   ) : (
     <span
       aria-hidden
       className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] uppercase"
+      data-testid="pr-avatar__fallback"
     >
       {login.slice(0, 1)}
     </span>
@@ -60,13 +76,24 @@ export function ReviewersSection({ reviewers }: { reviewers: Reviewer[] }) {
               <Avatar login={reviewer.login} url={reviewer.avatarUrl} />
               <span className="min-w-0 flex-1 truncate text-[13px]">{reviewer.login}</span>
               {reviewer.required && (
-                <span className="shrink-0 text-[10px] text-muted-foreground">Required</span>
+                <span
+                  role="img"
+                  aria-label="Required"
+                  title="Required"
+                  className="inline-flex shrink-0 text-muted-foreground"
+                  data-testid="pr-reviewers__required"
+                >
+                  <Asterisk className="size-3.5" aria-hidden />
+                </span>
               )}
               <span
-                className={`shrink-0 text-[11px] ${STATE_COLOR[reviewer.state]}`}
+                role="img"
+                aria-label={STATE_LABEL[reviewer.state]}
+                title={STATE_LABEL[reviewer.state]}
+                className={`inline-flex size-4 shrink-0 items-center justify-center ${STATE_COLOR[reviewer.state]}`}
                 data-testid="pr-reviewers__state"
               >
-                {STATE_LABEL[reviewer.state]}
+                {STATE_ICON[reviewer.state]}
               </span>
             </li>
           ))}

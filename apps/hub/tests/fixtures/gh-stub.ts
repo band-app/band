@@ -101,6 +101,8 @@ export interface GhStub {
     runId: number,
     opts?: { stderr?: string; onRequest?: (r: GhInvocation) => void },
   ) => void;
+  /** URL of a stub avatar: `ok` serves a PNG, `missing` answers 404. */
+  avatarUrl: (name: "ok" | "missing") => string;
   stop: () => Promise<void>;
 }
 
@@ -131,6 +133,17 @@ export const ghStub = {
       requests.push(req.body as GhInvocation);
       next();
     });
+    // Avatar images the browser loads: a real 1x1 PNG, and a 404.
+    const PNG = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    app.get("/avatars/ok.png", (_req, res) => {
+      res.type("image/png").send(PNG);
+    });
+    app.get("/avatars/missing.png", (_req, res) => {
+      res.status(404).type("text/html").send("<html></html>");
+    });
     const server: Server = await new Promise((resolve) => {
       const s = app.listen(0, "127.0.0.1", () => resolve(s));
     });
@@ -138,6 +151,7 @@ export const ghStub = {
     const baseUrl = `http://127.0.0.1:${port}`;
 
     return {
+      avatarUrl: (name) => `${baseUrl}/avatars/${name}.png`,
       env: { BAND_GH_BIN: GH_STUB_BIN, BAND_GH_STUB_URL: baseUrl },
       requests,
       setReviewQuery(repo, branch, data, opts) {
