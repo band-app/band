@@ -190,6 +190,45 @@ name: S10 group filter on the home screen
       text: Work
 - takeScreenshot: g1-filter-order-follows
 - tapOn: All
+# S7: a row's long-press menu sets and removes its parent. A search for "beta" leaves only
+# beta-main on screen, wherever it sits in the groups. It becomes a child of alpha-main, so the
+# menu then offers Remove parent, and stops offering it once the parent is gone.
+- tapOn:
+    id: home__search-toggle
+- tapOn:
+    id: home__search
+- inputText: beta
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-beta-main
+    timeout: 10000
+- longPressOn:
+    id: home__worktree-beta-main
+- assertNotVisible: Remove parent
+- tapOn: Set parent…
+- tapOn:
+    id: parent-sheet__search
+- inputText: alpha main
+- tapOn:
+    id: parent-sheet__item-alpha-main
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=2000
+- takeScreenshot: g1-parent-set
+- longPressOn:
+    id: home__worktree-beta-main
+- assertVisible: Remove parent
+- tapOn: Remove parent
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=2000
+- longPressOn:
+    id: home__worktree-beta-main
+- assertNotVisible: Remove parent
+- takeScreenshot: g1-parent-removed
+- tapOn: Cancel
 - runScript:
     file: scripts/hub-control.js
     env:

@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Dimensions,
   type GestureResponderEvent,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   type StyleProp,
@@ -39,6 +40,7 @@ export function BottomSheet({
   backdropTestID,
   backdropLabel = "Close",
   accessibilityLabel,
+  avoidKeyboard = false,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -51,6 +53,8 @@ export function BottomSheet({
   backdropTestID?: string;
   backdropLabel?: string;
   accessibilityLabel?: string;
+  /** Lifts the panel above the keyboard, for a sheet with a text field. */
+  avoidKeyboard?: boolean;
 }) {
   const reduceMotion = useReducedMotion();
   const bottomInset = useSafeAreaInsets().bottom;
@@ -124,7 +128,7 @@ export function BottomSheet({
       onRequestClose={onClose}
       onDismiss={onDismiss}
     >
-      <View style={styles.root}>
+      <KeyboardAvoidingView style={styles.root} behavior="padding" enabled={avoidKeyboard}>
         <Animated.View style={[styles.backdrop, backdropStyle]} pointerEvents="box-none">
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -148,7 +152,7 @@ export function BottomSheet({
             {children}
           </View>
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

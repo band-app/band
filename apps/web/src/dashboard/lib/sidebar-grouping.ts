@@ -65,24 +65,6 @@ export type GroupedRow =
 
 export type WorktreeRow = Extract<GroupedRow, { kind: "worktree" }>;
 
-/** True when `candidate` is `id` itself or sits anywhere below it in the tree. */
-export function isInSubtree(
-  childrenOf: Map<string, WorktreeEntry[]>,
-  id: string,
-  candidate: string,
-): boolean {
-  const seen = new Set<string>();
-  const stack = [id];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current === candidate) return true;
-    if (seen.has(current)) continue;
-    seen.add(current);
-    for (const kid of childrenOf.get(current) ?? []) stack.push(kid.worktreeId);
-  }
-  return false;
-}
-
 /** The Pinned section's rows, a pin followed by its subtree unless it is collapsed. */
 export function buildPinnedRows(
   tree: PinnedTree,

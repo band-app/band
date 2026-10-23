@@ -36,6 +36,7 @@ export function ParentSheet({
       onClose={onClose}
       style={styles.sheet}
       testID="parent-sheet"
+      avoidKeyboard
       accessibilityLabel={`Set parent of ${rowName}`}
     >
       <Text style={styles.title}>Set parent of {rowName}</Text>

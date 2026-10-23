@@ -154,13 +154,17 @@ test("the repo settings page has no Label picker (S8)", async ({ page }) => {
 
 test("S13: each row shows only the handle, color dot, name and menu, with no swatches or arrows", async ({
   page,
-}) => {
+}, testInfo) => {
   const settings = new SettingsPage(page, server.url, TOKEN);
   await new WorktreePage(page, server.url, TOKEN).goto("lib-main");
   await settings.openDialog("groups");
   await expect(settings.groupRowButtons(TWO)).toHaveCount(4);
   await expect(settings.groupMenuItem("move-up")).toHaveCount(0);
   await expect(settings.groupNameInput(TWO)).toHaveText("Two");
+  await testInfo.attach("settings-groups.png", {
+    body: await settings.dialog.screenshot(),
+    contentType: "image/png",
+  });
 });
 
 test("S13: a bad name shows an error icon, and Escape cancels the edit", async ({ page }) => {

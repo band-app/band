@@ -99,7 +99,7 @@ export class ClientStateService {
     }
     const updatedAt = Date.now();
     const version = input.baseVersion + 1;
-    const written =
+    let written =
       input.baseVersion === 0
         ? this.queries.insertIfAbsent({
             key: input.key,
@@ -114,6 +114,18 @@ export class ClientStateService {
             version,
             updatedAt,
           });
+    // `list` skips tombstones, so a client that never saw the key cannot know a deleted row's
+    // version. Its create (base version 0) over a tombstone succeeds instead of being refused.
+    if (!written && input.baseVersion === 0) {
+      const current = this.queries.find(input.key, input.scope);
+      if (current && current.value === null) {
+        written = this.queries.updateIfVersion(input.key, input.scope, current.version, {
+          value,
+          version: current.version + 1,
+          updatedAt,
+        });
+      }
+    }
     // The client thinks a row exists that doesn't (its worktree was deleted
     // and recreated): answer with an empty version 0 so it rebases on nothing.
     const entry = this.queries.find(input.key, input.scope) ?? {

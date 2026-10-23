@@ -376,6 +376,43 @@ describe("clientState", () => {
     expect((await listEntries(server.url, null, "mobile")).map((e) => e.key)).not.toContain(key);
   });
 
+  it("lets a device that never saw a deleted key create it again", async () => {
+    const key = "band.mobile.collapsed-repos";
+    const created = await setEntry(server.url, {
+      key,
+      scope: "mobile",
+      value: ["a"],
+      baseVersion: 0,
+    });
+    const res = await trpcMutate(server.url, "clientState.delete", {
+      key,
+      scope: "mobile",
+      baseVersion: created.entry.version,
+      clientId: "client-a",
+    });
+    const deleted = await trpcData<WriteResult>(res);
+
+    // A fresh install lists no tombstone, so it writes with base version 0 and must not lose.
+    const again = await setEntry(server.url, {
+      key,
+      scope: "mobile",
+      value: ["b"],
+      baseVersion: 0,
+    });
+    expect(again).toEqual({
+      ok: true,
+      entry: expect.objectContaining({ key, value: ["b"], version: deleted.entry.version + 1 }),
+    });
+    // A write based on an older, live version is still refused.
+    const stale = await setEntry(server.url, {
+      key,
+      scope: "mobile",
+      value: ["c"],
+      baseVersion: 0,
+    });
+    expect(stale.ok).toBe(false);
+  });
+
   it("refuses a delete based on a stale version", async () => {
     const key = "band.repos-list.collapsed-groups";
     const first = await setEntry(server.url, { key, scope: "all", value: ["a"], baseVersion: 0 });
