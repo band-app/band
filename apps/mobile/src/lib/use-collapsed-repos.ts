@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { COLLAPSED_REPOS_KEY, parseCollapsed, toggleCollapsed } from "./collapsed-repos";
+import {
+  COLLAPSED_REPOS_KEY,
+  parseCollapsed,
+  setCollapsedMany,
+  toggleCollapsed,
+} from "./collapsed-repos";
 import { useHubSession } from "./hub-session";
 
 /** The collapsed repo names, shared with the server so they survive a reinstall of the app's cache. */
@@ -26,6 +31,16 @@ export function useCollapsedRepos() {
     [clientState],
   );
 
+  const setMany = useCallback(
+    (names: readonly string[], value: boolean) => {
+      const next = setCollapsedMany(clientState.getItem(COLLAPSED_REPOS_KEY), names, value);
+      if (next === null) clientState.removeItem(COLLAPSED_REPOS_KEY);
+      else clientState.setItem(COLLAPSED_REPOS_KEY, next);
+      setRaw(next);
+    },
+    [clientState],
+  );
+
   const collapsed = useMemo(() => parseCollapsed(raw), [raw]);
-  return { collapsed, toggle };
+  return { collapsed, toggle, setMany };
 }

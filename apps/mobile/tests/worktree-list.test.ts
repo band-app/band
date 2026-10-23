@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { sortRepoWorktrees, withoutPinned } from "@band-app/shared/sidebar-tree";
+import { sortRepoWorktrees } from "@band-app/shared/sidebar-tree";
+import { buildGroupRows } from "../../web/src/dashboard/lib/sidebar-grouping.ts";
+import { allCollapsed, setCollapsedMany } from "../src/lib/collapsed-repos.ts";
 import {
-  buildOriginRows,
-  buildPinnedTree as webPinnedTree,
-} from "../../web/src/dashboard/lib/sidebar-grouping.ts";
+  parentCandidates,
+  removeFromGroupRequests,
+  setParentRequests,
+} from "../src/lib/parenting.ts";
 import { applyStatusEvent, emptyStatusState, type StatusEvent } from "../src/lib/status-state.ts";
 import {
   buildSections,
@@ -12,7 +15,6 @@ import {
   countAttention,
   findRow,
   hostLabel,
-  parseGroupBy,
   pullRequestTone,
   type RepoLike,
 } from "../src/lib/worktree-list.ts";
@@ -132,14 +134,7 @@ describe("buildSections", () => {
     assert.equal(countAttention(repos, statuses), 1);
   });
 
-  it("groups by host, hub first, and nests by origin", () => {
-    const byHost = buildSections(repos, { ...base, groupBy: "host" });
-    assert.deepEqual(
-      byHost.map((s) => s.title),
-      ["Pinned", "This hub", "builder"],
-    );
-    // The repo leads the second line, with no trailing separator when nothing follows.
-    assert.equal(byHost[2]?.data[0]?.subtitle, "alpha");
+  it("keeps the repo on the second line and records each row's parent", () => {
     const withOrigin: RepoLike[] = [
       {
         name: "alpha",
@@ -156,13 +151,13 @@ describe("buildSections", () => {
         ],
       },
     ];
-    const rows = buildSections(withOrigin, { ...base, groupBy: "origin" })[0]?.data ?? [];
+    const rows = buildSections(withOrigin, base)[0]?.data ?? [];
     assert.deepEqual(
-      rows.map((r) => [r.name, r.depth]),
+      rows.map((r) => [r.name, r.parentId]),
       [
-        ["main", 0],
-        ["feat", 1],
-        ["child", 2],
+        ["child", "alpha-feat"],
+        ["feat", null],
+        ["main", null],
       ],
     );
   });
@@ -182,10 +177,6 @@ describe("buildSections", () => {
     assert.equal(beta?.pr, null);
     assert.equal(beta?.ciTone, "success");
   });
-});
-
-const webPins = (repos: RepoLike[]) => ({
-  pins: webPinnedTree(sortRepoWorktrees(repos as never) as never),
 });
 
 describe("pinned, groups and origin like the web", () => {
@@ -237,20 +228,14 @@ describe("pinned, groups and origin like the web", () => {
     );
   });
 
-  it("S4: worktrees sit under group headers in group order, ungrouped last, a repo once per group", () => {
-    const sections = buildSections(fixture, opts).filter((s) => s.kind === "repo");
+  it("S4, S12: plain top-level rows come first with no header, then each group as one section", () => {
+    const sections = buildSections(fixture, opts).filter((s) => s.kind !== "pinned");
     assert.deepEqual(
-      sections.map((s) => [
-        s.name,
-        s.groupHeader?.name ?? null,
-        s.groupHeader?.color ?? null,
-        s.data.map((r) => r.id),
-      ]),
+      sections.map((s) => [s.name, s.kind, s.title, s.data.map((r) => r.id)]),
       [
-        ["l1:alpha", "Epic", "#ef4444", ["alpha-loose"]],
-        ["l1:beta", null, null, ["beta-main"]],
-        ["l2:alpha", "Private", "#3b82f6", ["alpha-main"]],
-        ["none:gamma", "Ungrouped", null, ["gamma-main"]],
+        ["group:none", "top", "", ["gamma-main"]],
+        ["group:l1", "group", "Epic", ["alpha-loose", "beta-main"]],
+        ["group:l2", "group", "Private", ["alpha-main"]],
       ],
     );
   });
@@ -266,59 +251,114 @@ describe("pinned, groups and origin like the web", () => {
       ],
       opts,
     );
+    // The defined groups stay listed, empty, so a worktree can be moved into them.
     assert.deepEqual(
-      sections.map((s) => [s.name, s.groupHeader?.name]),
-      [["none:delta", "Ungrouped"]],
+      sections.map((s) => [s.name, s.data.length]),
+      [
+        ["group:none", 1],
+        ["group:l1", 0],
+        ["group:l2", 0],
+      ],
     );
   });
 
-  it("S4: no group headers without groups or while a filter is on", () => {
-    assert.ok(buildSections(fixture, base).every((s) => !s.groupHeader));
-    assert.ok(buildSections(fixture, { ...opts, groupFilter: "l1" }).every((s) => !s.groupHeader));
+  it("S4: without groups the worktrees sit under their repos", () => {
+    assert.ok(buildSections(fixture, base).every((s) => s.kind !== "group"));
   });
 
-  it("S5: the filter keeps only that group's worktrees, the pins and the other views included", () => {
-    const ids = (groupBy: "repo" | "origin" | "host") =>
-      buildSections(fixture, { ...opts, groupFilter: "l1", groupBy }).flatMap((s) =>
-        s.data.map((r) => r.id),
-      );
-    assert.deepEqual(ids("repo"), ["alpha-loose", "beta-main"]);
-    assert.deepEqual(ids("origin").sort(), ["alpha-loose", "beta-main"]);
-    assert.deepEqual(ids("host").sort(), ["alpha-loose", "beta-main"]);
+  it("S5: the filter shows one group laid out as in All, with the pins narrowed too", () => {
+    const all = buildSections(fixture, opts).find((s) => s.name === "group:l1");
+    const filtered = buildSections(fixture, { ...opts, groupFilter: "l1" });
     assert.deepEqual(
-      buildSections(fixture, { ...opts, groupFilter: "l1" }).map((s) => s.kind),
-      ["repo", "repo"],
+      filtered.map((s) => s.name),
+      ["group:l1"],
     );
-    assert.equal(buildSections(fixture, { ...opts, groupFilter: null }).length, 5);
+    assert.deepEqual(
+      filtered[0]?.data.map((r) => [r.id, r.depth]),
+      all?.data.map((r) => [r.id, r.depth]),
+    );
+    assert.equal(filtered[0]?.title, all?.title);
+    assert.equal(buildSections(fixture, { ...opts, groupFilter: null }).length, 4);
   });
 
-  it("S6: Origin matches the web's Origin view for the same data, Pinned on top", () => {
-    const sections = buildSections(fixture, { ...opts, groupBy: "origin" });
-    assert.equal(sections[0]?.kind, "pinned");
-    const mine = sections[1]?.data.map((r) => [r.id, r.depth]);
-
-    const { pins } = webPins(fixture);
-    const webRows = buildOriginRows(
-      withoutPinned(sortRepoWorktrees(fixture as never), pins as never).repos as never,
-      () => false,
-    ).flatMap((row) => (row.kind === "worktree" ? [[row.entry.worktreeId, row.depth]] : []));
-    assert.deepEqual(mine, webRows);
+  it("S6: the groups and their rows match the web's for the same data", () => {
+    const mine = buildSections(fixture, opts)
+      .filter((s) => s.kind !== "pinned")
+      .flatMap((s) => s.data.map((r) => [s.name, r.id, r.depth]));
+    const sorted = sortRepoWorktrees(fixture as never);
+    const pinned = buildSections(fixture, opts)[0]?.data.map((r) => r.id) ?? [];
+    const rest = sorted.map((r) => ({
+      ...r,
+      worktrees: r.worktrees.filter((w) => !pinned.includes(`${r.name}-${w.name}`)),
+    }));
+    let group = "group:none";
+    const web: Array<[string, string, number]> = [];
+    for (const row of buildGroupRows({
+      repos: rest as never,
+      allRepos: sorted as never,
+      groups,
+      filter: null,
+      isGroupCollapsed: () => false,
+      isOriginCollapsed: () => false,
+    })) {
+      if (row.kind === "group") group = `group:${row.groupId ?? "none"}`;
+      else web.push([group, row.entry.worktreeId, row.depth]);
+    }
+    assert.deepEqual(mine, web);
   });
+});
 
-  it("S6: Worker groups the hub first and keeps Pinned on top", () => {
-    const withHost: RepoLike[] = [
-      ...fixture,
+describe("setting a parent", () => {
+  it("offers every worktree except the row and what was started from it", () => {
+    const tree: RepoLike[] = [
       {
-        name: "delta",
+        name: "app",
         defaultBranch: "main",
-        worktrees: [{ name: "x", branch: "x", pinned: false, hostId: "h-1" }],
+        worktrees: [
+          { name: "a", branch: "a", pinned: false, groupId: "g1" },
+          {
+            name: "b",
+            branch: "b",
+            pinned: false,
+            origin: { worktreeId: "app-a", removed: false },
+          },
+          { name: "c", branch: "c", pinned: false, groupId: "g2" },
+        ],
       },
     ];
-    const sections = buildSections(withHost, { ...opts, groupBy: "host" });
     assert.deepEqual(
-      sections.map((s) => s.title),
-      ["Pinned", "This hub", "builder"],
+      parentCandidates(tree, { id: "app-a" }).map((c) => c.id),
+      ["app-c"],
     );
+  });
+
+  it("moves the child into the parent's group, and a clear request changes no group", () => {
+    const row = { id: "app-a", repo: "app", name: "a", hostId: "h-1", groupId: "g1" };
+    const picked = setParentRequests(row, { id: "app-c", groupId: "g2" });
+    assert.deepEqual(picked.origin, { repo: "app", name: "a", origin: "app-c", hostId: "h-1" });
+    assert.deepEqual(picked.group, { worktreeId: "app-a", groupId: "g2", withChildren: true });
+    assert.equal(setParentRequests(row, null).group, null);
+    assert.equal(setParentRequests(row, { id: "app-d", groupId: "g1" }).group, null);
+  });
+
+  it("clears only the group when the parent is ungrouped or there is none", () => {
+    const row = { id: "app-a", repo: "app", name: "a", hostId: "h-1", parentId: null };
+    assert.deepEqual(removeFromGroupRequests(row, null), {
+      origin: null,
+      group: { worktreeId: "app-a", groupId: null },
+    });
+    assert.deepEqual(removeFromGroupRequests({ ...row, parentId: "app-b" }, null), {
+      origin: null,
+      group: { worktreeId: "app-a", groupId: null },
+    });
+  });
+
+  it("also clears the parent when the parent is itself grouped", () => {
+    const row = { id: "app-a", repo: "app", name: "a", hostId: "h-1", parentId: "app-b" };
+    assert.deepEqual(removeFromGroupRequests(row, "g1"), {
+      origin: { repo: "app", name: "a", origin: null, hostId: "h-1" },
+      group: { worktreeId: "app-a", groupId: null },
+    });
   });
 });
 
@@ -362,11 +402,18 @@ describe("findRow", () => {
   });
 });
 
-describe("parseGroupBy", () => {
-  it("accepts origin and host and falls back to repo", () => {
-    assert.equal(parseGroupBy("origin"), "origin");
-    assert.equal(parseGroupBy("host"), "host");
-    assert.equal(parseGroupBy("junk"), "repo");
-    assert.equal(parseGroupBy(null), "repo");
+describe("collapse all", () => {
+  it("folds and unfolds the named sections and keeps the others", () => {
+    const folded = setCollapsedMany(JSON.stringify(["keep"]), ["group:a", "group:b"], true);
+    assert.deepEqual(JSON.parse(folded ?? "[]"), ["group:a", "group:b", "keep"]);
+    const unfolded = setCollapsedMany(folded, ["group:a", "group:b"], false);
+    assert.deepEqual(JSON.parse(unfolded ?? "[]"), ["keep"]);
+    assert.equal(setCollapsedMany(null, ["x"], false), null);
+  });
+
+  it("reports everything folded only when every named section is, and never for none", () => {
+    assert.equal(allCollapsed(new Set(["a", "b"]), ["a", "b"]), true);
+    assert.equal(allCollapsed(new Set(["a"]), ["a", "b"]), false);
+    assert.equal(allCollapsed(new Set(["a"]), []), false);
   });
 });

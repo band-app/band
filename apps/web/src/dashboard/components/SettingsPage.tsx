@@ -676,7 +676,18 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent variant="fullscreen" showCloseButton={false} className="gap-0 p-0">
+      <DialogContent
+        variant="fullscreen"
+        showCloseButton={false}
+        className="gap-0 p-0"
+        onEscapeKeyDown={(event) => {
+          // An inline edit inside the dialog (a group's name field) uses Escape to cancel itself;
+          // without this the dialog's own Escape-to-close would win first and close over it.
+          if (document.activeElement?.closest("[data-settings-inline-edit]")) {
+            event.preventDefault();
+          }
+        }}
+      >
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <nav
@@ -935,14 +946,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                   ) : null}
 
                   {/* ── Groups ─────────────────────────────────────── */}
-                  {active === "groups" ? (
-                    <SettingsSection
-                      title="Groups"
-                      description="A worktree is in one group. The sidebar lists each group's worktrees together."
-                    >
-                      <GroupsSettings />
-                    </SettingsSection>
-                  ) : null}
+                  {active === "groups" ? <GroupsSettings /> : null}
 
                   {/* ── Coding Agents ──────────────────────────────── */}
                   {active === "agents" ? (

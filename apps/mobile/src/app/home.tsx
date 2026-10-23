@@ -1,5 +1,5 @@
 import { Redirect, router } from "expo-router";
-import { Layers, Settings as SettingsIcon, Tag } from "lucide-react-native";
+import { ChevronsDownUp, ChevronsUpDown, Settings as SettingsIcon, Tag } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActionSheetIOS,
@@ -17,33 +17,41 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChevronGlyph, Glass, GlassCircle, PlusGlyph, SearchGlyph } from "../components/glass";
 import { Icon } from "../components/icon";
+import { ParentSheet } from "../components/parent-sheet";
 import { avatarColor, initials, RepoAvatar } from "../components/repo-avatar";
 import { StartSheet } from "../components/start-sheet";
 import { Button } from "../components/ui";
 import { WorktreeRowView } from "../components/worktree-row";
+import { allCollapsed } from "../lib/collapsed-repos";
 import { canDelete, deleteFailure, deletePrompt, removeRequest } from "../lib/deleting";
 import { effectiveGroupFilter } from "../lib/group-filter";
 import { SessionGate, useHubSession } from "../lib/hub-session";
 import { useHubs } from "../lib/hubs-context";
 import { resetTo } from "../lib/navigation";
+import {
+  type ParentCandidate,
+  parentCandidates,
+  removeFromGroupFailure,
+  removeFromGroupRequests,
+  setParentFailure,
+  setParentRequests,
+} from "../lib/parenting";
 import { pinRequest } from "../lib/pinning";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
-import { useGroupBy } from "../lib/use-group-by";
 import { useGroupFilter } from "../lib/use-group-filter";
 import {
+  useCreateGroup,
   useGroups,
   useHosts,
   usePinWorktree,
+  useRemoveFromGroup,
   useRemoveWorktree,
+  useReorderGroups,
   useRepos,
+  useSetParent,
   useStatusFeed,
 } from "../lib/use-hub-data";
-import {
-  buildSections,
-  GROUP_BY_OPTIONS,
-  type RepoSection,
-  type WorktreeRow,
-} from "../lib/worktree-list";
+import { buildSections, findRow, type RepoSection, type WorktreeRow } from "../lib/worktree-list";
 import { colors, tones, useScheme } from "../theme";
 
 export default function Home() {
@@ -64,12 +72,16 @@ function WorktreeList() {
   const repos = useRepos();
   const hosts = useHosts();
   const { state: statuses, connection: stream } = useStatusFeed();
-  const { collapsed, toggle } = useCollapsedRepos();
-  const [groupBy, setGroupBy] = useGroupBy();
+  const { collapsed, toggle, setMany } = useCollapsedRepos();
   const groups = useGroups();
   const [storedGroup, setGroupFilter] = useGroupFilter();
   const pin = usePinWorktree();
   const remove = useRemoveWorktree();
+  const setParent = useSetParent();
+  const removeFromGroup = useRemoveFromGroup();
+  const createGroup = useCreateGroup();
+  const reorderGroups = useReorderGroups();
+  const [parentFor, setParentFor] = useState<WorktreeRow | null>(null);
   const [deleting, setDeleting] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -108,11 +120,43 @@ function WorktreeList() {
         hosts: hostList ?? [],
         collapsed,
         query,
-        groupBy,
         groups: groupList ?? [],
         groupFilter,
       }),
-    [repoList, hostList, statuses, collapsed, query, groupBy, groupList, groupFilter],
+    [repoList, hostList, statuses, collapsed, query, groupList, groupFilter],
+  );
+
+  // The button folds every group and repo section the list shows, and unfolds the same ones. A
+  // group the filter hides is not listed, so it keeps its state.
+  const foldable = useMemo(
+    () => sections.filter((s) => s.kind === "group" || s.kind === "repo").map((s) => s.name),
+    [sections],
+  );
+  const everythingFolded = allCollapsed(collapsed, foldable);
+
+  const groupActions = useCallback(
+    (groupId: string, name: string) => {
+      const ids = (groupList ?? []).map((g) => g.id);
+      const at = ids.indexOf(groupId);
+      const move = (to: number) => {
+        const next = [...ids];
+        [next[at], next[to]] = [next[to], next[at]];
+        reorderGroups.mutate(next);
+      };
+      const actions: { label: string; run: () => void }[] = [
+        ...(at > 0 ? [{ label: "Move up", run: () => move(at - 1) }] : []),
+        ...(at >= 0 && at < ids.length - 1
+          ? [{ label: "Move down", run: () => move(at + 1) }]
+          : []),
+      ];
+      if (actions.length === 0) return;
+      const options = [...actions.map((a) => a.label), "Cancel"];
+      ActionSheetIOS.showActionSheetWithOptions(
+        { title: name, options, cancelButtonIndex: options.length - 1 },
+        (index) => actions[index]?.run(),
+      );
+    },
+    [groupList, reorderGroups],
   );
 
   const refresh = useCallback(async () => {
@@ -124,28 +168,22 @@ function WorktreeList() {
     }
   }, [repos, hosts]);
 
-  const chooseGroupBy = useCallback(() => {
-    const options = [...GROUP_BY_OPTIONS.map((o) => o.label), "Cancel"];
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title: "Group by", options, cancelButtonIndex: options.length - 1 },
-      (index) => {
-        const choice = GROUP_BY_OPTIONS[index];
-        if (choice) setGroupBy(choice.value);
-      },
-    );
-  }, [setGroupBy]);
-
   const chooseGroup = useCallback(() => {
     const defined = groupList ?? [];
-    const options = ["All", ...defined.map((l) => l.name), "Cancel"];
+    const options = ["All", ...defined.map((l) => l.name), "New group…", "Cancel"];
     ActionSheetIOS.showActionSheetWithOptions(
       { title: "Filter by group", options, cancelButtonIndex: options.length - 1 },
       (index) => {
         if (index === 0) setGroupFilter(null);
         else if (index <= defined.length) setGroupFilter(defined[index - 1]?.id ?? null);
+        else if (index === defined.length + 1) {
+          Alert.prompt("New group", undefined, (name) => {
+            if (name?.trim()) createGroup.mutate(name.trim());
+          });
+        }
       },
     );
-  }, [groupList, setGroupFilter]);
+  }, [groupList, setGroupFilter, createGroup]);
 
   const confirmDelete = useCallback(
     (row: WorktreeRow) => {
@@ -179,30 +217,70 @@ function WorktreeList() {
   const rowActions = useCallback(
     (row: WorktreeRow) => {
       const deletable = canDelete(row);
-      const options = [
-        row.pinned ? "Unpin" : "Pin",
-        ...(deletable ? ["Delete worktree"] : []),
-        "Cancel",
+      const actions: { label: string; run: () => void; destructive?: boolean }[] = [
+        {
+          label: row.pinned ? "Unpin" : "Pin",
+          run: () => pin.mutate(pinRequest(row, !row.pinned)),
+        },
+        { label: "Set parent…", run: () => setParentFor(row) },
+        ...(row.parentId
+          ? [
+              {
+                label: "Remove parent",
+                run: () =>
+                  setParent.mutate(setParentRequests(row, null), {
+                    onError: (error) => {
+                      const failure = setParentFailure(row, error);
+                      Alert.alert(failure.title, failure.message);
+                    },
+                  }),
+              },
+            ]
+          : []),
+        ...(row.groupId
+          ? [
+              {
+                label: "Remove from group",
+                run: () => {
+                  const parentGroupId = row.parentId
+                    ? (findRow(repoList ?? [], row.parentId, statuses, hostList ?? [])?.groupId ??
+                      null)
+                    : null;
+                  removeFromGroup.mutate(removeFromGroupRequests(row, parentGroupId), {
+                    onError: (error) => {
+                      const failure = removeFromGroupFailure(row, error);
+                      Alert.alert(failure.title, failure.message);
+                    },
+                  });
+                },
+              },
+            ]
+          : []),
+        ...(deletable
+          ? [{ label: "Delete worktree", run: () => confirmDelete(row), destructive: true }]
+          : []),
       ];
+      const options = [...actions.map((a) => a.label), "Cancel"];
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: row.name,
           options,
           cancelButtonIndex: options.length - 1,
-          ...(deletable ? { destructiveButtonIndex: 1 } : {}),
+          ...(deletable ? { destructiveButtonIndex: actions.length - 1 } : {}),
         },
-        (index) => {
-          if (index === 0) pin.mutate(pinRequest(row, !row.pinned));
-          else if (deletable && index === 1) confirmDelete(row);
-        },
+        (index) => actions[index]?.run(),
       );
     },
-    [pin, confirmDelete],
+    [pin, confirmDelete, setParent, removeFromGroup, repoList, statuses, hostList],
+  );
+
+  const candidates = useMemo<ParentCandidate[]>(
+    () => (parentFor ? parentCandidates(repoList ?? [], parentFor) : []),
+    [parentFor, repoList],
   );
 
   const loading = repos.isPending || !clientStateReady;
   const filtering = query.trim() !== "";
-  const groupLabel = GROUP_BY_OPTIONS.find((o) => o.value === groupBy)?.label ?? "Repo";
   const activeGroup = groupList?.find((g) => g.id === groupFilter) ?? null;
   const hubLabel = active?.label ?? "Band";
 
@@ -292,6 +370,35 @@ function WorktreeList() {
           testID="home__search"
         />
       ) : null}
+      {sections.length > 0 || (groupList?.length ?? 0) > 0 ? (
+        <View style={styles.sectionRow} testID="home__list-controls">
+          <Text style={styles.sectionLabel}>
+            {(groupList?.length ?? 0) > 0 ? "Groups" : "Repos"}
+          </Text>
+          <View style={styles.controls}>
+            <Pressable
+              onPress={() => setMany(foldable, !everythingFolded)}
+              accessibilityRole="button"
+              accessibilityLabel={everythingFolded ? "Expand all" : "Collapse all"}
+              testID="home__toggle-all"
+              style={styles.groupBy}
+            >
+              <Icon icon={everythingFolded ? ChevronsUpDown : ChevronsDownUp} size="sm" />
+            </Pressable>
+            <Pressable
+              onPress={chooseGroup}
+              accessibilityRole="button"
+              accessibilityLabel={`Filter by group, ${activeGroup?.name ?? "All"}`}
+              testID="home__group-filter"
+              style={styles.groupBy}
+            >
+              <Tag size={13} color={colors.foreground} />
+              <Text style={styles.groupByText}>{activeGroup?.name ?? "All"}</Text>
+              <ChevronGlyph direction="down" size={7} color={colors.foreground} />
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       <SectionList<RepoSection["data"][number], RepoSection>
         sections={sections}
         keyExtractor={(row) => row.id}
@@ -308,21 +415,19 @@ function WorktreeList() {
         renderSectionHeader={({ section }) => (
           <SectionHeader
             section={section}
-            first={section === sections.find((s) => s.kind !== "pinned")}
-            groupLabel={groupLabel}
-            groupName={groupList && groupList.length > 0 ? (activeGroup?.name ?? "All") : null}
             filtering={filtering}
             avatarBase={hub.url}
             token={hub.token}
             onToggle={() => toggle(section.name)}
-            onGroupBy={chooseGroupBy}
-            onGroup={chooseGroup}
+            onGroupMenu={() =>
+              section.group?.id ? groupActions(section.group.id, section.title) : undefined
+            }
           />
         )}
         renderItem={({ item, index, section }) => (
           <WorktreeRowView
             row={item}
-            first={(section.kind === "pinned" || section.kind === "origin") && index === 0}
+            first={(section.kind === "pinned" || section.kind === "group") && index === 0}
             last={index === section.data.length - 1}
             onPress={() => router.push({ pathname: "/worktree/[id]", params: { id: item.id } })}
             deleting={deleting.has(item.id)}
@@ -354,6 +459,23 @@ function WorktreeList() {
           <Text style={styles.composerPlaceholder}>Plan, ask, build…</Text>
         </Glass>
       </Pressable>
+      <ParentSheet
+        visible={parentFor !== null}
+        rowName={parentFor?.name ?? ""}
+        candidates={candidates}
+        onClose={() => setParentFor(null)}
+        onPick={(candidate) => {
+          if (parentFor) {
+            setParent.mutate(setParentRequests(parentFor, candidate), {
+              onError: (error) => {
+                const failure = setParentFailure(parentFor, error);
+                Alert.alert(failure.title, failure.message);
+              },
+            });
+          }
+          setParentFor(null);
+        }}
+      />
       <StartSheet visible={starting} onClose={() => setStarting(false)} repos={repoList ?? []} />
     </View>
   );
@@ -361,27 +483,19 @@ function WorktreeList() {
 
 function SectionHeader({
   section,
-  first,
-  groupLabel,
-  groupName,
   filtering,
   avatarBase,
   token,
   onToggle,
-  onGroupBy,
-  onGroup,
+  onGroupMenu,
 }: {
   section: RepoSection;
-  first: boolean;
-  groupLabel: string;
-  /** The filter's current name, or null when the hub defines no groups. */
-  groupName: string | null;
   filtering: boolean;
   avatarBase: string;
   token: string;
   onToggle: () => void;
-  onGroupBy: () => void;
-  onGroup: () => void;
+  /** Long press on a group header: Move up and Move down. */
+  onGroupMenu: () => void;
 }) {
   if (section.kind === "pinned") {
     return (
@@ -392,53 +506,39 @@ function SectionHeader({
   }
   return (
     <View>
-      {first ? (
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionLabel}>
-            {groupLabel === "Worker" ? "Workers" : groupLabel === "Origin" ? "Origin" : "Repos"}
-          </Text>
-          <View style={styles.controls}>
-            {groupName !== null ? (
-              <Pressable
-                onPress={onGroup}
-                accessibilityRole="button"
-                accessibilityLabel={`Filter by group, ${groupName}`}
-                testID="home__group-filter"
-                style={styles.groupBy}
-              >
-                <Tag size={13} color={colors.foreground} />
-                <Text style={styles.groupByText}>{groupName}</Text>
-                <ChevronGlyph direction="down" size={7} color={colors.foreground} />
-              </Pressable>
-            ) : null}
-            <Pressable
-              onPress={onGroupBy}
-              accessibilityRole="button"
-              accessibilityLabel={`Group by ${groupLabel}`}
-              testID="home__group-by"
-              style={styles.groupBy}
-            >
-              <Layers size={13} color={colors.foreground} />
-              <Text style={styles.groupByText}>{groupLabel}</Text>
-              <ChevronGlyph direction="down" size={7} color={colors.foreground} />
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-      {section.groupHeader ? (
-        <View
+      {section.kind === "top" ? null : section.kind === "group" ? (
+        <Pressable
+          onPress={onToggle}
+          onLongPress={onGroupMenu}
+          disabled={filtering}
+          accessibilityRole="button"
+          accessibilityLabel={`${section.title}, ${section.total} worktrees, ${section.collapsed ? "collapsed" : "expanded"}`}
+          accessibilityHint="Long press to move the group"
+          accessibilityState={{ expanded: !section.collapsed }}
+          testID={`home__${section.name}`}
           style={styles.groupRow}
-          testID={`home__group-header-${section.groupHeader.id ?? "none"}`}
         >
-          {section.groupHeader.color ? (
-            <View style={[styles.groupDot, { backgroundColor: section.groupHeader.color }]} />
+          {section.group?.color ? (
+            <View style={[styles.groupDot, { backgroundColor: section.group.color }]} />
           ) : (
             <View style={[styles.groupDot, styles.groupDotEmpty]} />
           )}
-          <Text style={styles.groupName}>{section.groupHeader.name}</Text>
-        </View>
-      ) : null}
-      {section.kind === "origin" ? null : (
+          <Text style={styles.groupName} numberOfLines={1}>
+            {section.title}
+          </Text>
+          {section.collapsed && section.attention > 0 ? (
+            <View style={styles.repoAttention} testID={`home__repo-attention-${section.name}`}>
+              <Text style={styles.repoAttentionText}>{section.attention} need you</Text>
+            </View>
+          ) : null}
+          <Text style={styles.repoCount}>{section.total}</Text>
+          <ChevronGlyph
+            direction={section.collapsed ? "right" : "down"}
+            size={7}
+            color={colors.faint}
+          />
+        </Pressable>
+      ) : (
         <Pressable
           onPress={onToggle}
           disabled={filtering}
@@ -575,13 +675,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: 8,
-    marginBottom: 2,
+    marginBottom: 6,
     marginHorizontal: 20,
     marginTop: 14,
+    minHeight: 32,
   },
+  groupName: { color: colors.foreground, flex: 1, fontSize: 14, fontWeight: "600" },
   groupDot: { borderRadius: 5, height: 10, width: 10 },
   groupDotEmpty: { borderColor: colors.faint, borderWidth: 1.5 },
-  groupName: { color: colors.foreground, fontSize: 13, fontWeight: "600" },
   groupByText: { color: colors.foreground, fontSize: 13 },
   repoHeader: {
     alignItems: "center",

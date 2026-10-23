@@ -1,5 +1,5 @@
-import type { OriginTree, PinnedTree, WorktreeEntry } from "./sidebar-grouping";
-import { hostIdOf, isInSubtree } from "./sidebar-grouping";
+import { originDescendants } from "@band-app/shared/sidebar-tree";
+import type { PinnedTree, WorktreeEntry } from "./sidebar-grouping";
 
 /** Where a drag ended relative to the row under the pointer. */
 export type DropZone = "before" | "after" | "into";
@@ -18,7 +18,14 @@ export type DropPlan =
       order: WorktreeRef[];
       reparent?: WorktreeRef & { origin: string | null };
     }
-  | { type: "move"; worktreeId: string; toHostId: string }
+  | {
+      /** The worktree gets a new parent (null clears it) and moves into `groupId`. */
+      type: "parent";
+      worktree: WorktreeRef;
+      worktreeId: string;
+      origin: string | null;
+      groupId: string | null;
+    }
   | { type: "refuse"; reason: string }
   | { type: "none" };
 
@@ -75,6 +82,18 @@ function planFromIds(
   return order.length === 0 ? NONE : { type: "reorder", scope, order };
 }
 
+/** The group ids with `activeId` moved before or after `overId`, or null when nothing moves. */
+export function planGroupReorder(
+  ids: string[],
+  activeId: string,
+  overId: string,
+  zone: DropZone,
+): string[] | null {
+  if (activeId === overId || zone === "into") return null;
+  const next = moveWithin(ids, activeId, overId, zone);
+  return next.join("|") === ids.join("|") ? null : next;
+}
+
 /** Pins reorder among themselves, in every view. */
 export function planPinDrop(
   pinned: PinnedTree,
@@ -112,161 +131,47 @@ export function planRepoViewDrop(
   return planFromIds(byId, ids, "siblings");
 }
 
-/** A worktree dragged in the Host view: onto another host it moves, in its own group it reorders. */
-export function planHostViewDrop(
-  entries: WorktreeEntry[],
-  activeId: string,
-  over: { worktreeId?: string; hostId: string },
-  zone: DropZone,
-): DropPlan {
-  const active = entries.find((e) => e.worktreeId === activeId);
-  if (!active) return NONE;
-  const activeHost = hostIdOf(active.worktree);
-  if (over.hostId !== activeHost) {
-    return { type: "move", worktreeId: activeId, toHostId: over.hostId };
-  }
-  const overEntry = over.worktreeId ? entries.find((e) => e.worktreeId === over.worktreeId) : null;
-  if (!overEntry || overEntry.repo.name !== active.repo.name || zone === "into") return NONE;
-  const group = entries.filter(
-    (e) => e.repo.name === active.repo.name && hostIdOf(e.worktree) === activeHost,
-  );
-  return planRepoViewDrop(group, activeId, overEntry.worktreeId, zone);
-}
-
 /**
- * A drop in the Origin view. Onto the middle of a row the dragged worktree becomes its child. In
- * the gap between rows it becomes a sibling at that position, under the parent of that list. A
- * repo's main worktree has no parent to change and only reorders among the top-level rows.
+ * A worktree dropped on another row of the group list. Onto the middle of a row it becomes that
+ * row's child and joins its group. In the gap above or below a row it becomes a sibling of that
+ * row: a top-level row has no parent, so the parent is cleared. Either way it joins the group of
+ * the row it was dropped on. Dropping onto itself or onto a worktree started from it is refused,
+ * because the hub would refuse the cycle.
  */
-export function planOriginDrop(
-  tree: OriginTree,
-  pinned: PinnedTree,
+export function planParentDrop(
+  entries: WorktreeEntry[],
   activeId: string,
   overId: string,
   zone: DropZone,
 ): DropPlan {
-  if (activeId === overId) return NONE;
-  const byId = new Map<string, WorktreeEntry>(tree.byId);
-  for (const entry of pinned.pins) byId.set(entry.worktreeId, entry);
-  for (const list of pinned.childrenOf.values()) {
-    for (const entry of list) byId.set(entry.worktreeId, entry);
+  if (activeId === overId) {
+    return { type: "refuse", reason: "A worktree can't become its own parent." };
   }
-  const active = byId.get(activeId);
-  const over = byId.get(overId);
+  const active = entries.find((e) => e.worktreeId === activeId);
+  const over = entries.find((e) => e.worktreeId === overId);
   if (!active || !over) return NONE;
-
-  const childrenOf = new Map<string, WorktreeEntry[]>([...tree.childrenOf, ...pinned.childrenOf]);
-  const parentOf = new Map(tree.parentOf);
-  for (const [parentId, list] of pinned.childrenOf) {
-    for (const entry of list) parentOf.set(entry.worktreeId, parentId);
-  }
-  const activeIsMain = tree.isMain(active) && !tree.hasLiveOrigin(active);
-  const currentOrigin = active.worktree.origin?.worktreeId ?? null;
-
-  const withParent = (
-    parent: WorktreeEntry,
-    siblings: WorktreeEntry[],
-    insert: { before?: string; after?: string } | "end",
-  ): DropPlan => {
-    // A drop onto the main row names it as the origin. A drop in the gap among its children keeps
-    // no origin, which is where work with no origin is listed already.
-    const impliedByMain =
-      insert !== "end" &&
-      tree.isMain(parent) &&
-      !tree.hasLiveOrigin(parent) &&
-      parent.repo.name === active.repo.name &&
-      hostIdOf(parent.worktree) === hostIdOf(active.worktree);
-    const origin = impliedByMain ? null : parent.worktreeId;
-    if (activeIsMain) {
-      return { type: "refuse", reason: "A repo's main worktree can't be moved under another." };
-    }
-    if (isInSubtree(childrenOf, activeId, parent.worktreeId)) {
-      return {
-        type: "refuse",
-        reason: "A worktree can't become a child of one that was started from it.",
-      };
-    }
-    const ids = siblings.map((e) => e.worktreeId).filter((id) => id !== activeId);
-    if (insert === "end") ids.push(activeId);
-    else {
-      const anchor = insert.before ?? insert.after;
-      const at = anchor === undefined ? -1 : ids.indexOf(anchor);
-      if (at === -1) return NONE;
-      ids.splice(insert.before ? at : at + 1, 0, activeId);
-    }
-    const plan = planFromIds(byId, ids, "siblings");
-    if (plan.type !== "reorder") return plan;
-    if (origin !== currentOrigin) plan.reparent = { ...refOf(active), origin };
-    return plan;
+  const cycle = new Set([
+    activeId,
+    ...originDescendants(entries, activeId).map((e) => e.worktreeId),
+  ]);
+  const refuseCycle: DropPlan = {
+    type: "refuse",
+    reason: "A worktree can't become a child of one that was started from it.",
   };
-
+  let origin: string | null;
   if (zone === "into") {
-    return withParent(over, childrenOf.get(overId) ?? [], "end");
+    if (cycle.has(overId)) return refuseCycle;
+    origin = overId;
+  } else {
+    const parentId = over.worktree.origin?.worktreeId;
+    const live = parentId !== undefined && entries.some((e) => e.worktreeId === parentId);
+    origin = live ? (parentId as string) : null;
+    if (origin !== null && cycle.has(origin)) return refuseCycle;
   }
-
-  const parentId = parentOf.get(overId);
-  if (parentId === undefined) {
-    // A top-level row: pins and repo mains. Only roots reorder here.
-    const isRoot = tree.roots.some((e) => e.worktreeId === overId);
-    if (!isRoot) return NONE;
-    if (!activeIsMain && !tree.roots.some((e) => e.worktreeId === activeId)) {
-      return { type: "refuse", reason: "Only a repo's main worktree sits at the top level." };
-    }
-    const ids = moveWithin(
-      tree.roots.map((e) => e.worktreeId),
-      activeId,
-      overId,
-      zone,
-    );
-    const plan = planFromIds(byId, ids, "siblings");
-    if (plan.type === "reorder" && !activeIsMain && currentOrigin !== null) {
-      plan.reparent = { ...refOf(active), origin: null };
-    }
-    return plan;
-  }
-  const parent = byId.get(parentId);
-  if (!parent) return NONE;
-  return withParent(
-    parent,
-    childrenOf.get(parentId) ?? [],
-    zone === "before" ? { before: overId } : { after: overId },
-  );
-}
-
-export interface MoveContext {
-  hosts: { id: string; name?: string | null; status?: string }[];
-  isAdmin: boolean;
-}
-
-/**
- * Why a worktree can't be moved onto a host, or null when the "Open on another host" dialog may
- * open. The message for a repo limited to one host matches the card's menu.
- */
-export function moveRefusal(
-  entry: WorktreeEntry,
-  toHostId: string,
-  context: MoveContext,
-): string | null {
-  const { worktree, repo } = entry;
-  const fromHostId = hostIdOf(worktree);
-  const hostName = (id: string) => context.hosts.find((h) => h.id === id)?.name?.trim() || id;
-  if (fromHostId === "local" || worktree.supersededBy) {
-    return "A worktree on this hub's own machine can't be moved to another worker.";
-  }
-  if (toHostId === "local") return "A worktree can't be moved onto this hub's own machine.";
-  const source = context.hosts.find((h) => h.id === fromHostId);
-  if (source && source.status !== "online") {
-    return `${hostName(fromHostId)} is offline. Use "Open on another worker" in the worktree's menu.`;
-  }
-  if (repo.kind === "plain") return "A plain folder can't be moved to another worker.";
-  if (repo.allowedHostIds?.every((id) => id === fromHostId)) {
-    return `Only available on ${hostName(fromHostId)}`;
-  }
-  const target = context.hosts.find((h) => h.id === toHostId);
-  if (!target || target.status !== "online") return `${hostName(toHostId)} is offline.`;
-  const allowed = repo.allowedHostIds ?? null;
-  if (allowed !== null && !allowed.includes(toHostId) && !context.isAdmin) {
-    return `${repo.name} isn't allowed on ${hostName(toHostId)}, and adding a worker needs an admin.`;
-  }
-  return null;
+  const groupId = over.worktree.groupId ?? null;
+  const unchanged =
+    (active.worktree.origin?.worktreeId ?? null) === origin &&
+    (active.worktree.groupId ?? null) === groupId;
+  if (unchanged) return NONE;
+  return { type: "parent", worktree: refOf(active), worktreeId: activeId, origin, groupId };
 }

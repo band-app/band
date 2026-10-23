@@ -5,6 +5,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Spinner,
   Tooltip,
@@ -12,7 +13,16 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronsDownUp, FolderPlus, ListFilter, Plus, Settings, X } from "lucide-react";
+import {
+  Check,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FolderPlus,
+  ListFilter,
+  Plus,
+  Settings,
+  X,
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToastObstruction } from "../../lib/toast-obstructions";
 import { trpc } from "../../lib/trpc-client";
@@ -23,12 +33,11 @@ import {
   PINNED_COLLAPSE_KEY,
   PINNED_SECTION_ID,
   REPOS_COLLAPSE_KEY,
-  UNGROUPED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
 import { useGroupFilter } from "../hooks/use-group-filter";
 import { useGroupLastWorktree } from "../hooks/use-group-last-worktree";
-import { useGroupsQuery } from "../hooks/use-groups";
+import { useGroupMutations, useGroupsQuery } from "../hooks/use-groups";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useRepos } from "../hooks/use-repos";
 import {
@@ -37,20 +46,11 @@ import {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
-import {
-  buildOriginTree,
-  buildPinnedTree,
-  entriesOf,
-  HOST_COLLAPSE_KEY,
-  hostIdOf,
-  ORIGIN_COLLAPSE_KEY,
-  sortRepoWorktrees,
-  useGroupBy,
-} from "../lib/sidebar-grouping";
+import { collapsibleKeys, ORIGIN_COLLAPSE_KEY } from "../lib/sidebar-grouping";
 import { useDashboardStore } from "../stores/index";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { DesktopViewerDialog } from "./DesktopViewerDialog";
-import { GroupBySwitch } from "./GroupBySwitch";
+import { GroupNameDialog } from "./GroupDialogs";
 import { RepoList } from "./RepoList";
 import { ReposPanel } from "./ReposPanel";
 import { SettingsPage } from "./SettingsPage";
@@ -114,6 +114,8 @@ export function DashboardShell({
   });
   const actionBarObstructionRef = useToastObstruction();
   const [groupFilter, persistGroupFilter] = useGroupFilter();
+  const [namingGroup, setNamingGroup] = useState(false);
+  const { create: createGroup } = useGroupMutations();
   const { getLastWorktree, setLastWorktree } = useGroupLastWorktree();
   // A filter on a group that was deleted (here or on another device) goes back to All.
   useEffect(() => {
@@ -145,55 +147,32 @@ export function DashboardShell({
     setShowSettingsDialog(true);
   }, []);
 
-  // Collapse-all toolbar action: write every repo name into the
-  // collapsed-repos set and every group id (plus the ungrouped sentinel)
-  // into the collapsed-groups set. The custom event dispatched by `setAll`
-  // pings every useCollapseState consumer so the list re-renders instantly.
-  // The Pinned section header lives outside the groups/repos tree, so
-  // we also fold it into the collapsed state explicitly — "Collapse all"
-  // is meant to collapse everything visible, including the pinned group.
   const repoCollapse = useCollapseState(REPOS_COLLAPSE_KEY);
   const groupCollapse = useCollapseState(GROUPS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
   const originCollapse = useCollapseState(ORIGIN_COLLAPSE_KEY);
-  const hostCollapse = useCollapseState(HOST_COLLAPSE_KEY);
-  const [groupBy] = useGroupBy();
-  // Collapses what the current view shows: its groups, the Pinned section, and every worktree
-  // with children (the Origin view's parents and the pins' subtrees share one collapsed set).
-  const collapseAll = useCallback(() => {
-    pinnedCollapse.setAll([PINNED_SECTION_ID]);
-    const sorted = sortRepoWorktrees(repos);
-    const parents = new Set(buildPinnedTree(sorted).childrenOf.keys());
-    if (groupBy === "repo") {
-      repoCollapse.setAll(repos.map((p) => p.name));
-    } else if (groupBy === "groups") {
-      groupCollapse.setAll([...groups.map((g) => g.id), UNGROUPED_KEY]);
-      for (const [id, kids] of buildOriginTree(entriesOf(sorted)).childrenOf) {
-        if (kids.length > 0) parents.add(id);
-      }
-    } else if (groupBy === "origin") {
-      for (const [id, kids] of buildOriginTree(entriesOf(sorted)).childrenOf) {
-        if (kids.length > 0) parents.add(id);
-      }
-    } else {
-      const keys: string[] = [];
-      for (const entry of entriesOf(sorted)) {
-        const host = hostIdOf(entry.worktree);
-        keys.push(`host:${host}`, `host:${host}/${entry.repo.name}`);
-      }
-      hostCollapse.addAll(keys);
-    }
-    originCollapse.addAll(parents);
-  }, [
-    pinnedCollapse,
-    repoCollapse,
-    groupCollapse,
-    originCollapse,
-    hostCollapse,
-    groupBy,
-    repos,
-    groups,
-  ]);
+  // The button folds every header and every parent the list shows for the current filter, and
+  // unfolds the same ones. A group the filter hides keeps its state. It offers "Expand all" once
+  // everything it folds is folded.
+  const collapsible = useMemo(
+    () => collapsibleKeys(repos, groups, groupFilter),
+    [repos, groups, groupFilter],
+  );
+  const allCollapsed =
+    (!collapsible.pinned || pinnedCollapse.isCollapsed(PINNED_SECTION_ID)) &&
+    collapsible.groups.every(groupCollapse.isCollapsed) &&
+    collapsible.origins.every(originCollapse.isCollapsed) &&
+    collapsible.repos.every(repoCollapse.isCollapsed);
+  const hasCollapsible =
+    collapsible.pinned ||
+    collapsible.groups.length + collapsible.origins.length + collapsible.repos.length > 0;
+  const toggleAll = useCallback(() => {
+    const apply = allCollapsed ? "removeAll" : "addAll";
+    if (collapsible.pinned) pinnedCollapse[apply]([PINNED_SECTION_ID]);
+    groupCollapse[apply](collapsible.groups);
+    originCollapse[apply](collapsible.origins);
+    repoCollapse[apply](collapsible.repos);
+  }, [allCollapsed, collapsible, pinnedCollapse, groupCollapse, originCollapse, repoCollapse]);
 
   const activeGroup = useMemo(
     () => (groupFilter ? groups.find((g) => g.id === groupFilter) : null),
@@ -445,7 +424,7 @@ export function DashboardShell({
                 <TooltipContent side="bottom">Add repo</TooltipContent>
               </Tooltip>
             ) : null}
-            {groups.length > 0 && (
+            {repos.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -505,10 +484,17 @@ export function DashboardShell({
                       )}
                     </DropdownMenuItem>
                   ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    data-testid="dashboard__group-filter-new-group"
+                    onClick={() => setNamingGroup(true)}
+                  >
+                    <Plus />
+                    <span>New group…</span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            {repos.length > 0 && <GroupBySwitch />}
             {repos.length > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -516,13 +502,22 @@ export function DashboardShell({
                     size="icon-xs"
                     variant="ghost"
                     className="w-6 text-muted-foreground"
-                    aria-label="Collapse all"
-                    onClick={collapseAll}
+                    aria-label={allCollapsed ? "Expand all" : "Collapse all"}
+                    data-testid="repos-panel__toggle-all"
+                    data-next-action={allCollapsed ? "expand" : "collapse"}
+                    disabled={!hasCollapsible}
+                    onClick={toggleAll}
                   >
-                    <ChevronsDownUp className="size-4" />
+                    {allCollapsed ? (
+                      <ChevronsUpDown className="size-4" />
+                    ) : (
+                      <ChevronsDownUp className="size-4" />
+                    )}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Collapse all</TooltipContent>
+                <TooltipContent side="bottom">
+                  {allCollapsed ? "Expand all" : "Collapse all"}
+                </TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -563,6 +558,13 @@ export function DashboardShell({
           <RepoList groupFilter={groupFilter} />
         )}
       </ReposPanel>
+      <GroupNameDialog
+        open={namingGroup}
+        onOpenChange={setNamingGroup}
+        title="New group"
+        submitLabel="Create"
+        onSubmit={(name) => createGroup.mutate({ name })}
+      />
       <AddRepoDialog
         open={addingRepo}
         onOpenChange={setAddingRepo}

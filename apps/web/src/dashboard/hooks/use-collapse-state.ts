@@ -1,4 +1,3 @@
-import { UNGROUPED_KEY } from "@band-app/shared/sidebar-tree";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clientStorage } from "../../lib/client-state";
 
@@ -13,14 +12,12 @@ import { clientStorage } from "../../lib/client-state";
 
 /** localStorage key for the collapsed-repos set (repo names). */
 export const REPOS_COLLAPSE_KEY = "band.repos-list.collapsed-repos";
-/** localStorage key for the collapsed-group sections (group ids + UNGROUPED_KEY). */
+/** localStorage key for the collapsed-group sections (group ids). */
 export const GROUPS_COLLAPSE_KEY = "band.repos-list.collapsed-groups";
 /** localStorage key for the collapsed Pinned section. The section only has a
  *  single id (PINNED_SECTION_ID) but we reuse the same Set<string> hook for
  *  consistency with the groups/repos collapse state. */
 export const PINNED_COLLAPSE_KEY = "band.repos-list.collapsed-pinned";
-/** Sentinel id for the "Ungrouped" section, which has no real group id. */
-export { UNGROUPED_KEY };
 /** Sentinel id for the "Pinned" section — used with PINNED_COLLAPSE_KEY. */
 export const PINNED_SECTION_ID = "__pinned";
 
@@ -61,6 +58,8 @@ export interface CollapseState {
   setAll: (ids: Iterable<string>) => void;
   /** Add ids to the collapsed set and keep the ones already in it. */
   addAll: (ids: Iterable<string>) => void;
+  /** Mark ids as expanded and keep the other collapsed ids. */
+  removeAll: (ids: Iterable<string>) => void;
 }
 
 export function useCollapseState(storageKey: string): CollapseState {
@@ -128,6 +127,18 @@ export function useCollapseState(storageKey: string): CollapseState {
     [storageKey],
   );
 
+  const removeAll = useCallback(
+    (ids: Iterable<string>) => {
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        write(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey],
+  );
+
   const addAll = useCallback(
     (ids: Iterable<string>) => {
       setCollapsed((prev) => {
@@ -142,7 +153,7 @@ export function useCollapseState(storageKey: string): CollapseState {
   // Memoised so consumers can use the returned object as a useMemo/useEffect
   // dependency without triggering work on every render.
   return useMemo(
-    () => ({ isCollapsed, toggle, expand, setAll, addAll }),
-    [isCollapsed, toggle, expand, setAll, addAll],
+    () => ({ isCollapsed, toggle, expand, setAll, addAll, removeAll }),
+    [isCollapsed, toggle, expand, setAll, addAll, removeAll],
   );
 }

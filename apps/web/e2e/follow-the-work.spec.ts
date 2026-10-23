@@ -464,7 +464,6 @@ test("the continued worktree opens its chat on the new host with its history, ev
   await expect(chat.userMessage("first message")).toBeVisible({ timeout: 30_000 });
 
   // The cards show icons with names, not status text, and each carries its host's name.
-  await grouping.selectMode("repo");
   await expect(checkpoints.supersededBadge(openId)).toHaveAttribute(
     "aria-label",
     `Superseded by ${continuedId}`,
@@ -479,18 +478,11 @@ test("the sidebar clock shows until the continued worktree is opened, then only 
 }) => {
   const follow = new FollowPage(page);
   const app = new WorktreePage(page, server.url, TOKEN);
-  const grouping = new SidebarGroupingPage(page);
   // Open another worktree, so the continued one is unseen.
   await app.goto(openId);
   await app.waitForReady();
 
   await expect(follow.headerContinuedFrom).toHaveCount(0);
-  await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
-    "aria-label",
-    /^Continued from box-a/,
-  );
-
-  await grouping.selectMode("host");
   await expect(follow.cardContinuedFrom(continuedId)).toHaveAttribute(
     "aria-label",
     /^Continued from box-a/,

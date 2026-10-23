@@ -9,10 +9,8 @@ import {
   type PinnedTree as SharedPinnedTree,
   type WorktreeEntry as SharedWorktreeEntry,
   sortRepoWorktrees,
-  UNGROUPED_KEY,
   withoutPinned,
 } from "@band-app/shared/sidebar-tree";
-import { useSyncExternalStore } from "react";
 import type { RepoInfo } from "../types";
 
 // The ordering and nesting rules live in shared so the mobile list applies the same ones.
@@ -21,62 +19,10 @@ export type WorktreeEntry = SharedWorktreeEntry<RepoInfo>;
 export type OriginTree = SharedOriginTree<RepoInfo>;
 export type PinnedTree = SharedPinnedTree<RepoInfo>;
 
-export type GroupBy = "groups" | "repo" | "origin" | "host";
-
-export const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: "groups", label: "Groups" },
-  { value: "repo", label: "Repo" },
-  { value: "origin", label: "Origin" },
-  { value: "host", label: "Worker" },
-];
-
-/** Per device on purpose: a phone and a desktop may want different views. */
-export const GROUP_BY_KEY = "band.sidebar.group-by";
-/** Collapsed origin parents (worktree ids) and host groups. */
+/** Collapsed origin parents (worktree ids). */
 export const ORIGIN_COLLAPSE_KEY = "band.sidebar.collapsed-origins";
-export const HOST_COLLAPSE_KEY = "band.sidebar.collapsed-hosts";
 
 const LOCAL_HOST = "local";
-
-function readGroupBy(): GroupBy {
-  try {
-    const value = window.localStorage.getItem(GROUP_BY_KEY);
-    if (value === "groups" || value === "origin" || value === "host" || value === "repo") {
-      return value;
-    }
-  } catch {
-    // Storage blocked: fall back to the default.
-  }
-  return "groups";
-}
-
-let current: GroupBy | null = null;
-const listeners = new Set<() => void>();
-
-function getSnapshot(): GroupBy {
-  if (current === null) current = readGroupBy();
-  return current;
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-export function setGroupBy(value: GroupBy): void {
-  current = value;
-  try {
-    window.localStorage.setItem(GROUP_BY_KEY, value);
-  } catch {
-    // Storage blocked: the choice lasts until reload.
-  }
-  for (const listener of listeners) listener();
-}
-
-export function useGroupBy(): [GroupBy, (value: GroupBy) => void] {
-  const value = useSyncExternalStore(subscribe, getSnapshot, () => "groups" as GroupBy);
-  return [value, setGroupBy];
-}
 
 export interface HostInfoLite {
   id: string;
@@ -84,7 +30,7 @@ export interface HostInfoLite {
   status?: string;
 }
 
-/** A row of the Origin or Host view, in display order. */
+/** A row of the grouped list, in display order. */
 export type GroupedRow =
   | {
       kind: "worktree";
@@ -98,8 +44,10 @@ export type GroupedRow =
       parentRemoved: boolean;
       /** Set on the rows of the Pinned section. */
       pinned?: boolean;
+      /** Set on the rows of the worktrees that are in no group: plain top-level rows. */
+      ungrouped?: boolean;
       /**
-       * Groups view: the worktree was started from one in another group, so it is a top-level row
+       * The worktree was started from one in another group, so it is a top-level row
        * here. The row shows a chip that selects that parent.
        */
       fromParent?: { worktreeId: string; name: string };
@@ -113,24 +61,6 @@ export type GroupedRow =
       color: string | null;
       collapsed: boolean;
       count: number;
-      /** The group filter shows this group alone: its header stays and cannot collapse. */
-      filtered: boolean;
-    }
-  | {
-      kind: "host";
-      key: string;
-      hostId: string;
-      name: string;
-      status: string;
-      collapsed: boolean;
-      count: number;
-    }
-  | {
-      kind: "repo";
-      key: string;
-      hostId: string;
-      repo: RepoInfo;
-      collapsed: boolean;
     };
 
 export type WorktreeRow = Extract<GroupedRow, { kind: "worktree" }>;
@@ -187,6 +117,7 @@ function originTreeRows(
   tree: OriginTree,
   isCollapsed: (id: string) => boolean,
   fromParentOf?: (entry: WorktreeEntry) => WorktreeRow["fromParent"],
+  ungrouped = false,
 ): WorktreeRow[] {
   const { entries, childrenOf, roots, hasLiveOrigin } = tree;
   const rows: WorktreeRow[] = [];
@@ -206,6 +137,7 @@ function originTreeRows(
       collapsed,
       parentRemoved: !hasLiveOrigin(entry) && entry.worktree.origin?.removed === true,
       ...(fromParent ? { fromParent } : {}),
+      ...(ungrouped ? { ungrouped } : {}),
     });
     if (collapsed) {
       hide(entry.worktreeId);
@@ -227,18 +159,6 @@ function originTreeRows(
   return rows;
 }
 
-/**
- * The Origin view: each repo's main worktree at the top level, with everything started from it
- * nested under it. A worktree with no origin, or whose origin is gone, nests under its repo's main
- * on the same host. Children are listed in repo order. A collapsed parent hides its subtree.
- */
-export function buildOriginRows(
-  repos: RepoInfo[],
-  isCollapsed: (id: string) => boolean,
-): GroupedRow[] {
-  return originTreeRows(buildOriginTree(entriesOf(repos)), isCollapsed);
-}
-
 export interface GroupRowsInput {
   /** The repos to list: the group filter applied and the pinned worktrees left out. */
   repos: RepoInfo[];
@@ -251,50 +171,120 @@ export interface GroupRowsInput {
   isOriginCollapsed: (id: string) => boolean;
 }
 
+/** A group section's origin tree. A worktree started from one in another group stays at the top. */
+function sectionTree(
+  section: { entries: WorktreeEntry[] },
+  parents: ReadonlyMap<string, WorktreeEntry>,
+): OriginTree {
+  const inGroup = new Set(section.entries.map((e) => e.worktreeId));
+  return buildOriginTree(section.entries, {
+    keepAtTop: (entry) => {
+      const parentId = entry.worktree.origin?.worktreeId;
+      return (
+        !!parentId &&
+        parentId !== entry.worktreeId &&
+        !inGroup.has(parentId) &&
+        parents.has(parentId)
+      );
+    },
+  });
+}
+
 /**
- * The Groups view: a header per group in the order the groups are defined, then Ungrouped. Under
- * each header the group's worktrees as an origin tree, so a child nests under its parent when both
- * are in the group. A child whose parent is in another group is a top-level row with a `fromParent`
- * chip. A group filter shows that group alone, under its header.
+ * The worktrees with no group come first as plain top-level rows, with no header. Then a header per
+ * group in the order the groups are defined, with the group's worktrees as an origin tree under it,
+ * so a child nests under its parent when both are in the group. A child whose parent is in another
+ * group is a top-level row with a `fromParent` chip. A group filter shows that group alone, laid out
+ * exactly as in the full list.
  */
 export function buildGroupRows(input: GroupRowsInput): GroupedRow[] {
   const { repos, allRepos, groups, filter, isGroupCollapsed, isOriginCollapsed } = input;
   const parents = new Map(entriesOf(allRepos).map((e) => [e.worktreeId, e]));
   const rows: GroupedRow[] = [];
-  for (const section of groupEntries(entriesOf(repos), groups, filter)) {
-    const inGroup = new Set(section.entries.map((e) => e.worktreeId));
-    // A worktree started from one in another group is a top-level row here, not part of its main's.
-    const parentElsewhere = (entry: WorktreeEntry) => {
-      const parentId = entry.worktree.origin?.worktreeId;
-      return !!parentId && parentId !== entry.worktreeId && !inGroup.has(parentId);
-    };
-    const tree = buildOriginTree(section.entries, {
-      keepAtTop: (entry) =>
-        parentElsewhere(entry) && parents.has(entry.worktree.origin!.worktreeId),
-    });
-    const groupKey = section.group?.id ?? UNGROUPED_KEY;
-    const collapsed = !filter && isGroupCollapsed(groupKey);
-    rows.push({
-      kind: "group",
-      key: `group:${groupKey}`,
-      groupId: section.group?.id ?? null,
-      name: section.group?.name ?? "Ungrouped",
-      color: section.group?.color ?? null,
-      collapsed,
-      count: section.entries.length,
-      filtered: !!filter,
-    });
+  const sections = groupEntries(entriesOf(repos), groups, filter);
+  const ordered = [...sections.filter((s) => !s.group), ...sections.filter((s) => s.group)];
+  for (const section of ordered) {
+    const tree = sectionTree(section, parents);
+    const group = section.group;
+    let collapsed = false;
+    if (group) {
+      collapsed = isGroupCollapsed(group.id);
+      rows.push({
+        kind: "group",
+        key: `group:${group.id}`,
+        groupId: group.id,
+        name: group.name,
+        color: group.color,
+        collapsed,
+        count: section.entries.length,
+      });
+    }
     if (collapsed) continue;
     rows.push(
-      ...originTreeRows(tree, isOriginCollapsed, (entry) => {
-        const origin = entry.worktree.origin;
-        if (!origin || tree.hasLiveOrigin(entry)) return undefined;
-        const parent = parents.get(origin.worktreeId);
-        return parent ? { worktreeId: parent.worktreeId, name: parent.worktree.name } : undefined;
-      }),
+      ...originTreeRows(
+        tree,
+        isOriginCollapsed,
+        (entry) => {
+          const origin = entry.worktree.origin;
+          if (!origin || tree.hasLiveOrigin(entry)) return undefined;
+          const parent = parents.get(origin.worktreeId);
+          return parent ? { worktreeId: parent.worktreeId, name: parent.worktree.name } : undefined;
+        },
+        !group,
+      ),
     );
   }
   return rows;
+}
+
+export interface CollapsibleKeys {
+  /** The Pinned section has a header to fold. */
+  pinned: boolean;
+  /** Group ids whose header folds (a group nothing hides). */
+  groups: string[];
+  /** Worktree ids whose children fold, in the pins and in the group trees. */
+  origins: string[];
+  /** Repo names, while no group exists. */
+  repos: string[];
+}
+
+/**
+ * What the collapse-all button folds: the same headers and parents `buildGroupRows` lists for the
+ * current filter. A group the filter hides keeps its state.
+ */
+export function collapsibleKeys(
+  repos: RepoInfo[],
+  groups: readonly GroupDefinition[],
+  filter: string | null,
+): CollapsibleKeys {
+  const sorted = sortRepoWorktrees(repos);
+  const visible = filter
+    ? sorted
+        .map((r) => ({ ...r, worktrees: r.worktrees.filter((wt) => wt.groupId === filter) }))
+        .filter((r) => r.worktrees.length > 0)
+    : sorted;
+  const pinnedTree = buildPinnedTree(visible);
+  const origins = new Set<string>();
+  for (const [id, kids] of pinnedTree.childrenOf) if (kids.length > 0) origins.add(id);
+  const rest = withoutPinned(visible, pinnedTree).repos;
+  const result: CollapsibleKeys = {
+    pinned: pinnedTree.pins.length > 0,
+    groups: [],
+    origins: [],
+    repos: [],
+  };
+  if (groups.length === 0) {
+    result.repos = rest.filter((r) => r.kind !== "plain").map((r) => r.name);
+  } else {
+    const parents = new Map(entriesOf(sorted).map((e) => [e.worktreeId, e]));
+    for (const section of groupEntries(entriesOf(rest), groups, filter)) {
+      if (section.group) result.groups.push(section.group.id);
+      const tree = sectionTree(section, parents);
+      for (const [id, kids] of tree.childrenOf) if (kids.length > 0) origins.add(id);
+    }
+  }
+  result.origins = [...origins];
+  return result;
 }
 
 /** The name a host tag shows. */
@@ -306,71 +296,6 @@ export function hostLabel(hostId: string, hosts: HostInfoLite[]): string {
 /** True when a repo has worktrees on more than one host. */
 export function repoSpansHosts(repo: RepoInfo): boolean {
   return new Set(repo.worktrees.map(hostIdOf)).size > 1;
-}
-
-/** The Host view: a group per worker (the hub's own machine first), then a subgroup per repo. */
-export function buildHostRows(
-  repos: RepoInfo[],
-  hosts: HostInfoLite[],
-  isCollapsed: (id: string) => boolean,
-): GroupedRow[] {
-  const entries = entriesOf(repos);
-  // The hub's own machine has no row in the host list when it is turned off (BAND_LOCAL_WORKER=off),
-  // so it gets no group either.
-  const localOff = hosts.length > 0 && !hosts.some((h) => h.id === LOCAL_HOST);
-  const hostIds: string[] = [];
-  for (const entry of entries) {
-    const id = hostIdOf(entry.worktree);
-    if (localOff && id === LOCAL_HOST) continue;
-    if (!hostIds.includes(id)) hostIds.push(id);
-  }
-  hostIds.sort((a, b) => (a === LOCAL_HOST ? -1 : b === LOCAL_HOST ? 1 : 0));
-  const rows: GroupedRow[] = [];
-  for (const hostId of hostIds) {
-    const hostEntries = entries.filter((e) => hostIdOf(e.worktree) === hostId);
-    const host = hosts.find((h) => h.id === hostId);
-    const hostKey = `host:${hostId}`;
-    const hostCollapsed = isCollapsed(hostKey);
-    rows.push({
-      kind: "host",
-      key: hostKey,
-      hostId,
-      name: hostId === LOCAL_HOST ? "This hub" : host?.name?.trim() || hostId,
-      status: hostId === LOCAL_HOST ? "online" : (host?.status ?? "offline"),
-      collapsed: hostCollapsed,
-      count: hostEntries.length,
-    });
-    if (hostCollapsed) continue;
-    const repoNames: string[] = [];
-    for (const entry of hostEntries) {
-      if (!repoNames.includes(entry.repo.name)) repoNames.push(entry.repo.name);
-    }
-    for (const repoName of repoNames) {
-      const repoEntries = hostEntries.filter((e) => e.repo.name === repoName);
-      const repoKey = `host:${hostId}/${repoName}`;
-      const repoCollapsed = isCollapsed(repoKey);
-      rows.push({
-        kind: "repo",
-        key: repoKey,
-        hostId,
-        repo: repoEntries[0].repo,
-        collapsed: repoCollapsed,
-      });
-      if (repoCollapsed) continue;
-      for (const entry of repoEntries) {
-        rows.push({
-          kind: "worktree",
-          key: `${hostKey}/${entry.worktreeId}`,
-          entry,
-          depth: 0,
-          childCount: 0,
-          collapsed: false,
-          parentRemoved: false,
-        });
-      }
-    }
-  }
-  return rows;
 }
 
 /** The worktree ids keyboard navigation steps through, in display order. */

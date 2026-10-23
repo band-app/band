@@ -256,55 +256,121 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings-groups__row");
   }
 
-  /** The name field of a group row. */
+  /** The name of a group row, plain text until it is edited. */
   groupNameInput(groupId: string): Locator {
     return this.groupRow(groupId).getByTestId("settings-groups__name");
   }
 
-  /** The color dot of a group row. Its inline `background-color` is the group's color. */
-  groupDot(groupId: string): Locator {
-    return this.groupRow(groupId).getByTestId("settings-groups__dot");
+  /** The name field a group row shows while it is edited. */
+  groupNameField(groupId: string): Locator {
+    return this.groupRow(groupId).getByTestId("settings-groups__name-input");
   }
 
-  /** Adds a group through the name dialog. The new row appears at the end of the list. */
+  /** The error icon of a name that can't be saved. */
+  get groupNameError(): Locator {
+    return this.dialog.getByTestId("settings-groups__name-error");
+  }
+
+  /** The color dot of a group row. Its inline `background-color` is the group's color. */
+  groupDot(groupId: string): Locator {
+    return this.groupRow(groupId).getByTestId("settings-groups__dot").locator("span");
+  }
+
+  /** The buttons of a group row: handle, color dot, name and menu. */
+  groupRowButtons(groupId: string): Locator {
+    return this.groupRow(groupId).getByRole("button");
+  }
+
+  /** The row of the group being created. */
+  get newGroupRow(): Locator {
+    return this.dialog.getByTestId("settings-groups__new-row");
+  }
+
+  /** Adds a group: "New group", then types the name and presses Enter. */
   async addGroup(name: string): Promise<void> {
     await test.step(`Add the group ${name}`, async () => {
       await this.addGroupButton().click();
-      await this.page.getByTestId("group-dialog__name").fill(name);
-      await this.page.getByTestId("group-dialog__submit").click();
-      await expect(this.page.getByTestId("group-dialog")).toBeHidden();
+      const input = this.dialog.getByTestId("settings-groups__new-name-input");
+      await input.fill(name);
+      await input.press("Enter");
+      await expect(this.newGroupRow).toHaveCount(0);
     });
   }
 
-  /** Renames a group: types the new name and presses Enter. */
+  /** Renames a group: clicks the name, types the new one and presses Enter. */
   async renameGroup(groupId: string, name: string): Promise<void> {
     await test.step(`Rename group ${groupId} to ${name}`, async () => {
-      const input = this.groupNameInput(groupId);
+      await this.groupNameInput(groupId).click();
+      const input = this.groupNameField(groupId);
       await input.fill(name);
       await input.press("Enter");
     });
   }
 
-  /** Picks one of the preset colors of a group row, by its lowercase name ("red", "green"). */
+  /** Picks one of the preset colors from a group's color popover, by lowercase name. */
   async setGroupColor(groupId: string, preset: string): Promise<void> {
     await test.step(`Set the color of group ${groupId} to ${preset}`, async () => {
-      await this.groupRow(groupId).getByTestId(`settings-groups__color--${preset}`).click();
+      await this.groupRow(groupId).getByTestId("settings-groups__dot").click();
+      await this.page.getByTestId(`settings-groups__color--${preset}`).click();
     });
   }
 
-  /** Moves a group one place up or down. */
+  /** Opens a group row's menu. */
+  async openGroupRowMenu(groupId: string): Promise<void> {
+    await this.groupRow(groupId).getByTestId("settings-groups__menu").click();
+  }
+
+  /** Moves a group one place up or down from its menu. */
   async moveGroup(groupId: string, direction: "up" | "down"): Promise<void> {
     await test.step(`Move group ${groupId} ${direction}`, async () => {
-      await this.groupRow(groupId).getByTestId(`settings-groups__move-${direction}`).click();
+      await this.openGroupRowMenu(groupId);
+      await this.page.getByTestId(`settings-groups__move-${direction}`).click();
     });
   }
 
-  /** Deletes a group and confirms. */
-  async deleteGroup(groupId: string): Promise<void> {
+  /** A menu item of the open group menu: `rename`, `move-up`, `move-down` or `delete`. */
+  groupMenuItem(item: string): Locator {
+    return this.page.getByTestId(`settings-groups__${item}`);
+  }
+
+  /** Drags a group row by its handle onto another row, with the mouse. */
+  async dragGroupRow(groupId: string, ontoId: string): Promise<void> {
+    await test.step(`Drag group ${groupId} onto ${ontoId}`, async () => {
+      const from = await this.groupRow(groupId)
+        .getByTestId("settings-groups__handle")
+        .boundingBox();
+      const to = await this.groupRow(ontoId).boundingBox();
+      expect(from).not.toBeNull();
+      expect(to).not.toBeNull();
+      const x = from!.x + from!.width / 2;
+      const y = from!.y + from!.height / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x, y + 8, { steps: 4 });
+      await this.page.mouse.move(x, to!.y + to!.height / 2, { steps: 12 });
+      await this.page.mouse.up();
+    });
+  }
+
+  /** Alt+Arrow on a focused group row. */
+  async pressOnGroupRow(groupId: string, key: string): Promise<void> {
+    await this.groupRow(groupId).focus();
+    await this.page.keyboard.press(key);
+  }
+
+  /**
+   * Deletes a group from its menu. A group with worktrees asks first, so `confirms` says whether
+   * the dialog is expected, and it is answered with Delete.
+   */
+  async deleteGroup(groupId: string, confirms = true): Promise<void> {
     await test.step(`Delete group ${groupId}`, async () => {
-      await this.groupRow(groupId).getByTestId("settings-groups__delete").click();
-      await this.page.getByTestId("group-delete-dialog__confirm").click();
-      await expect(this.page.getByTestId("group-delete-dialog")).toBeHidden();
+      await this.openGroupRowMenu(groupId);
+      await this.groupMenuItem("delete").click();
+      const dialog = this.page.getByTestId("group-delete-dialog");
+      if (confirms) {
+        await this.page.getByTestId("group-delete-dialog__confirm").click();
+      }
+      await expect(dialog).toBeHidden();
     });
   }
 

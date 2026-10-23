@@ -1,17 +1,20 @@
 /**
- * The sidebar's Group by switch (Repo | Origin | Host) and the manual Set parent / Remove parent items.
+ * The sidebar's one list: groups with worktrees nested under the worktree they were started from.
  *
- * Real production binary and a real `band-worker`. Origins are recorded the way an agent records
- * them: `worktrees.create` called with the caller's worktree and chat headers. Everything runs in
- * temp dirs, never the real `~/.band`.
+ * Real production hub against a temp `~/.band/`, with two real git repos. Team A holds app's main,
+ * a parent with a child, and two lib worktrees (lib's main is in Team B, so they are top-level rows
+ * of Team A). Tests read the layout from the sidebar and the stored result from `repos.list`.
+ *
+ * Covers: no group-by choice (S1), the collapse-all button (S9), aligned headers (S10), group
+ * order (S11), top-level rows for worktrees with no group (S12), the group filter leaving the layout alone (S2), "New group…" in
+ * the filter (S3), dropping a worktree on another (S4), the refusals and the top-level gap (S5) and
+ * the drag preview being the row's own card (S6).
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, test } from "@playwright/test";
+import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -22,371 +25,459 @@ import {
   startServer,
 } from "./helpers/server";
 import { trpcMutate, trpcQuery } from "./helpers/trpc";
-import { startWorker, type WorkerHandle } from "./helpers/worker";
-import { SidebarGroupingPage } from "./pages/SidebarGroupingPage";
+import { SidebarGroupsPage } from "./pages/SidebarGroupsPage";
 import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-sidebar-grouping-token";
-const ORIGIN_CHAT = "chat_origin1";
+const TEAM_A = "team-a";
+const TEAM_B = "team-b";
 
-test.use({ viewport: { width: 1280, height: 800 } });
+test.use({ viewport: { width: 1280, height: 900 } });
 test.describe.configure({ mode: "serial" });
 
 let server: ServerHandle;
 let tmpHome: string;
-let worker: WorkerHandle | undefined;
-let hostId = "";
-// The worktree on the worker is named after its host.
-let remote1 = "";
-const dirs: string[] = [];
 
-const tmpDir = (prefix: string) => {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  dirs.push(dir);
-  return dir;
+interface Placement {
+  origin: string | null;
+  groupId: string | null;
+}
+
+async function placements(): Promise<Record<string, Placement>> {
+  const { repos } = await trpcQuery<{
+    repos: {
+      worktrees: {
+        worktreeId: string;
+        groupId: string | null;
+        origin: { worktreeId: string } | null;
+      }[];
+    }[];
+  }>(server.url, TOKEN, "repos.list");
+  return Object.fromEntries(
+    repos.flatMap((r) =>
+      r.worktrees.map((w) => [
+        w.worktreeId,
+        { origin: w.origin?.worktreeId ?? null, groupId: w.groupId },
+      ]),
+    ),
+  );
+}
+
+const LAYOUT: Record<string, Placement> = {
+  "app-main": { origin: null, groupId: TEAM_A },
+  "app-parent": { origin: null, groupId: TEAM_A },
+  "app-kid": { origin: "app-parent", groupId: TEAM_A },
+  "lib-main": { origin: null, groupId: TEAM_B },
+  "lib-x": { origin: null, groupId: TEAM_A },
+  "lib-y": { origin: null, groupId: TEAM_A },
 };
-
-function makeRepo(dir: string): void {
-  mkdirSync(dir, { recursive: true });
-  const env = {
-    ...process.env,
-    GIT_AUTHOR_NAME: "t",
-    GIT_AUTHOR_EMAIL: "t@example.com",
-    GIT_COMMITTER_NAME: "t",
-    GIT_COMMITTER_EMAIL: "t@example.com",
-  };
-  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir, env });
-  writeFileSync(join(dir, "README.md"), "hello\n");
-  execFileSync("git", ["add", "."], { cwd: dir, env });
-  execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir, env });
-}
-
-/** `worktrees.create` as an agent in `caller` makes it: the headers name the caller's worktree and chat. */
-async function createFrom(
-  input: Record<string, unknown>,
-  caller?: { worktreeId: string; chatId?: string },
-): Promise<void> {
-  const res = await fetch(`${server.url}/trpc/worktrees.create`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Cookie: `band_token=${TOKEN}`,
-      ...(caller
-        ? {
-            "x-band-worktree-id": caller.worktreeId,
-            ...(caller.chatId ? { "x-band-chat-id": caller.chatId } : {}),
-          }
-        : {}),
-    },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`worktrees.create failed: ${res.status} ${await res.text()}`);
-}
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const root = tmpDir("band-e2e-grouping-");
-  const repos = ["borko", "svc", "lib"].map((name) => {
-    const path = join(root, name);
-    makeRepo(path);
-    const groupId = name === "svc" ? "team-a" : name === "lib" ? "team-b" : undefined;
-    return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path, groupId }] };
-  });
+  const makeRepo = (name: string) => {
+    const path = join(tmpHome, name);
+    mkdirSync(path, { recursive: true });
+    gitInHome(path, ["init", "-b", "main"], tmpHome);
+    writeFileSync(join(path, "README.md"), `# ${name}\n`);
+    gitInHome(path, ["add", "."], tmpHome);
+    gitInHome(path, ["commit", "-m", "initial"], tmpHome);
+    return path;
+  };
+  const extra = (repoPath: string, branch: string) => {
+    const path = join(tmpHome, `${branch}-checkout`);
+    gitInHome(repoPath, ["worktree", "add", "-b", branch, path], tmpHome);
+    return path;
+  };
+  const app = makeRepo("app");
+  const lib = makeRepo("lib");
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   seedState(tmpHome, {
-    repos,
     groups: [
-      { id: "team-a", name: "Team A", color: "#8b5cf6" },
-      { id: "team-b", name: "Team B", color: "#3b82f6" },
+      { id: TEAM_A, name: "Team A", color: "#8b5cf6" },
+      { id: TEAM_B, name: "Team B", color: "#3b82f6" },
+    ],
+    repos: [
+      {
+        name: "app",
+        path: app,
+        defaultBranch: "main",
+        worktrees: [
+          { branch: "main", path: app, groupId: TEAM_A },
+          { branch: "parent", path: extra(app, "parent"), groupId: TEAM_A },
+          { branch: "kid", path: extra(app, "kid"), groupId: TEAM_A, origin: "app-parent" },
+        ],
+      },
+      {
+        name: "lib",
+        path: lib,
+        defaultBranch: "main",
+        worktrees: [
+          { branch: "main", path: lib, groupId: TEAM_B },
+          { branch: "x", path: extra(lib, "x"), groupId: TEAM_A },
+          { branch: "y", path: extra(lib, "y"), groupId: TEAM_A },
+        ],
+      },
     ],
   });
   server = await startServer({ tmpHome });
-
-  await createFrom({ repo: "svc", branch: "alpha", origin: "borko-main" });
-  await createFrom({ repo: "svc", branch: "beta", origin: "borko-main" });
-  await trpcMutate(server.url, TOKEN, "chats.create", {
-    worktreeId: "svc-alpha",
-    id: ORIGIN_CHAT,
-    name: "Origin chat",
-  });
-  await createFrom(
-    { repo: "lib", branch: "gamma" },
-    { worktreeId: "svc-alpha", chatId: ORIGIN_CHAT },
-  );
-  await createFrom({ repo: "lib", branch: "orphan", origin: "svc-beta" });
-  // Worktrees with no origin: the Origin view lists them under their repo's main.
-  await createFrom({ repo: "svc", branch: "solo", noOrigin: true });
-  await createFrom({ repo: "lib", branch: "solo2", noOrigin: true });
-
-  // A worker with a clone of svc, and one worktree on it.
-  const res = await fetch(`${server.url}/trpc/tokens.issueWorkerBootstrap`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
-    body: JSON.stringify({ hostName: "e2e-box", labels: [] }),
-  });
-  expect(res.ok).toBe(true);
-  const { result } = (await res.json()) as { result: { data: { token: string; hostId: string } } };
-  hostId = result.data.hostId;
-  const workerRoot = tmpDir("band-e2e-grouping-wroot-");
-  makeRepo(join(workerRoot, "svc"));
-  worker = startWorker({
-    env: {
-      BAND_HUB_URL: server.url,
-      BAND_BOOTSTRAP_TOKEN: result.data.token,
-      BAND_WORKER_ID: hostId,
-    },
-    root: workerRoot,
-    stateDir: tmpDir("band-e2e-grouping-state-"),
-    home: tmpDir("band-e2e-grouping-whome-"),
-  });
-  await expect
-    .poll(
-      async () => {
-        const { hosts } = await trpcQuery<{ hosts: Array<{ id: string; status: string }> }>(
-          server.url,
-          TOKEN,
-          "hosts.list",
-        );
-        return hosts.find((h) => h.id === hostId)?.status;
-      },
-      { timeout: 20_000 },
-    )
-    .toBe("online");
-  remote1 = toWorktreeId("svc", "remote1", hostId);
-  await createFrom({
-    repo: "svc",
-    branch: "remote1",
-    hostId,
-    hostRepoPath: join(workerRoot, "svc"),
-    noOrigin: true,
-  });
 });
 
-test.beforeEach(() => resetClientState(tmpHome));
+test.beforeEach(async () => {
+  resetClientState(tmpHome);
+  // Put every worktree and group back, so a test does not depend on the one before it.
+  const { groups } = await trpcQuery<{ groups: { id: string }[] }>(
+    server.url,
+    TOKEN,
+    "groups.list",
+  );
+  for (const group of groups) {
+    if (group.id !== TEAM_A && group.id !== TEAM_B) {
+      await trpcMutate(server.url, TOKEN, "groups.remove", { id: group.id });
+    }
+  }
+  await trpcMutate(server.url, TOKEN, "groups.reorder", { ids: [TEAM_A, TEAM_B] });
+  for (const id of Object.keys(LAYOUT)) {
+    const [repo, ...rest] = id.split("-");
+    await trpcMutate(server.url, TOKEN, "worktrees.setPinned", {
+      repo,
+      name: rest.join("-"),
+      pinned: false,
+    });
+  }
+  const toWorktree = (id: string) => {
+    const [repo, ...rest] = id.split("-");
+    return { repo, name: rest.join("-") };
+  };
+  for (const [id, want] of Object.entries(LAYOUT)) {
+    await trpcMutate(server.url, TOKEN, "worktrees.setOrigin", {
+      ...toWorktree(id),
+      origin: want.origin,
+    });
+    await trpcMutate(server.url, TOKEN, "worktrees.setGroup", {
+      worktreeId: id,
+      groupId: want.groupId,
+    });
+  }
+});
 
 test.afterAll(async () => {
-  await worker?.kill();
   await server.close();
   cleanupTmpHome(tmpHome);
-  for (const dir of dirs) cleanupTmpHome(dir);
 });
 
-async function open(page: import("@playwright/test").Page, worktreeId: string) {
+async function open(page: import("@playwright/test").Page, worktreeId = "app-main") {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
   await worktreePage.goto(worktreeId);
   await worktreePage.waitForReady();
-  return new SidebarGroupingPage(page);
+  return { sidebar: new SidebarGroupsPage(page), worktreePage };
 }
 
-test("Origin mode nests what started what across repos, with the repo name on every row (S1)", async ({
+test("S1: groups are collapsible headers, children nest under their parent, and there is no group-by choice", async ({
   page,
 }) => {
-  const sidebar = await open(page, "borko-main");
-  await sidebar.selectMode("origin");
-
-  // The tree comes first, in repo order. Parentless worktrees nest under their repo's main.
+  const { sidebar } = await open(page);
+  await expect(sidebar.groupByTrigger).toHaveCount(0);
   await expect
-    .poll(async () => (await sidebar.rowOrder()).slice(0, 5).map((r) => `${r.depth}:${r.id}`))
-    .toEqual(["0:borko-main", "1:svc-alpha", "2:lib-gamma", "1:svc-beta", "2:lib-orphan"]);
-  const rest = (await sidebar.rowOrder()).slice(5).map((r) => `${r.depth}:${r.id}`);
-  // remote1 is on a host with no svc main, so it stays at the top level.
-  expect(rest).toEqual(["0:svc-main", "1:svc-solo", `0:${remote1}`, "0:lib-main", "1:lib-solo2"]);
-  await expect(sidebar.row("lib-gamma")).toContainText("lib");
-  await expect(sidebar.row("svc-alpha")).toContainText("svc");
-  await expect(sidebar.row("borko-main")).toContainText("borko");
-
-  // Every row has the repo avatar (a folder here, the repos have no GitHub owner) and a gray host tag.
-  await expect(sidebar.repoAvatar(sidebar.row("svc-solo"), "svc")).toBeVisible();
-  await expect(sidebar.hostTag(sidebar.row("svc-solo"))).toHaveText("This hub");
-  await expect(sidebar.hostTag(sidebar.row(remote1))).toHaveText("e2e-box");
-
-  // Collapsing a parent hides its subtree.
-  await sidebar.originToggle("svc-alpha").click();
-  await expect(sidebar.row("lib-gamma")).toHaveCount(0);
-  await sidebar.originToggle("svc-alpha").click();
-  await expect(sidebar.row("lib-gamma")).toBeVisible();
-
-  // Collapsing a main hides its parentless worktrees, and the choice survives a reload.
-  await sidebar.originToggle("svc-main").click();
-  await expect(sidebar.row("svc-solo")).toHaveCount(0);
-  await sidebar.reload();
-  await expect(sidebar.row("lib-main")).toBeVisible();
-  await expect(sidebar.row("svc-solo")).toHaveCount(0);
-  await sidebar.originToggle("svc-main").click();
-  await expect(sidebar.row("svc-solo")).toBeVisible();
+    .poll(() => sidebar.sections())
+    .toMatchObject({
+      [TEAM_A]: ["0:app-main", "1:app-parent", "2:app-kid", "0:lib-x", "0:lib-y"],
+      [TEAM_B]: ["0:lib-main"],
+    });
+  await expect(sidebar.row("app-kid")).toContainText("app");
+  await sidebar.groupHeader(TEAM_A).click();
+  await expect(sidebar.groupHeader(TEAM_A)).toHaveAttribute("aria-expanded", "false");
+  await expect(sidebar.row("app-kid")).toHaveCount(0);
+  await sidebar.groupHeader(TEAM_A).click();
+  await expect(sidebar.row("app-kid")).toBeVisible();
 });
 
-for (const scheme of ["light", "dark"] as const) {
-  test(`the host tag is muted next to the repo name in ${scheme} mode (S3)`, async ({
-    page,
-  }, testInfo) => {
-    // The app takes its theme from the saved setting, not from the browser's color scheme.
-    await trpcMutate(server.url, TOKEN, "settings.update", { theme: scheme });
-    const sidebar = await open(page, "borko-main");
-    await sidebar.selectMode("origin");
-    const tag = sidebar.hostTag(sidebar.row("svc-solo"));
-    await expect(tag).toBeVisible();
-    await expect(page.locator("html")).toHaveClass(scheme === "dark" ? /dark/ : /^(?!.*dark)/);
-    // Gray like the repo line, not the foreground of the branch name.
-    const colors = await sidebar.row("svc-solo").evaluate((el) => {
-      const read = (id: string) => {
-        const node = el.querySelector(`[data-testid="${id}"]`);
-        return node ? getComputedStyle(node).color : "";
-      };
-      return { name: read("worktree-label__name"), tag: read("worktree-label__host") };
+test("S2: filtering to one group keeps the header, the collapse control and the indent", async ({
+  page,
+}) => {
+  const { sidebar, worktreePage } = await open(page);
+  const indentOf = async (id: string) => (await sidebar.card(id).boundingBox())?.x ?? -1;
+  const all = {
+    kid: await indentOf("app-kid"),
+    parent: await indentOf("app-parent"),
+    header: (await sidebar.groupHeader(TEAM_A).boundingBox())?.x ?? -1,
+  };
+  const orderAll = (await sidebar.sections())[TEAM_A];
+
+  await worktreePage.selectGroupFilter(TEAM_A);
+  await expect(sidebar.groupHeader(TEAM_B)).toHaveCount(0);
+  await expect(sidebar.row("lib-main")).toHaveCount(0);
+  await expect(sidebar.groupHeader(TEAM_A)).toBeVisible();
+  expect(await sidebar.sections()).toEqual({ __ungrouped: [], [TEAM_A]: orderAll });
+  expect(await indentOf("app-kid")).toBe(all.kid);
+  expect(await indentOf("app-parent")).toBe(all.parent);
+  expect((await sidebar.groupHeader(TEAM_A).boundingBox())?.x).toBe(all.header);
+
+  // The header collapses the filtered group too.
+  await sidebar.groupHeader(TEAM_A).click();
+  await expect(sidebar.groupHeader(TEAM_A)).toHaveAttribute("aria-expanded", "false");
+  await expect(sidebar.row("app-kid")).toHaveCount(0);
+  await sidebar.groupHeader(TEAM_A).click();
+  await expect(sidebar.row("app-kid")).toBeVisible();
+});
+
+test("S3: the group filter lists All, the groups and New group…, which creates a group", async ({
+  page,
+}) => {
+  const { sidebar, worktreePage } = await open(page);
+  await worktreePage.openGroupFilter();
+  await expect(worktreePage.groupFilterItem(null)).toBeVisible();
+  await expect(worktreePage.groupFilterItem(TEAM_A)).toBeVisible();
+  await expect(worktreePage.groupFilterItem(TEAM_B)).toBeVisible();
+  await expect(sidebar.newGroupMenuItem).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(worktreePage.groupFilterMenu).toHaveCount(0);
+
+  await sidebar.createGroup("Fresh");
+  await expect.poll(async () => (await sidebar.headerOrder()).length).toBe(3);
+  await worktreePage.openGroupFilter();
+  await expect(worktreePage.groupFilterMenu.getByRole("menuitem", { name: /Fresh/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(worktreePage.groupFilterMenu).toHaveCount(0);
+});
+
+test("S4: dropping a worktree on another makes it a child in that worktree's group, and it stays after a reload", async ({
+  page,
+}) => {
+  const { sidebar } = await open(page);
+  await sidebar.dragToWorktree("lib-x", "lib-main", "middle");
+  await expect
+    .poll(async () => (await placements())["lib-x"])
+    .toEqual({
+      origin: "lib-main",
+      groupId: TEAM_B,
     });
-    expect(colors.tag).not.toBe("");
-    expect(colors.tag).not.toBe(colors.name);
-    await testInfo.attach(`origin-view-${scheme}.png`, {
-      body: await page.getByTestId("repo-list__grouped--origin").screenshot(),
-      contentType: "image/png",
-    });
+  await expect
+    .poll(() => sidebar.sections())
+    .toMatchObject({ [TEAM_B]: ["0:lib-main", "1:lib-x"] });
+  await sidebar.reload();
+  await expect.poll(() => sidebar.depthOf("lib-x")).toBe(1);
+  await expect(sidebar.row("lib-x")).toBeVisible();
+});
+
+test("S5: a drop onto a descendant is refused, and the gap beside a top-level row clears the parent", async ({
+  page,
+}) => {
+  const { sidebar } = await open(page);
+  await sidebar.dragToWorktree("lib-x", "lib-main", "middle");
+  await expect.poll(async () => (await placements())["lib-x"]?.origin).toBe("lib-main");
+  await expect(sidebar.row("lib-x")).toHaveAttribute("data-depth", "1");
+
+  // lib-main can't become a child of lib-x, which was started from it.
+  await sidebar.dragToWorktree("lib-main", "lib-x", "middle");
+  await expect(sidebar.dropRefusal).toBeVisible();
+  expect((await placements())["lib-main"]).toEqual({ origin: null, groupId: TEAM_B });
+  await sidebar.dismissRefusal();
+
+  // A drop onto the dragged worktree itself changes nothing.
+  await sidebar.dragToWorktree("lib-x", "lib-x", "middle");
+  expect((await placements())["lib-x"]?.origin).toBe("lib-main");
+
+  // The gap below a top-level row clears the parent.
+  await sidebar.dragToWorktree("lib-x", "lib-main", "bottom");
+  await expect.poll(async () => (await placements())["lib-x"]?.origin).toBeNull();
+});
+
+test("S6: the drag preview is the row's own card, and the target shows the drop", async ({
+  page,
+}, testInfo) => {
+  const { sidebar } = await open(page);
+  await sidebar.holdDrag(sidebar.row("lib-x"), sidebar.row("lib-main"));
+  await expect(sidebar.dragPreview).toBeVisible();
+  const previewCard = sidebar.previewCard("lib-x");
+  await expect(previewCard).toBeVisible();
+  const rowCard = sidebar.rowCard("lib-x");
+  const [a, b] = await Promise.all([previewCard.boundingBox(), rowCard.boundingBox()]);
+  expect(a?.height).toBeCloseTo(b?.height ?? -1, 0);
+  expect(a?.width).toBeCloseTo(b?.width ?? -1, 0);
+  await expect(sidebar.dropTarget("lib-main")).toHaveAttribute("data-drop-zone", "into");
+  await testInfo.attach("drag-preview.png", {
+    body: await page.screenshot(),
+    contentType: "image/png",
   });
+  await sidebar.dropHeld();
+  await expect.poll(async () => (await placements())["lib-x"]?.origin).toBe("lib-main");
+});
+
+const pin = (repo: string, name: string) =>
+  trpcMutate(server.url, TOKEN, "worktrees.setPinned", { repo, name, pinned: true });
+
+async function groupOrder(): Promise<string[]> {
+  const { groups } = await trpcQuery<{ groups: { id: string }[] }>(
+    server.url,
+    TOKEN,
+    "groups.list",
+  );
+  return groups.map((g) => g.id);
 }
 
-test("Repo mode lists each worktree under its repo, and Host mode groups by worker (S2)", async ({
-  page,
-}) => {
-  const sidebar = await open(page, "borko-main");
-  await sidebar.selectMode("repo");
-  await expect(sidebar.repoModeCard("svc-alpha")).toBeVisible();
-  await expect(sidebar.repoModeCard("lib-gamma")).toBeVisible();
-  // The hub has more than one host, so every card carries its host's name.
-  await expect(sidebar.hostTag(sidebar.repoModeCard("svc-alpha"))).toHaveText("This hub");
-  await expect(sidebar.hostTag(sidebar.repoModeCard(remote1))).toHaveText("e2e-box");
-  await expect(sidebar.hostTag(sidebar.repoModeCard("lib-gamma"))).toHaveText("This hub");
+test("S9: the toggle folds every group and parent, then unfolds them, in All", async ({ page }) => {
+  await pin("lib", "y");
+  const { sidebar } = await open(page);
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Collapse all");
 
-  await sidebar.selectMode("host");
-  await expect(sidebar.hostHeader("local")).toBeVisible();
-  await expect(sidebar.hostHeader(hostId)).toContainText("e2e-box");
-  await expect(sidebar.hostHeader(hostId)).toHaveAttribute("data-status", "online");
-  await expect(sidebar.hostRepoHeader(hostId, "svc")).toBeVisible();
-  await expect(sidebar.row(remote1)).toBeVisible();
-  await expect(sidebar.row("svc-alpha")).toBeVisible();
-  const order = (await sidebar.rowOrder()).map((r) => r.id);
-  expect(order.indexOf(remote1)).toBeGreaterThan(order.indexOf("svc-alpha"));
+  await sidebar.clickToggleAll();
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Expand all");
+  for (const id of [TEAM_A, TEAM_B]) {
+    await expect(sidebar.groupHeader(id)).toHaveAttribute("aria-expanded", "false");
+  }
+  await expect(sidebar.pinnedHeader).toHaveAttribute("aria-expanded", "false");
+
+  // Opening one group by hand shows its parents folded too, and leaves the button on "Collapse all".
+  await sidebar.groupHeader(TEAM_A).click();
+  await expect(sidebar.originToggle("app-main")).toHaveAttribute("aria-expanded", "false");
+  await expect(sidebar.row("app-parent")).toHaveCount(0);
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Collapse all");
+
+  // From that mixed state one click folds everything, the next unfolds everything.
+  await sidebar.clickToggleAll();
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Expand all");
+  await expect(sidebar.groupHeader(TEAM_A)).toHaveAttribute("aria-expanded", "false");
+  await sidebar.clickToggleAll();
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Collapse all");
+  for (const id of [TEAM_A, TEAM_B]) {
+    await expect(sidebar.groupHeader(id)).toHaveAttribute("aria-expanded", "true");
+  }
+  await expect(sidebar.pinnedHeader).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.originToggle("app-parent")).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.row("app-kid")).toBeVisible();
 });
 
-test("the switch survives a reload (S3)", async ({ page }) => {
-  const sidebar = await open(page, "borko-main");
-  await sidebar.selectMode("origin");
+test("S9: with one group filtered the toggle folds that group, and a hidden group keeps its state", async ({
+  page,
+}) => {
+  const { sidebar, worktreePage } = await open(page);
+  await worktreePage.selectGroupFilter(TEAM_A);
+  await sidebar.clickToggleAll();
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Expand all");
+  await expect(sidebar.groupHeader(TEAM_A)).toHaveAttribute("aria-expanded", "false");
+
+  await worktreePage.selectGroupFilter(null);
+  await expect(sidebar.groupHeader(TEAM_A)).toHaveAttribute("aria-expanded", "false");
+  await expect(sidebar.groupHeader(TEAM_B)).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Collapse all");
+
+  await worktreePage.selectGroupFilter(TEAM_A);
+  await sidebar.clickToggleAll();
+  await expect(sidebar.groupHeader(TEAM_A)).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.originToggle("app-parent")).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.toggleAllButton).toHaveAttribute("aria-label", "Collapse all");
+});
+
+test("S10: every group header and the Pinned header share one left edge, and rows nest under their group", async ({
+  page,
+}) => {
+  await pin("lib", "y");
+  const { sidebar, worktreePage } = await open(page);
+  const edge = await sidebar.leftEdge(sidebar.pinnedHeader);
+  expect(await sidebar.leftEdge(sidebar.groupHeader(TEAM_A))).toBe(edge);
+  expect(await sidebar.leftEdge(sidebar.groupHeader(TEAM_B))).toBe(edge);
+  expect(await sidebar.leftEdge(sidebar.row("lib-main"))).toBeGreaterThan(edge);
+  expect(await sidebar.leftEdge(sidebar.card("app-kid"))).toBeGreaterThan(
+    await sidebar.leftEdge(sidebar.card("app-parent")),
+  );
+
+  await worktreePage.selectGroupFilter(TEAM_A);
+  expect(await sidebar.leftEdge(sidebar.groupHeader(TEAM_A))).toBe(
+    await sidebar.leftEdge(sidebar.pinnedHeader),
+  );
+});
+
+test("S12: worktrees with no group are plain top-level rows above the groups, and dragging there ungroups", async ({
+  page,
+}) => {
+  const { sidebar, worktreePage } = await open(page);
+  await trpcMutate(server.url, TOKEN, "worktrees.setGroup", { worktreeId: "lib-y", groupId: null });
+  await expect.poll(() => sidebar.sections()).toMatchObject({ __ungrouped: ["0:lib-y"] });
+  await expect(sidebar.groupHeader("__ungrouped")).toHaveCount(0);
+  expect(await sidebar.leftEdge(sidebar.row("lib-y"))).toBe(
+    await sidebar.leftEdge(sidebar.groupHeader(TEAM_A)),
+  );
+  const rowY = (await sidebar.row("lib-y").boundingBox())?.y ?? 0;
+  const headerY = (await sidebar.groupHeader(TEAM_A).boundingBox())?.y ?? 0;
+  expect(rowY).toBeLessThan(headerY);
+
+  await worktreePage.selectGroupFilter(TEAM_A);
+  await expect(sidebar.row("lib-y")).toHaveCount(0);
+  await worktreePage.selectGroupFilter(null);
+
+  // A worktree dragged to the top level leaves its group, and a parent that is in a group.
+  await sidebar.dragToTopLevel("app-kid", "lib-y");
+  await expect
+    .poll(async () => (await placements())["app-kid"])
+    .toEqual({
+      origin: null,
+      groupId: null,
+    });
+  await expect(sidebar.row("app-kid")).toBeVisible();
+});
+
+test("S11: groups reorder by dragging a header and from the header menu, and the filter follows", async ({
+  page,
+}) => {
+  const { sidebar, worktreePage } = await open(page);
+  await sidebar.dragGroup(TEAM_B, TEAM_A, "top");
+  await expect.poll(groupOrder).toEqual([TEAM_B, TEAM_A]);
+  await expect.poll(() => sidebar.headerOrder()).toEqual([TEAM_B, TEAM_A]);
   await sidebar.reload();
-  await expect(sidebar.groupByTrigger).toHaveAccessibleName(/Group by: Origin/);
-  await expect(sidebar.row("svc-alpha")).toBeVisible();
-});
+  await expect.poll(() => sidebar.headerOrder()).toEqual([TEAM_B, TEAM_A]);
+  await worktreePage.openGroupFilter();
+  await expect(worktreePage.groupFilterMenu.getByRole("menuitem")).toHaveText([
+    /All/,
+    /Team B.*1/,
+    /Team A.*2/,
+    /New group/,
+  ]);
+  await page.keyboard.press("Escape");
+  await expect(worktreePage.groupFilterMenu).toHaveCount(0);
 
-test("the header has the group filter and the Group by dropdown, and no switch row (S1, S2)", async ({
-  page,
-}) => {
-  const sidebar = await open(page, "borko-main");
-  const worktreePage = new WorktreePage(page, server.url, TOKEN);
-  await expect(worktreePage.groupFilterTrigger()).toBeVisible();
-  await expect(sidebar.groupByTrigger).toBeVisible();
-  await sidebar.expectHeaderFits();
-  // The old always-visible switch row is gone: the modes exist only inside the open menu.
-  await expect(page.getByTestId("repos-panel__group-by--repo")).toHaveCount(0);
-  await sidebar.groupByTrigger.click();
-  await expect(sidebar.modeItem("host")).toBeVisible();
+  // The first group can't move up, and the menu moves the other one.
+  await sidebar.openGroupMenu(TEAM_B);
+  await expect(sidebar.moveMenuItem("up")).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await sidebar.moveGroupFromMenu(TEAM_B, "down");
+  await expect.poll(groupOrder).toEqual([TEAM_A, TEAM_B]);
+  await sidebar.openGroupMenu(TEAM_B);
+  await expect(sidebar.moveMenuItem("down")).toBeDisabled();
   await page.keyboard.press("Escape");
 });
 
-for (const mode of ["groups", "repo", "origin", "host"] as const) {
-  test(`the group filter hides worktrees of other groups in ${mode} mode (S1)`, async ({
-    page,
-  }) => {
-    const sidebar = await open(page, "borko-main");
-    const worktreePage = new WorktreePage(page, server.url, TOKEN);
-    await sidebar.selectMode(mode);
-    await worktreePage.selectGroupFilter("team-b");
-    if (mode === "repo") {
-      await expect(sidebar.repoModeCard("lib-main")).toBeVisible();
-      await expect(sidebar.repoModeCard("svc-main")).toHaveCount(0);
-    } else {
-      await expect(sidebar.row("lib-main")).toBeVisible();
-      await expect(sidebar.row("svc-main")).toHaveCount(0);
-    }
-    await worktreePage.selectGroupFilter(null);
-  });
-}
+test("Set parent and Remove parent in the card menu nest and un-nest a worktree, and the list follows keys", async ({
+  page,
+}) => {
+  const { sidebar } = await open(page);
+  await sidebar.openSetParent(sidebar.row("lib-y"));
+  await sidebar.chooseParent("lib-main", "lib-main");
+  await expect.poll(async () => (await placements())["lib-y"]?.origin).toBe("lib-main");
+  await sidebar.removeParent(sidebar.row("lib-y"));
+  await expect.poll(async () => (await placements())["lib-y"]?.origin).toBeNull();
 
-test("keyboard navigation steps through the rows of the Origin view", async ({ page }) => {
-  const sidebar = await open(page, "borko-main");
-  await sidebar.selectMode("origin");
-  await sidebar.row("borko-main").click();
+  // Arrow keys step through the rows in display order and Enter opens the highlighted one.
+  await sidebar.row("app-main").click();
   await sidebar.openNextRowWithKeyboard();
-  await expect(page).toHaveURL(/\/worktree\/svc-alpha/);
+  await expect(page).toHaveURL(/\/worktree\/app-parent/);
 });
 
-test("a worktree started from another shows no Started from bar (S1)", async ({ page }) => {
-  const sidebar = await open(page, "lib-gamma");
-  await sidebar.selectMode("origin");
-  await expect(sidebar.row("lib-gamma")).toHaveAttribute("data-depth", "2");
-  await expect(sidebar.startedFrom).toHaveCount(0);
+test("the group filter narrows the Pinned section to the selected group", async ({ page }) => {
+  await pin("lib", "y");
+  await pin("lib", "main");
+  const { sidebar, worktreePage } = await open(page);
+  await worktreePage.selectGroupFilter(TEAM_A);
+  await expect(sidebar.pinnedRow("lib-y")).toBeVisible();
+  await expect(sidebar.pinnedRow("lib-main")).toHaveCount(0);
 });
 
-test("Set parent nests a worktree under the chosen one, and Remove parent undoes it (S3, S4)", async ({
-  page,
-}) => {
-  const sidebar = await open(page, "borko-main");
-  await sidebar.selectMode("origin");
-  // A second tab on the same hub follows without a reload.
-  const other = await page.context().newPage();
-  const otherSidebar = await open(other, "borko-main");
-  await otherSidebar.selectMode("origin");
-  await expect(otherSidebar.row("svc-solo")).toHaveAttribute("data-depth", "1");
-
-  // svc-solo has no parent: the menu offers Set parent only.
-  await sidebar.openMenu(sidebar.row("svc-solo"));
-  await expect(sidebar.removeParentItem).toHaveCount(0);
-  await page.keyboard.press("Escape");
-
-  await sidebar.openSetParent(sidebar.row("svc-solo"));
-  await sidebar.chooseParent("gamma", "lib-gamma");
-  await expect(sidebar.row("svc-solo")).toHaveAttribute("data-depth", "3");
-  await expect(otherSidebar.row("svc-solo")).toHaveAttribute("data-depth", "3");
-
-  await sidebar.removeParent(sidebar.row("svc-solo"));
-  await expect(sidebar.row("svc-solo")).toHaveAttribute("data-depth", "1");
-  await expect(otherSidebar.row("svc-solo")).toHaveAttribute("data-depth", "1");
+test("S11: a second device sees the new group order", async ({ page, browser }) => {
+  const { sidebar } = await open(page);
+  await sidebar.dragGroup(TEAM_B, TEAM_A, "top");
+  await expect.poll(groupOrder).toEqual([TEAM_B, TEAM_A]);
+  const other = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const otherPage = await other.newPage();
+  const { sidebar: otherSidebar } = await open(otherPage);
+  await expect.poll(() => otherSidebar.headerOrder()).toEqual([TEAM_B, TEAM_A]);
   await other.close();
-});
-
-test("Set parent does not offer the worktree or its descendants, and the hub refuses them (S5)", async ({
-  page,
-}) => {
-  const sidebar = await open(page, "borko-main");
-  await sidebar.selectMode("origin");
-  // svc-alpha is the parent of lib-gamma.
-  await sidebar.openSetParent(sidebar.row("svc-alpha"));
-  await expect(sidebar.setParentItem("svc-alpha")).toHaveCount(0);
-  await expect(sidebar.setParentItem("lib-gamma")).toHaveCount(0);
-  await expect(sidebar.setParentItem("svc-beta")).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  await expect(
-    trpcMutate(server.url, TOKEN, "worktrees.setOrigin", {
-      repo: "svc",
-      name: "alpha",
-      origin: "lib-gamma",
-    }),
-  ).rejects.toThrow(/descendant/);
-  await expect(
-    trpcMutate(server.url, TOKEN, "worktrees.setOrigin", {
-      repo: "svc",
-      name: "alpha",
-      origin: "svc-alpha",
-    }),
-  ).rejects.toThrow(/own parent/);
-});
-
-test("a worktree whose parent was deleted shows under its repo's main with a hint (S4)", async ({
-  page,
-}) => {
-  await trpcMutate(server.url, TOKEN, "worktrees.remove", { repo: "svc", name: "beta" });
-  const sidebar = await open(page, "borko-main");
-  await sidebar.selectMode("origin");
-  await expect(sidebar.row("svc-beta")).toHaveCount(0);
-  await expect(sidebar.row("lib-orphan")).toHaveAttribute("data-depth", "1");
-  await expect(sidebar.rowOrder()).resolves.toContainEqual({ id: "lib-main", depth: 0 });
-  await expect(sidebar.parentRemovedHint("lib-orphan")).toBeVisible();
 });

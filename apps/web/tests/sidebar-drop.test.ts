@@ -1,104 +1,61 @@
 import { describe, expect, it } from "vitest";
-import { moveRefusal, planOriginDrop } from "../src/dashboard/lib/sidebar-drop";
-import {
-  buildOriginTree,
-  buildPinnedTree,
-  entriesOf,
-  type WorktreeEntry,
-} from "../src/dashboard/lib/sidebar-grouping";
-import type { RepoInfo, WorktreeInfo } from "../src/dashboard/types";
+import { planParentDrop } from "../src/dashboard/lib/sidebar-drop";
+import { entriesOf } from "../src/dashboard/lib/sidebar-grouping";
+import type { RepoInfo } from "../src/dashboard/types";
 
-// Pure functions with no state to fake: the rules that decide whether a worktree dropped on a host
-// may open the "Open on another worker" dialog.
+// Pure functions with no state to fake: the rules that decide where a worktree dropped on another
+// worktree goes, and which drops are refused.
 
-const hosts = [
-  { id: "a", name: "box-a", status: "online" },
-  { id: "b", name: "box-b", status: "online" },
-  { id: "off", name: "box-off", status: "offline" },
-];
+describe("planParentDrop", () => {
+  const repos = [
+    {
+      name: "app",
+      defaultBranch: "main",
+      kind: "git",
+      worktrees: [
+        { name: "a", hostId: "a", groupId: "g1" },
+        {
+          name: "child",
+          hostId: "a",
+          groupId: "g1",
+          origin: { worktreeId: "app-a@a" },
+        },
+        {
+          name: "grandchild",
+          hostId: "a",
+          groupId: "g1",
+          origin: { worktreeId: "app-child@a" },
+        },
+        { name: "b", hostId: "a", groupId: "g2" },
+      ],
+    },
+  ] as unknown as RepoInfo[];
+  const entries = entriesOf(repos);
 
-function entry(worktree: Partial<WorktreeInfo>, repo: Partial<RepoInfo> = {}): WorktreeEntry {
-  return {
-    worktreeId: "app-feat@a",
-    repo: { name: "app", defaultBranch: "main", kind: "git", ...repo } as RepoInfo,
-    worktree: { name: "feat", hostId: "a", pinned: false, ...worktree } as WorktreeInfo,
-  };
-}
-
-describe("moveRefusal", () => {
-  it("allows a worktree on an online worker to go to another online worker", () => {
-    expect(moveRefusal(entry({}), "b", { hosts, isAdmin: false })).toBeNull();
+  it("makes the dragged worktree a child of the one it lands on, in that worktree's group", () => {
+    const plan = planParentDrop(entries, "app-a@a", "app-b@a", "into");
+    expect(plan).toMatchObject({ type: "parent", origin: "app-b@a", groupId: "g2" });
   });
 
-  it("allows the default branch while its host is up", () => {
-    expect(moveRefusal(entry({ name: "main" }), "b", { hosts, isAdmin: true })).toBeNull();
+  it("refuses a drop onto itself", () => {
+    expect(planParentDrop(entries, "app-a@a", "app-a@a", "into").type).toBe("refuse");
   });
 
-  it("refuses a worktree on the hub's own machine and a drop onto it", () => {
-    expect(moveRefusal(entry({ hostId: "local" }), "b", { hosts, isAdmin: true })).toContain("hub");
-    expect(moveRefusal(entry({}), "local", { hosts, isAdmin: true })).toContain("hub");
+  it("refuses a drop onto a descendant", () => {
+    expect(planParentDrop(entries, "app-a@a", "app-grandchild@a", "into").type).toBe("refuse");
   });
 
-  it("refuses a repo limited to this host with the card's wording", () => {
-    expect(moveRefusal(entry({}, { allowedHostIds: ["a"] }), "b", { hosts, isAdmin: true })).toBe(
-      "Only available on box-a",
-    );
+  it("clears the parent in the gap beside a top-level row", () => {
+    const plan = planParentDrop(entries, "app-child@a", "app-b@a", "before");
+    expect(plan).toMatchObject({ type: "parent", origin: null, groupId: "g2" });
   });
 
-  it("refuses a host the repo isn't allowed on unless the caller is an admin", () => {
-    const limited = entry({}, { allowedHostIds: ["a", "c"] });
-    expect(moveRefusal(limited, "b", { hosts, isAdmin: false })).toContain("needs an admin");
-    expect(moveRefusal(limited, "b", { hosts, isAdmin: true })).toBeNull();
+  it("makes the dragged worktree a sibling in the gap beside a nested row", () => {
+    const plan = planParentDrop(entries, "app-b@a", "app-child@a", "after");
+    expect(plan).toMatchObject({ type: "parent", origin: "app-a@a", groupId: "g1" });
   });
 
-  it("refuses an offline target", () => {
-    expect(moveRefusal(entry({}), "off", { hosts, isAdmin: true })).toContain("offline");
-  });
-});
-
-describe("planOriginDrop onto the repo's own main", () => {
-  const repos = (spikeOrigin: string | null, mainPinned: boolean) =>
-    [
-      {
-        name: "app",
-        defaultBranch: "main",
-        kind: "git",
-        worktrees: [
-          { name: "main", hostId: "a", pinned: mainPinned },
-          {
-            name: "spike",
-            hostId: "a",
-            pinned: false,
-            origin: spikeOrigin ? { worktreeId: spikeOrigin } : null,
-          },
-        ],
-      },
-      {
-        name: "other",
-        defaultBranch: "main",
-        kind: "git",
-        worktrees: [{ name: "main", hostId: "a" }],
-      },
-    ] as unknown as RepoInfo[];
-
-  const plan = (spikeOrigin: string | null, mainPinned = false) => {
-    const r = repos(spikeOrigin, mainPinned);
-    const tree = buildOriginTree(entriesOf(r));
-    return planOriginDrop(tree, buildPinnedTree(r), "app-spike@a", "app-main@a", "into");
-  };
-
-  it("stores the main as the explicit origin when the worktree came from another repo", () => {
-    const result = plan("other-main@a");
-    expect(result.type === "reorder" && result.reparent?.origin).toBe("app-main@a");
-  });
-
-  it("stores the main as the explicit origin when the main is pinned", () => {
-    const result = plan(null, true);
-    expect(result.type === "reorder" && result.reparent?.origin).toBe("app-main@a");
-  });
-
-  it("changes nothing when the worktree is already under that main", () => {
-    const result = plan("app-main@a");
-    expect(result.type === "reorder" && result.reparent).toBeUndefined();
+  it("changes nothing when the parent and group already match", () => {
+    expect(planParentDrop(entries, "app-child@a", "app-a@a", "into").type).toBe("none");
   });
 });

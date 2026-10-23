@@ -277,36 +277,22 @@ test.afterAll(async () => {
   for (const dir of scratch) cleanupTmpHome(dir);
 });
 
-for (const mode of ["repo", "origin", "host"] as const) {
-  test(`the ${mode} grouping selects only the host's own row (item 1)`, async ({ page }) => {
-    const app = new TwoHostsPage(page, server.url, TOKEN);
-    await app.open(a.same);
-    await app.groupBy(mode);
+test("the sidebar selects only the host's own row (item 1)", async ({ page }) => {
+  const app = new TwoHostsPage(page, server.url, TOKEN);
+  await app.open(a.same);
 
-    await expect(app.card(a.same)).toBeVisible();
-    await expect(app.card(b.same)).toBeVisible();
-    await app.expectOnlySelected(a.same);
-    await expect(app.card(b.same)).not.toHaveAttribute("aria-current", "page");
+  await expect(app.card(a.same)).toBeVisible();
+  await expect(app.card(b.same)).toBeVisible();
+  await app.expectOnlySelected(a.same);
+  await expect(app.card(b.same)).not.toHaveAttribute("aria-current", "page");
 
-    await app.select(b.same);
-    await app.expectOnlySelected(b.same);
-    await expect(app.card(a.same)).not.toHaveAttribute("aria-current", "page");
+  await app.select(b.same);
+  await app.expectOnlySelected(b.same);
+  await expect(app.card(a.same)).not.toHaveAttribute("aria-current", "page");
 
-    await app.select(a.same);
-    await app.expectOnlySelected(a.same);
-
-    if (mode === "host") {
-      // BAND_LOCAL_HOST=off: the hub's own machine is not a host in the list.
-      await expect(app.sidebar.hostHeader(a.id)).toContainText("box-a");
-      await expect(app.sidebar.hostHeader(b.id)).toContainText("box-b");
-      await expect(app.sidebar.hostHeader("local")).toHaveCount(0);
-      await expect(app.sidebar.hostRepoHeader(a.id, REPO)).toBeVisible();
-      await expect(app.sidebar.hostRepoHeader(b.id, REPO)).toBeVisible();
-      await expect(app.sidebar.row(a.same)).toBeVisible();
-      await expect(app.sidebar.row(b.same)).toBeVisible();
-    }
-  });
-}
+  await app.select(a.same);
+  await app.expectOnlySelected(a.same);
+});
 
 test("the URL names the host, a deep link opens it, reload keeps it and back returns (item 2)", async ({
   page,
@@ -426,11 +412,26 @@ test("an origin link from a child started on B nests under B (item 7)", async ({
   await app.select(childId);
   await app.expectOnlySelected(childId);
 
-  // In the Origin grouping the child nests under B's row, not A's.
-  await app.groupBy("origin");
-  await expect(app.sidebar.row(childId)).toHaveAttribute("data-depth", "1");
-  const order = (await app.sidebar.rowOrder()).map((r) => r.id);
-  expect(order.indexOf(childId)).toBe(order.indexOf(b.same) + 1);
+  // In a group the child nests under B's row, not A's.
+  const { group } = await trpcMutateData<{ group: { id: string } }>(
+    server.url,
+    TOKEN,
+    "groups.create",
+    { name: "Nesting" },
+  );
+  const groupId = group.id;
+  try {
+    await trpcMutate(server.url, TOKEN, "worktrees.setGroup", {
+      worktreeId: b.same,
+      groupId,
+      withChildren: true,
+    });
+    await expect(app.sidebar.row(childId)).toHaveAttribute("data-depth", "1");
+    const order = (await app.sidebar.rowOrder()).map((r) => r.id);
+    expect(order.indexOf(childId)).toBe(order.indexOf(b.same) + 1);
+  } finally {
+    await trpcMutate(server.url, TOKEN, "groups.remove", { id: groupId });
+  }
 });
 
 test("removing the worktree on A leaves B selectable with its chat and files (item 6)", async ({

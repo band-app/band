@@ -94,7 +94,7 @@ export function DeleteGroupDialog({
         <DialogHeader>
           <DialogTitle>Delete group</DialogTitle>
           <DialogDescription>
-            Delete <strong>{groupName}</strong>? Its worktrees are kept and become ungrouped.
+            Delete <strong>{groupName}</strong>? Its worktrees stay, without a group.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
