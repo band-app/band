@@ -26,14 +26,26 @@ export interface LinkClientOptions {
   window?: number;
   requestTimeoutMs?: number;
   heartbeatMisses?: number;
+  /**
+   * A link that stays up this long counts as healthy: the backoff starts over and a resumed
+   * session that ends sooner counts as a short one. Default 10 s.
+   */
+  stableMs?: number;
+  /**
+   * After this many resumed sessions in a row that ended within `stableMs` of `ready`, the next
+   * hello starts a fresh session (no `resume`). Default 2.
+   */
+  freshAfterShortResumes?: number;
 }
 
 /**
  * Dials the hub and keeps the link up. `session` is stable across reconnects:
  * handlers, channels and queued sends survive a dropped socket.
  *
- * Events: `connected` (ready, resumed), `disconnected`, `lost` (missed
- * heartbeats), `rejected` (reason, code, terminal), `mismatch` (need, terminal).
+ * Events: `connected` (ready, resumed), `disconnected` (uptime in ms, close code and reason), `lost` (missed
+ * heartbeats), `dialFailed` (reason, a dial that never reached `ready`), `rejected`
+ * (reason, code, terminal), `mismatch` (need, terminal), `freshSession` (the next hello
+ * drops `resume` because resumed sessions kept ending at once).
  */
 export class LinkClient extends EventEmitter {
   readonly session: LinkSession;
@@ -56,7 +68,22 @@ export class LinkClient extends EventEmitter {
       heartbeatMisses: opts.heartbeatMisses,
     });
     this.session.on("detached", () => {
-      this.emit("disconnected");
+      const uptime = this.readyAt ? Date.now() - this.readyAt : 0;
+      this.readyAt = 0;
+      const stable = uptime >= (this.opts.stableMs ?? 10_000);
+      // A link that dies right after `ready` is not a recovery: keep backing off.
+      if (stable) {
+        this.attempt = 0;
+        this.shortResumes = 0;
+      } else if (this.lastReadyResumed) {
+        this.shortResumes++;
+        if (this.shortResumes >= (this.opts.freshAfterShortResumes ?? 2)) {
+          this.sessionStarted = false;
+          this.shortResumes = 0;
+          this.emit("freshSession");
+        }
+      }
+      this.emit("disconnected", uptime, this.session.lastClose);
       this.scheduleRedial();
     });
     this.session.on("lost", () => this.emit("lost"));
@@ -85,6 +112,9 @@ export class LinkClient extends EventEmitter {
   }
 
   private connecting: Promise<void> | null = null;
+  private readyAt = 0;
+  private lastReadyResumed = false;
+  private shortResumes = 0;
   /** The `sessionToken` of the last `ready`, sent on later hellos as proof of ownership. */
   private lastSessionToken: string | undefined;
 
@@ -108,15 +138,22 @@ export class LinkClient extends EventEmitter {
     });
     this.ws = ws;
     let handshaken = false;
-    const timeout = setTimeout(() => ws.terminate(), this.opts.handshakeTimeoutMs ?? 10_000);
+    let failure = "";
+    const timeout = setTimeout(() => {
+      failure ||= "the hub did not answer the hello in time";
+      ws.terminate();
+    }, this.opts.handshakeTimeoutMs ?? 10_000);
 
     const failDial = () => {
       clearTimeout(timeout);
       if (handshaken || this.ws !== ws) return;
       this.ws = null;
+      this.emit("dialFailed", failure || "the connection closed before the hub answered");
       this.scheduleRedial();
     };
-    ws.on("error", () => {});
+    ws.on("error", (err) => {
+      failure = err.message;
+    });
     ws.on("close", failDial);
 
     ws.once("open", () => {
@@ -167,7 +204,8 @@ export class LinkClient extends EventEmitter {
   private sessionStarted = false;
 
   private onReady(ws: WebSocket, ready: Ready): void {
-    this.attempt = 0;
+    this.readyAt = Date.now();
+    this.lastReadyResumed = ready.resumed;
     if (this.opts.useSessionToken) this.currentToken = ready.sessionToken;
     this.sessionStarted = true;
     this.lastSessionToken = ready.sessionToken;
