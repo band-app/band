@@ -173,10 +173,10 @@ function sectionTree(
 }
 
 /**
- * The worktrees with no group come first as plain top-level rows, with no header. Then a header per
- * group in the order the groups are defined, with the group's worktrees as an origin tree under it,
- * so a child nests under its parent when both are in the group. A child whose parent is in another
- * group is a top-level row with a `fromParent` chip. A group filter shows that group alone, laid out
+ * A header per group in the order the groups are defined, with the group's worktrees as an origin
+ * tree under it, so a child nests under its parent when both are in the group. A child whose parent
+ * is in another group is a top-level row with a `fromParent` chip. The worktrees with no group come
+ * last as plain top-level rows, with no header. A group filter shows that group alone, laid out
  * exactly as in the full list.
  */
 export function buildGroupRows(input: GroupRowsInput): GroupedRow[] {
@@ -184,7 +184,7 @@ export function buildGroupRows(input: GroupRowsInput): GroupedRow[] {
   const parents = new Map(entriesOf(allRepos).map((e) => [e.worktreeId, e]));
   const rows: GroupedRow[] = [];
   const sections = groupEntries(entriesOf(repos), groups, filter);
-  const ordered = [...sections.filter((s) => !s.group), ...sections.filter((s) => s.group)];
+  const ordered = [...sections.filter((s) => s.group), ...sections.filter((s) => !s.group)];
   for (const section of ordered) {
     const tree = sectionTree(section, parents);
     const group = section.group;

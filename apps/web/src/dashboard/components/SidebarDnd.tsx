@@ -10,7 +10,7 @@ export interface SidebarDragData {
   groupId?: string | null;
   repoName?: string;
   hostId?: string;
-  /** Space left of the card in its row (indent and chevron), which the drag preview keeps. */
+  /** Space left of the card in its row (section lead plus nesting indent), which the drag preview keeps. */
   inset?: number;
 }
 
@@ -126,7 +126,7 @@ export function GroupDropTarget({
 }
 
 /**
- * The strip above the first group where a dragged worktree leaves its group and becomes a plain
+ * The strip below the last group where a dragged worktree leaves its group and becomes a plain
  * top-level row. It keeps a fixed height so a drag never moves the rows, and it is not drawn while
  * top-level rows exist, because those take the drop themselves.
  */

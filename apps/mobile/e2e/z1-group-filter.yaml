@@ -1,5 +1,6 @@
 # S9-S12: the home screen's group filter, the collapse-all toggle, group headers aligned with no
-# indent, ungrouped worktrees as plain top-level rows with no header, and reordering a group by its
+# indent, ungrouped worktrees as plain top-level rows with no header after the last group, the gap
+# under Pinned matching the gap between groups, and reordering a group by its
 # long-press menu. The hub's seeded worktrees go into two groups for this flow, and the groups are
 # removed at the end so the other flows see the plain repo list. The flow is named z1 so it runs
 # last: it leaves a collapsed-repos row on the hub, and a fresh app whose first collapse tap races
@@ -28,7 +29,13 @@ name: S10 group filter on the home screen
 - assertVisible:
     id: home__group-filter
     text: ".*All.*"
-# The ungrouped gamma worktrees come first, so the groups sit below them.
+# Pinned, then the groups, spaced alike: the top of the list for the spacing screenshot.
+- extendedWaitUntil:
+    visible:
+      text: "Work, .*"
+    timeout: 20000
+- assertVisible: Pinned
+- takeScreenshot: g1-pinned-then-groups
 - scrollUntilVisible:
     element:
       id: home__worktree-alpha-main
@@ -121,24 +128,26 @@ name: S10 group filter on the home screen
       id: home__worktree-beta-main
     direction: DOWN
     timeout: 20000
-# S12: gamma's worktrees have no group, so they are plain rows at the top with no "Ungrouped"
-# header, and the group headers come after them.
+# S12: gamma's worktrees have no group, so they are plain rows after the last group with no
+# "Ungrouped" header.
 - scrollUntilVisible:
     element:
       id: home__worktree-gamma-main
-    direction: UP
+    direction: DOWN
     timeout: 20000
 - assertNotVisible: Ungrouped
-- assertNotVisible:
-    text: "Work, .*"
-- takeScreenshot: g1-ungrouped-top-level
+- assertVisible:
+    id: home__worktree-beta-main
+    above:
+      id: home__worktree-gamma-main
+- takeScreenshot: g1-ungrouped-last
 - scrollUntilVisible:
     element:
       id: home__worktree-alpha-main
-    direction: DOWN
+    direction: UP
     timeout: 20000
 # Removing alpha-main from its group (the long-press menu stands in for the web's drag to the top
-# level) makes it a top-level row, with no header of its own.
+# level) makes it a top-level row after the groups, with no header of its own.
 - longPressOn:
     id: home__worktree-alpha-main
 - assertVisible: Remove from group
@@ -146,10 +155,12 @@ name: S10 group filter on the home screen
 - scrollUntilVisible:
     element:
       id: home__worktree-alpha-main
-    direction: UP
+    direction: DOWN
     timeout: 20000
-- assertNotVisible:
-    text: "Work, .*"
+- assertVisible:
+    id: home__worktree-beta-main
+    above:
+      id: home__worktree-alpha-main
 - takeScreenshot: g1-removed-from-group
 # S11: a group header's long-press menu moves it up or down. Work is first, so only Move down
 # shows; moving it below Home reorders the list at once, survives a restart, and the filter sheet
@@ -157,7 +168,7 @@ name: S10 group filter on the home screen
 - scrollUntilVisible:
     element:
       text: "Work, .*"
-    direction: DOWN
+    direction: UP
     timeout: 20000
 - longPressOn:
     text: "Work, .*"
@@ -173,10 +184,11 @@ name: S10 group filter on the home screen
 - takeScreenshot: g1-group-reordered
 - stopApp
 - launchApp
-- scrollUntilVisible:
-    element:
+# The groups are near the top now, so wait for them instead of scrolling past them while the
+# list loads.
+- extendedWaitUntil:
+    visible:
       text: "Work, .*"
-    direction: DOWN
     timeout: 30000
 - assertVisible:
     text: "Home, .*"

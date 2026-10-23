@@ -40,9 +40,15 @@ import { GroupColorPicker } from "./GroupColorPicker";
 import { DragRow, GroupDropTarget, TopLevelDropZone } from "./SidebarDnd";
 import { WorktreeCard } from "./WorktreeCard";
 
-const INDENT_PX = 14;
-/** The chevron column that sits before the card in every row. */
-const TOGGLE_PX = 20;
+/** A child's status dot sits under its parent's name: the dot (8px) plus the card's gap (8px). */
+const INDENT_PX = 16;
+/**
+ * Space left of a top-level card in its row. The card pads its dot 20px in, so 10 puts a grouped
+ * row's dot under the group's name (header padding 12, dot 10, gap 8) and 6 puts a pin's dot under
+ * "Pinned" inside the section's 8px padding. Rows with no group start at the edge, their dots 10px
+ * further out than grouped ones.
+ */
+const LEAD_PX = { grouped: 10, pinned: 6, ungrouped: 0 } as const;
 
 export interface RowCardProps {
   originCollapse: CollapseState;
@@ -103,6 +109,7 @@ export function WorktreeEntryCard({
           : hostLabel(hostIdOf(entry.worktree), hosts)
       }
       allowedHostIds={entry.repo.allowedHostIds}
+      chevronGutter
       onTogglePinned={onTogglePinned}
     />
   );
@@ -139,56 +146,59 @@ export function WorktreeRowView({
     else openWorktree(worktreeId);
   };
   const testPrefix = row.pinned ? "repo-list__pinned-row" : "repo-list__grouped-row";
+  const lead =
+    LEAD_PX[row.pinned ? "pinned" : row.ungrouped ? "ungrouped" : "grouped"] +
+    row.depth * INDENT_PX;
   return (
     <DragRow
       dndId={`${isPin ? "pin" : "wt"}:${entry.worktreeId}`}
       disabled={mode === "repo" && row.depth > 0}
       testId={`repo-list__drag-row--${entry.worktreeId}`}
-      className={row.pinned ? undefined : row.ungrouped ? "mr-2" : "ml-4 mr-2"}
+      className={row.pinned ? undefined : "mr-2"}
       data={{
         kind: isPin ? "pin" : "wt",
         worktreeId: entry.worktreeId,
         repoName: entry.repo.name,
         hostId: hostIdOf(entry.worktree),
-        inset: row.depth * INDENT_PX + TOGGLE_PX,
+        inset: lead,
       }}
     >
       <div
         data-testid={`${testPrefix}--${entry.worktreeId}`}
         data-depth={row.depth}
+        data-ungrouped={row.ungrouped || undefined}
         className="flex min-w-0 flex-col"
-        style={{ paddingLeft: row.depth * INDENT_PX + (row.ungrouped ? 4 : 0) }}
+        style={{ paddingLeft: lead }}
       >
-        <div className="flex min-w-0 items-center">
-          {row.childCount > 0 ? (
+        <div className="relative min-w-0">
+          {/* In the card's 20px left padding: a 12px icon 4px from the dot, the 20px hit area kept.
+              Before the card in the DOM so Tab reaches it first, as it is drawn. */}
+          {row.childCount > 0 && (
             <button
               type="button"
               aria-label={row.collapsed ? "Expand started worktrees" : "Collapse started worktrees"}
               aria-expanded={!row.collapsed}
               data-testid={`repo-list__origin-toggle--${entry.worktreeId}`}
               onClick={() => originCollapse.toggle(entry.worktreeId)}
-              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent/50"
+              className="absolute left-0 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent/50"
             >
               <ChevronRight
-                className={`size-3.5 transition-transform ${row.collapsed ? "" : "rotate-90"}`}
+                data-testid={`repo-list__origin-toggle-icon--${entry.worktreeId}`}
+                className={`size-3 transition-transform ${row.collapsed ? "" : "rotate-90"}`}
               />
             </button>
-          ) : (
-            <span className="size-5 shrink-0" />
           )}
-          <div className="min-w-0 flex-1">
-            <WorktreeEntryCard
-              entry={entry}
-              mode={mode}
-              isFocused={index === focusedIndex}
-              hosts={hosts}
-              statuses={statuses}
-              branchStatuses={branchStatuses}
-              setupStatuses={setupStatuses}
-              onShowDeleteDialog={onShowDeleteDialog}
-              onTogglePinned={onTogglePinned}
-            />
-          </div>
+          <WorktreeEntryCard
+            entry={entry}
+            mode={mode}
+            isFocused={index === focusedIndex}
+            hosts={hosts}
+            statuses={statuses}
+            branchStatuses={branchStatuses}
+            setupStatuses={setupStatuses}
+            onShowDeleteDialog={onShowDeleteDialog}
+            onTogglePinned={onTogglePinned}
+          />
         </div>
         {row.fromParent && (
           <button
@@ -196,7 +206,7 @@ export function WorktreeRowView({
             data-testid={`repo-list__from-parent--${entry.worktreeId}`}
             title={`Open ${row.fromParent.name}`}
             onClick={() => selectParent(row.fromParent!.worktreeId)}
-            className="ml-8 w-fit max-w-full truncate rounded px-1 text-left text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+            className="ml-5 w-fit max-w-full truncate rounded px-1 text-left text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
           >
             from {row.fromParent.name}
           </button>
@@ -204,7 +214,7 @@ export function WorktreeRowView({
         {row.parentRemoved && (
           <span
             data-testid={`repo-list__parent-removed--${entry.worktreeId}`}
-            className="pl-8 text-[11px] text-muted-foreground"
+            className="pl-5 text-[11px] text-muted-foreground"
           >
             parent removed
           </span>
@@ -315,7 +325,6 @@ export function GroupedWorktrees({
   let navIndex = navStart;
   return (
     <div className="flex flex-col gap-0.5" data-testid="repo-list__grouped--groups">
-      <TopLevelDropZone hidden={rows.some((r) => r.kind === "worktree" && r.ungrouped)} />
       {rows.map((row) => {
         if (row.kind === "group") {
           const toggleKey = row.groupId ?? "";
@@ -352,7 +361,10 @@ export function GroupedWorktrees({
                     ) : (
                       <Circle className="size-2.5 shrink-0 text-muted-foreground" />
                     )}
-                    <span className="truncate text-[13px] font-semibold text-foreground/90">
+                    <span
+                      data-testid={`repo-list__group-name--${toggleKey}`}
+                      className="truncate text-[13px] font-semibold text-foreground/90"
+                    >
                       {row.name}
                     </span>
                     <span
@@ -397,6 +409,7 @@ export function GroupedWorktrees({
           <WorktreeRowView key={row.key} row={row} index={index} mode="groups" {...cardProps} />
         );
       })}
+      <TopLevelDropZone hidden={rows.some((r) => r.kind === "worktree" && r.ungrouped)} />
     </div>
   );
 }

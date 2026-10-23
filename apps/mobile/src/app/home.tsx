@@ -427,7 +427,7 @@ function WorktreeList() {
         renderItem={({ item, index, section }) => (
           <WorktreeRowView
             row={item}
-            first={(section.kind === "pinned" || section.kind === "group") && index === 0}
+            first={section.kind !== "repo" && index === 0}
             last={index === section.data.length - 1}
             onPress={() => router.push({ pathname: "/worktree/[id]", params: { id: item.id } })}
             deleting={deleting.has(item.id)}
