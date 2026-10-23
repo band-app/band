@@ -595,6 +595,13 @@ interface CenterLayoutData {
   terminalIds: Set<string>;
   browserIds: Set<string>;
   urls: Map<string, string>;
+  /**
+   * Kinds whose list call failed, so their id set is empty for want of an
+   * answer rather than because nothing is live. Reconcile never prunes leaves
+   * of these kinds: an offline worker answers `terminal.list` with an error,
+   * and pruning then would drop (and persist the loss of) every terminal tab.
+   */
+  unlisted: Set<LeafKind>;
 }
 
 function centerLayoutKey(worktreeId: string) {
@@ -3241,15 +3248,21 @@ export const WorktreeCenter = memo(function WorktreeCenter({
     queryFn: async () => {
       // The saved layout, shared tab list and split blobs are read from
       // localStorage in onReady: bring them up to date from the server first.
+      const unlisted = new Set<LeafKind>();
       const [chatsRes, terminalsRes, browsersRes] = await Promise.all([
-        trpc.chats.list.query({ worktreeId }).catch(() => ({ chats: [] as { id: string }[] })),
-        trpc.terminal.list
-          .query({ worktreeId })
-          .catch(() => ({ terminals: [] as { terminalId: string }[] })),
+        trpc.chats.list.query({ worktreeId }).catch(() => {
+          unlisted.add("chat");
+          return { chats: [] as { id: string }[] };
+        }),
+        trpc.terminal.list.query({ worktreeId }).catch(() => {
+          unlisted.add("term");
+          return { terminals: [] as { terminalId: string }[] };
+        }),
         isDesktop
-          ? trpc.browsers.list
-              .query({ worktreeId })
-              .catch(() => ({ browsers: [] as { id: string; url?: string }[] }))
+          ? trpc.browsers.list.query({ worktreeId }).catch(() => {
+              unlisted.add("browser");
+              return { browsers: [] as { id: string; url?: string }[] };
+            })
           : Promise.resolve({ browsers: [] as { id: string; url?: string }[] }),
         hydrateWorktree(worktreeId),
       ]);
@@ -3262,6 +3275,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
         terminalIds: new Set(terminalsRes.terminals.map((t) => t.terminalId)),
         browserIds: new Set(browsersRes.browsers.map((b) => b.id)),
         urls,
+        unlisted,
       };
     },
     staleTime: Number.POSITIVE_INFINITY,
@@ -3887,6 +3901,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       // Remove per-instance leaves whose server record is gone.
       for (const panel of [...api.panels]) {
         const kind = panel.api.component as LeafKind;
+        if (data.unlisted.has(kind)) continue;
         if (kind === "chat" && !data.chatIds.has(panel.id)) api.removePanel(panel);
         else if (kind === "term") {
           // A term leaf owns N nested panes — it survives as long as ANY of its
@@ -3977,6 +3992,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
         terminalIds: new Set<string>(),
         browserIds: new Set<string>(),
         urls: new Map<string, string>(),
+        unlisted: new Set<LeafKind>(),
       };
 
       // Pre-seed terminal-pane ownership from persisted split blobs BEFORE
