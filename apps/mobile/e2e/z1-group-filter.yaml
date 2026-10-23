@@ -34,6 +34,7 @@ name: S10 group filter on the home screen
     visible:
       text: "Work, .*"
     timeout: 20000
+- assertVisible: Pinned
 - takeScreenshot: g1-pinned-then-groups
 - scrollUntilVisible:
     element:

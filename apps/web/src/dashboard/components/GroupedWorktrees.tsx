@@ -171,6 +171,23 @@ export function WorktreeRowView({
         style={{ paddingLeft: lead }}
       >
         <div className="relative min-w-0">
+          {/* In the card's 20px left padding: a 12px icon 4px from the dot, the 20px hit area kept.
+              Before the card in the DOM so Tab reaches it first, as it is drawn. */}
+          {row.childCount > 0 && (
+            <button
+              type="button"
+              aria-label={row.collapsed ? "Expand started worktrees" : "Collapse started worktrees"}
+              aria-expanded={!row.collapsed}
+              data-testid={`repo-list__origin-toggle--${entry.worktreeId}`}
+              onClick={() => originCollapse.toggle(entry.worktreeId)}
+              className="absolute left-0 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent/50"
+            >
+              <ChevronRight
+                data-testid={`repo-list__origin-toggle-icon--${entry.worktreeId}`}
+                className={`size-3 transition-transform ${row.collapsed ? "" : "rotate-90"}`}
+              />
+            </button>
+          )}
           <WorktreeEntryCard
             entry={entry}
             mode={mode}
@@ -182,21 +199,6 @@ export function WorktreeRowView({
             onShowDeleteDialog={onShowDeleteDialog}
             onTogglePinned={onTogglePinned}
           />
-          {/* In the card's 20px left padding: a 12px icon 4px from the dot, the 20px hit area kept. */}
-          {row.childCount > 0 && (
-            <button
-              type="button"
-              aria-label={row.collapsed ? "Expand started worktrees" : "Collapse started worktrees"}
-              aria-expanded={!row.collapsed}
-              data-testid={`repo-list__origin-toggle--${entry.worktreeId}`}
-              onClick={() => originCollapse.toggle(entry.worktreeId)}
-              className="absolute left-0 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent/50"
-            >
-              <ChevronRight
-                className={`size-3 transition-transform ${row.collapsed ? "" : "rotate-90"}`}
-              />
-            </button>
-          )}
         </div>
         {row.fromParent && (
           <button

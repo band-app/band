@@ -419,6 +419,23 @@ test("S12: worktrees with no group are plain top-level rows below the groups, an
   await expect(sidebar.row("app-kid")).toBeVisible();
 });
 
+test("S12: with every worktree in a group, the strip below the last group ungroups a dragged worktree", async ({
+  page,
+}) => {
+  const { sidebar } = await open(page);
+  await expect(sidebar.topLevelDrop).toBeVisible();
+  const strip = await sidebar.box(sidebar.topLevelDrop);
+  const lastGroupRow = await sidebar.box(sidebar.row("lib-main"));
+  expect(strip.y).toBeGreaterThan(lastGroupRow.y);
+
+  await sidebar.dragToTopLevel("app-kid");
+  await expect
+    .poll(async () => (await placements())["app-kid"])
+    .toEqual({ origin: null, groupId: null });
+  await expect.poll(() => sidebar.sections()).toMatchObject({ __ungrouped: ["0:app-kid"] });
+  await expect(sidebar.topLevelDrop).toHaveCount(0);
+});
+
 test("S11: groups reorder by dragging a header and from the header menu, and the filter follows", async ({
   page,
 }) => {
@@ -488,6 +505,7 @@ test("S13: rows sit under the group name, the chevron is small and close, and Pi
   const parentDot = await sidebar.box(sidebar.statusDot(sidebar.row("app-parent")));
   const kidDot = await sidebar.box(sidebar.statusDot(sidebar.row("app-kid")));
   expect(kidDot.x - parentDot.x).toBeCloseTo(parentDot.x - mainDot.x, 0);
+  expect(parentDot.x - mainDot.x).toBeGreaterThanOrEqual(12);
   expect(parentDot.x - mainDot.x).toBeLessThanOrEqual(16);
 
   // The chevron was a 14px icon 15px from the dot; now it is 12px and 4px away, with a 20px button.

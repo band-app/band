@@ -33,6 +33,11 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
     return this.groupsPage.getByTestId("repo-list__root");
   }
 
+  /** The strip below the last group that takes a drop to the top level, drawn while no row is ungrouped. */
+  get topLevelDrop(): Locator {
+    return this.groupsPage.getByTestId("repo-list__top-level-drop");
+  }
+
   groupName(groupId: string): Locator {
     return this.groupsPage.getByTestId(`repo-list__group-name--${groupId}`);
   }
@@ -44,7 +49,7 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
 
   /** The chevron icon inside a row's expand/collapse button. */
   originToggleIcon(worktreeId: string): Locator {
-    return this.originToggle(worktreeId).locator("svg");
+    return this.groupsPage.getByTestId(`repo-list__origin-toggle-icon--${worktreeId}`);
   }
 
   /** The box of an element, failing the test when it is not laid out. */
@@ -70,7 +75,12 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
       .locator(
         '[data-testid^="repo-list__group-header--"], [data-testid^="repo-list__grouped-row--"]',
       )
-      .evaluateAll((els) => {
+      .evaluateAll((found) => {
+        // Playwright can resolve the list before a React commit and run this after it, so the
+        // array may hold the old order. Sort by the live document order.
+        const els = [...found].sort((a, b) =>
+          a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+        );
         const result: Record<string, string[]> = { __ungrouped: [] };
         let current = "";
         let seenUngrouped = false;
@@ -189,11 +199,7 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
         await this.drag(this.row(worktreeId), this.row(besideRow), "top");
         return;
       }
-      await this.drag(
-        this.row(worktreeId),
-        this.groupsPage.getByTestId("repo-list__top-level-drop"),
-        "middle",
-      );
+      await this.drag(this.row(worktreeId), this.topLevelDrop, "middle");
     });
   }
 
