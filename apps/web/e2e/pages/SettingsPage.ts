@@ -635,6 +635,16 @@ export class SettingsPage {
     });
   }
 
+  /** The coding agents list of a worker row. Set in `HostAgentCommands.tsx`. */
+  hostAgentsList(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-agents-commands");
+  }
+
+  /** The status pill of a worker row, the first of its actions. Set in `HostsSettings.tsx`. */
+  hostStatusPill(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-status");
+  }
+
   /** The trust level selector of a worker row (admin tokens). Set in `HostsSettings.tsx`. */
   hostTrustSelect(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-trust-select");
