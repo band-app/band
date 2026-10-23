@@ -66,7 +66,8 @@ interface Pending {
  * policy. The server keeps one per worker and reattaches it on reconnect. The
  * client owns exactly one.
  *
- * Events: `channel` (a peer-opened channel), `attached`, `detached`, `lost`.
+ * Events: `channel` (a peer-opened channel), `attached`, `detached`, `lost`, `fault` (the
+ * reason this session cut its own socket, or a handler that threw and was contained).
  */
 export class LinkSession extends EventEmitter implements ChannelHost {
   private readonly role: "client" | "server";
@@ -96,6 +97,9 @@ export class LinkSession extends EventEmitter implements ChannelHost {
     this.misses = opts.heartbeatMisses ?? HEARTBEAT_MISSES;
     this.nextChan = opts.role === "client" ? 1 : 2;
   }
+
+  /** Close code and reason of the last socket that ended. Code 1006 means no close frame arrived. */
+  lastClose: { code: number; reason: string } | null = null;
 
   get attached(): boolean {
     return this.ws !== null && this.ws.readyState === 1;
@@ -206,8 +210,10 @@ export class LinkSession extends EventEmitter implements ChannelHost {
     ws.on("message", (data, isBinary) => {
       if (this.ws === ws) this.onMessage(data as Buffer, isBinary);
     });
-    ws.on("close", () => {
-      if (this.ws === ws) this.detach();
+    ws.on("close", (code: number, reason: Buffer) => {
+      if (this.ws !== ws) return;
+      this.lastClose = { code, reason: reason.toString().slice(0, 200) };
+      this.detach();
     });
     ws.on("error", () => {
       // the close event follows
@@ -309,33 +315,40 @@ export class LinkSession extends EventEmitter implements ChannelHost {
       let frame: ReturnType<typeof decodeFrame>;
       try {
         frame = decodeFrame(Buffer.isBuffer(data) ? data : Buffer.from(data));
-      } catch {
-        this.ws?.terminate();
+      } catch (err) {
+        this.cut("undecodable frame", err);
         return;
       }
       try {
         this.channels.get(frame.chan)?.handleFrame(frame);
-      } catch {
-        this.ws?.terminate();
+      } catch (err) {
+        this.cut(`channel ${frame.chan} failed to handle a frame`, err);
       }
       return;
     }
     let msg: RpcRequest | RpcNotification | RpcResponse;
     try {
       msg = JSON.parse(data.toString());
-    } catch {
-      this.ws?.terminate();
+    } catch (err) {
+      this.cut("unparsable message", err);
       return;
     }
     if (msg === null || typeof msg !== "object") {
-      this.ws?.terminate();
+      this.cut("message is not an object");
       return;
     }
     try {
       this.dispatchText(msg);
-    } catch {
-      this.ws?.terminate();
+    } catch (err) {
+      this.cut("invalid message", err);
     }
+  }
+
+  /** Drops the socket after a protocol violation, and says why, so the drop is not silent. */
+  private cut(reason: string, err?: unknown): void {
+    const detail = err instanceof Error ? `: ${err.message}` : "";
+    this.emit("fault", `${reason}${detail}`);
+    this.ws?.terminate();
   }
 
   private dispatchText(msg: RpcRequest | RpcNotification | RpcResponse): void {
@@ -370,14 +383,35 @@ export class LinkSession extends EventEmitter implements ChannelHost {
           throw new Error("malformed link.open");
         }
         if (this.channels.has(p.chan) || this.tombstones.has(p.chan)) return;
-        if (this.channels.size >= MAX_CHANNELS) throw new Error("too many channels");
+        if (this.channels.size >= MAX_CHANNELS) {
+          // Refuse this channel alone. Cutting the link would make the peer resume into the same refusal.
+          this.emit("fault", `refused channel ${p.chan}: too many channels`);
+          this.writeBinary(
+            encodeFrame({
+              chan: p.chan,
+              seq: 0,
+              kind: "reset",
+              payload: Buffer.from("too many channels"),
+            }),
+          );
+          return;
+        }
         const ch = new Channel(this, p.chan, p.name, p.meta, this.window);
         this.channels.set(p.chan, ch);
         this.emit("channel", ch);
         return;
       }
     }
-    this.notifyHandlers.get(msg.method)?.(msg.params);
+    // A handler that throws is that handler's bug. Cutting the link would only make the peer
+    // resume and send the same notification again.
+    try {
+      this.notifyHandlers.get(msg.method)?.(msg.params);
+    } catch (err) {
+      this.emit(
+        "fault",
+        `notification ${msg.method} handler threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private async onRequest(msg: RpcRequest): Promise<void> {

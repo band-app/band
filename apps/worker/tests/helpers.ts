@@ -178,7 +178,8 @@ export async function startWorker(
   );
   const connected = hub.nextSession();
   const worker = await Worker.start(config, {
-    link: { reconnect: { minMs: 20, maxMs: 100 } },
+    // Tests that cut the socket repeatedly must keep resuming, not fall back to a fresh session.
+    link: { reconnect: { minMs: 20, maxMs: 100 }, stableMs: 0 },
     ...extra.options,
   });
   return { worker, session: await connected, root, stateDir };

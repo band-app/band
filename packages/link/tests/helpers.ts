@@ -35,6 +35,8 @@ export function makeClient(url: string, opts: Partial<LinkClientOptions> = {}) {
     token: TOKEN,
     hello: HELLO,
     reconnect: { minMs: 20, maxMs: 100 },
+    // Tests that cut the socket again and again must not trip the fresh-session fallback.
+    stableMs: 0,
     ...opts,
   });
 }
