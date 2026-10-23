@@ -4,7 +4,7 @@ import { ghTokenEnv } from "./gh-token.ts";
 
 /**
  * The environment of an agent this worker starts, for the hub (`acp.spawn`) or
- * for a chat it owns: the hub's `band` CLI first on PATH, so an agent's shell
+ * for a chat it owns: the worker's `band` CLI first on PATH, so an agent's shell
  * tool finds it, and a GitHub token for `gh`.
  */
 export async function agentSpawnEnv(

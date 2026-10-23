@@ -81,9 +81,16 @@ The state directory (mode 0700) holds `worker-id`, created once and reused so th
 
 ## The band CLI
 
-On every connect the worker asks the hub for the `band` CLI built for its platform and keeps it in `<state dir>/bin/band`, replacing it when the SHA-256 differs. It runs `band skills install` with that binary, and puts the directory first on the PATH of every agent and terminal it starts. Those processes call the hub through the relay with their own token.
+The worker carries its own `band` CLI of the same release and never fetches it from the hub. It looks for the binary in this order:
 
-The hub answers from `$BAND_CLI_BINARIES_DIR/band-<platform>-<arch>` (for example `band-linux-x64`, `band-linux-arm64`, `band-darwin-arm64`), then from its own CLI when the worker has the hub's platform and architecture. A hub on macOS serving a Linux worker needs the Linux binaries in that directory. The Docker image sets `BAND_CLI_PATH=/opt/band/binaries/band`, so a hub container serves workers of its own platform with no setup. `findCliBinary` also honours `BAND_CLI_PATH` and a `band` on the hub's PATH. With none available the worker logs a warning and runs without `band`.
+1. `BAND_CLI_PATH`.
+2. The package `@band-app/worker-cli-<platform>-<arch>` (`darwin-arm64`, `linux-x64`, `linux-arm64`), an optional dependency of `@band-app/worker`. npm installs only the one that matches the machine.
+3. `Resources/binaries/band` beside the desktop app's bundled worker.
+4. `apps/cli/target/{release,debug}/band` in a checkout.
+
+At start the worker runs `band skills install` with it and puts its directory first on the PATH of every agent and terminal it starts. Those processes call the hub through the relay with their own token. With no binary found the worker logs one line naming the package and runs without `band`. The Docker image builds the CLI and sets `BAND_CLI_PATH`.
+
+A worker older than this change still asks a newer hub for the CLI with `cli.fetch`. The hub answers method-not-found, the old worker logs a warning and keeps running with any copy it cached earlier. This worker deletes that old cached copy at start and never puts its directory on the PATH.
 
 ## Path policy
 
