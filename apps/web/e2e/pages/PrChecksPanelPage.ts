@@ -143,6 +143,30 @@ export class PrChecksPanelPage {
     return this.reviewers.filter({ hasText: login });
   }
 
+  reviewerState(login: string): Locator {
+    return this.reviewer(login).getByTestId("pr-reviewers__state");
+  }
+
+  reviewerRequired(login: string): Locator {
+    return this.reviewer(login).getByTestId("pr-reviewers__required");
+  }
+
+  reviewerAvatarImage(login: string): Locator {
+    return this.reviewer(login).getByTestId("pr-avatar__image");
+  }
+
+  reviewerAvatarFallback(login: string): Locator {
+    return this.reviewer(login).getByTestId("pr-avatar__fallback");
+  }
+
+  commentAvatarImage(index: number): Locator {
+    return this.commentItems.nth(index).getByTestId("pr-avatar__image");
+  }
+
+  commentAvatarFallback(index: number): Locator {
+    return this.commentItems.nth(index).getByTestId("pr-avatar__fallback");
+  }
+
   /** Script elements inside comment bodies; untrusted HTML must never produce one. */
   commentBodyScripts(): Locator {
     return this.page.getByTestId("pr-comments__body").locator("script");

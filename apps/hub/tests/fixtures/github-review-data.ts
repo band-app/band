@@ -67,15 +67,18 @@ export function statusContextNode(input: {
   };
 }
 
-function actor(login: string) {
-  return { login, avatarUrl: `https://avatars.example.test/${login}.png` };
+function actor(login: string, avatarUrl?: string) {
+  return { login, avatarUrl: avatarUrl ?? `https://avatars.example.test/${login}.png` };
 }
 
 /** A user asked to review (`team` makes it a team request). */
-export function reviewRequestNode(login: string, opts: { asCodeOwner?: boolean } = {}) {
+export function reviewRequestNode(
+  login: string,
+  opts: { asCodeOwner?: boolean; avatarUrl?: string } = {},
+) {
   return {
     asCodeOwner: opts.asCodeOwner ?? false,
-    requestedReviewer: { __typename: "User", ...actor(login) },
+    requestedReviewer: { __typename: "User", ...actor(login, opts.avatarUrl) },
   };
 }
 
@@ -85,6 +88,7 @@ export function reviewNode(input: {
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
   body?: string;
   submittedAt?: string;
+  avatarUrl?: string;
 }) {
   return {
     id: input.id,
@@ -92,7 +96,7 @@ export function reviewNode(input: {
     body: input.body ?? "",
     submittedAt: input.submittedAt ?? "2026-01-02T08:00:00Z",
     url: `${REPO_URL}/pull/1#pullrequestreview-${input.id}`,
-    author: actor(input.login),
+    author: actor(input.login, input.avatarUrl),
   };
 }
 
@@ -101,13 +105,14 @@ export function commentNode(input: {
   login: string;
   body: string;
   createdAt?: string;
+  avatarUrl?: string;
 }) {
   return {
     id: input.id,
     body: input.body,
     createdAt: input.createdAt ?? "2026-01-02T08:30:00Z",
     url: `${REPO_URL}/pull/1#issuecomment-${input.id}`,
-    author: actor(input.login),
+    author: actor(input.login, input.avatarUrl),
   };
 }
 

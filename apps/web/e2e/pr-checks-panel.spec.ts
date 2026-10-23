@@ -57,6 +57,7 @@ const REFRESH_BRANCH = "feat/refresh";
 const GH_DOWN_BRANCH = "feat/gh-down";
 const RUNNING_BRANCH = "feat/running";
 const DISCUSSION_BRANCH = "feat/discussion";
+const AVATAR_BRANCH = "feat/avatars";
 const RERUN_BRANCH = "feat/rerun";
 const RERUN_REFUSED_BRANCH = "feat/rerun-refused";
 const FIX_CHAT_BRANCH = "feat/fix-chat";
@@ -187,6 +188,7 @@ test.beforeAll(async () => {
     GH_DOWN_BRANCH,
     RUNNING_BRANCH,
     DISCUSSION_BRANCH,
+    AVATAR_BRANCH,
     RERUN_BRANCH,
     RERUN_REFUSED_BRANCH,
     FIX_CHAT_BRANCH,
@@ -344,6 +346,41 @@ test.beforeAll(async () => {
   stub.setReviewQuery(FAKE_REPO, REFRESH_BRANCH, () => refreshAnswer);
   runningAnswer = runningChecks({ completedAt: null });
   stub.setReviewQuery(FAKE_REPO, RUNNING_BRANCH, () => runningAnswer);
+  const okAvatar = stub.avatarUrl("ok");
+  const missingAvatar = stub.avatarUrl("missing");
+  stub.setReviewQuery(
+    FAKE_REPO,
+    AVATAR_BRANCH,
+    reviewQueryData({
+      pullRequests: [
+        pullRequestNode({
+          number: 730,
+          reviewRequests: [
+            reviewRequestNode("pam", { asCodeOwner: true, avatarUrl: missingAvatar }),
+          ],
+          reviews: [
+            reviewNode({ id: "A1", login: "ann", state: "APPROVED", avatarUrl: okAvatar }),
+            reviewNode({
+              id: "A2",
+              login: "chad",
+              state: "CHANGES_REQUESTED",
+              avatarUrl: missingAvatar,
+            }),
+            reviewNode({ id: "A3", login: "cole", state: "COMMENTED", avatarUrl: missingAvatar }),
+            reviewNode({ id: "A4", login: "dana", state: "DISMISSED", avatarUrl: missingAvatar }),
+          ],
+          comments: [
+            commentNode({
+              id: "AC1",
+              login: "mia",
+              body: "Hello.",
+              avatarUrl: missingAvatar,
+            }),
+          ],
+        }),
+      ],
+    }),
+  );
   stub.setReviewQuery(
     FAKE_REPO,
     DISCUSSION_BRANCH,
@@ -736,6 +773,54 @@ test("the Reviewers section lists each reviewer's latest state above Checks", as
   const commentsTop = (await panel.sectionHeader("comments").boundingBox())?.y ?? 0;
   expect(reviewersTop).toBeLessThan(checksTop);
   expect(checksTop).toBeLessThan(commentsTop);
+});
+
+test("a reviewer's avatar that fails to load falls back to the initial letter", async ({
+  page,
+}) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, AVATAR_BRANCH, "local"));
+
+  await expect(panel.reviewers).toHaveCount(5);
+  await expect(panel.reviewerAvatarFallback("chad")).toHaveText("c");
+  await expect(panel.reviewerAvatarImage("chad")).toHaveCount(0);
+  // A loadable avatar stays an image.
+  await expect(panel.reviewerAvatarImage("ann")).toBeVisible();
+  await expect(panel.reviewerAvatarFallback("ann")).toHaveCount(0);
+});
+
+test("a comment author's avatar that fails to load falls back to the initial letter", async ({
+  page,
+}) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, AVATAR_BRANCH, "local"));
+
+  await expect(panel.commentItems).toHaveCount(1);
+  await expect(panel.commentAvatarFallback(0)).toHaveText("m");
+  await expect(panel.commentAvatarImage(0)).toHaveCount(0);
+});
+
+test("reviewer states and the required flag are icons with accessible names", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, AVATAR_BRANCH, "local"));
+
+  const expected: [string, string, string][] = [
+    ["ann", "approved", "Approved"],
+    ["chad", "changes_requested", "Changes requested"],
+    ["cole", "commented", "Commented"],
+    ["pam", "pending", "Pending"],
+    ["dana", "dismissed", "Dismissed"],
+  ];
+  for (const [login, state, label] of expected) {
+    await expect(panel.reviewer(login)).toHaveAttribute("data-reviewer-state", state);
+    await expect(panel.reviewerState(login)).toHaveAccessibleName(label);
+    await expect(panel.reviewerState(login)).toHaveAttribute("title", label);
+    await expect(panel.reviewerState(login)).toHaveText("");
+  }
+  // Only the code owner request is required.
+  await expect(panel.reviewerRequired("pam")).toHaveAccessibleName("Required");
+  await expect(panel.reviewerRequired("pam")).toHaveAttribute("title", "Required");
+  await expect(panel.reviewerRequired("ann")).toHaveCount(0);
 });
 
 test("the Comments section shows comments, review summaries and inline threads", async ({
