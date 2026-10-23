@@ -334,106 +334,104 @@ export function HostsSettings() {
               key={host.id}
               data-testid="settings__host"
               data-status={host.status}
-              className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 px-3 py-2 text-sm"
+              className="px-3 py-2 text-sm"
             >
-              <div className="min-w-[16rem] flex-1 basis-64">
-                <div className="flex items-center gap-1.5">
-                  <span className="truncate" data-testid="settings__host-name">
-                    {host.name}
-                  </span>
-                  <HostDetailsPopover host={host} />
-                </div>
-                {host.usable ? <HostVersionLine host={host} isAdmin={isAdmin} /> : null}
-                {host.usable ? (
-                  <HostAgentCommands
-                    host={host}
-                    isAdmin={isAdmin}
-                    onChanged={() => void refresh()}
-                  />
-                ) : null}
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <span
-                  data-testid="settings__host-status"
-                  className={`rounded-full px-2.5 py-0.5 text-xs ${STATUS_PILL[host.status] ?? "bg-muted text-muted-foreground"}`}
-                >
-                  {host.status}
-                </span>
-                {host.id !== "local" &&
-                  (admin ? (
-                    <select
-                      aria-label={`Trust level of ${host.name}`}
-                      data-testid="settings__host-trust-select"
-                      title={TRUST_HINT[host.trust]}
-                      value={host.trust}
-                      onChange={(e) => void setTrust(host, e.target.value as TrustLevel)}
-                      className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
-                    >
-                      {TRUST_LEVELS.map((level) => (
-                        <option key={level} value={level}>
-                          {TRUST_LABEL[level]}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span
-                      data-testid="settings__host-trust"
-                      title={TRUST_HINT[host.trust]}
-                      className="rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
-                    >
-                      {TRUST_LABEL[host.trust]}
+              <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+                <div className="min-w-0 flex-1 basis-24">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate" data-testid="settings__host-name">
+                      {host.name}
                     </span>
-                  ))}
-                {host.capabilities.includes("desktop") && host.status === "online" && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Open desktop of ${host.name}`}
-                    data-testid="settings__host-open-desktop"
-                    onClick={() => openDesktopViewer(host.id)}
+                    <HostDetailsPopover host={host} />
+                  </div>
+                  {host.usable ? <HostVersionLine host={host} isAdmin={isAdmin} /> : null}
+                </div>
+                <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
+                  <span
+                    data-testid="settings__host-status"
+                    className={`rounded-full px-2.5 py-0.5 text-xs ${STATUS_PILL[host.status] ?? "bg-muted text-muted-foreground"}`}
                   >
-                    Open desktop
-                  </Button>
-                )}
-                {host.id !== "local" && admin && host.status !== "disposed" && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`More actions for ${host.name}`}
-                        data-testid="settings__host-menu"
+                    {host.status}
+                  </span>
+                  {host.id !== "local" &&
+                    (admin ? (
+                      <select
+                        aria-label={`Trust level of ${host.name}`}
+                        data-testid="settings__host-trust-select"
+                        title={TRUST_HINT[host.trust]}
+                        value={host.trust}
+                        onChange={(e) => void setTrust(host, e.target.value as TrustLevel)}
+                        className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
                       >
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        data-testid="settings__host-evacuate"
-                        onClick={() => setEvacuating(host.id)}
+                        {TRUST_LEVELS.map((level) => (
+                          <option key={level} value={level}>
+                            {TRUST_LABEL[level]}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        data-testid="settings__host-trust"
+                        title={TRUST_HINT[host.trust]}
+                        className="rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
                       >
-                        Move all worktrees on this worker…
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-                {host.id !== "local" && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`Remove worker ${host.name}`}
-                    title="Remove worker"
-                    data-testid="settings__host-remove"
-                    disabled={host.status === "online" || host.status === "lost"}
-                    onClick={() => void removeHost(host)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                )}
+                        {TRUST_LABEL[host.trust]}
+                      </span>
+                    ))}
+                  {host.capabilities.includes("desktop") && host.status === "online" && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Open desktop of ${host.name}`}
+                      data-testid="settings__host-open-desktop"
+                      onClick={() => openDesktopViewer(host.id)}
+                    >
+                      Open desktop
+                    </Button>
+                  )}
+                  {host.id !== "local" && admin && host.status !== "disposed" && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`More actions for ${host.name}`}
+                          data-testid="settings__host-menu"
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          data-testid="settings__host-evacuate"
+                          onClick={() => setEvacuating(host.id)}
+                        >
+                          Move all worktrees on this worker…
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  {host.id !== "local" && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Remove worker ${host.name}`}
+                      title="Remove worker"
+                      data-testid="settings__host-remove"
+                      disabled={host.status === "online" || host.status === "lost"}
+                      onClick={() => void removeHost(host)}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
+              {host.usable ? (
+                <HostAgentCommands host={host} isAdmin={isAdmin} onChanged={() => void refresh()} />
+              ) : null}
             </li>
           ))}
         </ul>
