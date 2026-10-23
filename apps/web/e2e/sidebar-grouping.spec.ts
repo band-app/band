@@ -402,7 +402,9 @@ test("S12: worktrees with no group are plain top-level rows below the groups, an
   const row = await sidebar.box(sidebar.row("lib-y"));
   const lastGroupRow = await sidebar.box(sidebar.row("lib-main"));
   expect(row.y).toBeGreaterThan(lastGroupRow.y);
-  expect(row.y - (lastGroupRow.y + lastGroupRow.height)).toBeLessThanOrEqual(4);
+  const rowGap = row.y - (lastGroupRow.y + lastGroupRow.height);
+  expect(rowGap).toBeGreaterThanOrEqual(-1);
+  expect(rowGap).toBeLessThanOrEqual(4);
 
   await worktreePage.selectGroupFilter(TEAM_A);
   await expect(sidebar.row("lib-y")).toHaveCount(0);
@@ -508,11 +510,14 @@ test("S13: rows sit under the group name, the chevron is small and close, and Pi
   expect(parentDot.x - mainDot.x).toBeGreaterThanOrEqual(12);
   expect(parentDot.x - mainDot.x).toBeLessThanOrEqual(16);
 
-  // The chevron was a 14px icon 15px from the dot; now it is 12px and 4px away, with a 20px button.
+  // The chevron icon is at most 12px, ends within 5px of the dot without covering it, and keeps a
+  // 20px hit area.
   const icon = await sidebar.box(sidebar.originToggleIcon("app-parent"));
   const button = await sidebar.box(sidebar.originToggle("app-parent"));
   expect(icon.width).toBeLessThanOrEqual(12);
-  expect(parentDot.x - (icon.x + icon.width)).toBeLessThanOrEqual(5);
+  const chevronGap = parentDot.x - (icon.x + icon.width);
+  expect(chevronGap).toBeGreaterThanOrEqual(0);
+  expect(chevronGap).toBeLessThanOrEqual(5);
   expect(button.width).toBeGreaterThanOrEqual(20);
   expect(button.height).toBeGreaterThanOrEqual(20);
   await sidebar.originToggle("app-parent").click();

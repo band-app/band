@@ -10,7 +10,7 @@ export interface SidebarDragData {
   groupId?: string | null;
   repoName?: string;
   hostId?: string;
-  /** Space left of the card in its row (indent and chevron), which the drag preview keeps. */
+  /** Space left of the card in its row (section lead plus nesting indent), which the drag preview keeps. */
   inset?: number;
 }
 
