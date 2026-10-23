@@ -1,12 +1,9 @@
 /**
  * Root worktree status-icon swap.
  *
- * The default-branch ("root") worktree card shows a house icon as its
- * identity marker. When its agent has a live status ("working" /
- * "done" ...) the status dot must REPLACE the house — occupying the
- * same slot — exactly the way the branch glyph is replaced on every other
- * worktree card. The regression this guards against: the root card showed
- * the status dot AND the house side by side, instead of swapping.
+ * The default-branch ("root") worktree card marks itself with a star after
+ * its title. Its left slot always shows the agent status: a faint dot when
+ * idle, the state's mark otherwise. The star stays in both cases.
  *
  * Real production binary, real git repo so the default branch reconciles to a
  * WorktreeCard, no tRPC mocks. The status is driven live via the real
@@ -94,51 +91,37 @@ test.afterAll(async () => {
 });
 
 test.describe("Root worktree status icon", () => {
-  test("shows the home icon and no status dot while the agent is idle", async ({ page }) => {
+  test("shows the idle dot and the root star while the agent is idle", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
     await worktreePage.goto(WORKTREE);
     await worktreePage.waitForReady();
 
-    // The house is the root card's idle identity marker…
-    await expect(worktreePage.rootWorktreeHomeIcon(WORKTREE)).toBeVisible();
-    // …and with no live agent status there is no status dot beside it.
-    await expect(worktreePage.agentStatusDot(WORKTREE)).toHaveCount(0);
+    await expect(worktreePage.agentStatusDot(WORKTREE)).toHaveAttribute("data-status", "idle");
+    await expect(worktreePage.rootWorktreeStar(WORKTREE)).toBeVisible();
+    await expect(worktreePage.rootWorktreeStar(WORKTREE)).toHaveAttribute(
+      "aria-label",
+      "Repository root",
+    );
   });
 
-  test("replaces the home icon with the status dot when the agent is active", async ({ page }) => {
+  test("keeps the star while the agent is active", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
 
     await worktreePage.goto(WORKTREE);
     await worktreePage.waitForReady();
 
-    // Anchor the starting state: house present, no dot.
-    await expect(worktreePage.rootWorktreeHomeIcon(WORKTREE)).toBeVisible();
-    await expect(worktreePage.agentStatusDot(WORKTREE)).toHaveCount(0);
-
-    // Drive a live "working" status through the real mutation + SSE path.
-    // `statuses.update` emits to currently-subscribed SSE listeners with no
-    // replay, and the browser's status-stream subscription isn't guaranteed
-    // to be live the instant `waitForReady()` returns (it keys on the layout
-    // Maximize button, not on SSE connectivity). Re-fire the mutation — the
-    // upsert is idempotent and the router re-emits on every call — until the
-    // dot renders, so a lost pre-subscription event can't flake the test.
+    // The status stream has no replay, so re-send until the mark changes.
     await expect
       .poll(
         async () => {
           await worktreePage.setAgentStatus(WORKTREE, "working");
-          return worktreePage.agentStatusDot(WORKTREE).count();
+          return worktreePage.agentStatusDot(WORKTREE).getAttribute("data-status");
         },
-        // Match the `waitForReady` budget: on a slow CI worker the SSE
-        // subscription can take longer than the default 5 s poll window to
-        // come up, and this loop is the barrier that waits for it.
         { timeout: 15_000 },
       )
-      .toBeGreaterThan(0);
+      .toBe("working");
 
-    // Positive anchor: the status dot appeared (the swap happened)…
-    await expect(worktreePage.agentStatusDot(WORKTREE)).toBeVisible();
-    // …and it REPLACED the house rather than sitting beside it.
-    await expect(worktreePage.rootWorktreeHomeIcon(WORKTREE)).toHaveCount(0);
+    await expect(worktreePage.rootWorktreeStar(WORKTREE)).toBeVisible();
   });
 });
