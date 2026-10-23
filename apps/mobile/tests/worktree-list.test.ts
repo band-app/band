@@ -228,14 +228,14 @@ describe("pinned, groups and origin like the web", () => {
     );
   });
 
-  it("S4, S12: plain top-level rows come first with no header, then each group as one section", () => {
+  it("S4, S12: each group is one section, then plain top-level rows with no header come last", () => {
     const sections = buildSections(fixture, opts).filter((s) => s.kind !== "pinned");
     assert.deepEqual(
       sections.map((s) => [s.name, s.kind, s.title, s.data.map((r) => r.id)]),
       [
-        ["group:none", "top", "", ["gamma-main"]],
         ["group:l1", "group", "Epic", ["alpha-loose", "beta-main"]],
         ["group:l2", "group", "Private", ["alpha-main"]],
+        ["group:none", "top", "", ["gamma-main"]],
       ],
     );
   });
@@ -255,9 +255,9 @@ describe("pinned, groups and origin like the web", () => {
     assert.deepEqual(
       sections.map((s) => [s.name, s.data.length]),
       [
-        ["group:none", 1],
         ["group:l1", 0],
         ["group:l2", 0],
+        ["group:none", 1],
       ],
     );
   });
@@ -291,7 +291,7 @@ describe("pinned, groups and origin like the web", () => {
       ...r,
       worktrees: r.worktrees.filter((w) => !pinned.includes(`${r.name}-${w.name}`)),
     }));
-    let group = "group:none";
+    let group = "";
     const web: Array<[string, string, number]> = [];
     for (const row of buildGroupRows({
       repos: rest as never,
@@ -302,7 +302,7 @@ describe("pinned, groups and origin like the web", () => {
       isOriginCollapsed: () => false,
     })) {
       if (row.kind === "group") group = `group:${row.groupId ?? "none"}`;
-      else web.push([group, row.entry.worktreeId, row.depth]);
+      else web.push([row.ungrouped ? "group:none" : group, row.entry.worktreeId, row.depth]);
     }
     assert.deepEqual(mine, web);
   });

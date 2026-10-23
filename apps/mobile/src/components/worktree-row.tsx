@@ -127,7 +127,7 @@ export function WorktreeRowView({
   onLongPress?: () => void;
   /** The worktree is being deleted: a spinner shows and the row ignores taps. */
   deleting?: boolean;
-  /** First row of a card with no header of its own (Pinned): round the top. */
+  /** First row of a card with no header on it (Pinned, a group, the rows with no group): round the top. */
   first?: boolean;
   last?: boolean;
 }) {
@@ -147,9 +147,9 @@ export function WorktreeRowView({
         last && styles.last,
         !first && styles.divided,
         (pressed || deleting) && styles.pressed,
+        { paddingLeft: ROW_LEAD + row.depth * INDENT },
       ]}
     >
-      <View style={{ width: row.depth * 16 }} />
       <StateIcon state={row.shown} testID={`home__state-${row.id}`} />
       <View style={styles.body}>
         <View style={styles.title}>
@@ -186,6 +186,10 @@ export function WorktreeRowView({
 }
 
 const CARD_RADIUS = 18;
+/** The state icon's 9pt dot sits 5.5pt into its box, so 16 puts it under a group header's name. */
+const ROW_LEAD = 16;
+/** Each nesting level steps in by this much, as on the web. */
+const INDENT = 16;
 
 export const rowCard = {
   backgroundColor: colors.card,
@@ -202,7 +206,7 @@ const styles = StyleSheet.create({
     gap: 10,
     marginHorizontal: 16,
     minHeight: 54,
-    paddingHorizontal: 14,
+    paddingRight: 14,
     paddingVertical: 8,
   },
   divided: { borderTopColor: colors.divider, borderTopWidth: StyleSheet.hairlineWidth },

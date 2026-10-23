@@ -363,13 +363,13 @@ export function buildSections(repos: readonly RepoLike[], options: ListOptions):
   if (groups.length > 0) {
     // A worktree started from one in another group stays at the top of its own group.
     const known = new Set(entriesOf(repos as RepoLike[]).map((e) => e.worktreeId));
-    // Worktrees in no group come first as plain rows with no header.
+    // Worktrees in no group come last as plain rows with no header.
     const parts = groupEntries(
       restEntries,
       groups.map((g) => ({ ...g, color: g.color ?? "" })),
       groupFilter,
     );
-    const ordered = [...parts.filter((p) => !p.group), ...parts.filter((p) => p.group)];
+    const ordered = [...parts.filter((p) => p.group), ...parts.filter((p) => !p.group)];
     for (const part of ordered) {
       const inGroup = new Set(part.entries.map((e) => e.worktreeId));
       const tree = buildOriginTree(part.entries, {

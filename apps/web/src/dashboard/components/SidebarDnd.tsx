@@ -126,7 +126,7 @@ export function GroupDropTarget({
 }
 
 /**
- * The strip above the first group where a dragged worktree leaves its group and becomes a plain
+ * The strip below the last group where a dragged worktree leaves its group and becomes a plain
  * top-level row. It keeps a fixed height so a drag never moves the rows, and it is not drawn while
  * top-level rows exist, because those take the drop themselves.
  */

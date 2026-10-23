@@ -6,7 +6,8 @@
  * of Team A). Tests read the layout from the sidebar and the stored result from `repos.list`.
  *
  * Covers: no group-by choice (S1), the collapse-all button (S9), aligned headers (S10), group
- * order (S11), top-level rows for worktrees with no group (S12), the group filter leaving the layout alone (S2), "New group…" in
+ * order (S11), top-level rows for worktrees with no group after the last group (S12), the row indent,
+ * chevron and section gaps (S13), the group filter leaving the layout alone (S2), "New group…" in
  * the filter (S3), dropping a worktree on another (S4), the refusals and the top-level gap (S5) and
  * the drag preview being the row's own card (S6).
  */
@@ -376,7 +377,7 @@ test("S10: every group header and the Pinned header share one left edge, and row
   const edge = await sidebar.leftEdge(sidebar.pinnedHeader);
   expect(await sidebar.leftEdge(sidebar.groupHeader(TEAM_A))).toBe(edge);
   expect(await sidebar.leftEdge(sidebar.groupHeader(TEAM_B))).toBe(edge);
-  expect(await sidebar.leftEdge(sidebar.row("lib-main"))).toBeGreaterThan(edge);
+  expect(await sidebar.leftEdge(sidebar.card("lib-main"))).toBeGreaterThan(edge);
   expect(await sidebar.leftEdge(sidebar.card("app-kid"))).toBeGreaterThan(
     await sidebar.leftEdge(sidebar.card("app-parent")),
   );
@@ -387,7 +388,7 @@ test("S10: every group header and the Pinned header share one left edge, and row
   );
 });
 
-test("S12: worktrees with no group are plain top-level rows above the groups, and dragging there ungroups", async ({
+test("S12: worktrees with no group are plain top-level rows below the groups, and dragging there ungroups", async ({
   page,
 }) => {
   const { sidebar, worktreePage } = await open(page);
@@ -397,9 +398,11 @@ test("S12: worktrees with no group are plain top-level rows above the groups, an
   expect(await sidebar.leftEdge(sidebar.row("lib-y"))).toBe(
     await sidebar.leftEdge(sidebar.groupHeader(TEAM_A)),
   );
-  const rowY = (await sidebar.row("lib-y").boundingBox())?.y ?? 0;
-  const headerY = (await sidebar.groupHeader(TEAM_A).boundingBox())?.y ?? 0;
-  expect(rowY).toBeLessThan(headerY);
+  // After the last group's last row, with nothing between them.
+  const row = await sidebar.box(sidebar.row("lib-y"));
+  const lastGroupRow = await sidebar.box(sidebar.row("lib-main"));
+  expect(row.y).toBeGreaterThan(lastGroupRow.y);
+  expect(row.y - (lastGroupRow.y + lastGroupRow.height)).toBeLessThanOrEqual(4);
 
   await worktreePage.selectGroupFilter(TEAM_A);
   await expect(sidebar.row("lib-y")).toHaveCount(0);
@@ -469,6 +472,50 @@ test("the group filter narrows the Pinned section to the selected group", async 
   await worktreePage.selectGroupFilter(TEAM_A);
   await expect(sidebar.pinnedRow("lib-y")).toBeVisible();
   await expect(sidebar.pinnedRow("lib-main")).toHaveCount(0);
+});
+
+test("S13: rows sit under the group name, the chevron is small and close, and Pinned is spaced like a group", async ({
+  page,
+}, testInfo) => {
+  await pin("lib", "y");
+  const { sidebar } = await open(page);
+  await expect(sidebar.pinnedRow("lib-y")).toBeVisible();
+
+  // A top-level row's dot starts where the group's name starts, and a child's under its parent's name.
+  const name = await sidebar.box(sidebar.groupName(TEAM_A));
+  const mainDot = await sidebar.box(sidebar.statusDot(sidebar.row("app-main")));
+  expect(Math.abs(mainDot.x - name.x)).toBeLessThanOrEqual(2);
+  const parentDot = await sidebar.box(sidebar.statusDot(sidebar.row("app-parent")));
+  const kidDot = await sidebar.box(sidebar.statusDot(sidebar.row("app-kid")));
+  expect(kidDot.x - parentDot.x).toBeCloseTo(parentDot.x - mainDot.x, 0);
+  expect(parentDot.x - mainDot.x).toBeLessThanOrEqual(16);
+
+  // The chevron was a 14px icon 15px from the dot; now it is 12px and 4px away, with a 20px button.
+  const icon = await sidebar.box(sidebar.originToggleIcon("app-parent"));
+  const button = await sidebar.box(sidebar.originToggle("app-parent"));
+  expect(icon.width).toBeLessThanOrEqual(12);
+  expect(parentDot.x - (icon.x + icon.width)).toBeLessThanOrEqual(5);
+  expect(button.width).toBeGreaterThanOrEqual(20);
+  expect(button.height).toBeGreaterThanOrEqual(20);
+  await sidebar.originToggle("app-parent").click();
+  await expect(sidebar.row("app-kid")).toHaveCount(0);
+  await expect(sidebar.originToggle("app-parent")).toHaveAttribute("aria-expanded", "false");
+  await sidebar.originToggle("app-parent").click();
+  await expect(sidebar.row("app-kid")).toBeVisible();
+
+  // The gap from the last pin to the first group header is the gap between two groups.
+  const lastPin = await sidebar.box(sidebar.pinnedRow("lib-y"));
+  const headerA = await sidebar.box(sidebar.groupHeader(TEAM_A));
+  const lastRowA = await sidebar.box(sidebar.row("lib-x"));
+  const headerB = await sidebar.box(sidebar.groupHeader(TEAM_B));
+  const pinnedGap = headerA.y - (lastPin.y + lastPin.height);
+  const groupGap = headerB.y - (lastRowA.y + lastRowA.height);
+  expect(Math.abs(pinnedGap - groupGap)).toBeLessThanOrEqual(2);
+
+  await testInfo.attach("sidebar-spacing.png", {
+    body: await sidebar.root.screenshot(),
+    contentType: "image/png",
+  });
 });
 
 test("S11: a second device sees the new group order", async ({ page, browser }) => {

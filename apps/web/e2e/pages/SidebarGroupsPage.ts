@@ -28,6 +28,32 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
     return this.groupsPage.getByTestId(`repo-list__group-dot--${groupId}`);
   }
 
+  /** The whole list: Pinned, the groups and the rows with no group. */
+  get root(): Locator {
+    return this.groupsPage.getByTestId("repo-list__root");
+  }
+
+  groupName(groupId: string): Locator {
+    return this.groupsPage.getByTestId(`repo-list__group-name--${groupId}`);
+  }
+
+  /** The agent status dot at the start of a worktree's card, in the list or in Pinned. */
+  statusDot(row: Locator): Locator {
+    return row.getByTestId("worktree-card__agent-status").first();
+  }
+
+  /** The chevron icon inside a row's expand/collapse button. */
+  originToggleIcon(worktreeId: string): Locator {
+    return this.originToggle(worktreeId).locator("svg");
+  }
+
+  /** The box of an element, failing the test when it is not laid out. */
+  async box(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await locator.boundingBox();
+    expect(box, "element is laid out").not.toBeNull();
+    return box!;
+  }
+
   /** The "from <parent>" chip of a row. */
   fromParentChip(worktreeId: string): Locator {
     return this.groupsPage.getByTestId(`repo-list__from-parent--${worktreeId}`);
@@ -35,7 +61,9 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
 
   /**
    * The worktree ids under each group header, in display order, keyed by group id (`UNGROUPED`
-   * for Ungrouped) with the depth of each row. Read from the document order of headers and rows.
+   * for the plain rows of worktrees in no group) with the depth of each row. Read from the document
+   * order of headers and rows. The plain rows come after the last group, so a row counts as
+   * Ungrouped by its `data-ungrouped` mark, and `sections` throws if a group header follows one.
    */
   async sections(): Promise<Record<string, string[]>> {
     return this.groupsPage
@@ -43,19 +71,24 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
         '[data-testid^="repo-list__group-header--"], [data-testid^="repo-list__grouped-row--"]',
       )
       .evaluateAll((els) => {
-        // Worktrees in no group are plain rows above the first header.
         const result: Record<string, string[]> = { __ungrouped: [] };
-        let current = "__ungrouped";
+        let current = "";
+        let seenUngrouped = false;
         for (const el of els) {
           const id = el.getAttribute("data-testid") ?? "";
           if (id.startsWith("repo-list__group-header--")) {
+            if (seenUngrouped) throw new Error(`${id} comes after a row with no group`);
             current = id.replace("repo-list__group-header--", "");
             result[current] = [];
-          } else if (current) {
-            result[current].push(
-              `${el.getAttribute("data-depth")}:${id.replace("repo-list__grouped-row--", "")}`,
-            );
+            continue;
           }
+          const ungrouped = el.hasAttribute("data-ungrouped");
+          seenUngrouped ||= ungrouped;
+          const key = ungrouped ? "__ungrouped" : current;
+          if (!key) throw new Error(`${id} has no group header above it`);
+          result[key].push(
+            `${el.getAttribute("data-depth")}:${id.replace("repo-list__grouped-row--", "")}`,
+          );
         }
         return result;
       });
@@ -147,7 +180,8 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
 
   /**
    * Drags a worktree's row to the top level, where it is in no group. The target is the top-level
-   * strip, or the top of `besideRow` when plain rows exist and the strip is not drawn.
+   * strip below the last group, or the top of `besideRow` when plain rows exist and the strip is not
+   * drawn.
    */
   async dragToTopLevel(worktreeId: string, besideRow?: string): Promise<void> {
     await test.step(`Drag ${worktreeId} to the top level`, async () => {
