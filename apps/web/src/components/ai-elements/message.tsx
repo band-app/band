@@ -1,7 +1,7 @@
 import { cn } from "@band-app/ui";
 import { Download, Expand, FileIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
 import { hubAssetUrl } from "../../lib/hub-config";
@@ -95,7 +95,7 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
   const isText = isTextMediaType(part.mediaType);
   const canPreview = isImage || isText;
   const filename = part.filename ?? "File";
-  const shared = parseSharedFileUrl(part.url);
+  const shared = useMemo(() => parseSharedFileUrl(part.url), [part.url]);
 
   // A file an agent shared opens in a center tab; anything else previews in an overlay.
   const openInTab = useCallback(() => {

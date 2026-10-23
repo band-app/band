@@ -16,6 +16,8 @@ export class SharedFilesPage {
   readonly code: Locator;
   readonly binary: Locator;
   readonly viewerDownload: Locator;
+  readonly binaryDownload: Locator;
+  readonly htmlFrame: ReturnType<Page["frameLocator"]>;
 
   constructor(private readonly page: Page) {
     const visible = (id: string) => page.getByTestId(id).filter({ visible: true });
@@ -27,6 +29,8 @@ export class SharedFilesPage {
     this.code = visible("shared-file__code");
     this.binary = visible("shared-file__binary");
     this.viewerDownload = visible("shared-file__download");
+    this.binaryDownload = visible("shared-file__binary-download");
+    this.htmlFrame = page.frameLocator('[data-testid="shared-file__html"]:visible');
   }
 
   /** The chat card of a shared file. */
@@ -61,9 +65,8 @@ export class SharedFilesPage {
     await test.step(`Open the card for ${name}`, async () => {
       await this.showChat();
       await this.card(name)
-        .locator(
-          '[data-testid="message__file-card-open"], [data-testid="message__image-preview-button"]',
-        )
+        .getByTestId("message__file-card-open")
+        .or(this.card(name).getByTestId("message__image-preview-button"))
         .click();
       await expect(this.tab(name)).toBeVisible();
     });

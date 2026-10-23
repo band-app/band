@@ -411,6 +411,15 @@ function getCachedScalarHtml(): string {
  * Serve a file from a subdirectory of a root path.
  * Prevents path traversal and streams the file with the correct MIME type.
  */
+/** Headers that keep an agent-written HTML or SVG file from running with the hub's origin. */
+function hostedFileHeaders(contentType: string): Record<string, string> {
+  const headers: Record<string, string> = { "X-Content-Type-Options": "nosniff" };
+  if (/^(text\/html|image\/svg\+xml)\b/.test(contentType)) {
+    headers["Content-Security-Policy"] = "sandbox allow-scripts";
+  }
+  return headers;
+}
+
 function serveStaticFile(
   res: ServerResponse,
   root: string,
@@ -431,6 +440,7 @@ function serveStaticFile(
       "Content-Type": contentType,
       "Content-Length": fileStat.size.toString(),
       "Cache-Control": "private, max-age=86400",
+      ...hostedFileHeaders(contentType),
     });
     createReadStream(filePath).pipe(res);
   } catch {
@@ -458,10 +468,12 @@ async function serveHostedFile(
     res.end("Not found");
     return true;
   }
+  const contentType = mimeTypeFromFilename(basename(decodeURIComponent(rawName)));
   res.writeHead(200, {
-    "Content-Type": mimeTypeFromFilename(basename(decodeURIComponent(rawName))),
+    "Content-Type": contentType,
     "Content-Length": file.size.toString(),
     "Cache-Control": "private, max-age=86400",
+    ...hostedFileHeaders(contentType),
   });
   pipeline(
     Readable.from(file.stream, { objectMode: false, highWaterMark: 64 * 1024 }),

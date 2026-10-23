@@ -75,6 +75,12 @@ describe("shared files per chat (S1)", () => {
       `/api/shared/${encodeURIComponent(WORKTREE_ID)}/shared-chat-a/a.txt`,
     );
     expect(await (await get(fileCards(a)[0].url)).text()).toBe("share-a\n");
+    // Chat B's folder holds no copy of chat A's file.
+    const wtSeg = encodeURIComponent(WORKTREE_ID);
+    expect((await get(`/api/shared/${wtSeg}/shared-chat-b/a.txt`)).status).toBe(404);
+    // The route keeps its auth: no token, no file.
+    const bare = await fetch(`${server.url}${fileCards(a)[0].url}`);
+    expect(bare.status).toBe(401);
   });
 
   it("keeps two chats' files of the same name apart", async () => {

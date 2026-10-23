@@ -2,7 +2,7 @@ import { Button, Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
 import { AlertCircle, Download, FileIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CodeMirrorViewer, getFilePreviewType } from "@/dashboard";
-import { hubAssetUrl } from "../lib/hub-config";
+import { hubAssetUrl, hubFetch } from "../lib/hub-config";
 import { sharedFileUrl } from "../lib/shared-file";
 import { detectLanguageFromFilename, downloadFile } from "./ai-elements/file-preview-utils";
 import { MessageResponse } from "./ai-elements/message";
@@ -23,7 +23,7 @@ function useSharedText(url: string, enabled: boolean): Loaded {
     if (!enabled) return;
     let cancelled = false;
     setLoaded({ state: "loading" });
-    fetch(hubAssetUrl(url))
+    hubFetch(url)
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status));
         const bytes = new Uint8Array(await res.arrayBuffer());
@@ -71,7 +71,7 @@ export function SharedFileLeaf({ worktreeId, filePath }: { worktreeId: string; f
   const name = filePath.split("/").pop() ?? filePath;
   const kind = getFilePreviewType(name);
   const isHtml = /\.html?$/i.test(name);
-  const needsText = !!url && !isHtml && kind !== "image" && kind !== "pdf";
+  const needsText = !!url && kind !== "image" && kind !== "pdf";
   const loaded = useSharedText(url ?? "", needsText);
   if (!url) return null;
   const assetUrl = hubAssetUrl(url);
@@ -97,10 +97,12 @@ export function SharedFileLeaf({ worktreeId, filePath }: { worktreeId: string; f
         className="size-full border-0"
       />
     );
-  } else if (isHtml) {
+  } else if (isHtml && loaded.state === "text") {
+    // srcDoc, not src: the hub token rides in a cross-origin asset URL, and a
+    // script-enabled frame can read its own location.
     body = (
       <iframe
-        src={assetUrl}
+        srcDoc={loaded.text}
         title={name}
         sandbox="allow-scripts"
         data-testid="shared-file__html"
@@ -123,7 +125,12 @@ export function SharedFileLeaf({ worktreeId, filePath }: { worktreeId: string; f
       >
         <FileIcon className="size-8" />
         <p className="text-sm">No preview for this file type</p>
-        <Button variant="outline" size="sm" onClick={() => downloadFile(assetUrl, name)}>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="shared-file__binary-download"
+          onClick={() => downloadFile(assetUrl, name)}
+        >
           <Download className="size-4" />
           Download
         </Button>

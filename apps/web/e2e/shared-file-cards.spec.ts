@@ -139,9 +139,7 @@ test("a shared file card opens its file in a center tab", async ({ page }, testI
   await shared.openCard("page.html");
   await expect(shared.html).toBeVisible();
   await expect(shared.html).toHaveAttribute("sandbox", "allow-scripts");
-  await expect(
-    page.frameLocator('[data-testid="shared-file__html"]:visible').getByText("Hello from HTML"),
-  ).toBeVisible();
+  await expect(shared.htmlFrame.getByText("Hello from HTML")).toBeVisible();
   await shot("html-tab");
 
   await shared.openCard("util.ts");
@@ -151,7 +149,7 @@ test("a shared file card opens its file in a center tab", async ({ page }, testI
 
   await shared.openCard("data.bin");
   await expect(shared.binary).toBeVisible();
-  await expect(shared.binary.getByRole("button", { name: "Download" })).toBeVisible();
+  await expect(shared.binaryDownload).toBeVisible();
   await shot("binary-tab");
 
   // A second click focuses the tab that is open.
