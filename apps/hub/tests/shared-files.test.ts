@@ -4,7 +4,7 @@
  * is on a real `band-worker`, so the same assertions cover the worker path.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -105,6 +105,20 @@ describe("the shared file route (S2)", () => {
     const res = await get(`/api/shared/${wt}/old.txt`);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("from the old folder\n");
+  });
+
+  it("does not follow a symlink out of the chat's folder", async () => {
+    const root = sharedLocation(server.home, WORKTREE_ID);
+    const chatDir = join(root, "link-chat");
+    mkdirSync(chatDir, { recursive: true });
+    const target = join(dirname(root), "linked-secret.txt");
+    writeFileSync(target, "reached through a symlink\n");
+    symlinkSync(target, join(chatDir, "key.txt"));
+    writeFileSync(join(chatDir, "plain.txt"), "plain\n");
+    const linked = await get(`/api/shared/${wt}/link-chat/key.txt`);
+    expect(linked.status).toBe(404);
+    expect(await linked.text()).not.toContain("reached through a symlink");
+    expect((await get(`/api/shared/${wt}/link-chat/plain.txt`)).status).toBe(200);
   });
 
   it("never serves a file outside the shared root", async () => {

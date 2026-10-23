@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   statSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -434,6 +435,13 @@ function serveStaticFile(
   }
   const filePath = join(root, subdir, filename);
   try {
+    // A symlink an agent made must not lead the card out of its folder.
+    const dir = realpathSync(join(root, subdir));
+    if (!realpathSync(filePath).startsWith(dir + sep)) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
     const fileStat = statSync(filePath);
     const contentType = mimeTypeFromFilename(filename);
     res.writeHead(200, {

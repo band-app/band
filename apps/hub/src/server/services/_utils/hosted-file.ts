@@ -1,4 +1,4 @@
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { hostRegistry } from "../../infra/host/registry";
 
 export interface HostedFile {
@@ -34,6 +34,8 @@ export async function openHostedFile(
     const path = chatId
       ? join(dirs[kind], worktreeId, chatId, name)
       : join(dirs[kind], worktreeId, name);
+    const dir = await host.fs.realpath(dirname(path));
+    if (!(await host.fs.realpath(path)).startsWith(`${dir}/`)) return null;
     const stat = await host.fs.stat(path, { followSymlinks: true });
     if (stat.kind !== "file") return null;
     return { size: stat.size, stream: host.fs.readStream(path) };
