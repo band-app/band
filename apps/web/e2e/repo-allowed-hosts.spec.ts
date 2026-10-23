@@ -231,10 +231,17 @@ test("a branch on another host is refused and the dialog opens it (S3)", async (
   await app.worktree.newWorktreeHostSelect.selectOption(b.id);
   await app.worktree.fillNewWorktreeBranch("feat-x");
   await expect(app.worktree.newWorktreeSlugError).toBeVisible();
+  await expect(app.worktree.newWorktreeBranchInput).toHaveAttribute("aria-invalid", "true");
+  await expect(
+    app.worktree.newWorktreeDialog.getByRole("button", { name: "Create" }),
+  ).toBeDisabled();
+  await app.worktree.openNewWorktreeSlugError();
+  await expect(app.worktree.newWorktreeSlugErrorMessage).toHaveText("feat-x is already on box-a");
   await expect(app.worktree.newWorktreeOpenExisting).toBeVisible();
 
   // A branch that is free goes through on that same host, so the refusal is about the branch.
   await app.worktree.fillNewWorktreeBranch("feat-y");
+  await expect(app.worktree.newWorktreeSlugError).toBeHidden();
   await expect(app.worktree.newWorktreeOpenExisting).toBeHidden();
 
   // The hub says the same when asked directly, with the worktree to open.
@@ -251,6 +258,7 @@ test("a branch on another host is refused and the dialog opens it (S3)", async (
   expect(body.error.data.existingWorktreeId).toBe(onA);
 
   await app.worktree.fillNewWorktreeBranch("feat-x");
+  await app.worktree.openNewWorktreeSlugError();
   await app.worktree.newWorktreeOpenExisting.click();
   await expect.poll(() => app.currentPath()).toBe(`/worktree/${onA}`);
 });
