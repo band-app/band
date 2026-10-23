@@ -3,6 +3,9 @@ import { isHostAllowed } from "@band-app/shared/repo-hosts";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -11,9 +14,13 @@ import {
   DialogTitle,
   Input,
   Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Textarea,
 } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronRight, CircleAlert } from "lucide-react";
 import { useState } from "react";
 import { trpc } from "../../lib/trpc-client";
 import { useGroupFilter } from "../hooks/use-group-filter";
@@ -54,6 +61,7 @@ export function NewWorktreeDialog({
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
   const createWorktreeMutation = useCreateWorktree();
   const { repos } = useRepos();
   // A worktree made while the sidebar is filtered to a group joins that group.
@@ -83,7 +91,6 @@ export function NewWorktreeDialog({
     ? chosenHostId
     : (hostChoices[0]?.id ?? LOCAL_HOST_ID);
   const remote = hostId !== LOCAL_HOST_ID;
-  const hostRoots = hostChoices.find((h) => h.id === hostId)?.roots ?? [];
 
   const slug = slugifyBranchName(branch);
 
@@ -130,145 +137,209 @@ export function NewWorktreeDialog({
     onOpenChange(false);
   };
 
+  const hostLabel = hostChoices.find((h) => h.id === hostId)?.name ?? hostId;
+  const folderRequired = remote && !repoInfo?.remoteUrl;
+  const showFolder = remote;
+  const folderField = (
+    <div className="grid gap-1.5">
+      <Label htmlFor="host-repo-path">
+        {folderRequired ? `Repository folder on ${hostLabel}` : `Folder on ${hostLabel}`}
+      </Label>
+      <Input
+        id="host-repo-path"
+        data-testid="new-worktree-form__host-path"
+        value={hostRepoPath}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHostRepoPath(e.target.value)}
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+    </div>
+  );
+  const branchInvalid = !!slugError;
+  const serverError = createWorktreeMutation.error;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]" data-testid="new-worktree-form__dialog">
+      <DialogContent className="sm:max-w-lg" data-testid="new-worktree-form__dialog">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Add Worktree</DialogTitle>
-            <DialogDescription>Create a new worktree branch for {repoName}.</DialogDescription>
+            <DialogTitle>New worktree in {repoName}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Choose a branch name and an optional prompt for the coding agent.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 py-4">
-            {hostChoices.length > 1 && (
-              <>
-                <Label htmlFor="worktree-host">Worker</Label>
-                <select
-                  id="worktree-host"
-                  data-testid="new-worktree-form__host"
-                  value={hostId}
-                  onChange={(e) => setHostId(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                >
-                  {hostChoices.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.name}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-            {remote && (
-              <>
-                <Label htmlFor="host-repo-path">
-                  {repoInfo?.remoteUrl ? "Use another folder on " : "Repository path on "}
-                  {hostChoices.find((h) => h.id === hostId)?.name ?? hostId}
-                  {repoInfo?.remoteUrl ? " (optional)" : ""}
-                </Label>
-                <Input
-                  id="host-repo-path"
-                  data-testid="new-worktree-form__host-path"
-                  placeholder={
-                    repoInfo?.remoteUrl
-                      ? "Optional. The worker uses its folder for this repo or clones it."
-                      : "Needed the first time. Remembered after that."
-                  }
-                  value={hostRepoPath}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setHostRepoPath(e.target.value)
-                  }
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-                {hostRoots.length > 0 && (
+          <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 py-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="branch-name">Branch</Label>
+                <div className="relative">
+                  <Input
+                    id="branch-name"
+                    data-testid="new-worktree-form__branch"
+                    placeholder="feat/my-branch"
+                    value={branch}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    autoFocus
+                    aria-invalid={branchInvalid || undefined}
+                    className={branchInvalid ? "border-destructive pr-9" : undefined}
+                  />
+                  {slugError && (
+                    <ErrorHint
+                      testId="new-worktree-form__slug-error"
+                      label="Branch error"
+                      className="absolute right-1 top-1/2 -translate-y-1/2"
+                    >
+                      <p data-testid="new-worktree-form__slug-error-message">{slugError}</p>
+                      {existingId && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-2"
+                          data-testid="new-worktree-form__open-existing"
+                          onClick={() => {
+                            openWorktree(existingId);
+                            onOpenChange(false);
+                          }}
+                        >
+                          Open it
+                        </Button>
+                      )}
+                    </ErrorHint>
+                  )}
+                </div>
+                {branch && slug && slug !== branch && !slugError && (
                   <p
                     className="text-xs text-muted-foreground"
-                    data-testid="new-worktree-form__host-roots"
+                    data-testid="new-worktree-form__slug"
                   >
-                    Must be inside: {hostRoots.join(", ")}. Use an absolute path; ~ means the host's
-                    home directory.
+                    Creates <code>{slug}</code>
                   </p>
                 )}
-              </>
-            )}
-            <Label htmlFor="branch-name">Branch name</Label>
-            <Input
-              id="branch-name"
-              data-testid="new-worktree-form__branch"
-              placeholder="feature/my-branch"
-              value={branch}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              autoFocus
-            />
-            {branch && slug !== branch && !slugError && (
-              <p className="text-xs text-muted-foreground">
-                Will be created as: <code>{slug}</code>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="initial-prompt">Prompt</Label>
+                <Textarea
+                  id="initial-prompt"
+                  placeholder="What should the agent do? Leave empty to start without a task."
+                  value={prompt}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setPrompt(e.target.value)
+                  }
+                  rows={3}
+                />
+              </div>
+              {folderRequired && folderField}
+              <CollapsibleContent className="grid gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="base-branch">Base branch</Label>
+                  <Input
+                    id="base-branch"
+                    data-testid="new-worktree-form__base"
+                    placeholder={repoInfo?.defaultBranch ?? "main"}
+                    value={base}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBase(e.target.value)}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                </div>
+                {showFolder && !folderRequired && folderField}
+              </CollapsibleContent>
+            </div>
+            <DialogFooter className="items-center">
+              <div className="flex w-full min-w-0 items-center gap-2 sm:mr-auto sm:flex-1">
+                {hostChoices.length > 1 && (
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <Label htmlFor="worktree-host">Worker</Label>
+                    <select
+                      id="worktree-host"
+                      data-testid="new-worktree-form__host"
+                      value={hostId}
+                      onChange={(e) => setHostId(e.target.value)}
+                      className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 text-sm"
+                    >
+                      {hostChoices.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <CollapsibleTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1 text-muted-foreground"
+                    data-testid="new-worktree-form__more-options"
+                  >
+                    <ChevronRight
+                      className={`size-4 transition-transform ${moreOpen ? "rotate-90" : ""}`}
+                    />
+                    More options
+                  </Button>
+                </CollapsibleTrigger>
+              </div>
+
+              {serverError && (
+                <ErrorHint testId="new-worktree-form__error" label="Create error">
+                  <p data-testid="new-worktree-form__error-message">{serverError.message}</p>
+                </ErrorHint>
+              )}
+              <p role="alert" className="sr-only">
+                {serverError?.message}
               </p>
-            )}
-            {slugError && (
-              <p className="text-xs text-destructive" data-testid="new-worktree-form__slug-error">
-                {slugError}
-              </p>
-            )}
-            {createWorktreeMutation.error && (
-              <p
-                role="alert"
-                className="text-xs text-destructive"
-                data-testid="new-worktree-form__error"
-              >
-                {createWorktreeMutation.error.message}
-              </p>
-            )}
-            {existingId && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                data-testid="new-worktree-form__open-existing"
-                onClick={() => {
-                  openWorktree(existingId);
-                  onOpenChange(false);
-                }}
-              >
-                Open it
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+                Cancel
               </Button>
-            )}
-            <Label htmlFor="base-branch">Base branch (optional)</Label>
-            <Input
-              id="base-branch"
-              placeholder="main"
-              value={base}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBase(e.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-            <Label htmlFor="initial-prompt">Initial prompt (optional)</Label>
-            <Textarea
-              id="initial-prompt"
-              placeholder="Describe the task for the coding agent..."
-              value={prompt}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
-              rows={3}
-            />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              data-testid="new-worktree-form__submit"
-              disabled={!slug || !!slugError || createWorktreeMutation.isPending}
-            >
-              Create
-            </Button>
-          </DialogFooter>
+              <Button
+                type="submit"
+                data-testid="new-worktree-form__submit"
+                disabled={!slug || !!slugError || createWorktreeMutation.isPending}
+              >
+                Create
+              </Button>
+            </DialogFooter>
+          </Collapsible>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** An error icon that opens a popover with the message, so no error text sits inline. */
+function ErrorHint({
+  testId,
+  label,
+  className,
+  children,
+}: {
+  testId: string;
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          data-testid={testId}
+          className={`rounded-sm p-1 text-destructive outline-none focus-visible:ring-2 focus-visible:ring-ring ${className ?? ""}`}
+        >
+          <CircleAlert className="size-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="text-sm" aria-live="polite">
+        {children}
+      </PopoverContent>
+    </Popover>
   );
 }
