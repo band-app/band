@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@band-app/ui";
 import { ChevronDown, GitMerge } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** The merge button, its method menu and the inline confirm step. */
 export function MergeControl({ worktreeId, review }: { worktreeId: string; review: ReviewInfo }) {
@@ -18,6 +18,7 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
   const [confirming, setConfirming] = useState<MergeMethod | null>(null);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
   const status = mergeStatus(review);
   const merged = review.state === "merged";
 
@@ -34,6 +35,16 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
     }
   };
 
+  useEffect(() => {
+    if (!confirming) return;
+    confirmRef.current?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !merging) setConfirming(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [confirming, merging]);
+
   const tone = merged
     ? "bg-merged text-merged-foreground"
     : status.canMerge
@@ -42,86 +53,89 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex h-8 overflow-hidden rounded-md" title={status.hint || undefined}>
-        <button
-          type="button"
-          disabled={!status.canMerge || merging}
-          onClick={() => setConfirming("squash")}
-          data-testid="pr-checks__merge"
-          data-merge-state={review.mergeState}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-1.5 text-xs font-medium disabled:cursor-default",
-            tone,
-          )}
-        >
-          <GitMerge className="size-3.5" aria-hidden />
-          {status.label}
-        </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Merge options"
-              data-testid="pr-checks__merge-menu"
-              className={cn(
-                "flex w-8 items-center justify-center border-l border-scrim",
-                merged
-                  ? "bg-merged text-merged-foreground"
-                  : "bg-success text-success-foreground hover:bg-success/90",
-              )}
-            >
-              <ChevronDown className="size-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {MERGE_METHODS.map(({ method, label }) => (
-              <DropdownMenuItem
-                key={method}
-                disabled={!status.canMerge}
-                onSelect={() => setConfirming(method)}
-                data-testid={`pr-checks__merge-method--${method}`}
-              >
-                {label}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => host.openUrl(review.url)}>
-              Open on GitHub
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      {status.hint && !status.canMerge && (
-        <p className="text-[11px] text-muted-foreground" data-testid="pr-checks__merge-hint">
-          {status.hint}
-        </p>
-      )}
-      {confirming && (
+      {confirming ? (
         <div
-          className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs"
+          className="flex h-8 items-center overflow-hidden rounded-md border border-border bg-accent"
           data-testid="pr-checks__merge-confirm"
         >
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1 truncate whitespace-nowrap px-2.5 text-xs">
             {mergeMethodLabel(confirming)} #{review.number}?
           </span>
           <button
             type="button"
-            className="rounded px-2 py-0.5 text-muted-foreground hover:bg-accent"
+            className="px-2 text-xs text-muted-foreground hover:text-foreground disabled:cursor-default"
             onClick={() => setConfirming(null)}
             disabled={merging}
+            data-testid="pr-checks__merge-cancel"
           >
             Cancel
           </button>
           <button
+            ref={confirmRef}
             type="button"
-            className="rounded bg-success px-2 py-0.5 font-medium text-success-foreground hover:bg-success/90"
+            className="h-full bg-success px-3.5 text-xs font-semibold text-success-foreground hover:bg-success/90 disabled:cursor-default"
             onClick={() => void merge(confirming)}
             disabled={merging}
             data-testid="pr-checks__merge-confirm-button"
           >
-            {merging ? "Merging…" : "Merge"}
+            {merging ? "Merging…" : "Confirm"}
           </button>
         </div>
+      ) : (
+        <div className="flex h-8 overflow-hidden rounded-md" title={status.hint || undefined}>
+          <button
+            type="button"
+            disabled={!status.canMerge || merging}
+            onClick={() => setConfirming("squash")}
+            data-testid="pr-checks__merge"
+            data-merge-state={review.mergeState}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 text-xs font-medium disabled:cursor-default",
+              tone,
+            )}
+          >
+            <GitMerge className="size-3.5" aria-hidden />
+            {status.label}
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Merge options"
+                data-testid="pr-checks__merge-menu"
+                className={cn(
+                  "flex w-8 items-center justify-center border-l border-scrim",
+                  merged
+                    ? "bg-merged text-merged-foreground"
+                    : "bg-success text-success-foreground hover:bg-success/90",
+                )}
+              >
+                <ChevronDown className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {MERGE_METHODS.map(({ method, label }) => (
+                <DropdownMenuItem
+                  key={method}
+                  disabled={!status.canMerge}
+                  onSelect={() => setConfirming(method)}
+                  data-testid={`pr-checks__merge-method--${method}`}
+                >
+                  {label}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => host.openUrl(review.url)}>
+                Open on GitHub
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+      {status.hint && !status.canMerge && (
+        <p className="text-[11px] text-muted-foreground" data-testid="pr-checks__merge-hint">
+          {status.hint}
+        </p>
       )}
       {error && (
         <p className="text-[11px] text-danger" data-testid="pr-checks__merge-error">
