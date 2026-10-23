@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   statSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -78,6 +79,7 @@ import {
 } from "./src/server/services/_utils/html-visual-edit.ts";
 import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
+import { parseSharedPath } from "./src/server/services/_utils/shared-dir.ts";
 import {
   verifyWorktreePreviewGrant,
   WORKTREE_PREVIEW_PREFIX,
@@ -410,6 +412,15 @@ function getCachedScalarHtml(): string {
  * Serve a file from a subdirectory of a root path.
  * Prevents path traversal and streams the file with the correct MIME type.
  */
+/** Headers that keep an agent-written HTML or SVG file from running with the hub's origin. */
+function hostedFileHeaders(contentType: string): Record<string, string> {
+  const headers: Record<string, string> = { "X-Content-Type-Options": "nosniff" };
+  if (/^(text\/html|image\/svg\+xml)\b/.test(contentType)) {
+    headers["Content-Security-Policy"] = "sandbox allow-scripts";
+  }
+  return headers;
+}
+
 function serveStaticFile(
   res: ServerResponse,
   root: string,
@@ -424,12 +435,20 @@ function serveStaticFile(
   }
   const filePath = join(root, subdir, filename);
   try {
+    // A symlink an agent made must not lead the card out of its folder.
+    const dir = realpathSync(join(root, subdir));
+    if (!realpathSync(filePath).startsWith(dir + sep)) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
     const fileStat = statSync(filePath);
     const contentType = mimeTypeFromFilename(filename);
     res.writeHead(200, {
       "Content-Type": contentType,
       "Content-Length": fileStat.size.toString(),
       "Cache-Control": "private, max-age=86400",
+      ...hostedFileHeaders(contentType),
     });
     createReadStream(filePath).pipe(res);
   } catch {
@@ -448,18 +467,21 @@ async function serveHostedFile(
   kind: "uploads" | "shared",
   worktreeId: string,
   rawName: string,
+  chatId?: string,
 ): Promise<boolean> {
   if (hostRegistry.hostFor(worktreeId).id === hostRegistry.local.id) return false;
-  const file = await openHostedFile(kind, worktreeId, rawName);
+  const file = await openHostedFile(kind, worktreeId, rawName, chatId);
   if (!file) {
     res.writeHead(404);
     res.end("Not found");
     return true;
   }
+  const contentType = mimeTypeFromFilename(basename(decodeURIComponent(rawName)));
   res.writeHead(200, {
-    "Content-Type": mimeTypeFromFilename(basename(decodeURIComponent(rawName))),
+    "Content-Type": contentType,
     "Content-Length": file.size.toString(),
     "Cache-Control": "private, max-age=86400",
+    ...hostedFileHeaders(contentType),
   });
   pipeline(
     Readable.from(file.stream, { objectMode: false, highWaterMark: 64 * 1024 }),
@@ -1083,24 +1105,23 @@ async function main() {
       return;
     }
 
-    // Serve agent-shared files — URL: /api/shared/<worktreeId>/<filename>
+    // Serve agent-shared files — URL: /api/shared/<worktreeId>/<chatId>/<filename>,
+    // or the older /api/shared/<worktreeId>/<filename> that earlier chat cards hold.
     if (req.url?.startsWith("/api/shared/")) {
       // Drop the query string: an `<img>` against a remote hub carries `?token=`.
-      const rest = req.url.slice("/api/shared/".length).split("?")[0];
-      const slashIdx = rest.indexOf("/");
-      if (slashIdx === -1) {
+      const parsed = parseSharedPath(req.url.slice("/api/shared/".length));
+      if (!parsed) {
         res.writeHead(400);
         res.end("Bad request");
         return;
       }
-      const partition = basename(decodeURIComponent(rest.slice(0, slashIdx)));
-      if (!partition || partition === ".." || partition === ".") {
-        res.writeHead(400);
-        res.end("Bad request");
+      const encodedName = encodeURIComponent(parsed.name);
+      if (await serveHostedFile(res, "shared", parsed.worktreeId, encodedName, parsed.chatId))
         return;
-      }
-      if (await serveHostedFile(res, "shared", partition, rest.slice(slashIdx + 1))) return;
-      serveStaticFile(res, bandHome(), join("shared", partition), rest.slice(slashIdx + 1));
+      const subdir = parsed.chatId
+        ? join("shared", parsed.worktreeId, parsed.chatId)
+        : join("shared", parsed.worktreeId);
+      serveStaticFile(res, bandHome(), subdir, encodedName);
       return;
     }
 

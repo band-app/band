@@ -181,7 +181,7 @@ function FileScreen({
   );
 }
 
-function Notice({ title, text, testID }: { title?: string; text: string; testID: string }) {
+export function Notice({ title, text, testID }: { title?: string; text: string; testID: string }) {
   return (
     <View style={styles.center}>
       {title ? (
@@ -195,7 +195,7 @@ function Notice({ title, text, testID }: { title?: string; text: string; testID:
 }
 
 /** The file's lines with numbers, highlighted once the first paint is done. */
-function SourceView({
+export function SourceView({
   content,
   language,
   line,

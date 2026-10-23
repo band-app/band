@@ -1115,7 +1115,7 @@ export class AgentSessionService {
     ownerGrants.delete(chatId);
     const grant = await worktree.host.relay?.issue({ worktreeId: chat.worktreeId, chatId });
     if (grant) ownerGrants.set(chatId, grant);
-    const shared = await openSharedDir(chat.worktreeId).catch(() => null);
+    const shared = await openSharedDir(chat.worktreeId, chatId).catch(() => null);
     const login = await agentLoginService.resolve({
       agentType: def.type,
       repo: worktree.repo.name,

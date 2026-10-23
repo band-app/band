@@ -469,12 +469,13 @@ describe("uploads (S1)", () => {
   });
 
   it("shows a file the agent shares on the worker as a download in the chat", async () => {
-    const { events } = await submit(WT_A, "share-file please");
+    const { chatId, events } = await submit(WT_A, "share-file please");
     const file = events.find((e) => e.type === "file") as
       | { url: string; filename: string }
       | undefined;
     expect(file?.filename).toBe("report.txt");
-    expect(readFileSync(join(a.root, ".band-shared", WT_A, "report.txt"), "utf8")).toBe(
+    expect(file?.url).toBe(`/api/shared/${encodeURIComponent(WT_A)}/${chatId}/report.txt`);
+    expect(readFileSync(join(a.root, ".band-shared", WT_A, chatId, "report.txt"), "utf8")).toBe(
       "shared from the worker\n",
     );
     expect(existsSync(join(hubHome, ".band", "shared", WT_A))).toBe(false);
