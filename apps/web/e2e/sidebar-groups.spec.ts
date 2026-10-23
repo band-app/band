@@ -153,7 +153,7 @@ async function open(page: import("@playwright/test").Page, worktreeId = "app-mai
   return { sidebar: new SidebarGroupsPage(page), worktreePage };
 }
 
-test("the default view lists plain top-level rows, then each group's worktrees as an origin tree (S6, S12)", async ({
+test("the default view lists each group's worktrees as an origin tree, then plain top-level rows (S6, S12)", async ({
   page,
 }) => {
   const { sidebar } = await open(page);
