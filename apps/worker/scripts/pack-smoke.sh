@@ -16,6 +16,15 @@ cd "$tmp/install"
 npm init -y >/dev/null
 npm install --no-audit --no-fund "$tarball"
 
+# npm ignores pnpm-lock.yaml, so the pinned sdk must win over the newest release
+# that claude-agent-sdk's open peer range would otherwise pull in.
+sdk_version="$(node -p "require('./node_modules/@anthropic-ai/sdk/package.json').version")"
+if [ "$sdk_version" != "$(node -p "require('./node_modules/@band-app/worker/package.json').dependencies['@anthropic-ai/sdk']")" ]; then
+  echo "@anthropic-ai/sdk resolved to $sdk_version, not the pinned version" >&2
+  exit 1
+fi
+echo "@anthropic-ai/sdk $sdk_version"
+
 ./node_modules/.bin/band-worker --help | tee help.txt
 grep -q -- '--hub <url>' help.txt
 
