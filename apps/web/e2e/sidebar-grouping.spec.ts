@@ -395,7 +395,7 @@ test("S12: worktrees with no group are plain top-level rows below the groups, an
   await trpcMutate(server.url, TOKEN, "worktrees.setGroup", { worktreeId: "lib-y", groupId: null });
   await expect.poll(() => sidebar.sections()).toMatchObject({ __ungrouped: ["0:lib-y"] });
   await expect(sidebar.groupHeader("__ungrouped")).toHaveCount(0);
-  expect(await sidebar.leftEdge(sidebar.row("lib-y"))).toBe(
+  expect(await sidebar.leftEdge(sidebar.card("lib-y"))).toBe(
     await sidebar.leftEdge(sidebar.groupHeader(TEAM_A)),
   );
   // After the last group's last row, with nothing between them.
@@ -496,6 +496,7 @@ test("the group filter narrows the Pinned section to the selected group", async 
 test("S13: rows sit under the group name, the chevron is small and close, and Pinned is spaced like a group", async ({
   page,
 }, testInfo) => {
+  // The task brief's S1 (indent), S2 (chevron) and S6 (gap under Pinned).
   await pin("lib", "y");
   const { sidebar } = await open(page);
   await expect(sidebar.pinnedRow("lib-y")).toBeVisible();
