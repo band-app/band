@@ -38,6 +38,11 @@ let tmpHome: string;
 let hostId = "";
 let worker: WorkerHandle;
 let worktreeId = "";
+const extraIds: string[] = [];
+const extraBranches = [
+  "a",
+  "feat-with-a-much-longer-branch-name-that-needs-truncating-in-the-sidebar",
+];
 const scratch: string[] = [];
 
 const tmpDir = (prefix: string) => {
@@ -131,6 +136,15 @@ test.beforeAll(async () => {
     hostRepoPath: join(root, "app"),
   });
   worktreeId = `${REPO}-feat-x@${hostId}`;
+  for (const branch of extraBranches) {
+    await trpcMutateData(server.url, TOKEN, "worktrees.create", {
+      repo: REPO,
+      branch,
+      hostId,
+      hostRepoPath: join(root, "app"),
+    });
+    extraIds.push(`${REPO}-${branch}@${hostId}`);
+  }
   await expect.poll(async () => (await worktreeRow())?.path).toBeTruthy();
   const path = (await worktreeRow())?.path ?? "";
   // An uncommitted change to a tracked file and an untracked file.
@@ -204,4 +218,34 @@ test("a checkpoint is taken once, and the worktree is readable from it when the 
 
   await checkpoints.openExplorer();
   await checkpoints.expectFileContent("notes.md", "untracked notes");
+});
+
+test("the offline icon sits at the right edge of every row, also in a narrow sidebar (S1, S2)", async ({
+  page,
+}) => {
+  // Stop the worker here too, so the test does not rely on the one before it.
+  await worker.kill();
+  const ids = [worktreeId, ...extraIds];
+  const app = new WorktreePage(page, server.url, TOKEN);
+  const checkpoints = new CheckpointsPage(page);
+  await app.goto(worktreeId);
+  await app.waitForReady();
+  for (const id of ids) await expect(checkpoints.offlineIcon(id)).toBeVisible({ timeout: 30_000 });
+
+  const expectAligned = async () => {
+    const rights: number[] = [];
+    for (const id of ids) {
+      const g = await checkpoints.offlineIconGeometry(id);
+      expect(Math.abs(g.cardRight - g.paddingRight - g.iconRight)).toBeLessThanOrEqual(1);
+      rights.push(g.iconRight);
+    }
+    expect(Math.max(...rights) - Math.min(...rights)).toBeLessThanOrEqual(1);
+  };
+
+  await expectAligned();
+
+  // Narrow the sidebar until the long name has to truncate.
+  await app.dragSidebarEdgeBy(220 - (await app.sidebarWidth()));
+  await expect.poll(() => app.sidebarWidth()).toBeLessThan(260);
+  await expectAligned();
 });

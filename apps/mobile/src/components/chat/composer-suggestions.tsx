@@ -4,7 +4,7 @@ import {
   getMentionContext,
   type SlashCommandSkill,
 } from "@band-app/client/composer";
-import { File, SquareSlash } from "lucide-react-native";
+import { File } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useHubSession } from "../../lib/hub-session";
@@ -80,7 +80,6 @@ function SlashList({
           style={styles.row}
           testID={`suggestions__command-${skill.name}`}
         >
-          <Icon icon={SquareSlash} color={colors.mutedForeground} />
           <View style={styles.rowText}>
             <View style={styles.line}>
               <Text style={styles.name}>/{skill.name}</Text>

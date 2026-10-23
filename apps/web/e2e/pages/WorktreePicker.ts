@@ -41,7 +41,7 @@ export class WorktreePicker {
     return this.page.getByTestId(`worktree-picker__item--${worktreeId}`);
   }
 
-  /** The agent status mark of a row (absent while the agent is idle). Its `data-status` is the state. */
+  /** The agent status mark of a row (a faint dot with `data-status="idle"` while idle). Its `data-status` is the state. */
   agentStatus(worktreeId: string): Locator {
     return this.item(worktreeId).getByTestId("worktree-card__agent-status");
   }
@@ -50,11 +50,9 @@ export class WorktreePicker {
     return this.page.getByTestId(`worktree-picker__pin--${worktreeId}`);
   }
 
-  /** The house icon a row shows when its worktree is the repo's main
-   *  checkout (default-branch worktree). Feature-branch rows show the branch
-   *  glyph instead and have no such node. */
-  homeIcon(worktreeId: string): Locator {
-    return this.page.getByTestId(`worktree-picker__home-icon--${worktreeId}`);
+  /** The star a row shows when its worktree is the repo's root. */
+  rootStar(worktreeId: string): Locator {
+    return this.page.getByTestId(`worktree-picker__root-star--${worktreeId}`);
   }
 
   /** The search input inside the picker. cmdk's `Command.Input` renders an

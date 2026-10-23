@@ -6,6 +6,7 @@ import { trpc } from "../../../lib/trpc-client";
 import { useRepos } from "../../hooks/use-repos";
 import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
+import { RepoAvatar } from "../RepoAvatar";
 import { RepoLoginOverrides } from "./AgentLoginsSettings";
 import { RepoBrowserProfileSelect } from "./BrowserProfilesSettings";
 import { useIsAdmin } from "./DevicesSettings";
@@ -280,13 +281,22 @@ export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Pr
       <header className="space-y-1">
         {crumbs}
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold" data-testid="settings-repo__title">
-              {repo.name}
-            </h1>
-            <p className="break-all font-mono text-xs text-muted-foreground">
-              {repo.remoteUrl ?? "No remote"}
-            </p>
+          <div className="flex min-w-0 items-center gap-3">
+            <RepoAvatar
+              name={repo.name}
+              avatar={repo.avatar}
+              className="size-[38px]"
+              textClassName="text-lg"
+              testId="settings-repo__avatar"
+            />
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold" data-testid="settings-repo__title">
+                {repo.name}
+              </h1>
+              <p className="break-all font-mono text-xs text-muted-foreground">
+                {repo.remoteUrl ?? "No remote"}
+              </p>
+            </div>
           </div>
           <RemoveRepo repo={repo} onRemoved={onBack} />
         </div>

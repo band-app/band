@@ -76,6 +76,7 @@ function WorktreeScreen({ id, openChat }: { id: string; openChat?: string }) {
       <WorktreeChats
         worktreeId={id}
         repo={row.repoTitle}
+        avatar={row.repoAvatar?.src}
         branch={row.branch}
         pr={row.pr}
         openChat={openChat}
@@ -93,12 +94,15 @@ function WorktreeScreen({ id, openChat }: { id: string; openChat?: string }) {
 const WorktreeChats = memo(function WorktreeChats({
   worktreeId,
   repo,
+  avatar,
   branch,
   pr,
   openChat,
 }: {
   worktreeId: string;
   repo: string;
+  /** The hub path of the repo's GitHub avatar, if it has one. */
+  avatar?: string | null;
   branch: string;
   pr: WorktreeRow["pr"];
   /** A chat another screen started (the Fix agent); it becomes the shown tab once listed. */
@@ -250,6 +254,7 @@ const WorktreeChats = memo(function WorktreeChats({
       <View {...dismissOnTap}>
         <WorktreeHeader
           repo={repo}
+          avatar={avatar}
           branch={branch}
           tabs={tabs.tabs}
           active={tabs.active}
@@ -378,7 +383,7 @@ function NeighbourPage({
 }) {
   return (
     <View style={[local.neighbour, { width, height }]} testID={`worktree__neighbour-${direction}`}>
-      <StateIcon state={tab.shown} />
+      {tab.shown !== "idle" ? <StateIcon state={tab.shown} /> : null}
       {direction === "prev" ? <Icon icon={ChevronLeft} color={colors.mutedForeground} /> : null}
       {tab.kind === "chat" ? (
         <AgentIcon type={tab.agentType} size={16} color={colors.mutedForeground} />

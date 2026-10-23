@@ -50,9 +50,8 @@ const WS_BETA = toWorktreeId(REPO_BETA, "main", "local");
 const WS_GAMMA = toWorktreeId(REPO_GAMMA, "main", "local");
 
 // A feature-branch worktree on alpha (name !== defaultBranch), used to assert
-// the switcher shows the branch glyph — not the house icon — for non-root
-// worktrees.
-const ALPHA_FEATURE_BRANCH = "feat/switcher-home";
+// the switcher shows no star for non-root worktrees.
+const ALPHA_FEATURE_BRANCH = "feat/switcher-star";
 const WS_ALPHA_FEATURE = toWorktreeId(REPO_ALPHA, ALPHA_FEATURE_BRANCH, "local");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared layout (which
@@ -236,10 +235,8 @@ test.describe("Worktree picker — ordering is recency, not pinned", () => {
   });
 });
 
-test.describe("Worktree picker — root worktrees show a house icon", () => {
-  test("the main-branch worktree shows a house icon; a feature branch does not", async ({
-    page,
-  }) => {
+test.describe("Worktree picker — root worktrees show a star", () => {
+  test("the main-branch worktree shows a star; a feature branch does not", async ({ page }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
     const picker = new WorktreePicker(page);
 
@@ -250,14 +247,13 @@ test.describe("Worktree picker — root worktrees show a house icon", () => {
     await picker.waitVisible();
 
     // The default-branch worktree is the repo's main checkout — marked with
-    // a house icon, mirroring the repo-list root card. Assert it for two
+    // a star, mirroring the repo-list root card. Assert it for two
     // different repos so the marker is proven not to be repo-specific.
-    await expect(picker.homeIcon(WS_ALPHA)).toBeVisible();
-    await expect(picker.homeIcon(WS_BETA)).toBeVisible();
+    await expect(picker.rootStar(WS_ALPHA)).toBeVisible();
+    await expect(picker.rootStar(WS_BETA)).toBeVisible();
 
-    // The feature-branch worktree renders in the list but keeps the branch
-    // glyph — no house icon.
+    // The feature-branch worktree renders in the list but has no star.
     await expect(picker.item(WS_ALPHA_FEATURE)).toBeVisible();
-    await expect(picker.homeIcon(WS_ALPHA_FEATURE)).toHaveCount(0);
+    await expect(picker.rootStar(WS_ALPHA_FEATURE)).toHaveCount(0);
   });
 });

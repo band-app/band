@@ -1,9 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
-import { GitBranch } from "lucide-react";
-import type { ReactNode } from "react";
 import type { AgentInfo, AgentStatusType, TabAgentStatus } from "../types";
 
-/** A status that gets a mark. `idle` shows the fallback icon instead. */
+/** A status that gets a mark. `idle` is drawn only by `AgentStatusIndicator`. */
 export type ActiveAgentStatus = Exclude<AgentStatusType, "idle">;
 
 /** What each state is called for screen readers and what its tooltip says. */
@@ -49,7 +47,7 @@ export function AgentStateDot({ status, testId, withTitle }: DotProps) {
       return (
         <span
           {...common}
-          className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-status-working animate-status-pulse-slow"
+          className="inline-block size-2 shrink-0 rounded-full border-2 border-status-working animate-status-pulse-slow"
         />
       );
     case "question":
@@ -88,39 +86,48 @@ interface Props {
   agent?: AgentInfo;
   /** The worktree's chats and terminals with their own states, listed in the tooltip. */
   tabStatuses?: TabAgentStatus[];
-  isActive?: boolean;
-  // Icon shown when the agent is idle. Non-root cards fall back to the branch
-  // glyph (the default); the root card passes its house icon so the status dot
-  // occupies the same slot — replacing the identity icon rather than sitting
-  // beside it.
-  fallback?: ReactNode;
 }
 
-export function AgentStatusIndicator({ agent, tabStatuses, isActive, fallback }: Props) {
-  if (!agent || !isActiveAgentStatus(agent.status)) {
+const IDLE_LABEL = "No agent activity";
+
+/**
+ * The left slot of a worktree row: the agent's state mark, or a faint solid dot
+ * when there is no activity.
+ */
+export function AgentStatusIndicator({ agent, tabStatuses }: Props) {
+  const status: AgentStatusType = agent?.status ?? "idle";
+  const tabsText = describeTabStatuses(tabStatuses);
+  if (!isActiveAgentStatus(status)) {
+    // Idle rows are the common case in long lists, so they skip the Tooltip.
     return (
-      fallback ?? (
-        <GitBranch
-          className={`size-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+      <span
+        className="inline-flex shrink-0 items-center"
+        data-testid="worktree-card__agent-status"
+        data-status={status}
+      >
+        <span
+          role="img"
+          aria-label={IDLE_LABEL}
+          title={tabsText || IDLE_LABEL}
+          className="inline-block size-2 shrink-0 rounded-full bg-muted-foreground/40"
         />
-      )
+      </span>
     );
   }
-
-  const tabsText = describeTabStatuses(tabStatuses);
+  const tooltip = AGENT_STATE_INFO[status].tooltip;
   return (
     <Tooltip delayDuration={200}>
       <TooltipTrigger asChild>
         <span
           className="inline-flex shrink-0 items-center"
           data-testid="worktree-card__agent-status"
-          data-status={agent.status}
+          data-status={status}
         >
-          <AgentStateDot status={agent.status} />
+          <AgentStateDot status={status} />
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" data-testid="worktree-card__agent-status-tooltip">
-        {tabsText || AGENT_STATE_INFO[agent.status].tooltip}
+        {tabsText || tooltip}
       </TooltipContent>
     </Tooltip>
   );

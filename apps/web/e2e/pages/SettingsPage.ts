@@ -325,6 +325,8 @@ export class SettingsPage {
     await test.step(`Move group ${groupId} ${direction}`, async () => {
       await this.openGroupRowMenu(groupId);
       await this.page.getByTestId(`settings-groups__move-${direction}`).click();
+      // The menu keeps focus until its exit animation ends, and Escape would go to it first.
+      await expect(this.page.getByRole("menu")).toHaveCount(0);
     });
   }
 
@@ -371,6 +373,7 @@ export class SettingsPage {
         await this.page.getByTestId("group-delete-dialog__confirm").click();
       }
       await expect(dialog).toBeHidden();
+      await expect(this.page.getByRole("menu")).toHaveCount(0);
     });
   }
 
@@ -758,6 +761,26 @@ export class SettingsPage {
   /** The remote shown under a repo's name in the overview. */
   repoRowUrl(name: string): Locator {
     return this.repoRow(name).getByTestId("settings-repos__url");
+  }
+
+  /** A repo's avatar square in its overview row: the fallback initial, or the image once loaded. */
+  repoRowAvatar(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__avatar-fallback");
+  }
+
+  /** The GitHub owner's image in a repo's overview row. Absent for a repo without one. */
+  repoRowAvatarImage(name: string): Locator {
+    return this.repoRow(name).getByTestId("settings-repos__avatar");
+  }
+
+  /** The 38 px fallback avatar beside the name in the open repo page's header. */
+  repoPageAvatar(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__avatar-fallback");
+  }
+
+  /** The GitHub owner's image in the open repo page's header. */
+  repoPageAvatarImage(name: string): Locator {
+    return this.repoPage(name).getByTestId("settings-repo__avatar");
   }
 
   /** The "<workers> only" mark of a limited repo's overview row. Absent for an unlimited repo. */

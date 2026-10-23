@@ -386,39 +386,26 @@ function SortableRepo({
                 // Plain repo: agent-status dot when the agent is
                 // working / needs attention, otherwise a repo-sized
                 // (size-4) Folder icon. Inlined rather than routing
-                // through AgentStatusIndicator's fallback so the idle
-                // icon can match a git repo's folder size — using the
-                // indicator's size-3 fallback would make plain headers
-                // read as nested worktree cards (see #427 review).
+                // through AgentStatusIndicator's idle dot so the idle
+                // icon can match a git repo's folder size — the faint dot
+                // would make plain headers read as nested worktree cards
+                // (see #427 review).
                 plainAgent && isActiveAgentStatus(plainAgent.status) ? (
                   <AgentStatusIndicator
                     agent={plainAgent}
                     tabStatuses={statuses.get(plainWorktreeId)?.tabStatuses}
-                    isActive={plainIsActive}
                   />
                 ) : (
                   <Folder className="size-4 shrink-0 text-muted-foreground" />
                 )
               ) : (
                 // Git repo: the GitHub owner's avatar when `origin` is
-                // on GitHub, else the open/closed folder.
+                // on GitHub, else an initial on a coloured square.
                 <RepoAvatar
+                  name={repo.name}
                   avatar={repo.avatar}
                   className="size-4"
                   testId={`repo-list__repo-avatar--${repo.name}`}
-                  fallback={
-                    collapsed ? (
-                      <Folder
-                        data-testid={`repo-list__repo-folder--${repo.name}`}
-                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
-                      />
-                    ) : (
-                      <FolderOpen
-                        data-testid={`repo-list__repo-folder--${repo.name}`}
-                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
-                      />
-                    )
-                  }
                 />
               )}
               <Tooltip>
@@ -1372,9 +1359,9 @@ export function RepoList({ groupFilter }: RepoListProps) {
               ) : activeDragId ? (
                 <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
                   <RepoAvatar
+                    name={activeDragId}
                     avatar={repos.find((p) => p.name === activeDragId)?.avatar}
                     className="size-3.5"
-                    fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
                   />
                   <span className="text-[13px] font-semibold text-foreground">{activeDragId}</span>
                 </div>

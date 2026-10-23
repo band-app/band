@@ -1,4 +1,3 @@
-import { GitBranch, House } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 import type { ShownState } from "../lib/status-state";
 import { colors, tones } from "../theme";
@@ -14,21 +13,15 @@ export const SHOWN_LABEL: Record<ShownState, string> = {
 
 /**
  * The agent's state as the web sidebar draws it: a solid dot for working, done and failed, a ring
- * for monitoring, a "?" disc for a question, and the lucide branch icon (a house on the repo's
- * main worktree) when the agent is idle.
+ * for monitoring, a "?" disc for a question, and a faint solid dot when the agent is idle.
  */
-export function StateIcon({
-  state,
-  main = false,
-  testID,
-}: {
-  state: ShownState;
-  main?: boolean;
-  testID?: string;
-}) {
-  const Idle = main ? House : GitBranch;
+export function StateIcon({ state, testID }: { state: ShownState; testID?: string }) {
   return (
-    <View style={styles.box} accessibilityLabel={SHOWN_LABEL[state]} testID={testID}>
+    <View
+      style={styles.box}
+      accessibilityLabel={state === "idle" ? "No agent activity" : SHOWN_LABEL[state]}
+      testID={testID}
+    >
       {state === "working" ? (
         <View style={[styles.dot, { backgroundColor: tones.pending }]} />
       ) : state === "monitoring" ? (
@@ -42,7 +35,7 @@ export function StateIcon({
       ) : state === "failed" ? (
         <View style={[styles.dot, { backgroundColor: tones.failure }]} />
       ) : (
-        <Idle size={14} color={colors.mutedForeground} />
+        <View style={[styles.dot, styles.idle]} />
       )}
     </View>
   );
@@ -51,7 +44,8 @@ export function StateIcon({
 const styles = StyleSheet.create({
   box: { width: 20, height: 20, alignItems: "center", justifyContent: "center" },
   dot: { width: 9, height: 9, borderRadius: 5 },
-  ring: { backgroundColor: "transparent", borderWidth: 1.5 },
+  idle: { backgroundColor: colors.mutedForeground, opacity: 0.4 },
+  ring: { backgroundColor: "transparent", borderWidth: 2 },
   disc: { width: 14, height: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" },
   discText: { color: "#000", fontSize: 10, fontWeight: "800" },
 });

@@ -101,15 +101,39 @@ export class WorktreePage {
     return this.worktreeCard(worktreeId).getByTestId("worktree-card__deleting");
   }
 
-  /** The root (default-branch) worktree card's house icon — the identity
-   *  marker `AgentStatusIndicator` renders as its idle fallback for the root
-   *  card. `data-testid` set on the lucide `Home` glyph in `WorktreeCard`.
-   *  Scoped to the card so it never matches another repo's root. Present
-   *  only while the root agent is idle; a live status replaces it with the
-   *  status dot — mirroring how the branch glyph is replaced on non-root
-   *  cards. */
-  rootWorktreeHomeIcon(worktreeId: string): Locator {
-    return this.worktreeCard(worktreeId).getByTestId("worktree-card__home-icon");
+  /** The gray star after the root (default-branch) worktree's title. Scoped to the card. */
+  rootWorktreeStar(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).getByTestId("worktree-card__root-star");
+  }
+
+  /** The "Repository root" tooltip, shown after hovering a root star. */
+  rootStarTooltip(): Locator {
+    return this.page.getByTestId("worktree-card__root-star-tooltip");
+  }
+
+  /** The branch or house glyphs the left slot used to show when idle. Matches by lucide's
+   *  class names because the glyphs no longer carry a test id. Scoped to the card. */
+  legacyIdentityIcons(worktreeId: string): Locator {
+    return this.worktreeCard(worktreeId).locator(
+      "svg.lucide-git-branch, svg.lucide-house, svg.lucide-home",
+    );
+  }
+
+  /** A worktree card inside the Pinned section. */
+  pinnedWorktreeCard(worktreeId: string): Locator {
+    return this.page
+      .getByTestId("repo-list__pinned")
+      .getByTestId(`repo-list__worktree-card--${worktreeId}`);
+  }
+
+  /** The agent status mark of a card inside the Pinned section. */
+  pinnedAgentStatus(worktreeId: string): Locator {
+    return this.pinnedWorktreeCard(worktreeId).getByTestId("worktree-card__agent-status");
+  }
+
+  /** The root star of a card inside the Pinned section. */
+  pinnedRootStar(worktreeId: string): Locator {
+    return this.pinnedWorktreeCard(worktreeId).getByTestId("worktree-card__root-star");
   }
 
   /** The "uncommitted changes" mark of a worktree card's git status
@@ -119,8 +143,8 @@ export class WorktreePage {
   }
 
   /** The agent status dot inside a worktree card. `data-testid` set on the
-   *  dot `<span>` in `AgentStatusIndicator`, shown only when the agent status
-   *  is not idle. Its `data-status` is the state. Scoped to the card. */
+   *  mark `<span>` in `AgentStatusIndicator`, always shown (a faint dot
+   *  with `data-status="idle"` when there is no activity). Its `data-status` is the state. Scoped to the card. */
   agentStatusDot(worktreeId: string): Locator {
     return this.worktreeCard(worktreeId).getByTestId("worktree-card__agent-status");
   }
@@ -362,14 +386,44 @@ export class WorktreePage {
     return this.newWorktreeDialog.getByTestId("new-worktree-form__host-path");
   }
 
-  /** The roots of the chosen remote host, listed under the path field. */
-  get newWorktreeHostRoots(): Locator {
-    return this.newWorktreeDialog.getByTestId("new-worktree-form__host-roots");
+  /** The "More options" toggle: base branch and, for a remote worker, its folder. */
+  get newWorktreeMoreOptions(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__more-options");
   }
 
-  /** The error the dialog shows when creating the worktree is refused. */
-  get newWorktreeError(): Locator {
+  /** Opens "More options" when it is closed. */
+  async openNewWorktreeMoreOptions(): Promise<void> {
+    if ((await this.newWorktreeDialog.getByTestId("new-worktree-form__base").count()) === 0) {
+      await this.newWorktreeMoreOptions.click();
+    }
+    await expect(this.newWorktreeDialog.getByTestId("new-worktree-form__base")).toBeVisible();
+  }
+
+  /** The base branch field, inside "More options". */
+  get newWorktreeBaseInput(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__base");
+  }
+
+  /** The one muted line naming the branch a typed name will be created as. */
+  get newWorktreeSlugNote(): Locator {
+    return this.newWorktreeDialog.getByTestId("new-worktree-form__slug");
+  }
+
+  /** The error icon beside Create, shown when the hub refuses the create. */
+  get newWorktreeErrorIcon(): Locator {
     return this.newWorktreeDialog.getByTestId("new-worktree-form__error");
+  }
+
+  /** The hub's refusal message, read by opening the error popover beside Create. */
+  get newWorktreeError(): Locator {
+    return this.page.getByTestId("new-worktree-form__error-message");
+  }
+
+  /** Opens the popover beside Create and returns its message. */
+  async openNewWorktreeError(): Promise<Locator> {
+    await this.newWorktreeErrorIcon.click();
+    await expect(this.newWorktreeError).toBeVisible();
+    return this.newWorktreeError;
   }
 
   /** Opens the New Worktree dialog, picks a remote host and fills the path and branch, without submitting. */
@@ -384,29 +438,41 @@ export class WorktreePage {
       await this.addWorktreeMenuItem.click();
       await expect(this.newWorktreeDialog).toBeVisible();
       await this.newWorktreeHostSelect.selectOption(opts.hostId);
+      await this.openNewWorktreeMoreOptions();
       await this.newWorktreeHostPathInput.fill(opts.hostRepoPath);
-      await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
+      await this.newWorktreeBranchInput.fill(opts.branch);
     });
   }
 
   /** The branch name field of the open New Worktree dialog. */
   get newWorktreeBranchInput(): Locator {
-    return this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" });
+    return this.newWorktreeDialog.getByRole("textbox", { name: "Branch", exact: true });
   }
 
   /** Fills the branch name of the open New Worktree dialog. */
   async fillNewWorktreeBranch(branch: string): Promise<void> {
-    await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(branch);
+    await this.newWorktreeDialog.getByRole("textbox", { name: "Branch", exact: true }).fill(branch);
   }
 
-  /** The "<branch> is already on <host>" line under the branch name. */
+  /** The error icon at the end of the branch field. */
   get newWorktreeSlugError(): Locator {
     return this.newWorktreeDialog.getByTestId("new-worktree-form__slug-error");
   }
 
-  /** "Open it": opens the worktree that already holds the branch on another host. */
+  /** The "<branch> is already on <host>" message, in the branch error popover. */
+  get newWorktreeSlugErrorMessage(): Locator {
+    return this.page.getByTestId("new-worktree-form__slug-error-message");
+  }
+
+  /** Opens the branch error popover. */
+  async openNewWorktreeSlugError(): Promise<void> {
+    await this.newWorktreeSlugError.click();
+    await expect(this.newWorktreeSlugErrorMessage).toBeVisible();
+  }
+
+  /** "Open it", in the branch error popover: opens the worktree that already holds the branch. */
   get newWorktreeOpenExisting(): Locator {
-    return this.newWorktreeDialog.getByTestId("new-worktree-form__open-existing");
+    return this.page.getByTestId("new-worktree-form__open-existing");
   }
 
   /** The note on a card whose host the repo is no longer allowed on. */
@@ -416,7 +482,7 @@ export class WorktreePage {
 
   /** Clicks Create in the New Worktree dialog. */
   async submitNewWorktree(): Promise<void> {
-    await this.newWorktreeDialog.getByRole("button", { name: "Create" }).click();
+    await this.newWorktreeDialog.getByRole("button", { name: "Create", exact: true }).click();
   }
 
   /** Opens the New Worktree dialog from the repo's context menu, picks a host and creates the worktree. */
@@ -431,9 +497,10 @@ export class WorktreePage {
       await this.addWorktreeMenuItem.click();
       await expect(this.newWorktreeDialog).toBeVisible();
       await this.newWorktreeHostSelect.selectOption(opts.hostId);
+      await this.openNewWorktreeMoreOptions();
       await this.newWorktreeHostPathInput.fill(opts.hostRepoPath);
-      await this.newWorktreeDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
-      await this.newWorktreeDialog.getByRole("button", { name: "Create" }).click();
+      await this.newWorktreeBranchInput.fill(opts.branch);
+      await this.newWorktreeDialog.getByRole("button", { name: "Create", exact: true }).click();
       await expect(this.newWorktreeDialog).toBeHidden();
     });
   }
@@ -449,9 +516,9 @@ export class WorktreePage {
     return this.page.getByTestId(`repo-list__repo-avatar--${repoName}`);
   }
 
-  /** The folder icon a git repo header shows when it has no avatar. */
-  repoFolderIcon(repoName: string): Locator {
-    return this.page.getByTestId(`repo-list__repo-folder--${repoName}`);
+  /** The initial on a coloured square a git repo header shows when it has no avatar. */
+  repoFallbackAvatar(repoName: string): Locator {
+    return this.page.getByTestId(`repo-list__repo-avatar--${repoName}-fallback`);
   }
 
   /** Decoded width of a repo's avatar image; 0 when it did not decode. */
