@@ -1377,6 +1377,11 @@ export class ChatPanePage {
       .then((names) => names.map((n) => n.trim()));
   }
 
+  /** How many icons the slash dropdown rows draw. */
+  async slashCommandIconCount(): Promise<number> {
+    return this.slashCommandDropdown.locator("svg").count();
+  }
+
   /** Open the execution mode menu. */
   async openModeMenu(): Promise<void> {
     await test.step("Open the execution mode menu", async () => {
