@@ -542,6 +542,36 @@ test("S13: rows sit under the group name, the chevron is small and close, and Pi
   });
 });
 
+test("the expand chevron shows no hover background, still toggles, and shows keyboard focus", async ({
+  page,
+}, testInfo) => {
+  const { sidebar } = await open(page);
+  const toggle = sidebar.originToggle("app-parent");
+  await expect(toggle).toBeVisible();
+  const resting = await sidebar.originToggleBackground("app-parent");
+  expect(resting).toBe("rgba(0, 0, 0, 0)");
+
+  await toggle.hover();
+  expect(await sidebar.originToggleBackground("app-parent")).toBe(resting);
+  await testInfo.attach("chevron-hover.png", {
+    body: await sidebar.root.screenshot(),
+    contentType: "image/png",
+  });
+
+  await toggle.click();
+  await expect(sidebar.row("app-kid")).toHaveCount(0);
+  await toggle.click();
+  await expect(sidebar.row("app-kid")).toBeVisible();
+
+  await page.mouse.move(0, 0);
+  await toggle.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(toggle).toBeFocused();
+  const shadow = await toggle.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(shadow).not.toBe("none");
+});
+
 test("S11: a second device sees the new group order", async ({ page, browser }) => {
   const { sidebar } = await open(page);
   await sidebar.dragGroup(TEAM_B, TEAM_A, "top");
