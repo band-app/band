@@ -50,7 +50,12 @@ import {
   writeWorkerId,
 } from "./state.ts";
 import { createWorkerTerminalBackend } from "./terminals.ts";
-import { detectServiceManager, registerUpdateMethods, type ServiceManager } from "./update.ts";
+import {
+  detectServiceManager,
+  registerUpdateMethods,
+  type ServiceManager,
+  updateBlockedReason,
+} from "./update.ts";
 
 const log = createLogger("band-worker");
 
@@ -206,7 +211,11 @@ export class Worker {
         workerId,
         buildId: `band-worker@${WORKER_VERSION}`,
         version: WORKER_VERSION,
-        ...(serviceManager ? { serviceManager } : {}),
+        ...(serviceManager && !updateBlockedReason(serviceManager)
+          ? { serviceManager }
+          : serviceManager
+            ? { updateBlocked: updateBlockedReason(serviceManager) as string }
+            : {}),
         mode: config.ephemeral ? "ephemeral" : "attached",
         capabilities: [
           ...Object.entries(info.capabilities)

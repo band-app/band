@@ -5,6 +5,10 @@
  */
 
 import { execFile } from "node:child_process";
+import { chmodSync, existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { delimiter, dirname, join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { RpcError } from "@band-app/link";
 import { isStrictSemver } from "@band-app/shared/versions";
 import type { Registrar } from "./context.ts";
@@ -55,8 +59,60 @@ const defaultRunner: CommandRunner = (cmd, args, env) =>
     );
   });
 
+const PACKAGE_DIR = join("node_modules", "@band-app", "worker");
+
+/**
+ * The npm prefix this worker was installed into (`<prefix>/lib/node_modules/@band-app/worker`),
+ * or null when it runs from anywhere else (a checkout, the desktop app, the Docker image).
+ */
+export function installPrefix(
+  file: string = fileURLToPath(import.meta.url),
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  if (platform === "win32") return null;
+  const marker = `${sep}lib${sep}${PACKAGE_DIR}${sep}`;
+  const at = file.lastIndexOf(marker);
+  return at > 0 ? file.slice(0, at) : null;
+}
+
+/** Why this worker cannot update itself with npm, or null when it can. */
+export function updateBlockedReason(
+  manager: ServiceManager | null,
+  prefix: string | null = installPrefix(),
+): string | null {
+  if (!manager) {
+    return "this worker does not run under launchd or a systemd user unit, so it cannot restart itself";
+  }
+  if (!prefix) {
+    return "this worker does not run from an npm global install, so npm cannot update it";
+  }
+  return null;
+}
+
+/** node-pty's prebuilt spawn-helper must be executable; npm 11 skips the install script that sets it. */
+function fixSpawnHelper(prefix: string): void {
+  try {
+    const pkg = join(prefix, "lib", PACKAGE_DIR, "package.json");
+    const prebuilds = join(
+      dirname(createRequire(pkg).resolve("node-pty/package.json")),
+      "prebuilds",
+    );
+    if (!existsSync(prebuilds)) return;
+    for (const dir of readdirSync(prebuilds)) {
+      const helper = join(prebuilds, dir, "spawn-helper");
+      if (existsSync(helper)) chmodSync(helper, 0o755);
+    }
+  } catch {
+    // node-pty is not resolvable from the install; nothing to fix.
+  }
+}
+
 export interface UpdateDeps {
   manager: ServiceManager | null;
+  /** The npm prefix the worker lives in. Defaults to the one derived from where it runs. */
+  prefix?: string | null;
+  /** The node that runs the worker, whose directory holds the npm to use. */
+  execPath?: string;
   run?: CommandRunner;
   env?: NodeJS.ProcessEnv;
   uid?: number;
@@ -94,19 +150,28 @@ export async function updateWorker(version: unknown, deps: UpdateDeps): Promise<
   if (!isStrictSemver(version)) {
     throw new RpcError(RPC_INVALID_PARAMS, "version must be MAJOR.MINOR.PATCH");
   }
-  if (!deps.manager) {
-    throw new RpcError(
-      RPC_UPDATE_FAILED,
-      "this worker does not run under launchd or a systemd user unit, so it cannot restart itself",
-    );
-  }
+  const prefix = deps.prefix === undefined ? installPrefix() : deps.prefix;
+  const blocked = updateBlockedReason(deps.manager, prefix);
+  if (blocked || !deps.manager || !prefix) throw new RpcError(RPC_UPDATE_FAILED, blocked ?? "");
   const env = deps.env ?? process.env;
   const run = deps.run ?? defaultRunner;
+  // A service manager's PATH has no node or npm. The npm beside the running node is the one that
+  // matches this install, and its `#!/usr/bin/env node` line needs that node on PATH.
+  const nodeDir = dirname(deps.execPath ?? process.execPath);
+  const beside = join(nodeDir, "npm");
+  const npm = env.BAND_NPM_BIN ?? (existsSync(beside) ? beside : "npm");
+  const installEnv = { ...env, PATH: [nodeDir, env.PATH].filter(Boolean).join(delimiter) };
   const result = await run(
-    env.BAND_NPM_BIN ?? "npm",
-    ["i", "-g", `@band-app/worker@${version}`],
-    env,
+    npm,
+    ["i", "-g", "--prefix", prefix, `@band-app/worker@${version}`],
+    installEnv,
   );
+  if (result.code !== 0 && /ENOENT/.test(result.stderr) && !env.BAND_NPM_BIN) {
+    throw new RpcError(
+      RPC_UPDATE_FAILED,
+      `npm not found in ${nodeDir} or on PATH, set BAND_NPM_BIN in the service file`,
+    );
+  }
   if (result.code !== 0) {
     deps.log("error", { version, code: result.code }, "the worker update failed to install");
     throw new RpcError(
@@ -114,6 +179,7 @@ export async function updateWorker(version: unknown, deps: UpdateDeps): Promise<
       `npm install failed (exit ${result.code}): ${tail(result.stderr)}`,
     );
   }
+  fixSpawnHelper(prefix);
   deps.log("info", { version, manager: deps.manager }, "installed the new worker, restarting");
   const [cmd, args] = restartCommand(deps.manager, env, deps.uid ?? process.getuid?.() ?? 0);
   const timer = setTimeout(() => {

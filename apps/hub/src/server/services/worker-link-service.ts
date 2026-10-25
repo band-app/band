@@ -282,6 +282,7 @@ export class WorkerLinkService {
       tools: info?.tools ?? hello.tools ?? {},
       mode: hello.mode,
       ...(hello.serviceManager ? { serviceManager: hello.serviceManager } : {}),
+      ...(hello.updateBlocked ? { updateBlocked: hello.updateBlocked } : {}),
     };
     // A worker from before version reporting has neither field, and its build id is all there is.
     const version = workerVersionOf(hello);
