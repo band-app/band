@@ -204,13 +204,16 @@ describe("browser over the link", {
   });
 
   it("keeps cookies across a close and reopen of the same worktree", async () => {
-    await openBrowser(w.session, "wt-b");
-    assert.equal(await pageTitle(w.session, "wt-b", `${origin}/cookie`), "cookie set");
+    const first = await openBrowser(w.session, "wt-b");
+    assert.equal(
+      await pageTitle(w.session, "wt-b", `${origin}/cookie`, first.profileDir),
+      "cookie set",
+    );
     await call(w.session, "browser.close", { worktreeId: "wt-b" });
     const again = await openBrowser(w.session, "wt-b");
     assert.ok(cookieHits >= 1);
     assert.equal(
-      await pageTitle(w.session, "wt-b", `${origin}/echo-cookie`),
+      await pageTitle(w.session, "wt-b", `${origin}/echo-cookie`, again.profileDir),
       "cookie:band=persisted",
     );
     assert.ok(again.profileDir.endsWith("wt-b"));
@@ -218,7 +221,10 @@ describe("browser over the link", {
 
   it("gives another worktree its own profile", async () => {
     const other = await openBrowser(w.session, "wt-a");
-    assert.equal(await pageTitle(w.session, "wt-a", `${origin}/echo-cookie`), "cookie:none");
+    assert.equal(
+      await pageTitle(w.session, "wt-a", `${origin}/echo-cookie`, other.profileDir),
+      "cookie:none",
+    );
     assert.ok(other.profileDir.endsWith("wt-a"));
   });
 

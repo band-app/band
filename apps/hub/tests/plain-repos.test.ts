@@ -891,17 +891,25 @@ describe("tRPC — plain repos (self-heal keeps the group)", () => {
       groupId: group.id,
     });
     expect(set.status).toBe(200);
-
-    rmSync(join(repoPath, ".git"), { recursive: true, force: true });
-
-    const data = await trpcData<{
+    type ReposList = {
       repos: Array<{
         name: string;
         kind: "git" | "plain";
         worktrees: Array<{ worktreeId: string; groupId?: string | null }>;
       }>;
-    }>(await trpcQuery(server.url, "repos.list"));
-    const repo = data.repos.find((p) => p.name === "grouped")!;
+    };
+    const listGrouped = async () =>
+      (await trpcData<ReposList>(await trpcQuery(server.url, "repos.list"))).repos.find(
+        (p) => p.name === "grouped",
+      )!;
+
+    const before = await listGrouped();
+    expect(before.kind).toBe("git");
+    expect(before.worktrees).toEqual([expect.objectContaining({ worktreeId, groupId: group.id })]);
+
+    rmSync(join(repoPath, ".git"), { recursive: true, force: true });
+
+    const repo = await listGrouped();
     expect(repo.kind).toBe("plain");
     expect(repo.worktrees).toEqual([expect.objectContaining({ worktreeId, groupId: group.id })]);
   });
