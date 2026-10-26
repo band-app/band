@@ -192,7 +192,21 @@ export function reconcileKindForRepo(repo: RepoState): boolean {
   // with no `.git` to reach back to) and the flattened plain UI would
   // render the wrong branch label.
   if (detectedKind === "plain") {
-    repo.worktrees = [{ name: "main", branch: "main", path: repo.path, pinned: false }];
+    // Keep the group and origin of the row named "main", as `saveAll` does when it persists this.
+    // `repos.list` returns the list it reconciled before the sync saves it.
+    const main = repo.worktrees.find(
+      (wt) => wt.name === "main" && (wt.hostId ?? "local") === "local",
+    );
+    repo.worktrees = [
+      {
+        name: "main",
+        branch: "main",
+        path: repo.path,
+        pinned: false,
+        ...(main?.origin ? { origin: main.origin } : {}),
+        ...(main?.groupId ? { groupId: main.groupId } : {}),
+      },
+    ];
   }
   return true;
 }

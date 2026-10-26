@@ -847,3 +847,62 @@ describe("tRPC — plain repos (sync-state worktree reconcile skips)", () => {
     expect(proj.worktrees[0].pinned).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A worktree keeps its group when its folder stops being a git repo
+// ---------------------------------------------------------------------------
+//
+// `repos.list` re-detects kind in memory before any sync saves it, and the
+// dashboard keeps that answer until its next refetch. The rebuilt `main`
+// row must keep the group, or the worktree drops out of its group's section.
+
+describe("tRPC — plain repos (self-heal keeps the group)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let repoPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    repoPath = join(tmpHome, "grouped");
+    mkdirSync(repoPath, { recursive: true });
+    git(repoPath, ["init", "-b", "main"]);
+    writeFileSync(join(repoPath, "README.md"), "# grouped\n");
+    git(repoPath, ["add", "."]);
+    git(repoPath, ["commit", "-m", "initial"]);
+
+    seedState(tmpHome, { repos: [] });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    removeTmpHome(tmpHome);
+  });
+
+  it("repos.list keeps the main worktree's group right after .git is removed", async () => {
+    expect((await trpcMutate(server.url, "repos.add", { path: repoPath })).status).toBe(200);
+    const { group } = await trpcData<{ group: { id: string } }>(
+      await trpcMutate(server.url, "groups.create", { name: "Work" }),
+    );
+    const worktreeId = toWorktreeId("grouped", "main", "local");
+    const set = await trpcMutate(server.url, "worktrees.setGroup", {
+      worktreeId,
+      groupId: group.id,
+    });
+    expect(set.status).toBe(200);
+
+    rmSync(join(repoPath, ".git"), { recursive: true, force: true });
+
+    const data = await trpcData<{
+      repos: Array<{
+        name: string;
+        kind: "git" | "plain";
+        worktrees: Array<{ worktreeId: string; groupId?: string | null }>;
+      }>;
+    }>(await trpcQuery(server.url, "repos.list"));
+    const repo = data.repos.find((p) => p.name === "grouped")!;
+    expect(repo.kind).toBe("plain");
+    expect(repo.worktrees).toEqual([expect.objectContaining({ worktreeId, groupId: group.id })]);
+  });
+});
