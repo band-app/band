@@ -14,7 +14,10 @@
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
-          "NSAllowsLocalNetworking": true
+          "NSAllowsLocalNetworking": true,
+          "NSExceptionDomains": {
+            "100.64.0.0/10": { "NSExceptionAllowsInsecureHTTPLoads": true }
+          }
         },
         "NSLocalNetworkUsageDescription": "Band connects to the hub on your local network."
       },

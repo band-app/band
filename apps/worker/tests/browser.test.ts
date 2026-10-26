@@ -14,6 +14,10 @@ const chromium = findChromium();
 // on its first start is killed after 20 s and started again, which can take 44 s in all. The link's default
 // 30 s would end the call mid-retry and hide the browser's own error.
 const OPEN_TIMEOUT_MS = 60_000;
+// The first page of a fresh Chromium starts its renderer and GPU processes, which a loaded runner can
+// take many seconds for, so the title is polled until a deadline, not a fixed number of times. A CI run
+// of #1009 saw the poll outlast 100 rounds of 50 ms while every later page loaded in under a second.
+const TITLE_TIMEOUT_MS = 30_000;
 
 function openBrowser(session: ServerSession, worktreeId: string) {
   return call<BrowserInfo>(session, "browser.open", { worktreeId }, { timeoutMs: OPEN_TIMEOUT_MS });
@@ -68,16 +72,23 @@ async function pageTitle(session: ServerSession, worktreeId: string, url: string
       flatten: true,
     })) as { sessionId: string };
     // The page may still be loading when the target is created.
-    for (let i = 0; i < 100; i++) {
+    const deadline = Date.now() + TITLE_TIMEOUT_MS;
+    let last = { readyState: "", title: "" };
+    while (Date.now() < deadline) {
       const res = (await cdp.send(
         "Runtime.evaluate",
-        { expression: "document.readyState === 'complete' ? document.title : ''" },
+        {
+          expression: "JSON.stringify({ readyState: document.readyState, title: document.title })",
+        },
         sessionId,
       )) as { result: { value: string } };
-      if (res.result.value) return res.result.value;
+      last = JSON.parse(res.result.value) as typeof last;
+      if (last.readyState === "complete" && last.title) return last.title;
       await new Promise((r) => setTimeout(r, 50));
     }
-    throw new Error("the page never got a title");
+    throw new Error(
+      `the page never got a title within ${TITLE_TIMEOUT_MS} ms (readyState ${JSON.stringify(last.readyState)}, title ${JSON.stringify(last.title)})`,
+    );
   } finally {
     cdp.close();
   }

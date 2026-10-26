@@ -477,6 +477,13 @@ test("Set parent and Remove parent in the card menu nest and un-nest a worktree,
   await expect.poll(async () => (await placements())["lib-y"]?.origin).toBe("lib-main");
   await sidebar.removeParent(sidebar.row("lib-y"));
   await expect.poll(async () => (await placements())["lib-y"]?.origin).toBeNull();
+  // The list must show the un-nested row before the keys step through it.
+  await expect
+    .poll(() => sidebar.sections())
+    .toMatchObject({
+      [TEAM_A]: ["0:app-main", "1:app-parent", "2:app-kid", "0:lib-x", "0:lib-y"],
+      [TEAM_B]: ["0:lib-main"],
+    });
 
   // Arrow keys step through the rows in display order and Enter opens the highlighted one.
   await sidebar.row("app-main").click();
