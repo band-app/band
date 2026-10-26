@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { collectEvents, STUB_AGENT_PATH, TEST_TOKEN } from "./helpers/acp-chat";
+import { openStream, STUB_AGENT_PATH, TEST_TOKEN } from "./helpers/acp-chat";
 import { seedSettings } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -269,17 +269,20 @@ describe("per-worker agent command", () => {
 
     const chatId = "cmd-chat-missing";
     await m("chats.create", { worktreeId: a.worktreeId, id: chatId });
+    // The launch error is a transient event that is not replayed, so the
+    // stream must be open before the message is sent.
+    const stream = await openStream(server.url, chatId, {
+      lastEventId: 0,
+      until: (e) => JSON.stringify(e).includes("no-such-bin"),
+      timeoutMs: 15_000,
+    });
     const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
       body: JSON.stringify({ worktreeId: a.worktreeId, text: "hello" }),
     });
     expect(res.ok).toBe(true);
-    const events = await collectEvents(server.url, chatId, {
-      lastEventId: 0,
-      until: (e) => JSON.stringify(e).includes("no-such-bin"),
-      timeoutMs: 15_000,
-    });
+    const events = await stream.events;
     const text = JSON.stringify(events.at(-1));
     expect(text).toContain("no-such-bin");
     expect(text).toContain(a.name);
