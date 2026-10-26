@@ -1282,7 +1282,9 @@ export class WorktreePage {
       throw new Error(`pressGroupShortcut: index must be 0..9, got ${index}`);
     }
     await test.step(`Press Meta+${index} (group shortcut)`, async () => {
-      await this.groupFilterTrigger().waitFor({ state: "visible" });
+      // The trigger shows once repos load, but the shortcut reads the groups
+      // query, which can still be in flight; a press before it lands is lost.
+      await expect(this.groupFilterTrigger()).toHaveAttribute("data-groups-loaded", "true");
       await this.page.keyboard.press(`Meta+${index}`);
     });
   }

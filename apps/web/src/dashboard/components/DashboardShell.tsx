@@ -431,6 +431,7 @@ export function DashboardShell({
                     size="sm"
                     variant="ghost"
                     data-testid="dashboard__group-filter-trigger"
+                    data-groups-loaded={groupsLoaded}
                     className={`min-w-6 shrink max-w-[5rem] text-[11px] h-5 px-1.5 gap-1 ${groupFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
                   >
                     {activeGroup ? (

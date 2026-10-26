@@ -278,7 +278,7 @@ describe("per-worker agent command", () => {
     const events = await collectEvents(server.url, chatId, {
       lastEventId: 0,
       until: (e) => JSON.stringify(e).includes("no-such-bin"),
-      timeoutMs: 30_000,
+      timeoutMs: 15_000,
     });
     const text = JSON.stringify(events.at(-1));
     expect(text).toContain("no-such-bin");
