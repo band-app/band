@@ -25,6 +25,8 @@ export interface HostVersionView {
   updateTarget: string | null;
   /** True when the Update button works: the worker is online, supervised and not current. */
   canUpdate: boolean;
+  /** Why a supervised worker cannot be updated with one click, or null. */
+  updateBlockedReason: string | null;
   /** The command to run on the worker by hand, shown when the button cannot be. */
   manualCommand: string | null;
 }
@@ -72,6 +74,7 @@ export function describeHostVersion(
       serviceManager: null,
       updateTarget: null,
       canUpdate: false,
+      updateBlockedReason: null,
       manualCommand: null,
     };
   }
@@ -91,6 +94,8 @@ export function describeHostVersion(
     serviceManager,
     updateTarget,
     canUpdate: host.status === "online" && serviceManager !== null && updateTarget !== null,
+    updateBlockedReason:
+      typeof host.info?.updateBlocked === "string" ? host.info.updateBlocked : null,
     manualCommand: updateTarget ? workerUpdateCommand(updateTarget) : null,
   };
 }

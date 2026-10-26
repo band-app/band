@@ -39,7 +39,8 @@ function isPrivateIPv4(hostname: string): boolean {
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
     (a === 169 && b === 254) ||
-    // Carrier-grade NAT space, which Tailscale hands out.
+    // Carrier-grade NAT space, which Tailscale hands out. iOS does not count it as local, so
+    // app.json lists it as an ATS exception (`NSExceptionDomains`).
     (a === 100 && b >= 64 && b <= 127)
   );
 }
@@ -52,7 +53,8 @@ function isPrivateIPv6(hostname: string): boolean {
 /**
  * Whether plain http is allowed for this host. iOS App Transport Security lets the app load
  * http only from local addresses (`NSAllowsLocalNetworking`): loopback, private LAN ranges and
- * `.local` names. Every other hub needs https, as in the desktop app.
+ * `.local` names, plus the Tailscale range app.json excepts by hand. Every other hub needs
+ * https, as in the desktop app.
  */
 export function allowsPlainHttp(hostname: string): boolean {
   const h = hostname.replace(/^\[|\]$/g, "");

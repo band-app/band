@@ -108,10 +108,17 @@ export class SidebarGroupingPage {
     await target.click({ button: "right" });
   }
 
+  /**
+   * Picks Remove parent and waits for the menu to leave the DOM. The menu plays an exit animation
+   * before it unmounts, and on unmount Radix puts focus back on the row that opened it. A key press
+   * sent before that lands on the row again, so a caller that moves on at once can see its Enter
+   * open this row instead of the highlighted one.
+   */
   async removeParent(target: Locator): Promise<void> {
     await test.step("Remove the parent from the context menu", async () => {
       await this.openMenu(target);
       await this.removeParentItem.click();
+      await expect(this.removeParentItem).toHaveCount(0);
     });
   }
 

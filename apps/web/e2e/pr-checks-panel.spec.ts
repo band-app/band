@@ -789,6 +789,31 @@ test("a reviewer's avatar that fails to load falls back to the initial letter", 
   await expect(panel.reviewerAvatarFallback("ann")).toHaveCount(0);
 });
 
+test("a failed avatar URL is not requested again after switching worktrees and back", async ({
+  page,
+}) => {
+  const missingPath = new URL(stub.avatarUrl("missing")).pathname;
+  const requested: string[] = [];
+  page.on("request", (request) => {
+    requested.push(new URL(request.url()).pathname);
+  });
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, AVATAR_BRANCH, "local"));
+  await expect(panel.reviewerAvatarFallback("chad")).toHaveText("c");
+  expect(requested.filter((path) => path === missingPath).length).toBeGreaterThan(0);
+  const before = requested.length;
+
+  await panel.switchTo(toWorktreeId(REPO, PR_BRANCH, "local"));
+  await panel.switchTo(toWorktreeId(REPO, AVATAR_BRANCH, "local"));
+
+  await expect(panel.reviewerAvatarFallback("chad")).toHaveText("c");
+  await expect(panel.reviewerAvatarImage("chad")).toHaveCount(0);
+  // The loadable avatar is still an image.
+  await expect(panel.reviewerAvatarImage("ann")).toBeVisible();
+  // Only the failed URL is remembered: the panel's own tab came back, no request for it.
+  expect(requested.slice(before).filter((path) => path === missingPath)).toHaveLength(0);
+});
+
 test("a comment author's avatar that fails to load falls back to the initial letter", async ({
   page,
 }) => {

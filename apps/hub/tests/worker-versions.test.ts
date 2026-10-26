@@ -36,6 +36,7 @@ interface HostView {
   serviceManager: "launchd" | "systemd" | null;
   updateTarget: string | null;
   canUpdate: boolean;
+  updateBlockedReason: string | null;
   manualCommand: string | null;
   update: {
     target: string;
@@ -81,7 +82,12 @@ interface Fake {
 
 /** A stand-in worker that says hello with the given version fields. */
 async function fakeWorker(
-  hello: { version?: string; buildId?: string; serviceManager?: "launchd" | "systemd" },
+  hello: {
+    version?: string;
+    buildId?: string;
+    serviceManager?: "launchd" | "systemd";
+    updateBlocked?: string;
+  },
   existing?: { hostId: string; sessionToken: string },
 ): Promise<Fake> {
   const issued = existing ?? (await issue(`fake ${hello.version ?? hello.buildId}`));
@@ -97,6 +103,7 @@ async function fakeWorker(
       buildId: hello.buildId ?? `band-worker@${hello.version}`,
       ...(hello.version ? { version: hello.version } : {}),
       ...(hello.serviceManager ? { serviceManager: hello.serviceManager } : {}),
+      ...(hello.updateBlocked ? { updateBlocked: hello.updateBlocked } : {}),
       mode: "attached",
       capabilities: [],
       labels: {},
@@ -146,6 +153,17 @@ describe("what a host shows (S1, S6)", () => {
       serviceManager: "systemd",
       updateTarget: HUB_VERSION,
       canUpdate: true,
+    });
+  });
+
+  it("reports why a supervised worker outside an npm global install cannot update", async () => {
+    const reason = "this worker does not run from an npm global install, so npm cannot update it";
+    const w = await fakeWorker({ version: "0.49.0", updateBlocked: reason });
+    await connect(w);
+    expect(await host(w.hostId)).toMatchObject({
+      canUpdate: false,
+      updateBlockedReason: reason,
+      updateTarget: HUB_VERSION,
     });
   });
 

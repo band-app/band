@@ -218,6 +218,7 @@ export class WorkerRelayService {
   /** A short JSON answer, sent the same way as any other. */
   private answer(session: ServerSession, status: number, body: unknown): RelayHttpReply {
     const ch = session.openChannel("relay.body");
+    ch.discardIncoming();
     ch.send(Buffer.from(JSON.stringify(body)))
       .then(() => ch.end())
       .catch(() => undefined);

@@ -28,16 +28,22 @@ const STATE_ICON: Record<ReviewerState, ReactElement> = {
   dismissed: <MinusCircle className="size-3.5" aria-hidden />,
 };
 
+/** URLs that failed to load in this page session, so a remount shows the initial without a request. */
+const failedAvatarUrls = new Set<string>();
+
 /** The image, or the initial letter when there is no URL or it fails to load. */
 export function Avatar({ login, url }: { login: string; url: string | null }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  return url && failedUrl !== url ? (
+  const [, setFailureCount] = useState(0);
+  return url && !failedAvatarUrls.has(url) ? (
     <img
       src={url}
       alt=""
       loading="lazy"
       referrerPolicy="no-referrer"
-      onError={() => setFailedUrl(url)}
+      onError={() => {
+        failedAvatarUrls.add(url);
+        setFailureCount((n) => n + 1);
+      }}
       className="size-5 shrink-0 rounded-full"
       data-testid="pr-avatar__image"
     />

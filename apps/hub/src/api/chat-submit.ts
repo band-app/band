@@ -67,8 +67,9 @@ export async function handleChatSubmit(
 
   const { text, sessionId, mode, model, codingAgentId, files } = body;
   let { worktreeId } = body;
-  if (!worktreeId || !text?.trim()) {
-    sendJson(res, 400, { error: "worktreeId and text are required" });
+  const hasFiles = Array.isArray(files) && files.length > 0;
+  if (!worktreeId || (!text?.trim() && !hasFiles)) {
+    sendJson(res, 400, { error: "worktreeId and text or files are required" });
     return;
   }
   if (sessionId !== undefined && !SESSION_ID_PATTERN.test(sessionId)) {
@@ -124,7 +125,7 @@ export async function handleChatSubmit(
     const result = taskService.submitOrQueueTask({
       worktreeId,
       chatId,
-      prompt: text,
+      prompt: text ?? "",
       sessionId,
       attachments,
       mode,

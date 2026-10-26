@@ -57,6 +57,8 @@ export class Channel implements AsyncIterable<Buffer> {
   private reportedBytes = 0;
   private remoteEnded = false;
   private readWaiter: (() => void) | null = null;
+  /** The reader left its loop early. Later data is consumed on arrival, so the channel can finish. */
+  private discarding = false;
 
   private failure: Error | null = null;
   private readonly host: ChannelHost;
@@ -148,6 +150,17 @@ export class Channel implements AsyncIterable<Buffer> {
 
   // ---- session hooks -----------------------------------------------------
 
+  /**
+   * For a channel nobody on this side reads any more: one this side only writes to, or a reader
+   * that left its loop for good. The peer's frames, including its end marker, are consumed on
+   * arrival. Without that the end is never acknowledged and the channel stays in both
+   * sessions' maps. Do not call it while a reader may still come back to the channel.
+   */
+  discardIncoming(): void {
+    this.discarding = true;
+    this.discardInbox();
+  }
+
   /** After a (re)attach: restart transmission from the first frame the peer lacks. */
   resumeSend(peerLastSeq: number): void {
     // The peer keeps what it received across the reconnect, so only frames after
@@ -193,6 +206,7 @@ export class Channel implements AsyncIterable<Buffer> {
         } else {
           this.inbox.push({ seq: frame.seq, data: frame.payload });
         }
+        if (this.discarding) this.discardInbox();
         this.wakeReader();
         return;
       }
@@ -255,6 +269,7 @@ export class Channel implements AsyncIterable<Buffer> {
             return { value: item.data, done: false };
           }
           if (this.failure) throw this.failure;
+          if (this.discarding && this.remoteEnded) return { value: undefined, done: true };
           await new Promise<void>((resolve) => {
             this.readWaiter = resolve;
           });
@@ -311,6 +326,20 @@ export class Channel implements AsyncIterable<Buffer> {
     const w = this.readWaiter;
     this.readWaiter = null;
     w?.();
+  }
+
+  /** Consumes everything queued without delivering it, and reports the credit. */
+  private discardInbox(): void {
+    while (this.inbox.length > 0) {
+      const item = this.inbox.shift() as { seq: number; data: Buffer | null };
+      this.consumedSeq = item.seq;
+      if (item.data) {
+        this.inboxBytes -= item.data.length;
+        this.consumedBytes += item.data.length;
+      }
+    }
+    this.sendCredit(true);
+    this.maybeDone();
   }
 
   private maybeDone(): void {

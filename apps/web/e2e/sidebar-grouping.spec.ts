@@ -477,6 +477,13 @@ test("Set parent and Remove parent in the card menu nest and un-nest a worktree,
   await expect.poll(async () => (await placements())["lib-y"]?.origin).toBe("lib-main");
   await sidebar.removeParent(sidebar.row("lib-y"));
   await expect.poll(async () => (await placements())["lib-y"]?.origin).toBeNull();
+  // The list must show the un-nested row before the keys step through it.
+  await expect
+    .poll(() => sidebar.sections())
+    .toMatchObject({
+      [TEAM_A]: ["0:app-main", "1:app-parent", "2:app-kid", "0:lib-x", "0:lib-y"],
+      [TEAM_B]: ["0:lib-main"],
+    });
 
   // Arrow keys step through the rows in display order and Enter opens the highlighted one.
   await sidebar.row("app-main").click();
@@ -540,6 +547,36 @@ test("S13: rows sit under the group name, the chevron is small and close, and Pi
     body: await sidebar.root.screenshot(),
     contentType: "image/png",
   });
+});
+
+test("the expand chevron shows no hover background, still toggles, and shows keyboard focus", async ({
+  page,
+}, testInfo) => {
+  const { sidebar } = await open(page);
+  const toggle = sidebar.originToggle("app-parent");
+  await expect(toggle).toBeVisible();
+  const resting = await sidebar.originToggleBackground("app-parent");
+  expect(resting).toBe("rgba(0, 0, 0, 0)");
+
+  await toggle.hover();
+  expect(await sidebar.originToggleBackground("app-parent")).toBe(resting);
+  await testInfo.attach("chevron-hover.png", {
+    body: await sidebar.root.screenshot(),
+    contentType: "image/png",
+  });
+
+  await toggle.click();
+  await expect(sidebar.row("app-kid")).toHaveCount(0);
+  await toggle.click();
+  await expect(sidebar.row("app-kid")).toBeVisible();
+
+  await page.mouse.move(0, 0);
+  await toggle.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(toggle).toBeFocused();
+  const shadow = await toggle.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(shadow).not.toBe("none");
 });
 
 test("S11: a second device sees the new group order", async ({ page, browser }) => {

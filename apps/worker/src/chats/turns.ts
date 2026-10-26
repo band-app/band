@@ -313,7 +313,10 @@ export class Turns {
     sharedDir: string | null,
   ): Promise<acp.ContentBlock[]> {
     const caps = runtime.promptCapabilities;
-    const blocks: acp.ContentBlock[] = [{ type: "text", text: message.text }];
+    // An image-only message has no text, and an empty text block can be rejected by the adapter.
+    const blocks: acp.ContentBlock[] = message.text.trim()
+      ? [{ type: "text", text: message.text }]
+      : [];
     for (const file of message.files ?? []) {
       const name = file.filename ?? file.path.split("/").pop() ?? file.path;
       if (caps.image && file.mediaType.startsWith("image/")) {

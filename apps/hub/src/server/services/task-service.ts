@@ -169,7 +169,10 @@ async function promptBlocks(
   sharedDir: string,
 ): Promise<acp.ContentBlock[]> {
   const caps = agentSessionService.promptCapabilities(task.chatId);
-  const blocks: acp.ContentBlock[] = [{ type: "text", text: task.prompt }];
+  // An image-only message has no text, and an empty text block can be rejected by the adapter.
+  const blocks: acp.ContentBlock[] = task.prompt.trim()
+    ? [{ type: "text", text: task.prompt }]
+    : [];
   for (const file of task.attachments) {
     const name = file.filename ?? file.path.split("/").pop() ?? file.path;
     if (caps.image && file.mediaType.startsWith("image/")) {

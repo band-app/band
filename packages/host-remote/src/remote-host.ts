@@ -210,6 +210,7 @@ export class RemoteHost implements Host {
       }
       // Over the message limit: the worker reads the channel to its end.
       const ch = this.rpc.session().openChannel("speech.audio", {});
+      ch.discardIncoming();
       const done = this.rpc.call<SpeechTranscribeResult>("speech.transcribe", {
         ...rest,
         audio: { chan: ch.id },
@@ -366,6 +367,7 @@ export class RemoteHost implements Host {
     // The worker reads the channel to its end, which needs this side to keep
     // sending while the request is open.
     const ch = this.rpc.session().openChannel("fs.write", { path });
+    ch.discardIncoming();
     const done = this.rpc.call("fs.writeFile", { ...base, data: { chan: ch.id } });
     // A call that fails first (a denied path) must not leave an unhandled rejection behind the send.
     done.catch(() => undefined);
@@ -425,8 +427,16 @@ export class RemoteHost implements Host {
     }>("acp.spawn", { ...launch, cwd });
     const stdio = this.rpc.channel(reply.stdio);
     const stderr = this.rpc.channel(reply.stderr);
-    const exit = new Promise<AgentExit>((resolve) => this.agents.set(reply.agentId, resolve));
     let closed = false;
+    // Whoever never calls `stdin.end()` would leave the worker waiting on this channel for good,
+    // so the agent exiting ends the hub's side.
+    const exit = new Promise<AgentExit>((resolve) =>
+      this.agents.set(reply.agentId, (result) => {
+        resolve(result);
+        closed = true;
+        stdio.end();
+      }),
+    );
     return {
       pid: reply.pid ?? undefined,
       stdin: {
@@ -499,6 +509,8 @@ function duplexOf(ch: Channel): Duplex {
     close: () => {
       closed = true;
       ch.end();
+      // Nothing reads the output after a close, and the peer's end marker needs consuming.
+      ch.discardIncoming();
     },
   };
 }

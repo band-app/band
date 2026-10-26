@@ -52,6 +52,11 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
     return this.groupsPage.getByTestId(`repo-list__origin-toggle-icon--${worktreeId}`);
   }
 
+  /** The computed background color of a row's expand/collapse button. */
+  originToggleBackground(worktreeId: string): Promise<string> {
+    return this.originToggle(worktreeId).evaluate((el) => getComputedStyle(el).backgroundColor);
+  }
+
   /** The box of an element, failing the test when it is not laid out. */
   async box(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
     const box = await locator.boundingBox();

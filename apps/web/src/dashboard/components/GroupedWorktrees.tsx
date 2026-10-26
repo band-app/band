@@ -180,7 +180,7 @@ export function WorktreeRowView({
               aria-expanded={!row.collapsed}
               data-testid={`repo-list__origin-toggle--${entry.worktreeId}`}
               onClick={() => originCollapse.toggle(entry.worktreeId)}
-              className="absolute left-0 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent/50"
+              className="absolute left-0 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <ChevronRight
                 data-testid={`repo-list__origin-toggle-icon--${entry.worktreeId}`}
