@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   agentText,
+  authHeaders,
   collectEvents,
   maxId,
   openStream,
@@ -366,6 +367,44 @@ describe("chat over ACP", () => {
       },
       { type: "text", text: expect.stringMatching(/^\[File sharing: /) },
     ]);
+  });
+
+  it("runs a turn for a message with an image and no text, and keeps it in the history", async () => {
+    const server = await boot();
+    const chatId = newChatId();
+    const png = Buffer.from("not-really-a-png").toString("base64");
+    const { events: done } = await openStream(server.url, chatId, { until: turnEnded });
+    await sendMessage(server.url, chatId, "", {
+      files: [
+        { mediaType: "image/png", url: `data:image/png;base64,${png}`, filename: "shot.png" },
+      ],
+    });
+    const events = await done;
+
+    expect(events.find((e) => e.type === "prompt")).toMatchObject({
+      text: "",
+      files: [{ mediaType: "image/png", filename: "shot.png" }],
+    });
+    const [sent] = stubRequests(server.home, "session/prompt");
+    expect(sent.params.prompt).toEqual([
+      { type: "image", mimeType: "image/png", data: png, uri: expect.stringMatching(/shot\.png$/) },
+      { type: "text", text: expect.stringMatching(/^\[File sharing: /) },
+    ]);
+
+    const replay = await collectEvents(server.url, chatId, { until: turnEnded });
+    expect(replay.find((e) => e.type === "prompt")).toMatchObject({
+      files: [{ filename: "shot.png" }],
+    });
+  });
+
+  it("refuses a message with no text and no files", async () => {
+    const server = await boot();
+    const res = await fetch(`${server.url}/api/chats/${newChatId()}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ worktreeId: WORKTREE_ID, text: "  ", files: [] }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it("changes a session config option on the live session and remembers it", async () => {

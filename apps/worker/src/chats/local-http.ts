@@ -129,7 +129,8 @@ export async function handleChatRoute(
     switch (route) {
       case "messages": {
         const text = typeof body.text === "string" ? body.text : "";
-        if (!text.trim()) return json(400, { error: "text is required" });
+        const hasFiles = Array.isArray(body.files) && body.files.length > 0;
+        if (!text.trim() && !hasFiles) return json(400, { error: "text or files are required" });
         if (body.sessionId !== undefined && !SESSION_ID_PATTERN.test(String(body.sessionId))) {
           return json(400, { error: "invalid session id" });
         }

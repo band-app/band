@@ -157,7 +157,7 @@ export function stubRequests(home: string, method?: string): StubRequest[] {
   return method ? all.filter((r) => r.method === method) : all;
 }
 
-const authHeaders = { Cookie: `band_token=${TEST_TOKEN}` };
+export const authHeaders = { Cookie: `band_token=${TEST_TOKEN}` };
 
 export async function trpc<T>(
   url: string,
