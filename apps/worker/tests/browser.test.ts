@@ -86,7 +86,10 @@ async function pageTitle(
       )) as { result: { value: string } };
       last = res.result.value;
       const page = JSON.parse(last) as { state: string; href: string; title: string };
-      if (page.state === "complete" && page.title) return page.title;
+      if (page.state === "complete" && page.title) {
+        console.log(`DIAG title after ${Date.now() - startedAt} ms, ${i + 1} polls`);
+        return page.title;
+      }
       await new Promise((r) => setTimeout(r, 50));
     }
     const log = profileDir

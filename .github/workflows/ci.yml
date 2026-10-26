@@ -340,7 +340,8 @@ jobs:
         run: |
           for i in $(seq 1 15); do
             echo "=== run $i"
-            node --import tsx --test --test-timeout=90000 --test-force-exit tests/browser.test.ts 2>&1 | grep -E "DIAG|never got|✖|✔ browser over" || true
+            sync; sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+            node --import tsx --test --test-timeout=90000 --test-force-exit tests/browser.test.ts 2>&1 | grep -E "DIAG|never got|✖|✔" || true
           done
 
       - name: Test (web unit & packages)
