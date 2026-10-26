@@ -191,6 +191,8 @@ describe("resume after a dropped socket (S4)", () => {
     await incoming;
     hub.dropConnection();
     await waitFor(() => out.failed, 3000, "channel failure after the session expired");
+    assert.equal(hub.openChannelCount, 0, "the hub dropped its channels");
+    assert.equal(client.session.openChannelCount, 0, "the worker dropped its channels");
     await assert.rejects(out.send(Buffer.alloc(1)), /lost the link session/);
   });
   it("delivers data on a channel opened while the socket was down", async () => {
@@ -236,5 +238,77 @@ describe("resume after a dropped socket (S4)", () => {
       await closed;
     }
     assert.ok(server);
+  });
+});
+
+describe("channels are released", () => {
+  it("releases a channel whose reader stopped early once the peer ends it", async () => {
+    const { hub, worker } = await connected();
+    const incoming = peerChannel(hub);
+    const out = worker.openChannel("early");
+    out.discardIncoming();
+    const ch = await incoming;
+    await out.send(Buffer.from("one"));
+    for await (const _chunk of ch) break;
+    ch.discardIncoming();
+    // Data and the end marker that arrive after the reader left are still consumed.
+    await out.send(Buffer.from("two"));
+    out.end();
+    ch.end();
+    await waitFor(
+      () => hub.openChannelCount === 0 && worker.openChannelCount === 0,
+      2000,
+      "release",
+    );
+  });
+
+  it("releases a write-only channel when the peer reads it and ends its side", async () => {
+    const { hub, worker } = await connected();
+    const incoming = peerChannel(hub);
+    const out = worker.openChannel("one-way");
+    out.discardIncoming();
+    const ch = await incoming;
+    await out.send(Buffer.from("payload"));
+    out.end();
+    assert.equal((await ch.readAll()).toString(), "payload");
+    ch.end();
+    await waitFor(
+      () => hub.openChannelCount === 0 && worker.openChannelCount === 0,
+      2000,
+      "release",
+    );
+  });
+
+  it("releases channels that finish after a resume", async () => {
+    const { hub, worker } = await connected();
+    const incoming = peerChannel(hub);
+    const out = worker.openChannel("across");
+    out.discardIncoming();
+    const ch = await incoming;
+    assert.equal(hub.openChannelCount, 1);
+    hub.dropConnection();
+    await waitFor(() => !worker.attached, 2000, "worker to notice the drop");
+    await waitFor(() => worker.attached && hub.attached, 3000, "resume");
+    assert.equal(hub.openChannelCount, 1, "the channel survives the resume");
+    await out.send(Buffer.from("after"));
+    out.end();
+    assert.equal((await ch.readAll()).toString(), "after");
+    ch.end();
+    await waitFor(
+      () => hub.openChannelCount === 0 && worker.openChannelCount === 0,
+      2000,
+      "release",
+    );
+  });
+
+  it("names the channels that hold the slots when it refuses one", async () => {
+    const { hub, worker } = await connected();
+    const faults: string[] = [];
+    hub.on("fault", (m: string) => faults.push(m));
+    for (let i = 0; i < 1024; i++) worker.openChannel(i % 4 === 0 ? "lsp" : "pty");
+    await waitFor(() => hub.openChannelCount === 1024, 5000, "the cap to fill");
+    const refused = worker.openChannel("overflow");
+    await assert.rejects(refused.readAll(), /too many channels/);
+    assert.match(faults.join("\n"), /too many channels \(open: pty=768, lsp=256\)/);
   });
 });

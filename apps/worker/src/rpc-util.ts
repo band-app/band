@@ -114,6 +114,7 @@ export function encodeBytes(session: LinkSession, data: Uint8Array): Encoded {
 
 function viaChannel(session: LinkSession, data: Buffer, as: "json" | "bytes"): Encoded {
   const ch: Channel = session.openChannel("result", { as });
+  ch.discardIncoming(); // the hub ends its side once it has read the result
   ch.send(data).then(
     () => ch.end(),
     () => undefined,
