@@ -3,6 +3,7 @@
  * through `Host.exec`, and neither changes the worktree's branch, index or files.
  */
 
+import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
 import type { Host } from "@band-app/host-api";
 
@@ -51,7 +52,9 @@ export async function buildSnapshot(
   await host.fs.mkdir(wipDir, { recursive: true });
   const baseSha = await git(["rev-parse", "HEAD"]);
   const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
-  const indexFile = posix.join(wipDir, `${worktreeId}.index`);
+  // A name of its own, so two snapshots of one worktree at once (a restore's check and a checkpoint) never
+  // share or delete each other's index.
+  const indexFile = posix.join(wipDir, `${worktreeId}.${randomBytes(4).toString("hex")}.index`);
   const env = { ...SNAPSHOT_BOT, GIT_INDEX_FILE: indexFile };
   await host.fs.rm(indexFile, { force: true });
   try {

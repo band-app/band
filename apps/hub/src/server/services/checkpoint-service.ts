@@ -959,7 +959,12 @@ export class CheckpointService {
     }
 
     this.busy.add(worktreeId);
+    // The target's copy is reset and checked below, so no automatic checkpoint of it may run meanwhile:
+    // the sweep skips a busy worktree, and one it already started is waited for.
+    const targetId = toWorktreeId(repo.name, worktree.name, toHostId);
+    this.busy.add(targetId);
     try {
+      await this.inflight.get(targetId)?.catch(() => undefined);
       const host = hostRegistry.hostById(toHostId);
       const rpc = new RemoteRpc(toHostId, () => target);
       const [root] = (await host.info()).roots;
@@ -1165,6 +1170,7 @@ export class CheckpointService {
         }
       }
       this.busy.delete(worktreeId);
+      this.busy.delete(targetId);
     }
   }
 
