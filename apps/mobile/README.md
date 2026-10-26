@@ -47,7 +47,7 @@ Use any hub you have a device token for: the throwaway one above, or your real h
 - Camera: scan the QR code from Settings > Devices (a real iPhone only).
 - Deep link: `xcrun simctl openurl <UDID> "band://pair?url=<url-encoded hub URL>&code=<pairing code>"` (an older `&token=<token>` works too) (`booted` works when only one simulator is booted). iOS asks "Open in Band?", so tap Open. The app then shows "Connect to this hub?", so tap Connect. The home screen shows Connected.
 
-The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub on another machine must be `https`, on the local network, or on a Tailscale address (`100.64.0.0/10`, an App Transport Security exception in `app.json`).
+The simulator reaches a hub on the same Mac at `http://localhost:<port>`. A hub on another machine must be `https`, on the local network, or on a Tailscale address (`100.64.0.0/10`, an App Transport Security exception in `app.json`). The range is shared carrier-grade NAT space, and the app sends the device token and pairing code in clear over plain http, so use it only for a Tailscale address, which WireGuard encrypts, or put the hub behind https with `tailscale serve`.
 
 ## Run on an iPhone
 
