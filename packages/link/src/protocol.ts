@@ -33,6 +33,8 @@ export interface Hello {
   version?: string;
   /** The service manager that supervises the worker, so the hub knows it can restart it. Absent when none. */
   serviceManager?: "launchd" | "systemd";
+  /** Why the worker cannot update itself although a service manager supervises it. Absent otherwise. */
+  updateBlocked?: string;
   /** Toolchain versions on the worker's PATH (`node`, `python`, `go`, ...). Absent from older workers. */
   tools?: Record<string, string>;
   /** Highest sequence number the sender has received on each channel. */
@@ -113,6 +115,12 @@ export function validateHello(h: Hello): string | null {
     h.serviceManager !== "systemd"
   ) {
     return "serviceManager must be launchd or systemd";
+  }
+  if (
+    h.updateBlocked !== undefined &&
+    (typeof h.updateBlocked !== "string" || h.updateBlocked.length > 300)
+  ) {
+    return "updateBlocked must be a short string";
   }
   if (h.tools !== undefined) {
     const tools = h.tools as unknown;
