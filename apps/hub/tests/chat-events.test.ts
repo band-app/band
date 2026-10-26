@@ -847,7 +847,7 @@ describe("error paths", () => {
       body: JSON.stringify({ text: "no worktree id" }),
     });
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "worktreeId and text are required" });
+    expect(await res.json()).toEqual({ error: "worktreeId and text or files are required" });
   });
 
   it("POST /api/chats/:chatId/messages with blank text returns 400", async () => {
@@ -857,7 +857,7 @@ describe("error paths", () => {
       body: JSON.stringify({ worktreeId: WORKTREE_ID, text: "   " }),
     });
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "worktreeId and text are required" });
+    expect(await res.json()).toEqual({ error: "worktreeId and text or files are required" });
   });
 
   it("POST /api/chats/:chatId/messages with a non-JSON body returns 400", async () => {
