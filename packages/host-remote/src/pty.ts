@@ -159,6 +159,8 @@ class RemoteAttachment implements TerminalAttachment {
     this.done = true;
     this.release();
     this.channel.end();
+    // The read loop may leave with output still in flight, and nothing reads the channel after that.
+    this.channel.discardIncoming();
   }
 
   private release(): void {

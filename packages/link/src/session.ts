@@ -177,6 +177,17 @@ export class LinkSession extends EventEmitter implements ChannelHost {
     return this.channels.get(id);
   }
 
+  /** How many channels are open, by name. Largest first. */
+  channelCounts(): { name: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const ch of this.channels.values()) counts.set(ch.name, (counts.get(ch.name) ?? 0) + 1);
+    return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+  }
+
+  get openChannelCount(): number {
+    return this.channels.size;
+  }
+
   /** Highest received sequence per channel, for `hello.resume` and `ready.resume`. */
   resumeMap(): Record<string, number> {
     const out: Record<string, number> = {};
@@ -385,7 +396,11 @@ export class LinkSession extends EventEmitter implements ChannelHost {
         if (this.channels.has(p.chan) || this.tombstones.has(p.chan)) return;
         if (this.channels.size >= MAX_CHANNELS) {
           // Refuse this channel alone. Cutting the link would make the peer resume into the same refusal.
-          this.emit("fault", `refused channel ${p.chan}: too many channels`);
+          const held = this.channelCounts()
+            .slice(0, 5)
+            .map((c) => `${c.name}=${c.count}`)
+            .join(", ");
+          this.emit("fault", `refused channel ${p.chan}: too many channels (open: ${held})`);
           this.writeBinary(
             encodeFrame({
               chan: p.chan,

@@ -14,6 +14,7 @@ export function sendPayload(session: LinkSession, value: unknown): JsonPayload {
   const text = JSON.stringify(value ?? null);
   if (Buffer.byteLength(text) <= PAYLOAD_INLINE_LIMIT) return { json: value ?? null };
   const ch = session.openChannel("payload");
+  ch.discardIncoming();
   ch.send(Buffer.from(text)).then(
     () => ch.end(),
     () => undefined,
