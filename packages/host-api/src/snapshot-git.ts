@@ -82,6 +82,23 @@ export async function buildSnapshot(
     return { baseSha, branch: branch === "HEAD" ? "" : branch, snapshotSha, treeSha };
   } finally {
     await host.fs.rm(indexFile, { force: true }).catch(() => undefined);
+    await removeStaleIndexes(host, wipDir, worktreeId).catch(() => undefined);
+  }
+}
+
+/** An index older than this was left by a snapshot that never reached its `finally`. */
+const STALE_INDEX_MS = 10 * 60_000;
+
+/** Removes the worktree's snapshot indexes that a crashed hub or a dropped link left in `wipDir`. */
+async function removeStaleIndexes(host: Host, wipDir: string, worktreeId: string): Promise<void> {
+  const prefix = `${worktreeId}.`;
+  for (const entry of await host.fs.list(wipDir)) {
+    const middle = entry.name.slice(prefix.length, -".index".length);
+    if (!entry.name.startsWith(prefix) || !entry.name.endsWith(".index")) continue;
+    if (!/^[0-9a-f]{8}$/.test(middle)) continue;
+    const path = posix.join(wipDir, entry.name);
+    const { mtimeMs } = await host.fs.stat(path);
+    if (Date.now() - mtimeMs > STALE_INDEX_MS) await host.fs.rm(path, { force: true });
   }
 }
 

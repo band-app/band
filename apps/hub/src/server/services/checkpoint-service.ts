@@ -380,6 +380,10 @@ export class CheckpointService {
         "Checkpoints are for worktrees on a worker, not on the hub's own machine.",
       );
     }
+    // A restore resets this checkout and uses its `refs/band/wip` ref, so no trigger may snapshot it meanwhile.
+    if (this.busy.has(worktreeId)) {
+      throw new CheckpointError("conflict", `${worktreeId} is being restored or moved.`);
+    }
     if (
       !opts.ignoreSetting &&
       !checkpointsEnabledFor(found.repo.checkpointsEnabled, found.repo.allowedHostIds)

@@ -83,10 +83,15 @@ async function pageTitle(
             "JSON.stringify({ state: document.readyState, href: location.href, title: document.title })",
         },
         sessionId,
-      )) as { result: { value: string } };
-      last = res.result.value;
-      const page = JSON.parse(last) as { state: string; href: string; title: string };
-      if (page.state === "complete" && page.title) return page.title;
+      )) as { result: { value?: string } };
+      // A context torn down mid-navigation answers with an exception and no value: try again.
+      if (typeof res.result.value === "string") {
+        last = res.result.value;
+        const page = JSON.parse(last) as { state: string; href: string; title: string };
+        if (page.state === "complete" && page.title) return page.title;
+      } else {
+        last = JSON.stringify(res.result);
+      }
       await new Promise((r) => setTimeout(r, 50));
     }
     let log = "";

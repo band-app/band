@@ -1290,6 +1290,7 @@ export class WorktreePage {
       throw new Error(`pressGroupShortcut: index must be 0..9, got ${index}`);
     }
     await test.step(`Press Meta+${index} (group shortcut)`, async () => {
+      await this.groupFilterTrigger().waitFor({ state: "visible" });
       if (index > 0) await expect(this.groupedSidebarList()).toBeAttached();
       await this.page.keyboard.press(`Meta+${index}`);
     });
