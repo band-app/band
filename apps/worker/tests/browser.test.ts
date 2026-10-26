@@ -76,15 +76,23 @@ async function pageTitle(
     const startedAt = Date.now();
     let last = "";
     for (let i = 0; i < 100; i++) {
-      const res = (await cdp.send(
-        "Runtime.evaluate",
-        {
-          expression:
-            "JSON.stringify({ state: document.readyState, href: location.href, title: document.title })",
-        },
-        sessionId,
-      )) as { result: { value?: string } };
-      // A context torn down mid-navigation answers with an exception and no value: try again.
+      // A context torn down mid-navigation answers with a protocol error, and an exception in the
+      // page with no value: record it and try again.
+      let res: { result: { value?: string } };
+      try {
+        res = (await cdp.send(
+          "Runtime.evaluate",
+          {
+            expression:
+              "JSON.stringify({ state: document.readyState, href: location.href, title: document.title })",
+          },
+          sessionId,
+        )) as { result: { value?: string } };
+      } catch (err) {
+        last = `evaluate failed: ${err instanceof Error ? err.message : String(err)}`;
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
       if (typeof res.result.value === "string") {
         last = res.result.value;
         const page = JSON.parse(last) as { state: string; href: string; title: string };

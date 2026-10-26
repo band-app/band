@@ -276,6 +276,8 @@ describe("per-worker agent command", () => {
       until: (e) => JSON.stringify(e).includes("no-such-bin"),
       timeoutMs: 15_000,
     });
+    // Awaited below; this keeps a failed send from leaving it as an unhandled rejection.
+    stream.events.catch(() => undefined);
     const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },

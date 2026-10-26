@@ -3,7 +3,6 @@
  * through `Host.exec`, and neither changes the worktree's branch, index or files.
  */
 
-import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
 import type { Host } from "@band-app/host-api";
 
@@ -52,11 +51,18 @@ export async function buildSnapshot(
   await host.fs.mkdir(wipDir, { recursive: true });
   const baseSha = await git(["rev-parse", "HEAD"]);
   const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
-  // A name of its own, so two snapshots of one worktree at once (a restore's check and a checkpoint) never
-  // share or delete each other's index.
-  const indexFile = posix.join(wipDir, `${worktreeId}.${randomBytes(4).toString("hex")}.index`);
+  // A slot of its own, so two snapshots of one worktree at once (a restore's check and a checkpoint)
+  // never share or delete each other's index. Slots are reused, so the removal below also clears an
+  // index a crashed run left behind.
+  const slotKey = `${wipDir}\0${worktreeId}`;
+  const slot = takeIndexSlot(slotKey);
+  const indexFile = posix.join(
+    wipDir,
+    slot === 0 ? `${worktreeId}.index` : `${worktreeId}.${slot}.index`,
+  );
   const env = { ...SNAPSHOT_BOT, GIT_INDEX_FILE: indexFile };
   try {
+    await host.fs.rm(indexFile, { force: true });
     let treeSha: string | undefined;
     if (seedIndex) {
       try {
@@ -82,24 +88,29 @@ export async function buildSnapshot(
     return { baseSha, branch: branch === "HEAD" ? "" : branch, snapshotSha, treeSha };
   } finally {
     await host.fs.rm(indexFile, { force: true }).catch(() => undefined);
-    await removeStaleIndexes(host, wipDir, worktreeId).catch(() => undefined);
+    releaseIndexSlot(slotKey, slot);
   }
 }
 
-/** An index older than this was left by a snapshot that never reached its `finally`. */
-const STALE_INDEX_MS = 10 * 60_000;
+/** Index slots in use in this process, by worktree and staging directory. */
+const indexSlots = new Map<string, Set<number>>();
 
-/** Removes the worktree's snapshot indexes that a crashed hub or a dropped link left in `wipDir`. */
-async function removeStaleIndexes(host: Host, wipDir: string, worktreeId: string): Promise<void> {
-  const prefix = `${worktreeId}.`;
-  for (const entry of await host.fs.list(wipDir)) {
-    const middle = entry.name.slice(prefix.length, -".index".length);
-    if (!entry.name.startsWith(prefix) || !entry.name.endsWith(".index")) continue;
-    if (!/^[0-9a-f]{8}$/.test(middle)) continue;
-    const path = posix.join(wipDir, entry.name);
-    const { mtimeMs } = await host.fs.stat(path);
-    if (Date.now() - mtimeMs > STALE_INDEX_MS) await host.fs.rm(path, { force: true });
+function takeIndexSlot(key: string): number {
+  let used = indexSlots.get(key);
+  if (!used) {
+    used = new Set();
+    indexSlots.set(key, used);
   }
+  let slot = 0;
+  while (used.has(slot)) slot++;
+  used.add(slot);
+  return slot;
+}
+
+function releaseIndexSlot(key: string, slot: number): void {
+  const used = indexSlots.get(key);
+  used?.delete(slot);
+  if (used?.size === 0) indexSlots.delete(key);
 }
 
 /**

@@ -111,13 +111,13 @@ impl TestEnv {
             let mut signaled = false;
             for line in reader.lines() {
                 let line = line.unwrap_or_default();
-                if !signaled && line.contains("listening") {
+                if !signaled && line.contains("Web server listening on ") {
                     // "Web server listening on http://0.0.0.0:<port>": the port it bound.
                     let bound = line
                         .rsplit(':')
                         .next()
                         .and_then(|p| p.trim().parse::<u16>().ok());
-                    let _ = tx.send(Some(bound));
+                    let _ = tx.send(Some(bound.ok_or(line)));
                     signaled = true;
                 }
                 // Continue reading to keep the pipe drained.
@@ -130,7 +130,11 @@ impl TestEnv {
         // The port was free when picked, but another test can bind it before this server does.
         // The server then moves to the next free port, and the CLI must follow it, or it would
         // talk to the other test's server (same token) until that one exits.
-        if let Some(Some(bound)) = listening {
+        if let Some(Err(line)) = &listening {
+            let _ = child.kill();
+            panic!("could not read the port from the server's banner: {line}");
+        }
+        if let Some(Ok(bound)) = listening {
             if bound != port {
                 let path = band_dir.join("settings.json");
                 let mut stored: serde_json::Value =
