@@ -86,10 +86,7 @@ async function pageTitle(
       )) as { result: { value: string } };
       last = res.result.value;
       const page = JSON.parse(last) as { state: string; href: string; title: string };
-      if (page.state === "complete" && page.title) {
-        console.log(`DIAG title after ${Date.now() - startedAt} ms, ${i + 1} polls`);
-        return page.title;
-      }
+      if (page.state === "complete" && page.title) return page.title;
       await new Promise((r) => setTimeout(r, 50));
     }
     const log = profileDir
@@ -159,9 +156,7 @@ describe("browser over the link", {
   });
 
   it("reads the title of a page on the worker's localhost", async () => {
-    const openedAt = Date.now();
     const info = await openBrowser(w.session, "wt-a");
-    console.log(`DIAG browser.open took ${Date.now() - openedAt} ms`);
     assert.ok(info.pid > 0);
     assert.ok(info.profileDir.startsWith(join(w.stateDir, "browser")));
     assert.equal(
