@@ -112,17 +112,34 @@ impl TestEnv {
             for line in reader.lines() {
                 let line = line.unwrap_or_default();
                 if !signaled && line.contains("listening") {
-                    let _ = tx.send(true);
+                    // "Web server listening on http://0.0.0.0:<port>": the port it bound.
+                    let bound = line
+                        .rsplit(':')
+                        .next()
+                        .and_then(|p| p.trim().parse::<u16>().ok());
+                    let _ = tx.send(Some(bound));
                     signaled = true;
                 }
                 // Continue reading to keep the pipe drained.
             }
             if !signaled {
-                let _ = tx.send(false);
+                let _ = tx.send(None);
             }
         });
-        let found = rx.recv_timeout(Duration::from_secs(30)).unwrap_or(false);
-        if !found {
+        let listening = rx.recv_timeout(Duration::from_secs(30)).unwrap_or(None);
+        // The port was free when picked, but another test can bind it before this server does.
+        // The server then moves to the next free port, and the CLI must follow it, or it would
+        // talk to the other test's server (same token) until that one exits.
+        if let Some(Some(bound)) = listening {
+            if bound != port {
+                let path = band_dir.join("settings.json");
+                let mut stored: serde_json::Value =
+                    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+                stored["webServerPort"] = serde_json::json!(bound);
+                fs::write(&path, stored.to_string()).unwrap();
+            }
+        }
+        if listening.is_none() {
             // Kill server and capture stderr for diagnostics
             let _ = child.kill();
             let output = child.wait_with_output().ok();
