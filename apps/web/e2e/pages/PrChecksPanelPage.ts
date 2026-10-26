@@ -218,6 +218,15 @@ export class PrChecksPanelPage {
     await expect(this.loading).toHaveCount(0, { timeout: 15_000 });
   }
 
+  /** Switch to another worktree from the sidebar, without a page reload, and wait for its Checks tab. */
+  async switchTo(worktreeId: string): Promise<void> {
+    await test.step(`Switch to worktree ${worktreeId}`, async () => {
+      await this.worktree.worktreeCard(worktreeId).click();
+      await expect(this.body).toBeVisible();
+      await expect(this.loading).toHaveCount(0, { timeout: 15_000 });
+    });
+  }
+
   async refresh(): Promise<void> {
     await test.step("Refresh the Checks tab", async () => {
       await this.refreshButton.click();

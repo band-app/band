@@ -37,6 +37,9 @@ export const clientPluginHost: ClientPluginHost = {
       // Polling refreshes the panel; this only saves a `gh` call when the
       // user flips between tabs or worktrees.
       staleTime: 15_000,
+      // Coming back to a worktree within 30 minutes shows the last data at
+      // once while it refetches.
+      gcTime: 30 * 60_000,
       refetchInterval:
         typeof refetchInterval === "function"
           ? (q) => refetchInterval(q.state.data)
