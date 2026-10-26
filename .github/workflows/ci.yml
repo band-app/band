@@ -332,6 +332,17 @@ jobs:
           pnpm --filter @band-app/web build
           pnpm --filter @band-app/server build
 
+      - name: "TEMP: repeat the worker browser test"
+        continue-on-error: true
+        env:
+          BAND_CHROMIUM_NO_SANDBOX: "1"
+        working-directory: apps/worker
+        run: |
+          for i in $(seq 1 15); do
+            echo "=== run $i"
+            node --import tsx --test --test-timeout=90000 --test-force-exit tests/browser.test.ts 2>&1 | grep -E "DIAG|never got|✖|✔ browser over" || true
+          done
+
       - name: Test (web unit & packages)
         env:
           BAND_CHROMIUM_NO_SANDBOX: "1"

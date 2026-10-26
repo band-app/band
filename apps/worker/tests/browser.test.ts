@@ -59,7 +59,12 @@ async function connectCdp(session: ServerSession, worktreeId: string) {
   };
 }
 
-async function pageTitle(session: ServerSession, worktreeId: string, url: string) {
+async function pageTitle(
+  session: ServerSession,
+  worktreeId: string,
+  url: string,
+  profileDir?: string,
+) {
   const cdp = await connectCdp(session, worktreeId);
   try {
     const { targetId } = (await cdp.send("Target.createTarget", { url })) as { targetId: string };
@@ -68,16 +73,28 @@ async function pageTitle(session: ServerSession, worktreeId: string, url: string
       flatten: true,
     })) as { sessionId: string };
     // The page may still be loading when the target is created.
+    const startedAt = Date.now();
+    let last = "";
     for (let i = 0; i < 100; i++) {
       const res = (await cdp.send(
         "Runtime.evaluate",
-        { expression: "document.readyState === 'complete' ? document.title : ''" },
+        {
+          expression:
+            "JSON.stringify({ state: document.readyState, href: location.href, title: document.title })",
+        },
         sessionId,
       )) as { result: { value: string } };
-      if (res.result.value) return res.result.value;
+      last = res.result.value;
+      const page = JSON.parse(last) as { state: string; href: string; title: string };
+      if (page.state === "complete" && page.title) return page.title;
       await new Promise((r) => setTimeout(r, 50));
     }
-    throw new Error("the page never got a title");
+    const log = profileDir
+      ? readFileSync(join(profileDir, "chromium.log"), "utf8").split("\n").slice(-30).join(" | ")
+      : "";
+    throw new Error(
+      `the page never got a title after ${Date.now() - startedAt} ms; last saw ${last}; chromium.log: ${log}`,
+    );
   } finally {
     cdp.close();
   }
@@ -139,10 +156,15 @@ describe("browser over the link", {
   });
 
   it("reads the title of a page on the worker's localhost", async () => {
+    const openedAt = Date.now();
     const info = await openBrowser(w.session, "wt-a");
+    console.log(`DIAG browser.open took ${Date.now() - openedAt} ms`);
     assert.ok(info.pid > 0);
     assert.ok(info.profileDir.startsWith(join(w.stateDir, "browser")));
-    assert.equal(await pageTitle(w.session, "wt-a", origin), "served on the worker");
+    assert.equal(
+      await pageTitle(w.session, "wt-a", origin, info.profileDir),
+      "served on the worker",
+    );
   });
 
   it("keeps the DevTools port on loopback", async () => {
