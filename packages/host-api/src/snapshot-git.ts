@@ -56,7 +56,6 @@ export async function buildSnapshot(
   // share or delete each other's index.
   const indexFile = posix.join(wipDir, `${worktreeId}.${randomBytes(4).toString("hex")}.index`);
   const env = { ...SNAPSHOT_BOT, GIT_INDEX_FILE: indexFile };
-  await host.fs.rm(indexFile, { force: true });
   try {
     let treeSha: string | undefined;
     if (seedIndex) {

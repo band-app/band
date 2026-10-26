@@ -89,9 +89,17 @@ async function pageTitle(
       if (page.state === "complete" && page.title) return page.title;
       await new Promise((r) => setTimeout(r, 50));
     }
-    const log = profileDir
-      ? readFileSync(join(profileDir, "chromium.log"), "utf8").split("\n").slice(-30).join(" | ")
-      : "";
+    let log = "";
+    if (profileDir) {
+      try {
+        log = readFileSync(join(profileDir, "chromium.log"), "utf8")
+          .split("\n")
+          .slice(-30)
+          .join(" | ");
+      } catch {
+        log = "(no chromium.log)";
+      }
+    }
     throw new Error(
       `the page never got a title after ${Date.now() - startedAt} ms; last saw ${last}; chromium.log: ${log}`,
     );

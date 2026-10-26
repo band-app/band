@@ -714,6 +714,12 @@ export class WorktreePage {
     return this.page.getByTestId("dashboard__group-filter-trigger");
   }
 
+  /** The sidebar's list of group sections (`GroupedWorktrees`). It renders
+   *  only once the groups query has returned at least one group. */
+  groupedSidebarList(): Locator {
+    return this.page.getByTestId("repo-list__grouped--groups");
+  }
+
   /** The open group-filter dropdown, listing "All" and every group. */
   get groupFilterMenu(): Locator {
     return this.page.getByTestId("dashboard__group-filter-menu");
@@ -1274,17 +1280,17 @@ export class WorktreePage {
    *  the terminal input included, so no focus has to be set up first: a
    *  worktree switch moves focus into the new worktree's tab a frame or
    *  more later, and a focus set here could be taken before the key.
-   *  Waits for the group filter trigger first: it renders once the groups
-   *  have loaded, and the listener ignores a digit with no group behind it.
-   *  `index` 0 picks "All", 1..9 pick the Nth group. */
+   *  For a group digit it first waits for the sidebar's group list: the
+   *  filter trigger shows once repos load, but the listener reads the groups
+   *  query, which can still be in flight, and it ignores a digit with no
+   *  group behind it. The list renders from that same query once it holds a
+   *  group. `index` 0 picks "All", 1..9 pick the Nth group. */
   async pressGroupShortcut(index: number): Promise<void> {
     if (index < 0 || index > 9) {
       throw new Error(`pressGroupShortcut: index must be 0..9, got ${index}`);
     }
     await test.step(`Press Meta+${index} (group shortcut)`, async () => {
-      // The trigger shows once repos load, but the shortcut reads the groups
-      // query, which can still be in flight; a press before it lands is lost.
-      await expect(this.groupFilterTrigger()).toHaveAttribute("data-groups-loaded", "true");
+      if (index > 0) await expect(this.groupedSidebarList()).toBeAttached();
       await this.page.keyboard.press(`Meta+${index}`);
     });
   }
