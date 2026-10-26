@@ -63,7 +63,7 @@ async function pageTitle(
   session: ServerSession,
   worktreeId: string,
   url: string,
-  profileDir?: string,
+  profileDir: string,
 ) {
   const cdp = await connectCdp(session, worktreeId);
   try {
@@ -102,16 +102,14 @@ async function pageTitle(
       }
       await new Promise((r) => setTimeout(r, 50));
     }
-    let log = "";
-    if (profileDir) {
-      try {
-        log = readFileSync(join(profileDir, "chromium.log"), "utf8")
-          .split("\n")
-          .slice(-30)
-          .join(" | ");
-      } catch {
-        log = "(no chromium.log)";
-      }
+    let log: string;
+    try {
+      log = readFileSync(join(profileDir, "chromium.log"), "utf8")
+        .split("\n")
+        .slice(-30)
+        .join(" | ");
+    } catch {
+      log = "(no chromium.log)";
     }
     throw new Error(
       `the page never got a title after ${Date.now() - startedAt} ms; last saw ${last}; chromium.log: ${log}`,

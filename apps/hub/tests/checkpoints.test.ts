@@ -386,3 +386,21 @@ describe("repos limited to chosen hosts (S5, S6)", () => {
     );
   }, 120_000);
 });
+
+describe("one restore at a time", () => {
+  it("refuses a second restore of a worktree while the first one runs", async () => {
+    const wt = await w.createWorktree(a, "proj", "feat-twice");
+    writeFileSync(join(w.worktreePath(a, "proj", "feat-twice"), "twice.txt"), "twice\n");
+    await w.m("checkpoints.take", { worktreeId: wt });
+
+    const results = await Promise.all([
+      w.mFail("checkpoints.restore", { worktreeId: wt, toHostId: b.hostId }),
+      w.mFail("checkpoints.restore", { worktreeId: wt, toHostId: b.hostId }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(results.find((r) => r.status === 409)?.body).toContain("is being restored or moved");
+    expect(readFileSync(join(w.worktreePath(b, "proj", "feat-twice"), "twice.txt"), "utf8")).toBe(
+      "twice\n",
+    );
+  }, 120_000);
+});
