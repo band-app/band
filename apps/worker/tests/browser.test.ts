@@ -63,7 +63,12 @@ async function connectCdp(session: ServerSession, worktreeId: string) {
   };
 }
 
-async function pageTitle(session: ServerSession, worktreeId: string, url: string) {
+async function pageTitle(
+  session: ServerSession,
+  worktreeId: string,
+  url: string,
+  profileDir: string,
+) {
   const cdp = await connectCdp(session, worktreeId);
   try {
     const { targetId } = (await cdp.send("Target.createTarget", { url })) as { targetId: string };
@@ -73,21 +78,45 @@ async function pageTitle(session: ServerSession, worktreeId: string, url: string
     })) as { sessionId: string };
     // The page may still be loading when the target is created.
     const deadline = Date.now() + TITLE_TIMEOUT_MS;
-    let last = { readyState: "", title: "" };
+    let last = "";
     while (Date.now() < deadline) {
-      const res = (await cdp.send(
-        "Runtime.evaluate",
-        {
-          expression: "JSON.stringify({ readyState: document.readyState, title: document.title })",
-        },
-        sessionId,
-      )) as { result: { value: string } };
-      last = JSON.parse(res.result.value) as typeof last;
-      if (last.readyState === "complete" && last.title) return last.title;
+      // A context torn down mid-navigation answers with a protocol error, and an exception in the
+      // page with no value: record it and try again.
+      let res: { result: { value?: string } };
+      try {
+        res = (await cdp.send(
+          "Runtime.evaluate",
+          {
+            expression:
+              "JSON.stringify({ state: document.readyState, href: location.href, title: document.title })",
+          },
+          sessionId,
+        )) as { result: { value?: string } };
+      } catch (err) {
+        last = `evaluate failed: ${err instanceof Error ? err.message : String(err)}`;
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
+      if (typeof res.result.value === "string") {
+        last = res.result.value;
+        const page = JSON.parse(last) as { state: string; href: string; title: string };
+        if (page.state === "complete" && page.title) return page.title;
+      } else {
+        last = JSON.stringify(res.result);
+      }
       await new Promise((r) => setTimeout(r, 50));
     }
+    let log: string;
+    try {
+      log = readFileSync(join(profileDir, "chromium.log"), "utf8")
+        .split("\n")
+        .slice(-30)
+        .join(" | ");
+    } catch {
+      log = "(no chromium.log)";
+    }
     throw new Error(
-      `the page never got a title within ${TITLE_TIMEOUT_MS} ms (readyState ${JSON.stringify(last.readyState)}, title ${JSON.stringify(last.title)})`,
+      `the page never got a title within ${TITLE_TIMEOUT_MS} ms; last saw ${last}; chromium.log: ${log}`,
     );
   } finally {
     cdp.close();
@@ -153,7 +182,10 @@ describe("browser over the link", {
     const info = await openBrowser(w.session, "wt-a");
     assert.ok(info.pid > 0);
     assert.ok(info.profileDir.startsWith(join(w.stateDir, "browser")));
-    assert.equal(await pageTitle(w.session, "wt-a", origin), "served on the worker");
+    assert.equal(
+      await pageTitle(w.session, "wt-a", origin, info.profileDir),
+      "served on the worker",
+    );
   });
 
   it("keeps the DevTools port on loopback", async () => {
@@ -174,13 +206,16 @@ describe("browser over the link", {
   });
 
   it("keeps cookies across a close and reopen of the same worktree", async () => {
-    await openBrowser(w.session, "wt-b");
-    assert.equal(await pageTitle(w.session, "wt-b", `${origin}/cookie`), "cookie set");
+    const first = await openBrowser(w.session, "wt-b");
+    assert.equal(
+      await pageTitle(w.session, "wt-b", `${origin}/cookie`, first.profileDir),
+      "cookie set",
+    );
     await call(w.session, "browser.close", { worktreeId: "wt-b" });
     const again = await openBrowser(w.session, "wt-b");
     assert.ok(cookieHits >= 1);
     assert.equal(
-      await pageTitle(w.session, "wt-b", `${origin}/echo-cookie`),
+      await pageTitle(w.session, "wt-b", `${origin}/echo-cookie`, again.profileDir),
       "cookie:band=persisted",
     );
     assert.ok(again.profileDir.endsWith("wt-b"));
@@ -188,7 +223,10 @@ describe("browser over the link", {
 
   it("gives another worktree its own profile", async () => {
     const other = await openBrowser(w.session, "wt-a");
-    assert.equal(await pageTitle(w.session, "wt-a", `${origin}/echo-cookie`), "cookie:none");
+    assert.equal(
+      await pageTitle(w.session, "wt-a", `${origin}/echo-cookie`, other.profileDir),
+      "cookie:none",
+    );
     assert.ok(other.profileDir.endsWith("wt-a"));
   });
 

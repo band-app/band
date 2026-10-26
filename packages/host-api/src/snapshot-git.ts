@@ -51,10 +51,18 @@ export async function buildSnapshot(
   await host.fs.mkdir(wipDir, { recursive: true });
   const baseSha = await git(["rev-parse", "HEAD"]);
   const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
-  const indexFile = posix.join(wipDir, `${worktreeId}.index`);
+  // A slot of its own, so two snapshots of one worktree at once (a restore's check and a checkpoint)
+  // never share or delete each other's index. Slots are reused, so the removal below also clears an
+  // index a crashed run left behind.
+  const slotKey = `${wipDir}\0${worktreeId}`;
+  const slot = takeIndexSlot(slotKey);
+  const indexFile = posix.join(
+    wipDir,
+    slot === 0 ? `${worktreeId}.index` : `${worktreeId}.${slot}.index`,
+  );
   const env = { ...SNAPSHOT_BOT, GIT_INDEX_FILE: indexFile };
-  await host.fs.rm(indexFile, { force: true });
   try {
+    await host.fs.rm(indexFile, { force: true });
     let treeSha: string | undefined;
     if (seedIndex) {
       try {
@@ -80,7 +88,29 @@ export async function buildSnapshot(
     return { baseSha, branch: branch === "HEAD" ? "" : branch, snapshotSha, treeSha };
   } finally {
     await host.fs.rm(indexFile, { force: true }).catch(() => undefined);
+    releaseIndexSlot(slotKey, slot);
   }
+}
+
+/** Index slots in use in this process, by worktree and staging directory. */
+const indexSlots = new Map<string, Set<number>>();
+
+function takeIndexSlot(key: string): number {
+  let used = indexSlots.get(key);
+  if (!used) {
+    used = new Set();
+    indexSlots.set(key, used);
+  }
+  let slot = 0;
+  while (used.has(slot)) slot++;
+  used.add(slot);
+  return slot;
+}
+
+function releaseIndexSlot(key: string, slot: number): void {
+  const used = indexSlots.get(key);
+  used?.delete(slot);
+  if (used?.size === 0) indexSlots.delete(key);
 }
 
 /**

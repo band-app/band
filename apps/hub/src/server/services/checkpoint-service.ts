@@ -299,6 +299,12 @@ export class CheckpointService {
     }
   }
 
+  /** Refuses when a restore or move holds any of the worktrees. */
+  private assertNotBusy(...worktreeIds: string[]): void {
+    const held = worktreeIds.find((id) => this.busy.has(id));
+    if (held) throw new CheckpointError("conflict", `${held} is being restored or moved.`);
+  }
+
   /** Why no automatic checkpoint is taken for the worktree, or null when one may be. */
   private ineligible(worktreeId: string): string | null {
     const found = worktreeService.resolve(worktreeId);
@@ -380,6 +386,8 @@ export class CheckpointService {
         "Checkpoints are for worktrees on a worker, not on the hub's own machine.",
       );
     }
+    // A restore resets this checkout and uses its `refs/band/wip` ref, so no trigger may snapshot it meanwhile.
+    this.assertNotBusy(worktreeId);
     if (
       !opts.ignoreSetting &&
       !checkpointsEnabledFor(found.repo.checkpointsEnabled, found.repo.allowedHostIds)
@@ -884,9 +892,9 @@ export class CheckpointService {
         `${worktreeId} was already restored as ${worktree.supersededBy}.`,
       );
     }
-    if (this.busy.has(worktreeId)) {
-      throw new CheckpointError("conflict", `${worktreeId} is being restored or moved.`);
-    }
+    // The worktree this restore creates or resets on the target.
+    const targetId = toWorktreeId(repo.name, worktree.name, toHostId);
+    this.assertNotBusy(worktreeId, targetId);
     const row = this.pick(worktreeId, input.checkpointId);
     // An offline source may still be running under its lease. Wait until it has stopped.
     const sourceUp = this.sessions.get(fromHostId)?.attached === true;
@@ -923,7 +931,6 @@ export class CheckpointService {
     );
     if (onTarget && !onTarget.supersededBy && isRoot) {
       // The target's own checkout is reset under whoever is using it, so it must be idle.
-      const targetId = toWorktreeId(repo.name, worktree.name, toHostId);
       const busy =
         chatService
           .list(targetId)
@@ -946,6 +953,9 @@ export class CheckpointService {
         `Worker ${toHostId} already has a worktree ${worktree.name} of ${repo.name}. Remove it first.`,
       );
     }
+    // Again after the awaits above, so two restores into one target can't both pass. Nothing awaits
+    // between here and marking both ids busy.
+    this.assertNotBusy(worktreeId, targetId);
 
     // The checkout on the target is refused while the host is not allowed, so widen first and undo it on failure.
     const previousAllowed = repo.allowedHostIds ? [...repo.allowedHostIds] : null;
@@ -959,7 +969,11 @@ export class CheckpointService {
     }
 
     this.busy.add(worktreeId);
+    // The target's copy is reset and checked below, so no automatic checkpoint of it may run meanwhile:
+    // the sweep skips a busy worktree, and one it already started is waited for.
+    this.busy.add(targetId);
     try {
+      await this.inflight.get(targetId)?.catch(() => undefined);
       const host = hostRegistry.hostById(toHostId);
       const rpc = new RemoteRpc(toHostId, () => target);
       const [root] = (await host.info()).roots;
@@ -976,7 +990,7 @@ export class CheckpointService {
         input.hostRepoPath,
       );
       const git = gitIn(host, repoPath);
-      const newId = toWorktreeId(repo.name, worktree.name, toHostId);
+      const newId = targetId;
       const worktreePath = isRoot
         ? repoPath
         : posix.join(root, ".band-worktrees", repo.name, worktree.name);
@@ -1165,6 +1179,7 @@ export class CheckpointService {
         }
       }
       this.busy.delete(worktreeId);
+      this.busy.delete(targetId);
     }
   }
 
