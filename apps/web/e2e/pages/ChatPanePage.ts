@@ -819,6 +819,13 @@ export class ChatPanePage {
     return this.page.getByTestId("chat-pane__user-message").filter({ hasText: text });
   }
 
+  /** User message bubbles that show an attached image, whatever their text. */
+  get userMessagesWithImage(): Locator {
+    return this.page
+      .getByTestId("chat-pane__user-message")
+      .filter({ has: this.page.getByTestId("message__image-preview-button") });
+  }
+
   /** Locator for an assistant-role message bubble carrying the given
    *  text. Same role-scoping rationale as `userMessage`. */
   assistantMessage(text: string): Locator {

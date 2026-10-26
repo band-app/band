@@ -153,6 +153,37 @@ describe("send and stream on the direct path (S1)", () => {
     expect(prompts).toEqual(["hello on loopback"]);
   }, 30_000);
 
+  it("runs a message with an image and no text, and refuses one with neither", async () => {
+    const after = Math.max(0, ...workerLog().map((r) => r.id));
+    const stream = await openStream(direct(), chatId, {
+      lastEventId: after,
+      headers: bearer(),
+      until: (e) => turnEnded(e) && e.eventId > after,
+      timeoutMs: 60_000,
+    });
+    const png = Buffer.from("not-really-a-png").toString("base64");
+    const send = (body: Record<string, unknown>) =>
+      fetch(`${direct()}/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...bearer() },
+        body: JSON.stringify({ worktreeId: wt, ...body }),
+      });
+    const empty = await send({ text: " ", files: [] });
+    expect(empty.status).toBe(400);
+    const res = await send({
+      text: "",
+      files: [
+        { mediaType: "image/png", url: `data:image/png;base64,${png}`, filename: "shot.png" },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const events = await stream.events;
+    expect(events.find((e) => e.type === "prompt")).toMatchObject({
+      text: "",
+      files: [{ filename: "shot.png" }],
+    });
+  }, 90_000);
+
   it("refuses the chat routes without a token and with a token for another worktree", async () => {
     const noToken = await fetch(`${direct()}/api/chats/${chatId}/events`);
     expect(noToken.status).toBe(401);
@@ -220,6 +251,7 @@ describe("a cut link (S3, within the lease)", () => {
     expect(hub.map((r) => r.id)).toEqual(workerLog().map((r) => r.id));
     expect(promptsOn(hub)).toEqual([
       "hello on loopback",
+      "",
       "first while offline",
       "second while offline",
     ]);
