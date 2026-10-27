@@ -377,8 +377,8 @@ const localFs: Omit<HostFs, "browse"> = {
     return new Uint8Array(await readFile(path));
   },
   realpath: (path) => realpath(path),
-  async *readStream(path) {
-    for await (const chunk of createReadStream(path)) {
+  async *readStream(path, range) {
+    for await (const chunk of createReadStream(path, range)) {
       const buffer = chunk as Buffer;
       yield new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     }

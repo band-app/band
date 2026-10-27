@@ -17,6 +17,7 @@ import { ChatProvider } from "../../../components/chat/chat-context";
 import { Markdown } from "../../../components/chat/markdown";
 import { FileIcon } from "../../../components/file-icon";
 import { CodeList, type CodeRow } from "../../../components/files/code-list";
+import { VideoPlayer } from "../../../components/files/video-view";
 import { ViewHeader } from "../../../components/files/view-header";
 import { Body } from "../../../components/ui";
 import { highlight } from "../../../lib/chat/highlight";
@@ -57,8 +58,8 @@ function FileScreen({
   const file = useQuery({
     queryKey: ["worktree.getFile", worktreeId, path],
     queryFn: () => client.worktree.getFile.query({ worktreeId, path }),
-    // An image is fetched by the Image from its own URL, so there is no need to read it as text.
-    enabled: kind !== "image",
+    // An image or video is fetched by its player from its own URL, so there is no need to read it as text.
+    enabled: kind !== "image" && kind !== "video",
   });
   const data = file.data;
   const text = data && "content" in data ? data.content : null;
@@ -75,6 +76,8 @@ function FileScreen({
   let body: ReactNode;
   if (kind === "image") {
     body = <ImageView hubUrl={hub.url} token={hub.token} worktreeId={worktreeId} path={path} />;
+  } else if (kind === "video") {
+    body = <VideoPlayer hubUrl={hub.url} token={hub.token} worktreeId={worktreeId} path={path} />;
   } else if (file.error) {
     body = <Notice testID="file__error" text={file.error.message} />;
   } else if (!data) {

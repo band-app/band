@@ -314,6 +314,13 @@ export interface DashboardAdapter {
     toPath: string,
   ): Promise<{ kind: "file" | "directory" }>;
 
+  /**
+   * Save a worktree file to the user's computer. Authenticates with the hub's
+   * header or cookie and never puts the token in a URL. Rejects when the hub
+   * refuses or the file is gone.
+   */
+  downloadWorktreeFile?(worktreeId: string, path: string): Promise<void>;
+
   /** Get a URL for raw file content (images, PDFs, etc.) */
   getWorktreeFileUrl?(worktreeId: string, path: string): string;
 

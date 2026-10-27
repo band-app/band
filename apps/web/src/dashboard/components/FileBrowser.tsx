@@ -19,6 +19,7 @@ import {
   ClipboardCopy,
   ClipboardPaste,
   Copy as CopyIcon,
+  Download,
   File as FileIconLucide,
   Folder,
   FolderOpen,
@@ -384,6 +385,8 @@ interface TreeNodeProps {
   dnd: TreeDnd;
   /** Reveal the entry in the OS file manager. Desktop shell only. */
   onRevealInFinder?: (path: string) => void;
+  /** Save a file to the user's computer. Files only. */
+  onDownload?: (path: string) => void;
 }
 
 function TreeNode({
@@ -421,6 +424,7 @@ function TreeNode({
   onRenameCancel,
   dnd,
   onRevealInFinder,
+  onDownload,
 }: TreeNodeProps) {
   const entryPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
   const isDir = entry.type === "directory";
@@ -618,6 +622,15 @@ function TreeNode({
             <ContextMenuSeparator />
           </>
         )}
+        {!isDir && onDownload && (
+          <ContextMenuItem
+            data-testid="file-tree__download"
+            onSelect={() => menu.queue(() => onDownload(entryPath))}
+          >
+            <Download className="size-4" />
+            Download
+          </ContextMenuItem>
+        )}
         {canCut && (
           <ContextMenuItem
             data-testid="file-tree__cut"
@@ -755,6 +768,7 @@ function TreeNode({
               onRenameCancel={onRenameCancel}
               dnd={dnd}
               onRevealInFinder={onRevealInFinder}
+              onDownload={onDownload}
             />
           );
           const newEntryInput = showInlineInput ? (
@@ -1545,6 +1559,21 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     [revealInFinder, worktreePath],
   );
 
+  // ------- Download -------
+  const downloadWorktreeFile = adapter.downloadWorktreeFile;
+  const onDownload = useMemo(
+    () =>
+      downloadWorktreeFile
+        ? (path: string) => {
+            setOperationError(null);
+            downloadWorktreeFile.call(adapter, worktreeId, path).catch((err: unknown) => {
+              setOperationError(err instanceof Error ? err.message : String(err));
+            });
+          }
+        : undefined,
+    [adapter, downloadWorktreeFile, worktreeId],
+  );
+
   // ------- Imperative handle for parent toolbars -------
   useImperativeHandle(
     handleRef,
@@ -1759,6 +1788,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                   onRenameCancel={cancelRename}
                   dnd={dnd}
                   onRevealInFinder={onRevealInFinder}
+                  onDownload={onDownload}
                 />
               );
               const rootInput = showRootInput ? (

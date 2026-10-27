@@ -160,6 +160,14 @@ export class FileTreesPage {
     });
   }
 
+  /** On the phone layout the Explorer is a bottom sheet: expand a folder in it and tap a file. */
+  async openFileInMobileSheet(folder: string, path: string): Promise<void> {
+    await test.step(`Open ${path} from the mobile Explorer sheet`, async () => {
+      await this.expandFileTreeFolder(folder, path);
+      await this.fileTreeRow(path).click();
+    });
+  }
+
   /** Single-click a Files-tree row (opens a preview tab) and wait for its tab. */
   async clickFile(path: string): Promise<void> {
     await test.step(`Single-click Files-tree row ${path}`, async () => {
@@ -246,9 +254,24 @@ export class FileTreesPage {
   }
 
   menuItem(
-    action: "new-file" | "new-folder" | "cut" | "copy" | "paste" | "rename" | "delete",
+    action: "new-file" | "new-folder" | "cut" | "copy" | "paste" | "rename" | "delete" | "download",
   ): Locator {
     return this.page.getByTestId(`file-tree__${action}`);
+  }
+
+  /** Right-click a Files-tree row, pick Download and return the saved file. */
+  async downloadFile(path: string): Promise<{ name: string; bytes: Buffer }> {
+    return test.step(`Download Files-tree row ${path}`, async () => {
+      await this.openFileTreeMenu(path);
+      const [download] = await Promise.all([
+        this.page.waitForEvent("download"),
+        this.menuItem("download").click(),
+      ]);
+      const stream = await download.createReadStream();
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      return { name: download.suggestedFilename(), bytes: Buffer.concat(chunks) };
+    });
   }
 
   /** Hover the Explorer header (its actions show on hover) and click one. */

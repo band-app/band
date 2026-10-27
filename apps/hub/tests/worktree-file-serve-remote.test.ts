@@ -38,6 +38,8 @@ const PNG_BYTES = Buffer.from([
 ]);
 const PDF_BYTES = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.from([0x00, 0xff, 0xc3, 0x28])]);
 
+const BIG_BYTES = Buffer.alloc(6 * 1024 * 1024 + 7, "band-big-remote-");
+
 const scratch: string[] = [];
 const tmp = (prefix: string) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
@@ -164,6 +166,8 @@ describe("GET /api/worktree-file for a worktree on a remote worker", () => {
     const excludeFile = git(created.path, "rev-parse", "--git-path", "info/exclude").trim();
     mkdirSync(join(created.path, ".am", "evidence"), { recursive: true });
     writeFileSync(join(created.path, ".am", "evidence", "x.png"), PNG_BYTES);
+    writeFileSync(join(created.path, "big.bin"), BIG_BYTES);
+    writeFileSync(join(created.path, "clip.mp4"), BIG_BYTES);
     appendFileSync(resolve(created.path, excludeFile), "\n.am/\n");
   }, 120_000);
 
@@ -197,5 +201,85 @@ describe("GET /api/worktree-file for a worktree on a remote worker", () => {
     expect((await get(".am/evidence/x.png")).status).toBe(401);
     expect((await get(".am/evidence/x.png", { cookie: "wrong" })).status).toBe(401);
     expect((await get(".am/evidence/x.png", { query: "?token=wrong" })).status).toBe(401);
+  });
+
+  it("downloads a file as an attachment with exact bytes from the worker", async () => {
+    const res = await get("assets/tracked.png", { cookie: TOKEN, query: "?download=1" });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toBe(
+      `attachment; filename="tracked.png"; filename*=UTF-8''tracked.png`,
+    );
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(Buffer.from(await res.arrayBuffer()).equals(PNG_BYTES)).toBe(true);
+  });
+
+  it("streams a download of several MB from the worker with unchanged bytes", async () => {
+    const res = await get("big.bin", { cookie: TOKEN, query: "?download=1" });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe(String(BIG_BYTES.length));
+    expect(Buffer.from(await res.arrayBuffer()).equals(BIG_BYTES)).toBe(true);
+  });
+
+  it("keeps serving downloads after clients abandon several of them part way", async () => {
+    // A client that leaves must release the worker link channel. 1100 leaks would
+    // pass the 1024-channel cap and make the next download fail.
+    for (let i = 0; i < 1100; i++) {
+      const ctl = new AbortController();
+      const res = await fetch(
+        `${server.url}/api/worktree-file/${encodeURIComponent(worktreeId)}/big.bin?download=1`,
+        { headers: { Cookie: `band_token=${TOKEN}` }, signal: ctl.signal },
+      );
+      expect(res.status).toBe(200);
+      const reader = res.body?.getReader();
+      await reader?.read();
+      ctl.abort();
+      await reader?.closed.catch(() => undefined);
+    }
+    const res = await get("assets/tracked.png", { cookie: TOKEN, query: "?download=1" });
+
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).equals(PNG_BYTES)).toBe(true);
+  }, 120_000);
+
+  it("refuses a download without a valid token", async () => {
+    expect((await get("assets/tracked.png", { query: "?download=1" })).status).toBe(401);
+    expect(
+      (await get("assets/tracked.png", { cookie: "wrong", query: "?download=1" })).status,
+    ).toBe(401);
+  });
+
+  it("serves a byte range of a video from the worker, and releases the channel", async () => {
+    for (let i = 0; i < 1100; i++) {
+      const res = await fetch(
+        `${server.url}/api/worktree-file/${encodeURIComponent(worktreeId)}/clip.mp4`,
+        { headers: { Cookie: `band_token=${TOKEN}`, Range: "bytes=2000000-2000049" } },
+      );
+      expect(res.status).toBe(206);
+      expect(res.headers.get("content-range")).toBe(`bytes 2000000-2000049/${BIG_BYTES.length}`);
+      expect(
+        Buffer.from(await res.arrayBuffer()).equals(BIG_BYTES.subarray(2000000, 2000050)),
+      ).toBe(true);
+    }
+  }, 120_000);
+
+  it("answers 416 for a range past the end of a file on the worker", async () => {
+    const res = await fetch(
+      `${server.url}/api/worktree-file/${encodeURIComponent(worktreeId)}/clip.mp4`,
+      { headers: { Cookie: `band_token=${TOKEN}`, Range: `bytes=${BIG_BYTES.length}-` } },
+    );
+
+    expect(res.status).toBe(416);
+    expect(res.headers.get("content-range")).toBe(`bytes */${BIG_BYTES.length}`);
+  });
+
+  it("refuses a path that leaves the worktree on the worker", async () => {
+    const res = await get(encodeURIComponent("../../etc/hosts"), {
+      cookie: TOKEN,
+      query: "?download=1",
+    });
+
+    expect([400, 404]).toContain(res.status);
   });
 });

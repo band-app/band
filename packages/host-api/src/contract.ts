@@ -248,6 +248,14 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       const chunks: Uint8Array[] = [];
       for await (const chunk of host.fs.readStream(join(dir, "real", "f.txt"))) chunks.push(chunk);
       assert.equal(text(Buffer.concat(chunks)), "linked");
+      const ranged: Uint8Array[] = [];
+      for await (const chunk of host.fs.readStream(join(dir, "real", "f.txt"), {
+        start: 1,
+        end: 3,
+      })) {
+        ranged.push(chunk);
+      }
+      assert.equal(text(Buffer.concat(ranged)), "ink");
       await assert.rejects(
         (async () => {
           for await (const _chunk of host.fs.readStream(join(dir, "missing"))) {

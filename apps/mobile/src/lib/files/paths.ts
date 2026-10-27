@@ -15,9 +15,10 @@ export function dirName(path: string): string {
   return at < 0 ? "" : path.slice(0, at);
 }
 
-export type FileKind = "image" | "markdown" | "pdf" | "code";
+export type FileKind = "image" | "video" | "markdown" | "pdf" | "code";
 
 const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "heic", "avif"]);
+const VIDEO_EXT = new Set(["mp4", "m4v", "mov", "webm"]);
 const MARKDOWN_EXT = new Set(["md", "markdown", "mdx"]);
 
 function extOf(path: string): string {
@@ -30,6 +31,7 @@ function extOf(path: string): string {
 export function fileKind(path: string): FileKind {
   const ext = extOf(path);
   if (IMAGE_EXT.has(ext)) return "image";
+  if (VIDEO_EXT.has(ext)) return "video";
   if (MARKDOWN_EXT.has(ext)) return "markdown";
   if (ext === "pdf") return "pdf";
   return "code";

@@ -547,6 +547,28 @@ export class WebDashboardAdapter implements DashboardAdapter {
     );
   }
 
+  async downloadWorktreeFile(worktreeId: string, path: string): Promise<void> {
+    const res = await hubFetch(
+      `/api/worktree-file/${encodeURIComponent(worktreeId)}/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}?download=1`,
+    );
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = path.slice(path.lastIndexOf("/") + 1);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      // The click starts the save synchronously; the blob can go afterwards.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
+  }
+
   async getWorktreePreviewUrl(worktreeId: string, path: string): Promise<string> {
     const { url } = (await this.trpc.worktree.previewUrl.query({ worktreeId, path })) as {
       url: string;

@@ -52,6 +52,7 @@ export { TerminalSelectionContextMenu } from "./components/SelectionContextMenu"
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { SettingsRow, SettingsSection } from "./components/settings";
+export { VideoPreview } from "./components/VideoPreview";
 export { WorktreeCard } from "./components/WorktreeCard";
 export { WorktreeLabel } from "./components/WorktreeLabel";
 export { WorktreePickerDialog } from "./components/WorktreePickerDialog";
