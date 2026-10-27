@@ -1,3 +1,4 @@
+import { crossOriginHub } from "../../lib/hub-config";
 import type { PlatformCapabilities, Unsubscribe, UpdateStatus } from "../adapter";
 import { WebCapabilities, WebDashboardAdapter } from "./web";
 
@@ -5,6 +6,21 @@ import { WebCapabilities, WebDashboardAdapter } from "./web";
 // Shell detection — the Electron preload (`apps/desktop/src/preload/index.cts`)
 // exposes `window.__BAND_DESKTOP__`. Anything else is a regular browser tab.
 // ---------------------------------------------------------------------------
+
+/**
+ * The admin dialog links a CLI on this Mac, so it only helps when the hub runs on this Mac. A
+ * hub on another machine reports its own CLI, which this Mac's install cannot change.
+ */
+function hubIsOnThisMachine(): boolean {
+  const hub = crossOriginHub();
+  if (!hub) return true;
+  try {
+    const host = new URL(hub.origin).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  } catch {
+    return false;
+  }
+}
 
 function isElectron(): boolean {
   return typeof window !== "undefined" && "__BAND_DESKTOP__" in window;
@@ -63,13 +79,18 @@ export class DesktopDashboardAdapter extends WebDashboardAdapter {
   async installCli(opts?: { allowPrompt?: boolean }): Promise<void> {
     try {
       // Try the web server path first (works when /usr/local/bin is writable).
-      await super.installCli();
+      await this.installCliRaw();
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // If elevation is needed and the user explicitly clicked Install, defer
       // to the desktop app's admin-password dialog.
-      if (opts?.allowPrompt && isDesktopShell() && message.includes("elevation-required")) {
+      if (
+        opts?.allowPrompt &&
+        isDesktopShell() &&
+        hubIsOnThisMachine() &&
+        message.includes("elevation-required")
+      ) {
         const paths = await this.trpc.cli.resolve.query();
         if (!paths) {
           // The tRPC resolver returned null. That can mean the bundled
@@ -85,6 +106,14 @@ export class DesktopDashboardAdapter extends WebDashboardAdapter {
           symlinkPath: paths.symlinkPath,
         });
         return;
+      }
+      if (message.includes("elevation-required") && !hubIsOnThisMachine()) {
+        const paths = await this.trpc.cli.resolve.query();
+        if (paths) {
+          throw new Error(
+            `On the hub's server, run: sudo ln -sf "${paths.binaryPath}" "${paths.symlinkPath}"`,
+          );
+        }
       }
       throw err;
     }

@@ -347,6 +347,12 @@ export type CliStatus =
   | "DirNotFound"
   | "NotWritable";
 
+export interface CliCheck {
+  status: CliStatus;
+  /** False when the hub runs no worktrees of its own or the caller is not an admin. */
+  applicable: boolean;
+}
+
 export interface DeleteDialogInfo {
   repoName: string;
   /** Worktree identity (immutable `name`), used both as the delete target

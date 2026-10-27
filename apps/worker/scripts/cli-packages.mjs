@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Writes the per-platform npm packages that carry the `band` CLI, and pins them as
-// optionalDependencies of @band-app/worker (the esbuild pattern: npm installs only the
+// optionalDependencies of @band-app/worker and @band-app/server (the esbuild pattern: npm installs only the
 // package whose `os` and `cpu` match the machine).
 //
 //   node scripts/cli-packages.mjs --version 1.2.3 --out <dir> \
@@ -8,7 +8,7 @@
 //
 // The packages are generated and never committed: a committed optionalDependency on a
 // version that is not on npm would break `pnpm install` in the workspace. With --pin the
-// script also rewrites apps/worker/package.json, so run it in the release checkout only.
+// script also rewrites apps/worker/package.json and apps/hub/package.json, so run it in the release checkout only.
 // The package names must match `cliPackageName` in src/cli.ts.
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -81,11 +81,12 @@ for (const [key, binary] of Object.entries(binaries)) {
 }
 
 if (pin) {
-  const file = join(root, "package.json");
-  const pkg = JSON.parse(readFileSync(file, "utf8"));
-  pkg.optionalDependencies = Object.fromEntries(
-    Object.keys(PLATFORMS).map((k) => [`@band-app/worker-cli-${k}`, version]),
-  );
-  writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
-  console.log(`pinned optionalDependencies to ${version} in ${file}`);
+  for (const file of [join(root, "package.json"), join(root, "..", "hub", "package.json")]) {
+    const pkg = JSON.parse(readFileSync(file, "utf8"));
+    pkg.optionalDependencies = Object.fromEntries(
+      Object.keys(PLATFORMS).map((k) => [`@band-app/worker-cli-${k}`, version]),
+    );
+    writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
+    console.log(`pinned optionalDependencies to ${version} in ${file}`);
+  }
 }

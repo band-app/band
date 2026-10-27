@@ -1,6 +1,11 @@
 import { z } from "zod";
-import { checkCli, installCli, resolveCliPaths } from "../../services/cli-service";
-import { publicProcedure, t } from "../trpc";
+import {
+  checkCli,
+  installCli,
+  isCliCheckApplicable,
+  resolveCliPaths,
+} from "../../services/cli-service";
+import { adminProcedure, publicProcedure, t } from "../trpc";
 
 /**
  * CLI sub-router — migrated into the 3-tier architecture as part of
@@ -12,16 +17,20 @@ import { publicProcedure, t } from "../trpc";
  * (absorbed from `lib/cli.ts`).
  */
 export const cliRouter = t.router({
-  check: publicProcedure.query(async () => {
-    const status = await checkCli();
-    return { status };
+  // `applicable` is false when nobody can act on the answer: the hub runs no worktrees of its
+  // own (workers carry their own CLI), or the caller is not an admin.
+  check: publicProcedure.query(async ({ ctx }) => {
+    // Not applicable: skip the file system probe and report the neutral answer.
+    if (!isCliCheckApplicable(ctx.admin))
+      return { status: "Installed" as const, applicable: false };
+    return { status: await checkCli(), applicable: true };
   }),
 
-  resolve: publicProcedure.query(() => {
+  resolve: adminProcedure.query(() => {
     return resolveCliPaths();
   }),
 
-  install: publicProcedure
+  install: adminProcedure
     .input(z.object({ allowPrompt: z.boolean().optional() }).optional())
     .mutation(async ({ input }) => {
       try {

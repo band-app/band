@@ -8,6 +8,7 @@ import type { SSEEvent } from "../lib/sse";
 import type {
   BrowserProfileInfo,
   CIStatus,
+  CliCheck,
   CliStatus,
   ContentSearchMatch,
   DiffMode,
@@ -418,13 +419,31 @@ export class WebDashboardAdapter implements DashboardAdapter {
     };
   }
 
-  async checkCli(): Promise<CliStatus> {
+  async checkCli(): Promise<CliCheck> {
     const data = await this.trpc.cli.check.query();
-    return data.status as CliStatus;
+    return { status: data.status as CliStatus, applicable: data.applicable !== false };
+  }
+
+  /** The hub's answer as it is, `elevation-required` included. The desktop shell reads that. */
+  protected async installCliRaw(opts?: { allowPrompt?: boolean }): Promise<void> {
+    await this.trpc.cli.install.mutate(opts);
   }
 
   async installCli(opts?: { allowPrompt?: boolean }): Promise<void> {
-    await this.trpc.cli.install.mutate(opts);
+    try {
+      await this.installCliRaw(opts);
+    } catch (err) {
+      // A browser cannot elevate. Say where the person has to run the command.
+      if (err instanceof Error && err.message.includes("elevation-required")) {
+        const paths = await this.trpc.cli.resolve.query();
+        if (paths) {
+          throw new Error(
+            `On the hub's server, run: sudo ln -sf "${paths.binaryPath}" "${paths.symlinkPath}"`,
+          );
+        }
+      }
+      throw err;
+    }
   }
 
   async getWorktreeDiff(
