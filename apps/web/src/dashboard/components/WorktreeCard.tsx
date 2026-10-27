@@ -40,6 +40,7 @@ import { useHostLabel, useHostNames } from "../hooks/use-host-names";
 import { timeAgo, useHostSeen } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
+import { deleteDialogInfoFor } from "../lib/worktree-delete";
 import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
@@ -338,11 +339,6 @@ export const WorktreeCard = memo(function WorktreeCard({
     },
   };
 
-  const ciState = branchStatus?.ci.state;
-  const hasUnmergedPR = ciState !== undefined && ciState !== "none" && ciState !== "merged";
-  const isDirty = branchStatus?.git.dirty ?? false;
-  const hasUnpushedCommits = (branchStatus?.git.ahead ?? 0) > 0;
-
   const removeParent = () => {
     trpc.worktrees.setOrigin
       .mutate({ repo: repoName, name: worktree.name, hostId: worktree.hostId, origin: null })
@@ -351,20 +347,15 @@ export const WorktreeCard = memo(function WorktreeCard({
   };
 
   const handleDelete = () => {
-    if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
+    const target = { repoName, name: worktree.name, hostId: worktree.hostId };
+    const info = deleteDialogInfoFor(target, branchStatus);
+    if (info) {
+      onShowDeleteDialog(info);
+    } else {
       removeWorktreeMutation.mutate({
         repo: repoName,
         name: worktree.name,
         hostId: worktree.hostId,
-      });
-    } else {
-      onShowDeleteDialog({
-        repoName,
-        name: worktree.name,
-        hostId: worktree.hostId,
-        isUnmerged: hasUnmergedPR,
-        isDirty,
-        hasUnpushedCommits,
       });
     }
   };
