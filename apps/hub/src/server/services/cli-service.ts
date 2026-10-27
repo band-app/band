@@ -13,7 +13,12 @@ import {
 } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { findCliBinary, findCliBinaryAt } from "@band-app/host-local/process/cli-binary";
+import {
+  cliPackageName,
+  findCliBinary,
+  findCliBinaryAt,
+} from "@band-app/host-local/process/cli-binary";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 
 export { findCliBinaryAt };
 
@@ -46,6 +51,15 @@ export const SYMLINK_PATH =
   platform() === "win32" ? join(windowsBinDir(), "band.cmd") : "/usr/local/bin/band";
 
 /**
+ * Where the install lives. `BAND_CLI_SYMLINK_PATH` replaces the POSIX default and is read on
+ * every call, so tests can point the check at a temp dir instead of `/usr/local/bin`.
+ */
+export function symlinkPath(): string {
+  if (platform() === "win32") return SYMLINK_PATH;
+  return process.env.BAND_CLI_SYMLINK_PATH?.trim() || SYMLINK_PATH;
+}
+
+/**
  * Windows install-status check. The shim is a plain `band.cmd` file (not a
  * symlink), so we read it and confirm it still points at an existing
  * `band.exe`. A shim referencing a moved/removed binary reports
@@ -57,7 +71,7 @@ export const SYMLINK_PATH =
 function checkCliWindows(): CliStatus {
   let contents: string;
   try {
-    contents = readFileSync(SYMLINK_PATH, "utf-8");
+    contents = readFileSync(symlinkPath(), "utf-8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EACCES") return "NotWritable";
@@ -74,14 +88,23 @@ function checkCliWindows(): CliStatus {
   return existsSync(target) ? "Installed" : "NotInstalled";
 }
 
+/**
+ * Whether the CLI check means anything to this caller. It does not when the hub runs no worktrees
+ * of its own (workers carry their own CLI) or when the caller is not an admin who could fix it.
+ */
+export function isCliCheckApplicable(admin: boolean): boolean {
+  return isLocalHostEnabled() && admin;
+}
+
 export async function checkCli(): Promise<CliStatus> {
   // Windows uses a `.cmd` shim, not a symlink — different install/verify
   // shape entirely.
   if (platform() === "win32") {
     return checkCliWindows();
   }
+  const linkPath = symlinkPath();
   try {
-    const stat = lstatSync(SYMLINK_PATH);
+    const stat = lstatSync(linkPath);
     if (!stat.isSymbolicLink()) {
       return "ConflictingBinary";
     }
@@ -90,7 +113,7 @@ export async function checkCli(): Promise<CliStatus> {
     // (e.g. the symlink pointed to a deleted worktree).
     let target: string;
     try {
-      target = realpathSync(SYMLINK_PATH);
+      target = realpathSync(linkPath);
     } catch {
       // Dangling symlink — treat as not installed so installCli() can
       // replace it with a valid path.
@@ -105,6 +128,18 @@ export async function checkCli(): Promise<CliStatus> {
     const isElectronSidecar = target.endsWith(join("binaries", "band"));
     if (isCargoBuild || isElectronSidecar) {
       return "Installed";
+    }
+
+    // The link points at the binary this hub resolves itself (an npm
+    // `worker-cli-*` package, `BAND_CLI_PATH`, ...). Compare real paths, so a
+    // link straight to the file or through another link both count.
+    const resolved = findCliBinary();
+    if (resolved) {
+      try {
+        if (realpathSync(resolved) === target) return "Installed";
+      } catch {
+        // The resolved binary vanished; fall through to the other verdicts.
+      }
     }
 
     // A symlink that resolves into a Band.app bundle but doesn't match the
@@ -124,7 +159,7 @@ export async function checkCli(): Promise<CliStatus> {
     if (code === "ENOENT") {
       // Check if /usr/local/bin exists
       try {
-        lstatSync("/usr/local/bin");
+        lstatSync(dirname(linkPath));
         return "NotInstalled";
       } catch {
         return "DirNotFound";
@@ -178,7 +213,7 @@ export function noBinaryError(env: NodeJS.ProcessEnv = process.env): Error {
     return new Error("Bundled CLI binary missing - try reinstalling Band");
   }
   return new Error(
-    "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
+    `Could not find band CLI binary. Install ${cliPackageName()} or set BAND_CLI_PATH. In a source checkout, build it with: cargo build --release -p band-cli`,
   );
 }
 
@@ -262,17 +297,18 @@ export async function installCli(_opts: InstallCliOptions = {}): Promise<void> {
     return;
   }
 
-  const dir = dirname(SYMLINK_PATH);
+  const linkPath = symlinkPath();
+  const dir = dirname(linkPath);
 
   if (isDirWritable(dir)) {
     try {
-      lstatSync(SYMLINK_PATH);
-      unlinkSync(SYMLINK_PATH);
+      lstatSync(linkPath);
+      unlinkSync(linkPath);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") throw err;
     }
-    symlinkSync(binaryPath, SYMLINK_PATH);
+    symlinkSync(binaryPath, linkPath);
     return;
   }
 
@@ -283,12 +319,12 @@ export async function installCli(_opts: InstallCliOptions = {}): Promise<void> {
     throw new Error("elevation-required");
   }
 
-  throw new Error(`Run: sudo ln -sf "${binaryPath}" "${SYMLINK_PATH}"`);
+  throw new Error(`On the hub's server, run: sudo ln -sf "${binaryPath}" "${linkPath}"`);
 }
 
 /** Resolve the CLI binary path and symlink path for the frontend. */
 export function resolveCliPaths(): { binaryPath: string; symlinkPath: string } | null {
   const binaryPath = findCliBinary();
   if (!binaryPath) return null;
-  return { binaryPath, symlinkPath: SYMLINK_PATH };
+  return { binaryPath, symlinkPath: symlinkPath() };
 }

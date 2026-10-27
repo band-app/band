@@ -1,6 +1,12 @@
 import { lstatSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { platform } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname as dirOf, join, resolve } from "node:path";
+
+/** The npm package that holds the `band` binary for a platform (an optional dependency of the hub and the worker). */
+export function cliPackageName(os: string = platform(), arch: string = process.arch): string {
+  return `@band-app/worker-cli-${os}-${arch}`;
+}
 
 /**
  * Pure resolver for the band CLI binary. Takes the cwd and the calling
@@ -81,6 +87,18 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
     } catch {
       // Continue
     }
+  }
+
+  // --- Strategy B2: the platform package, an optional dependency of an npm install ---
+  try {
+    const pkgJson = createRequire(join(dirname, "noop.js")).resolve(
+      `${cliPackageName()}/package.json`,
+    );
+    const p = join(dirOf(pkgJson), "bin", exe);
+    lstatSync(p);
+    return p;
+  } catch {
+    // The package is not installed for this platform.
   }
 
   // --- Strategy C: `band` on PATH, symlinks resolved ---

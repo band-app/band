@@ -195,3 +195,38 @@ describe("findCliBinaryAt with BAND_CLI_PATH or band on PATH", () => {
     );
   });
 });
+
+describe("findCliBinaryAt with the npm platform package", () => {
+  it("S2: finds bin/band of @band-app/worker-cli-<platform>-<arch> beside the bundle", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "band-cli-npm-")));
+    const saved = process.env.BAND_CLI_PATH;
+    const savedPath = process.env.PATH;
+    try {
+      const pkg = join(
+        root,
+        "node_modules",
+        "@band-app",
+        `worker-cli-${process.platform}-${process.arch}`,
+      );
+      mkdirSync(join(pkg, "bin"), { recursive: true });
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
+      writeFileSync(join(pkg, "bin", "band"), "#!/bin/sh\n");
+      chmodSync(join(pkg, "bin", "band"), 0o755);
+      const dist = join(root, "node_modules", "@band-app", "server", "dist");
+      mkdirSync(dist, { recursive: true });
+      delete process.env.BAND_CLI_PATH;
+      process.env.PATH = "";
+      expect(findCliBinaryAt({ cwd: root, dirname: dist })).toBe(join(pkg, "bin", "band"));
+    } finally {
+      if (saved === undefined) delete process.env.BAND_CLI_PATH;
+      else process.env.BAND_CLI_PATH = saved;
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("S2: the missing-binary message tells an npm user what to install", () => {
+    expect(noBinaryError({}).message).toMatch(/@band-app\/worker-cli-.* or set BAND_CLI_PATH/);
+  });
+});
