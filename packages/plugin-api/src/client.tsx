@@ -35,6 +35,12 @@ export interface ClientPluginHost {
   startAgent(worktreeId: string, prompt: string): Promise<{ chatId?: string; terminalId?: string }>;
   /** Make the center dock tab with this chat or terminal id the active one. */
   openPane(worktreeId: string, paneId: string): void;
+  /**
+   * Delete the worktree the way its sidebar card does: at once when nothing is at risk,
+   * else after the core's confirmation dialog. Does nothing for the default branch or a
+   * superseded copy.
+   */
+  deleteWorktree(worktreeId: string): void;
   /** Open a URL in the system browser (the desktop app) or a new tab (the web app). */
   openUrl(url: string): void;
   /** Open a file of the worktree in the center dock, scrolled to `line` when given. */

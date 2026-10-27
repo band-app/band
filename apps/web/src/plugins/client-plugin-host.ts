@@ -3,6 +3,7 @@ import type { ClientPluginHost } from "@band-app/plugin-api/client";
 import { useQuery } from "@tanstack/react-query";
 import { readAgentMode } from "@/dashboard/lib/agent-mode";
 import { queryClient } from "@/dashboard/query-client";
+import { DELETE_WORKTREE_EVENT } from "../dashboard/lib/worktree-delete";
 import { AGENT_LAUNCHING_EVENT, OPEN_PANE_EVENT } from "../lib/agent-pane-events";
 import { markChatFresh, newChatId, newTerminalId } from "../lib/leaf-instance-ids";
 import { openExternalUrl } from "../lib/open-external-url";
@@ -101,6 +102,11 @@ export const clientPluginHost: ClientPluginHost = {
 
   openPane(worktreeId, paneId) {
     window.dispatchEvent(new CustomEvent(OPEN_PANE_EVENT, { detail: { worktreeId, paneId } }));
+  },
+
+  deleteWorktree(worktreeId) {
+    // The sidebar owns the delete flow and its confirmation dialog.
+    window.dispatchEvent(new CustomEvent(DELETE_WORKTREE_EVENT, { detail: { worktreeId } }));
   },
 
   openUrl(url) {
