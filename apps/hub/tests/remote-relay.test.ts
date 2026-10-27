@@ -349,6 +349,11 @@ beforeAll(async () => {
             headers: { "content-type": "application/json" },
           }),
           probe("other-route", "/api/worktree-file/proj-main/hello.txt"),
+          // The explorer's download and a video's Range request use the same route.
+          probe("file-download", "/api/worktree-file/proj-main/hello.txt?download=1"),
+          probe("file-range", "/api/worktree-file/proj-main/hello.txt", {
+            headers: { Range: "bytes=0-4" },
+          }),
           // The desktop route (plan step 7.1) is for a person's device token. The relay lists no
           // route for it, so no host id gets an agent through, including the hub's own.
           probe("desktop-local", "/api/hosts/local/desktop"),
@@ -556,6 +561,8 @@ describe("the worker relay (S2)", () => {
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);
     expect(by("other-route")?.status).toBe(403);
+    expect(by("file-download")?.status).toBe(403);
+    expect(by("file-range")?.status).toBe(403);
     expect(by("desktop-local")?.status).toBe(403);
     expect(by("desktop-worker")?.status).toBe(403);
     expect(by("voice-transcribe")?.status).toBe(403);

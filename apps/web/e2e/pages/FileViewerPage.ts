@@ -51,6 +51,51 @@ export class FileViewerPage {
     return (this.scope ?? this.page).getByTestId(FILE_VIEWER_ROOT_TESTID);
   }
 
+  /** The `<video>` of a video preview tab. */
+  get videoPlayer(): Locator {
+    return this.root.getByTestId("video-preview__player");
+  }
+
+  /** The `<img>` of an image preview tab, named by its file name. */
+  imageTab(alt: string): Locator {
+    return this.root.getByRole("img", { name: alt, exact: true });
+  }
+
+  /** The loaded width of an image preview tab's picture; 0 when it did not load. */
+  async imageTabNaturalWidth(alt: string): Promise<number> {
+    return this.imageTab(alt).evaluate((img) => (img as HTMLImageElement).naturalWidth);
+  }
+
+  /** Start the preview video. */
+  async playVideo(): Promise<void> {
+    await test.step("Play the preview video", async () => {
+      await this.videoPlayer.evaluate((el) => {
+        const v = el as HTMLVideoElement;
+        // An unmuted video may be refused by the autoplay policy.
+        v.muted = true;
+        return v.play();
+      });
+    });
+  }
+
+  /** The element's own view of the video: size, duration and playback position. */
+  async videoState(): Promise<{
+    width: number;
+    height: number;
+    duration: number;
+    currentTime: number;
+  }> {
+    return this.videoPlayer.evaluate((el) => {
+      const v = el as HTMLVideoElement;
+      return {
+        width: v.videoWidth,
+        height: v.videoHeight,
+        duration: v.duration,
+        currentTime: v.currentTime,
+      };
+    });
+  }
+
   /** The floating find widget over this viewer's content (source or
    *  markdown preview). */
   get findWidget(): FindWidget {

@@ -157,7 +157,8 @@ export class RemoteHost implements Host {
       this.rpc.call("fs.stat", { path, followSymlinks: options?.followSymlinks }),
     realpath: (path) => this.rpc.call("fs.realpath", { path }),
     readFile: (path) => this.rpc.callBytes("fs.readFile", { path }),
-    readStream: (path) => this.streamOf("fs.readStream", { path }),
+    readStream: (path, range) =>
+      this.streamOf("fs.readStream", { path, start: range?.start, end: range?.end }),
     writeFile: (path, data, options) => this.writeFile(path, data, options),
     glob: (pattern, cwd) => this.rpc.call("fs.glob", { pattern, cwd }),
     mkdtemp: (prefix) => this.rpc.call("fs.mkdtemp", { prefix }),

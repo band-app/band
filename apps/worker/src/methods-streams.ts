@@ -51,7 +51,10 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     const target = await path(a, "path");
     await host.fs.stat(target, { followSymlinks: true }); // a missing file fails the call, not the stream
     const ch = session.openChannel("fs.read", { path: target });
-    serve(ch, host.fs.readStream(target), { release: activity.hold() });
+    const start = optNum(a, "start");
+    const end = optNum(a, "end");
+    const range = start !== undefined && end !== undefined ? { start, end } : undefined;
+    serve(ch, host.fs.readStream(target, range), { release: activity.hold() });
     return { chan: ch.id };
   });
 

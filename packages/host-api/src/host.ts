@@ -335,8 +335,11 @@ export interface HostFs {
   /** The canonical path, with every symlink resolved. Rejects when the path does not exist. */
   realpath(path: string): Promise<string>;
   readFile(path: string): Promise<Uint8Array>;
-  /** Yields a file's bytes in chunks. Breaking out of the loop closes the file. */
-  readStream(path: string): Stream<Uint8Array>;
+  /**
+   * Yields a file's bytes in chunks. Breaking out of the loop closes the file.
+   * `range` limits it to the bytes `start` to `end`, both inclusive.
+   */
+  readStream(path: string, range?: { start: number; end: number }): Stream<Uint8Array>;
   /**
    * Creates the file or replaces its content. The parent directory must
    * exist. With `exclusive`, rejects when the path already exists. `mode`

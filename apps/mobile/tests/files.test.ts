@@ -15,6 +15,7 @@ describe("paths", () => {
     assert.equal(dirName("a.ts"), "");
     assert.equal(fileKind("logo.PNG"), "image");
     assert.equal(fileKind("docs/README.md"), "markdown");
+    assert.equal(fileKind("clip.MP4"), "video");
     assert.equal(fileKind("spec.pdf"), "pdf");
     assert.equal(fileKind("icon.svg"), "code");
     assert.equal(fileKind(".gitignore"), "code");

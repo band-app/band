@@ -69,6 +69,8 @@ import {
   startUsageScanner,
   stopUsageScanner,
 } from "./src/server/infra/usage-scanner/usage-scanner.ts";
+import { parseByteRange } from "./src/server/services/_utils/byte-range.ts";
+import { attachmentDisposition } from "./src/server/services/_utils/content-disposition.ts";
 import { openHostedFile } from "./src/server/services/_utils/hosted-file.ts";
 import {
   annotateHtmlForEdit,
@@ -501,6 +503,8 @@ async function serveWorktreeFile(
   rawPath: string,
   extraHeaders: Record<string, string> = {},
   visualEditNonce?: string,
+  download = false,
+  rangeHeader?: string,
 ): Promise<void> {
   const worktree = worktreeService.resolve(worktreeId);
   if (!worktree) {
@@ -532,6 +536,12 @@ async function serveWorktreeFile(
       return;
     }
     const fileStat = await fs.stat(target, { followSymlinks: true });
+    // A download is for one file; a folder has no bytes to stream.
+    if (download && fileStat.kind !== "file") {
+      res.writeHead(400);
+      res.end("Bad request");
+      return;
+    }
     const contentType = mimeTypeFromFilename(basename(target));
     const isHtml = contentType.startsWith("text/html");
     // Edit mode (only the signed preview route passes a nonce): the previewed
@@ -551,30 +561,45 @@ async function serveWorktreeFile(
         body = Buffer.from(annotateHtmlForEdit(source, visualEditNonce), "utf8");
       }
     }
-    res.writeHead(200, {
+    // A player seeks with Range requests; Safari will not play a video without them.
+    const range =
+      !body && !trailer && fileStat.kind === "file"
+        ? parseByteRange(rangeHeader, fileStat.size)
+        : null;
+    if (range === "unsatisfiable") {
+      res.writeHead(416, { "Content-Range": `bytes */${fileStat.size}` });
+      res.end();
+      return;
+    }
+    const partial = range !== null;
+    res.writeHead(partial ? 206 : 200, {
       "Content-Type": contentType,
-      "Content-Length": (body?.byteLength ?? fileStat.size + (trailer?.byteLength ?? 0)).toString(),
+      "Content-Length": (partial
+        ? range.end - range.start + 1
+        : (body?.byteLength ?? fileStat.size + (trailer?.byteLength ?? 0))
+      ).toString(),
+      ...(partial ? { "Content-Range": `bytes ${range.start}-${range.end}/${fileStat.size}` } : {}),
+      "Accept-Ranges": "bytes",
       "Cache-Control": "private, no-cache",
-      // HTML from a repo must not run with the hub's origin.
-      ...(isHtml
-        ? {
-            "Content-Security-Policy": "sandbox allow-scripts",
-            "X-Content-Type-Options": "nosniff",
-          }
-        : {}),
+      // HTML and SVG from a repo must not run with the hub's origin, and no
+      // type may be sniffed into one.
+      ...hostedFileHeaders(contentType),
+      ...(download ? { "Content-Disposition": attachmentDisposition(basename(target)) } : {}),
       ...extraHeaders,
     });
     if (body) {
       res.end(body);
       return;
     }
-    const stream = Readable.from(fs.readStream(target), {
+    const stream = Readable.from(fs.readStream(target, range ?? undefined), {
       objectMode: false,
       highWaterMark: 64 * 1024,
     });
     if (trailer) {
       stream.on("end", () => res.end(trailer));
       stream.on("error", () => res.destroy());
+      // A client that leaves must release the worker link channel behind the stream.
+      res.once("close", () => stream.destroy());
       stream.pipe(res, { end: false });
     } else {
       pipeline(stream, res, () => {});
@@ -1133,6 +1158,9 @@ async function main() {
         "/api/worktree-file/".length,
         queryIdx === -1 ? undefined : queryIdx,
       );
+      // `?download=1` saves the file as an attachment instead of showing it.
+      const download =
+        queryIdx !== -1 && new URLSearchParams(req.url.slice(queryIdx)).get("download") === "1";
       const slashIdx = rest.indexOf("/");
       if (slashIdx === -1) {
         res.writeHead(400);
@@ -1154,7 +1182,7 @@ async function main() {
         res.end("Bad request");
         return;
       }
-      await serveWorktreeFile(res, wId, filePath);
+      await serveWorktreeFile(res, wId, filePath, {}, undefined, download, req.headers.range);
       return;
     }
 

@@ -32,6 +32,7 @@ import { HtmlVisualEditor } from "./HtmlVisualEditor";
 import { ImagePreview } from "./ImagePreview";
 import { LanguagePickerDialog } from "./LanguagePickerDialog";
 import { PdfPreview } from "./PdfPreview";
+import { VideoPreview } from "./VideoPreview";
 
 interface FileViewerProps {
   worktreeId: string;
@@ -419,7 +420,7 @@ export function FileViewer({
   // Image and PDF previews have no editor view. (The markdown preview is an
   // editor and reports its own view.)
   useEffect(() => {
-    if (previewType === "image" || previewType === "pdf") {
+    if (previewType === "image" || previewType === "video" || previewType === "pdf") {
       onEditorView?.(null);
     }
   }, [previewType, onEditorView]);
@@ -444,7 +445,10 @@ export function FileViewer({
     // genuine images), since opening an arbitrary binary outside the worktree
     // root is rare and the image preview UI isn't a goal of the external-file
     // flow.
-    if (!external && (previewType === "image" || previewType === "pdf")) {
+    if (
+      !external &&
+      (previewType === "image" || previewType === "video" || previewType === "pdf")
+    ) {
       setData(null);
       setLoading(false);
       setError(null);
@@ -930,7 +934,7 @@ export function FileViewer({
   const missedFileChangesRef = useRef(false);
   useEffect(() => {
     if (untitled || external) return;
-    if (previewType === "image" || previewType === "pdf") return;
+    if (previewType === "image" || previewType === "video" || previewType === "pdf") return;
     if (!adapter.subscribeFileChanges) return;
     if (!watchFileChanges) {
       missedFileChangesRef.current = true;
@@ -1168,6 +1172,11 @@ export function FileViewer({
         {/* Image preview */}
         {!loading && !error && previewType === "image" && fileUrl && (
           <ImagePreview src={fileUrl} alt={getFilename(filePath)} />
+        )}
+
+        {/* Video preview */}
+        {!loading && !error && previewType === "video" && fileUrl && (
+          <VideoPreview key={fileUrl} src={fileUrl} filename={getFilename(filePath)} />
         )}
 
         {/* PDF preview */}
