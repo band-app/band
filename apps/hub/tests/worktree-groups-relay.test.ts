@@ -344,4 +344,17 @@ describe("worktree groups through a worker", () => {
     const { groups } = await q<{ groups: Array<{ id: string; name: string }> }>("groups.list");
     expect(groups.map((g) => g.name)).toEqual(["Work", "Home"]);
   });
+
+  it("lets an agent title its own worker's worktrees, not another worker's (rename S7)", async () => {
+    const titleOf = async (id: string) =>
+      ((await worktreeOf(id)) as { title?: string | null } | undefined)?.title;
+    expect(
+      await relayStatus("worktrees.setTitle", { worktreeId: wt("svc", "seed"), title: "Seeded" }),
+    ).toBe(200);
+    expect(await titleOf(wt("svc", "seed"))).toBe("Seeded");
+    // A worktree on the hub's own machine is not on this worker.
+    const local = toWorktreeId("borko", "main", "local");
+    expect(await relayStatus("worktrees.setTitle", { worktreeId: local, title: "Nope" })).toBe(403);
+    expect(await titleOf(local)).toBeNull();
+  });
 });

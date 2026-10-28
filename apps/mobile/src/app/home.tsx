@@ -37,6 +37,7 @@ import {
   setParentRequests,
 } from "../lib/parenting";
 import { pinRequest } from "../lib/pinning";
+import { renameFailure, renameRequest, rowTitle } from "../lib/renaming";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
 import { useGroupFilter } from "../lib/use-group-filter";
 import {
@@ -46,6 +47,7 @@ import {
   usePinWorktree,
   useRemoveFromGroup,
   useRemoveWorktree,
+  useRenameWorktree,
   useReorderGroups,
   useRepos,
   useSetParent,
@@ -78,6 +80,7 @@ function WorktreeList() {
   const pin = usePinWorktree();
   const remove = useRemoveWorktree();
   const setParent = useSetParent();
+  const rename = useRenameWorktree();
   const removeFromGroup = useRemoveFromGroup();
   const createGroup = useCreateGroup();
   const reorderGroups = useReorderGroups();
@@ -222,6 +225,23 @@ function WorktreeList() {
           label: row.pinned ? "Unpin" : "Pin",
           run: () => pin.mutate(pinRequest(row, !row.pinned)),
         },
+        {
+          label: "Rename…",
+          run: () =>
+            Alert.prompt(
+              "Rename worktree",
+              "Leave it empty to show the original name.",
+              (typed) =>
+                rename.mutate(renameRequest(row, typed), {
+                  onError: (error) => {
+                    const failure = renameFailure(row, error);
+                    Alert.alert(failure.title, failure.message);
+                  },
+                }),
+              "plain-text",
+              row.title ?? row.name,
+            ),
+        },
         { label: "Set parent…", run: () => setParentFor(row) },
         ...(row.parentId
           ? [
@@ -263,7 +283,7 @@ function WorktreeList() {
       const options = [...actions.map((a) => a.label), "Cancel"];
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          title: row.name,
+          title: rowTitle(row),
           options,
           cancelButtonIndex: options.length - 1,
           ...(deletable ? { destructiveButtonIndex: actions.length - 1 } : {}),
@@ -271,7 +291,7 @@ function WorktreeList() {
         (index) => actions[index]?.run(),
       );
     },
-    [pin, confirmDelete, setParent, removeFromGroup, repoList, statuses, hostList],
+    [pin, rename, confirmDelete, setParent, removeFromGroup, repoList, statuses, hostList],
   );
 
   const candidates = useMemo<ParentCandidate[]>(

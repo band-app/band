@@ -125,6 +125,8 @@ export interface WorktreeInfo {
   hostId?: string;
   /** The group the worktree is in, or null for none. */
   groupId?: string | null;
+  /** A custom title shown in place of `name`, or null when there is none. */
+  title?: string | null;
   /** True when a scan of the host found the worktree's folder gone. Remove drops the record. */
   missing?: boolean;
   /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */

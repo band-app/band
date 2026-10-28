@@ -45,6 +45,8 @@ export interface WorktreeLike {
   origin?: { worktreeId: string; removed: boolean } | null;
   /** The group the worktree is in; null or unset means Ungrouped. */
   groupId?: string | null;
+  /** A custom title shown in place of the name; null or unset means none. */
+  title?: string | null;
 }
 
 export interface RepoLike {
@@ -122,7 +124,10 @@ export interface WorktreeRow {
   repoTitle: string;
   /** The repo's avatar, for the worktree screen's header. */
   repoAvatar?: { src: string; label: string } | null;
+  /** The worktree's identity, which requests name. `title` is what the list shows. */
   name: string;
+  /** The custom title, or null when there is none. */
+  title: string | null;
   branch: string;
   hostId: string;
   hostTag: string;
@@ -237,6 +242,7 @@ function toRow(
     repoTitle: repo.name,
     repoAvatar: repo.avatar ?? null,
     name: worktree.name,
+    title: worktree.title || null,
     branch: worktree.branch,
     hostId,
     hostTag: hostLabel(worktree.hostId, hosts),
@@ -274,7 +280,7 @@ function withRepo(row: WorktreeRow): string {
 function matches(row: WorktreeRow, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [row.name, row.branch, row.repoTitle, row.hostTag, row.id].some((text) =>
+  return [row.name, row.title ?? "", row.branch, row.repoTitle, row.hostTag, row.id].some((text) =>
     text.toLowerCase().includes(q),
   );
 }
