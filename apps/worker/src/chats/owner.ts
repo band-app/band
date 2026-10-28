@@ -42,6 +42,7 @@ import {
   METHOD_CHAT_REPLICATE,
   METHOD_CHAT_SESSION_STATE,
   METHOD_CHAT_SET_CONFIG,
+  METHOD_CHAT_VIEW_SESSION,
   NOTIFY_CHAT_ACTIVITY,
   NOTIFY_CHAT_LIVE,
   NOTIFY_CHAT_TRANSIENT,
@@ -122,6 +123,10 @@ export class ChatOwner {
       const params = p as unknown as ChatSetConfigParams;
       return this.runtime(this.owned(params.chatId)).setConfigOption(params.configId, params.value);
     });
+    r.json(METHOD_CHAT_VIEW_SESSION, async (p) => {
+      await this.viewSession(this.owned(String(p.chatId)), p.sessionId as string | undefined);
+      return {};
+    });
     r.json(METHOD_CHAT_LIST_SESSIONS, async (p): Promise<ChatListSessionsReply> => {
       const chatId = this.owned(String(p.chatId));
       const sessions = await this.runtime(chatId).listSessions();
@@ -134,6 +139,30 @@ export class ChatOwner {
           })) ?? null,
       };
     });
+  }
+
+  /** Sends an event the log does not keep to the chat's subscribers. */
+  notify(chatId: string, event: Parameters<ChatRuntime["broadcastTransient"]>[0]): void {
+    this.runtime(chatId).broadcastTransient(event);
+  }
+
+  /**
+   * Loads an unlogged session for viewing, then replicates the replayed rows so the hub
+   * holds them when this returns.
+   */
+  async viewSession(chatId: string, sessionId?: string): Promise<void> {
+    const record = this.store.ownedChat(chatId);
+    // The hub's pick, when it got here before the chat's info did.
+    if (
+      record &&
+      sessionId &&
+      record.info.activeSessionId !== sessionId &&
+      !this.taskRunning(chatId)
+    ) {
+      this.store.saveChat({ ...record.info, activeSessionId: sessionId, hasSummary: true });
+    }
+    await this.runtime(chatId).ensureSession("view");
+    await this.flushReplication();
   }
 
   /** Runs what was queued before the worker last stopped, for chats whose log is copied in. */

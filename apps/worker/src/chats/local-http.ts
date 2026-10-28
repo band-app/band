@@ -273,19 +273,58 @@ async function streamEvents(
       state: await owner.sessionState(chatId),
       eventId: syntheticId--,
     });
+    const sendWindow = (rev: number) => {
+      const page = owner.replayTurns(sessionId as string, rev, HISTORY_PAGE_SIZE);
+      for (const event of page.events) send(event);
+      writer.write({
+        type: "history-meta",
+        hasOlder: page.hasOlder,
+        oldestEventId: page.oldestEventId,
+        eventId: syntheticId--,
+      });
+    };
     if (sessionId && revision > 0) {
       if (cold) {
-        const page = owner.replayTurns(sessionId, revision, HISTORY_PAGE_SIZE);
-        for (const event of page.events) send(event);
-        writer.write({
-          type: "history-meta",
-          hasOlder: page.hasOlder,
-          oldestEventId: page.oldestEventId,
-          eventId: syntheticId--,
-        });
+        sendWindow(revision);
       } else {
         for (const event of owner.replayAfter(sessionId, revision, cursor ?? 0)) send(event);
       }
+    } else if (cold && sessionId) {
+      // No log for this session (picked from the agent's history): have the agent replay it
+      // into the log, then send the same window as for a logged one. The replay also reached
+      // the live listener while it was written; those rows are in the window or in older
+      // pages, so drop them from the live queue.
+      try {
+        await owner.viewSession(chatId);
+      } catch (err) {
+        owner.notify(chatId, {
+          type: "notice",
+          level: "warning",
+          text: `This session's history couldn't be loaded: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (queue[i].eventId > 0) queue.splice(i, 1);
+      }
+      const loaded = owner.logRevision(sessionId);
+      if (loaded !== revision) {
+        writer.write({
+          type: "subscription-opened",
+          sessionId,
+          revision: loaded,
+          taskRunning: owner.taskRunning(chatId),
+          reset: false,
+          eventId: syntheticId--,
+        });
+      }
+      if (loaded > 0) sendWindow(loaded);
+      else
+        writer.write({
+          type: "history-meta",
+          hasOlder: false,
+          oldestEventId: 0,
+          eventId: syntheticId--,
+        });
     } else if (cold) {
       writer.write({
         type: "history-meta",
