@@ -48,6 +48,7 @@ import {
   METHOD_CHAT_REPLICATE,
   METHOD_CHAT_SESSION_STATE,
   METHOD_CHAT_SET_CONFIG,
+  METHOD_CHAT_VIEW_SESSION,
   NOTIFY_CHAT_ACTIVITY,
   NOTIFY_CHAT_LIVE,
   NOTIFY_CHAT_TRANSIENT,
@@ -86,6 +87,8 @@ const log = createLogger("chat-ownership");
 
 /** How long the hub waits for a worker to answer one forwarded request. */
 const FORWARD_TIMEOUT_MS = 60_000;
+/** session/load can take up to 180 s on the agent's side. */
+const VIEW_SESSION_TIMEOUT_MS = 200_000;
 /** How long the outbox waits before it tries a host again after a request timed out. */
 const RETRY_MS = 5_000;
 /** Rows per `chat.history` page the hub serves. */
@@ -594,6 +597,37 @@ export class ChatOwnershipService {
       { timeoutMs: FORWARD_TIMEOUT_MS },
     );
     return readPayload<SessionState>(session, enc);
+  }
+
+  /**
+   * The user picked another session for the chat: the owner learns of it from the chat's info,
+   * sent again. A chat with a turn running keeps its session, and the worker's own record wins.
+   */
+  syncActiveSession(chatId: string): void {
+    const hostId = this.ownerOf(chatId);
+    if (!hostId || taskService.getTask(chatId)?.status === "running") return;
+    this.enqueue(chatId, hostId, METHOD_CHAT_OWN, { chatId });
+  }
+
+  /**
+   * Has the owner load a session Band has no log for, and waits until the replayed rows are
+   * here. An offline owner, or an old worker without the method, does nothing, so the replay
+   * arrives with the first prompt as before.
+   */
+  async viewSession(chatId: string): Promise<void> {
+    const sessionId = chatService.get(chatId)?.activeSessionId;
+    const hostId = this.ownerOf(chatId);
+    const session = hostId ? this.sessions.get(hostId) : undefined;
+    if (!session?.attached) return;
+    try {
+      await session.request(
+        METHOD_CHAT_VIEW_SESSION,
+        { chatId, sessionId },
+        { timeoutMs: VIEW_SESSION_TIMEOUT_MS },
+      );
+    } catch (err) {
+      log.warn({ chatId, err }, "the owner could not load the session history");
+    }
   }
 
   /** The agent's own session list on the owner, or null when it can't list or is offline. */
