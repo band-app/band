@@ -538,7 +538,7 @@ band repos add --from w-1a2b3c4d5e6f /home/me/code/my-app
 band repos list
 
 # Build a repo on one machine only
-band repos set epic --workers mac --primary mac
+band repos set atlas --workers mac --primary mac
 
 # Remove a repo
 band repos remove my-app

@@ -181,7 +181,7 @@ describe("buildSections", () => {
 
 describe("pinned, groups and origin like the web", () => {
   const groups = [
-    { id: "l1", name: "Epic", color: "#ef4444" },
+    { id: "l1", name: "Acme", color: "#ef4444" },
     { id: "l2", name: "Private", color: "#3b82f6" },
   ];
   const fixture: RepoLike[] = [
@@ -233,7 +233,7 @@ describe("pinned, groups and origin like the web", () => {
     assert.deepEqual(
       sections.map((s) => [s.name, s.kind, s.title, s.data.map((r) => r.id)]),
       [
-        ["group:l1", "group", "Epic", ["alpha-loose", "beta-main"]],
+        ["group:l1", "group", "Acme", ["alpha-loose", "beta-main"]],
         ["group:l2", "group", "Private", ["alpha-main"]],
         ["group:none", "top", "", ["gamma-main"]],
       ],

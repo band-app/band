@@ -114,7 +114,7 @@ export interface HostInfo {
   hostname: string;
   /** The home directory of the user the host runs as. A `~` in a path the user types means this. */
   home?: string;
-  /** Free-form tags used for placement (`gpu`, `epic-approved`). */
+  /** Free-form tags used for placement (`gpu`, `security-approved`). */
   labels: string[];
   /** Directories worktrees may live under. Empty means unrestricted. */
   roots: string[];

@@ -22,7 +22,7 @@ describe("repoAvatarInitial", () => {
 
 describe("repoAvatarColorIndex", () => {
   it("is stable and in range", () => {
-    for (const name of ["band", "epic-veda", "borko", "x", "", "日本語"]) {
+    for (const name of ["band", "notes-kb", "borko", "x", "", "日本語"]) {
       const index = repoAvatarColorIndex(name);
       assert.equal(index, repoAvatarColorIndex(name));
       assert.ok(Number.isInteger(index) && index >= 0 && index < REPO_AVATAR_COLOR_COUNT);

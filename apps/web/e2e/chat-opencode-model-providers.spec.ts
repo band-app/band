@@ -36,7 +36,7 @@ const MODELS = [
     value: "opencode/nemotron-3.5-lightning-free",
     name: "OpenCode Zen/Nemotron 3.5 Lightning Free",
   },
-  { value: "epic/claude-fable-5-1", name: "Epic Portkey/Claude Fable 5.1" },
+  { value: "acme/claude-fable-5-1", name: "Acme Gateway/Claude Fable 5.1" },
   // The model id has a slash of its own; the provider is still `lmstudio`.
   { value: "lmstudio/qwen/qwen3-coder-30b", name: "LM Studio (local)/Qwen3 Coder 30B" },
   {
@@ -105,7 +105,7 @@ test.describe("OpenCode model picker", () => {
     await chatPane.openMoreModels();
     await expect(chatPane.moreModelsRows).toHaveText([
       "OpenCode Zen",
-      "Epic Portkey",
+      "Acme Gateway",
       "LM Studio (local)",
       "MTPLX (local)",
     ]);

@@ -35,8 +35,8 @@ describe("effectivePrimaryHost", () => {
 describe("onlyAvailableOnMessage", () => {
   it("names the repo and the hosts", () => {
     assert.equal(
-      onlyAvailableOnMessage("epic", ["mac", "contabo"]),
-      "epic is only available on mac, contabo",
+      onlyAvailableOnMessage("atlas", ["mac", "contabo"]),
+      "atlas is only available on mac, contabo",
     );
   });
 });
