@@ -156,6 +156,7 @@ Check each tool first and install only what is missing. All of it is user space 
 | `st5-voice.yaml` | Voice shows its status; an admin's Test connection reaches the speech-to-text stub. |
 | `st6-devices.yaml` | Add device shows the pairing link; Revoke asks first, removes another device, and asks the stronger confirm for the session's own token. |
 | `st7-non-admin.yaml` | With a non-admin device token Devices shows the admin-only notice and Hosts shows no Update button. |
+| `st8-usage.yaml` | Usage lists the Claude and Codex accounts of the hub machine (usage stub) with percent bars, reset times and workers; pull to refresh makes new requests to the stub. |
 | `perf-explorer-fling.yaml` | Flings through the open 3,000-file folder; fails when the frame log's longest JS gap is over 100 ms. Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`; `scripts/seed-explorer.mjs` adds the repo `delta` for the Explorer flows: a 3,000-file `bulk` folder, a 1.3 MB file, a binary, a PNG, markdown, a long-line file and one file of each change kind): repos `alpha` and `beta`, the worktrees

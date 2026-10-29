@@ -64,7 +64,11 @@ function alive(pid) {
 
 /** The caller's environment without `BAND_*`, so a BAND_HOME or token in the shell can't leak in. */
 function cleanEnv() {
-  return Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("BAND_")));
+  // CLAUDE_CONFIG_DIR and CODEX_HOME would point the hub's usage readers at a real login.
+  const drop = new Set(["CLAUDE_CONFIG_DIR", "CODEX_HOME"]);
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith("BAND_") && !drop.has(k)),
+  );
 }
 
 /** The scripted agent's turns (`seed.mjs`), written into the home so a restart keeps them. */
