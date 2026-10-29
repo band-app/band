@@ -14,8 +14,8 @@ import { createHash } from "node:crypto";
 import { chmodSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Server } from "node:net";
 import { join } from "node:path";
-import { ensurePrivateDir } from "@band-app/host-local/terminals/daemon/endpoint";
-import { shortSocketDir } from "@band-app/host-local/terminals/daemon/protocol";
+import { ensurePrivateDir } from "@band-app/host-local/daemon-kit/endpoint";
+import { shortSocketDir } from "@band-app/host-local/daemon-kit/protocol";
 import {
   type GitCredentialParams,
   type GitCredentialReply,

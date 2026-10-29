@@ -1,5 +1,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { createLogger } from "@band-app/logger";
+import { type EndpointIdentity, entryIdentity } from "../../daemon-kit/endpoint";
+import { type DaemonPaths, listRetiredDaemons, type PidRecord } from "../../daemon-kit/protocol";
 import {
   AttachGate,
   type TerminalAttachment,
@@ -8,18 +10,9 @@ import {
 } from "../terminal-backend";
 import type { TerminalExitEvent, TerminalListEntry } from "../terminal-pool";
 import { DaemonClient, DaemonNotRunningError, DaemonRejectedError } from "./client";
-import { type EndpointIdentity, entryIdentity } from "./endpoint";
 import { drainExitRecords } from "./exit-records";
 import { launchDaemon, retireOlderDaemons } from "./launch";
-import {
-  type ControlNotify,
-  type DaemonPaths,
-  daemonPaths,
-  ENDPOINT_LOST_ERROR,
-  listRetiredDaemons,
-  type PidRecord,
-  type StreamEvent,
-} from "./protocol";
+import { type ControlNotify, daemonPaths, ENDPOINT_LOST_ERROR, type StreamEvent } from "./protocol";
 
 const log = createLogger("terminal-daemon-backend");
 
