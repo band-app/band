@@ -283,3 +283,52 @@ describe("chat agents survive a worker restart", () => {
     assert.equal(statSync(socket).mode & 0o777, 0o600);
   });
 });
+
+describe("an agent nobody reattaches is killed (hub gone)", () => {
+  let hub: TestHub;
+  let root: string;
+  let stateDir: string;
+  let proc: WorkerProcess;
+  let session: ServerSession;
+  const pids = new Set<number>();
+
+  before(async () => {
+    hub = await startHub();
+    root = tmpDir();
+    stateDir = tmpDir("band-worker-state-");
+    const connected = hub.nextSession();
+    // The daemon reads the timeout from the environment the worker launched it with.
+    proc = spawnWorkerProcess(
+      ["--hub", hub.url, "--token", TOKEN, "--root", root, "--state-dir", stateDir],
+      { BAND_AGENT_REATTACH_TIMEOUT_MS: "2000" },
+    );
+    session = await connected;
+  });
+
+  after(async () => {
+    proc.child.kill("SIGTERM");
+    await proc.exited;
+    stopAgentDaemons(stateDir);
+    await hub.close();
+    await waitFor(() => [...pids].every((pid) => !isAlive(pid)), 8000, "the agents to end");
+    cleanup(root, stateDir);
+  });
+
+  it("kills a held agent once the hub is gone and the reattach timeout has passed", async () => {
+    const agent = await session.request<Spawned>("acp.spawn", {
+      command: "cat",
+      args: [],
+      env: {},
+      cwd: root,
+    });
+    pids.add(agent.pid as number);
+    // The hub dies without a word: its link closes and the worker stays up and redials.
+    await hub.close();
+    assert.ok(isAlive(agent.pid as number), "the agent outlives the link for a while");
+    await waitFor(
+      () => !isAlive(agent.pid as number),
+      15_000,
+      "the daemon to kill the orphaned agent",
+    );
+  });
+});

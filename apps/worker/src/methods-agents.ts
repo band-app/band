@@ -133,7 +133,7 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
     const agentId = str(a, "agentId");
     if (!holder) throw new Error("This worker does not keep agents across restarts");
     const old = agents.get(agentId);
-    old?.held?.release();
+    old?.held?.release({ detach: false });
     const held = await HeldAgentProcess.attach(holder, agentId, {
       stdout: num(a, "stdout"),
       stderr: num(a, "stderr"),

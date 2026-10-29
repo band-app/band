@@ -54,6 +54,22 @@ const INITIAL_ADOPTION_MS = 2 * 60_000;
 const MAX_STREAM_BACKLOG_BYTES = 64 * 1024 * 1024;
 const DEFAULT_BUFFER_BYTES = 8 * 1024 * 1024;
 const DEFAULT_EXIT_KEEP_MS = 10 * 60_000;
+/** Extra time after the hub's own reattach timeout, so the hub gives up on an agent before the daemon does. */
+const ORPHAN_MARGIN_MS = 2_000;
+const DEFAULT_REATTACH_TIMEOUT_MS = 2 * 60_000;
+
+/**
+ * How long a held agent may go unwatched before the daemon kills it. The hub keeps its ACP state in
+ * memory, so once the hub is gone nothing can reattach. The reattach timeout of the hub, plus a
+ * margin. Read on every check.
+ */
+function orphanMs(): number {
+  const value = Number(process.env.BAND_AGENT_REATTACH_TIMEOUT_MS);
+  return (
+    (Number.isFinite(value) && value > 0 ? value : DEFAULT_REATTACH_TIMEOUT_MS) + ORPHAN_MARGIN_MS
+  );
+}
+
 /** How long an exit waits for the agent's last output to be read. */
 const EXIT_FLUSH_MS = 200;
 
@@ -75,6 +91,8 @@ interface Client {
   stream: Socket | null;
   /** agentId -> true for the agents streaming to this client. */
   attached: Set<string>;
+  /** The worker's link to the hub is down, so this client watches nothing. */
+  hubDown: boolean;
 }
 
 interface Held {
@@ -84,6 +102,11 @@ interface Held {
   paused: Record<AgentStreamName, boolean>;
   subscribers: Set<Client>;
   keepTimer: NodeJS.Timeout | null;
+  /**
+   * Since when no worker watches this agent, or null while one does. An agent nobody reattaches
+   * within the reattach timeout is an orphan: the hub that ran it is gone.
+   */
+  unattachedSince: number | null;
 }
 
 export interface DaemonOptions {
@@ -172,6 +195,20 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       shutdown("run dir removed");
       return;
     }
+    for (const agent of held.values()) {
+      if (agent.record.exit) continue;
+      // Watched means a worker whose link to the hub is up is subscribed.
+      const watched = [...agent.subscribers].some((client) => !client.hubDown);
+      if (watched) {
+        agent.unattachedSince = null;
+      } else if (agent.unattachedSince === null) {
+        agent.unattachedSince = Date.now();
+      } else if (Date.now() - agent.unattachedSince > orphanMs()) {
+        agent.unattachedSince = null;
+        log.warn({ agentId: agent.record.agentId }, "no worker reattached the agent; killing it");
+        killAgent(agent);
+      }
+    }
     if (leaseExpiresAt !== null && Date.now() > leaseExpiresAt) {
       leaseExpiresAt = null;
       killAllAgents("the worker's lease ran out");
@@ -252,19 +289,32 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     }, 50);
   }
 
+  /** SIGTERM, then SIGKILL after the grace period for an agent that ignores it. */
+  function killAgent(agent: Held): void {
+    signalGroup(agent.child, "SIGTERM");
+    const pid = agent.record.pid;
+    if (pid) {
+      setTimeout(() => {
+        if (groupAlive(pid)) killGroup(pid, "SIGKILL");
+      }, SHUTDOWN_GRACE_MS).unref();
+    }
+  }
+
   /** Stops every running agent, with the same escalation as a `kill` request. */
   function killAllAgents(reason: string): void {
     const running = [...held.values()].filter((agent) => !agent.record.exit);
     if (running.length === 0) return;
     log.warn({ agents: running.length, reason }, "killing the held agents");
-    for (const agent of running) {
-      signalGroup(agent.child, "SIGTERM");
-      const pid = agent.record.pid;
-      if (pid) {
-        setTimeout(() => {
-          if (groupAlive(pid)) killGroup(pid, "SIGKILL");
-        }, SHUTDOWN_GRACE_MS).unref();
-      }
+    for (const agent of running) killAgent(agent);
+  }
+
+  /** `client` no longer watches `agent`. The last one leaving starts the orphan clock. */
+  function unwatch(agent: Held | undefined, client: Client): void {
+    if (!agent) return;
+    agent.subscribers.delete(client);
+    client.attached.delete(agent.record.agentId);
+    if (agent.subscribers.size === 0 && agent.unattachedSince === null) {
+      agent.unattachedSince = Date.now();
     }
   }
 
@@ -324,7 +374,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   function registerClient(clientId: string, role: ClientRole, socket: Socket): Client | null {
     let client = clients.get(clientId);
     if (!client) {
-      client = { id: clientId, control: null, stream: null, attached: new Set() };
+      client = { id: clientId, control: null, stream: null, attached: new Set(), hubDown: false };
       clients.set(clientId, client);
     }
     if (client[role]) return null;
@@ -340,7 +390,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   function dropClient(client: Client): void {
     if (clients.get(client.id) !== client) return;
     clients.delete(client.id);
-    for (const agentId of client.attached) held.get(agentId)?.subscribers.delete(client);
+    for (const agentId of client.attached) unwatch(held.get(agentId), client);
     client.attached.clear();
     client.control?.destroy();
     client.stream?.destroy();
@@ -410,6 +460,15 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         }
         return true;
       }
+      case "hub":
+        client.hubDown = !request.up;
+        return true;
+      case "detach": {
+        const agent = held.get(request.agentId);
+        if (!agent) return false;
+        unwatch(agent, client);
+        return true;
+      }
       case "lease":
         leaseExpiresAt = Date.now() + request.ttlMs;
         return true;
@@ -456,6 +515,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         paused: { stdout: false, stderr: false },
         subscribers: new Set(),
         keepTimer: null,
+        unattachedSince: Date.now(),
       };
       held.set(agent.record.agentId, agent);
       for (const name of ["stdout", "stderr"] as const) {
@@ -542,6 +602,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       }
     }
     agent.subscribers.add(client);
+    agent.unattachedSince = null;
     client.attached.add(agent.record.agentId);
     if (agent.record.exit) {
       send(client, "stream", {

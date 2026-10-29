@@ -61,6 +61,13 @@ export interface DaemonRequests {
   spawn: [SpawnParams, AgentRecord];
   /** Subscribes this client's stream connection from these byte offsets. */
   attach: [{ agentId: string; stdout: number; stderr: number }, AgentRecord | null];
+  /**
+   * Whether this worker's link to the hub is up. A worker that is alive but cut off from the hub
+   * watches nothing: the orphan clock runs for agents only such clients watch.
+   */
+  hub: [{ up: boolean }, boolean];
+  /** This client stops watching the agent. The agent keeps running, and starts the orphan clock. */
+  detach: [{ agentId: string }, boolean];
   /** Releases output up to these offsets and answers with the stdin offset. */
   ack: [{ agentId: string; stdout: number; stderr: number }, { stdin: number } | null];
   /** Base64 bytes for the agent's stdin; `end` closes stdin after them. */

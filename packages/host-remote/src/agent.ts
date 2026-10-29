@@ -130,6 +130,18 @@ export class RemoteAgent implements AgentStdio {
     this.rpc.request("acp.kill", { agentId: this.agentId, signal }).catch(() => undefined);
   }
 
+  /**
+   * Kills the agent and waits, up to `timeoutMs`, until the worker has answered the kill. For the
+   * hub shutting down: nothing can reattach after it, so the agent must not outlive it.
+   */
+  async stop(timeoutMs: number): Promise<void> {
+    if (this.exited || this.gone || this.detachedAt !== null) return;
+    await Promise.race([
+      this.rpc.request("acp.kill", { agentId: this.agentId }).catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs).unref()),
+    ]);
+  }
+
   onReattached(listener: () => void): void {
     this.reattachListeners.push(listener);
   }

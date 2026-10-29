@@ -134,6 +134,18 @@ export class AgentHolder {
   /** Stops streaming to the current listeners. The agent keeps running. */
   detach(agentId: string): void {
     this.listeners.delete(agentId);
+    // The daemon starts its orphan clock once no worker watches the agent.
+    void this.ownerOf(agentId)
+      .then((client) => client?.request("detach", { agentId }))
+      .catch(() => undefined);
+  }
+
+  /** Tells the daemons whether the worker's link to the hub is up. Starts no daemon. */
+  async hubLink(up: boolean): Promise<void> {
+    await this.discover().catch(() => undefined);
+    await Promise.all(
+      this.clients().map((client) => client.request("hub", { up }).catch(() => false)),
+    );
   }
 
   async ack(agentId: string, offsets: { stdout: number; stderr: number }) {

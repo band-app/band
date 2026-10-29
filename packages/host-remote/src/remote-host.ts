@@ -150,6 +150,14 @@ export class RemoteHost implements Host {
     await this.rpc.request("acp.reconcile", { keep }).catch(() => undefined);
   }
 
+  /**
+   * Ends the agents this worker holds for the hub, and waits for the worker to confirm. Called when
+   * the hub shuts down, because nothing reattaches them after it comes back.
+   */
+  async stopAgents(timeoutMs = 3_000): Promise<void> {
+    await Promise.all([...this.heldAgents.values()].map((agent) => agent.stop(timeoutMs)));
+  }
+
   async info(): Promise<HostInfo> {
     const info = await this.rpc.call<HostInfo>("host.info");
     return { ...info, id: this.id };

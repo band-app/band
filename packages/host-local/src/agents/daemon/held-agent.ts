@@ -123,9 +123,12 @@ export class HeldAgentProcess implements AgentStdio {
     void this.holder.kill(this.record.agentId, signal).catch(() => undefined);
   }
 
-  /** Stops streaming to this handle. The agent keeps running. */
-  release(): void {
-    this.holder.detach(this.record.agentId);
+  /**
+   * Stops streaming to this handle. The agent keeps running. With `detach: false` the daemon keeps
+   * watching for the worker, as when a new handle for the same agent replaces this one.
+   */
+  release(options: { detach?: boolean } = {}): void {
+    if (options.detach !== false) this.holder.detach(this.record.agentId);
     this.stdout.end();
     this.stderr.end();
   }

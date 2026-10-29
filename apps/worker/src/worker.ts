@@ -142,6 +142,8 @@ export class Worker {
   private terminalDaemon: { recoverExits(): Promise<number> } | null = null;
   /** Kills every agent, held ones included. Set once the agent methods are registered. */
   private killAgents: (() => Promise<void>) | null = null;
+  /** Reports the hub link to the agent daemon, so it can tell an orphaned agent from a watched one. */
+  private hubLink: ((up: boolean) => void) | null = null;
 
   private constructor(
     client: LinkClient,
@@ -290,6 +292,7 @@ export class Worker {
     worker.disposers.push(() => agentControl.dispose());
     worker.disposers.push(() => agentHolder?.close());
     worker.killAgents = () => agentControl.killAll();
+    worker.hubLink = (up) => void agentHolder?.hubLink(up);
     worker.disposers.push(registerRelayMethods(registrar, ctx));
     if (config.ownChats) {
       const chats = new ChatOwner(ctx, await ChatStore.open(join(config.stateDir, "chats.db")));
@@ -398,6 +401,7 @@ export class Worker {
     let disconnectedSince: number | null = null;
     client.on("connected", (ready: Ready, resumed: boolean) => {
       disconnectedSince = null;
+      this.hubLink?.(true);
       this.connectedOnce = true;
       log.info({ workerId: this.workerId, resumed }, "connected to the hub");
       this.chats?.onConnected();
@@ -438,6 +442,7 @@ export class Worker {
       "disconnected",
       (uptimeMs: number, close: { code: number; reason: string } | null) => {
         disconnectedSince = Date.now();
+        this.hubLink?.(false);
         logLimited(
           "disconnected",
           { uptimeMs, closeCode: close?.code, closeReason: close?.reason },
