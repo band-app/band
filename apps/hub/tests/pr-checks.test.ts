@@ -226,6 +226,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     const expectedChecks = {
       state: "failure",
       headSha: "abcdef1234567890abcdef1234567890abcdef12",
+      actions: [],
       checks: [
         {
           id: "check-run-12",
@@ -512,6 +513,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
       checks: {
         state: "pending",
         headSha: "3333333333333333333333333333333333333333",
+        actions: [],
         checks: [
           {
             id: "check-run-22",
@@ -555,6 +557,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     expect(data.checks).toEqual({
       state: "success",
       headSha: "2222222222222222222222222222222222222222",
+      actions: [],
       checks: [
         {
           id: "check-run-41",

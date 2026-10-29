@@ -42,6 +42,8 @@ export class ReviewProviderError extends Error {
   }
 }
 
+const RERUN_ACTIONS = new Set([REVIEW_ACTION_RERUN_JOB, REVIEW_ACTION_RERUN_FAILED]);
+
 type Target =
   | { ok: true; repo: RepoInfo; branch: string; ctx: ProviderContext; provider: ReviewProvider }
   | { ok: false; result: WorktreeReview };
@@ -110,17 +112,23 @@ export class ReviewService {
     if (!target.ok) throw new NoOpenReviewError(worktreeId);
     const { repo, branch, ctx, provider } = target;
 
-    let review: ReviewInfo | null;
-    try {
-      review = await provider.getReviewForBranch(repo, branch, ctx);
-    } catch (err) {
-      throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
+    // Re-running CI jobs needs no review: a branch with no pull request has jobs too. The re-run
+    // actions do not read the review number.
+    let number = 0;
+    if (!RERUN_ACTIONS.has(actionId)) {
+      let review: ReviewInfo | null;
+      try {
+        review = await provider.getReviewForBranch(repo, branch, ctx);
+      } catch (err) {
+        throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
+      }
+      if (!review || (review.state !== "open" && review.state !== "draft")) {
+        throw new NoOpenReviewError(worktreeId);
+      }
+      number = review.number;
     }
-    if (!review || (review.state !== "open" && review.state !== "draft")) {
-      throw new NoOpenReviewError(worktreeId);
-    }
     try {
-      await provider.runAction(repo, review.number, actionId, args, ctx);
+      await provider.runAction(repo, number, actionId, args, ctx);
     } catch (err) {
       throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
     }
@@ -131,31 +139,18 @@ export class ReviewService {
     return this.runAction(worktreeId, REVIEW_ACTION_MERGE, { method });
   }
 
-  /**
-   * `reviews.rerunChecks`, kept for the mobile app: one action per target, stopping at the first
-   * refusal. Re-running a job needs no open review (a branch with no PR has CI jobs too), so this
-   * resolves the provider once and passes review number 0, which the re-run actions do not read.
-   */
+  /** `reviews.rerunChecks`, kept for the mobile app: one action per target, stopping at the first refusal. */
   async rerunChecks(worktreeId: string, targets: RerunTarget[]): Promise<void> {
-    const target = await this.resolve(worktreeId);
-    if (!target.ok) throw new NoOpenReviewError(worktreeId);
-    const { repo, ctx, provider } = target;
     for (const item of targets) {
-      let actionId: string;
-      let args: ReviewActionArgs;
       if (item.failedOnly) {
-        actionId = REVIEW_ACTION_RERUN_FAILED;
-        args = { runId: item.runId };
+        await this.runAction(worktreeId, REVIEW_ACTION_RERUN_FAILED, { runId: item.runId });
       } else if (item.jobId) {
-        actionId = REVIEW_ACTION_RERUN_JOB;
-        args = { runId: item.runId, jobId: item.jobId };
+        await this.runAction(worktreeId, REVIEW_ACTION_RERUN_JOB, {
+          runId: item.runId,
+          jobId: item.jobId,
+        });
       } else {
         throw new ReviewProviderError("Name a job to run again, or ask for the failed jobs.");
-      }
-      try {
-        await provider.runAction(repo, 0, actionId, args, ctx);
-      } catch (err) {
-        throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
       }
     }
   }

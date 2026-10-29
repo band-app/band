@@ -44,6 +44,33 @@ function rerunnable(
   return !!check.rerun && check.state !== "running" && check.state !== "pending";
 }
 
+/** Re-run actions for finished GitHub Actions jobs: one per job, and one per run with a failure. */
+export function rerunActions(checks: CheckRun[]): ReviewAction[] {
+  const actions: ReviewAction[] = [];
+  const failedRuns = new Set<string>();
+  for (const check of checks) {
+    if (!rerunnable(check)) continue;
+    actions.push({
+      id: REVIEW_ACTION_RERUN_JOB,
+      label: "Re-run job",
+      icon: "rerun",
+      placement: "check",
+      args: { runId: check.rerun.runId, jobId: check.rerun.jobId, checkId: check.id },
+    });
+    if (check.state === "failure") failedRuns.add(check.rerun.runId);
+  }
+  for (const runId of failedRuns) {
+    actions.push({
+      id: REVIEW_ACTION_RERUN_FAILED,
+      label: "Re-run failed",
+      icon: "rerun",
+      placement: "header",
+      args: { runId },
+    });
+  }
+  return actions;
+}
+
 /** What a person can do to this pull request now, as data for the core to draw. */
 export function reviewActions(review: Omit<ReviewInfo, "actions">): ReviewAction[] {
   const actions: ReviewAction[] = [];
@@ -72,27 +99,7 @@ export function reviewActions(review: Omit<ReviewInfo, "actions">): ReviewAction
     });
   }
 
-  const failedRuns = new Set<string>();
-  for (const check of review.checks.checks) {
-    if (!rerunnable(check)) continue;
-    actions.push({
-      id: REVIEW_ACTION_RERUN_JOB,
-      label: "Re-run job",
-      icon: "rerun",
-      placement: "check",
-      args: { runId: check.rerun.runId, jobId: check.rerun.jobId, checkId: check.id },
-    });
-    if (check.state === "failure") failedRuns.add(check.rerun.runId);
-  }
-  for (const runId of failedRuns) {
-    actions.push({
-      id: REVIEW_ACTION_RERUN_FAILED,
-      label: "Re-run failed",
-      icon: "rerun",
-      placement: "header",
-      args: { runId },
-    });
-  }
+  actions.push(...rerunActions(review.checks.checks));
   return actions;
 }
 

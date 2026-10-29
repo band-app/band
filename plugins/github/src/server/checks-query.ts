@@ -14,7 +14,7 @@ import type {
   ReviewState,
   ReviewThread,
 } from "@band-app/plugin-api";
-import { reviewActions } from "./actions";
+import { rerunActions, reviewActions } from "./actions";
 
 // What one query fetches of the discussion. Past a cap the newest messages
 // win for comments and reviews, and the first ones for threads; the
@@ -526,7 +526,7 @@ function report(headSha: string | null, checks: CheckRun[]): ChecksReport {
       state = check.state as ChecksState;
     }
   }
-  return { state, headSha, checks: sorted };
+  return { state, headSha, checks: sorted, actions: rerunActions(sorted) };
 }
 
 function reviewState(pr: PullRequestNode): ReviewState {

@@ -97,7 +97,7 @@ export function ChecksSection({
   refetch: () => void;
 }) {
   const provider = useReviewProviderInfo();
-  const actions = review?.actions ?? [];
+  const actions = checks.actions ?? [];
   const [open, setOpen] = useSectionOpen("checks");
   const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");

@@ -110,6 +110,11 @@ export interface ChecksReport {
   /** The commit the checks ran on. */
   headSha: string | null;
   checks: CheckRun[];
+  /**
+   * What a person can do to these checks, e.g. re-run a job. A review's `actions` repeat them;
+   * a branch with no review has only these.
+   */
+  actions?: ReviewAction[];
 }
 
 export type ReviewState = "open" | "draft" | "merged" | "closed";

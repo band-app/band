@@ -514,6 +514,7 @@ test.beforeAll(async () => {
     }),
   );
   stub.setRunRerun(602, { stderr: REFUSED_MESSAGE });
+  stub.setRunRerun(900, { onRequest: (r) => reruns.push(r) });
   stub.setReviewQueryError(FAKE_REPO, GH_DOWN_BRANCH, "HTTP 401: Bad credentials\n");
   stub.setReviewQuery(
     FAKE_REPO,
@@ -523,7 +524,13 @@ test.beforeAll(async () => {
       suites: [
         checkSuiteNode("Release", [
           checkRunNode({ id: 41, name: "Publish", runId: 900 }),
-          checkRunNode({ id: 42, name: "Notarize", runId: 900, conclusion: "FAILURE" }),
+          checkRunNode({
+            id: 42,
+            name: "Notarize",
+            runId: 900,
+            rerunnable: true,
+            conclusion: "FAILURE",
+          }),
         ]),
       ],
     }),
@@ -995,6 +1002,19 @@ test("a branch with no pull request shows only the checks", async ({ page }) => 
   await expect(panel.reviewersSummary).toHaveCount(0);
   await expect(panel.commentsSummary).toHaveCount(0);
   await expect(panel.checks).not.toHaveCount(0);
+});
+
+test("a branch with no pull request can re-run a job", async ({ page }) => {
+  reruns.length = 0;
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, "main", "local"));
+  await expect(panel.noReview).toBeVisible();
+  await expect(panel.check("Notarize")).toHaveAttribute("data-check-state", "failure");
+
+  await panel.rerunCheck("Notarize");
+  await expect
+    .poll(() => reruns.map((r) => r.args))
+    .toEqual([["run", "rerun", "900", "--job", "42", "--repo", "github.com/acme/widgets"]]);
 });
 
 test("Re-run runs one failed job and shows it as queued until GitHub lists it again", async ({

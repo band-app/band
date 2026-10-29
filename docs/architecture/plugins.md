@@ -35,7 +35,7 @@ A review lists what a person can do to it in `ReviewInfo.actions`. An action has
 - GitHub also offers `rerun-job` (placement `check`, args `runId`, `jobId`, `checkId`), `rerun-failed` (placement `header`, one per run with a failure, args `runId`) and `ready` on a draft pull request (`gh pr ready`).
 - An action is identified by its `id` and `args`, so several actions may share an `id`.
 - The provider validates `args` and rejects unknown ids with the forge's own message. The hub does not check that an action was offered.
-- A review lookup returns actions only for a branch that has a review, so a branch with only CI jobs has no re-run buttons in the panel.
+- `ChecksReport.actions` carries the re-run actions of its checks, so a branch with no review still has re-run buttons. A review's `actions` repeat them, and the hub runs re-run actions without requiring an open review.
 - `reviews.merge` and `reviews.rerunChecks` stay as thin wrappers over `runAction`, because the mobile app calls them. The mobile app does not draw actions yet.
 
 ## Comparison with VS Code's SCM API
