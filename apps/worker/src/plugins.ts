@@ -1,4 +1,4 @@
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { METHOD_PLUGIN_CALL, RpcError } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
@@ -41,14 +41,17 @@ export class WorkerPlugins {
   private readonly running = new Map<string, Running>();
   private readonly reasons = new Map<string, string>();
 
-  private constructor(private readonly log: Logger) {}
+  private constructor(
+    private readonly log: Logger,
+    private readonly scopesFile: string,
+  ) {}
 
   static async start(options: {
     stateDir: string;
     log: Logger;
     bundled?: BundledWorkerPlugin[];
   }): Promise<WorkerPlugins> {
-    const plugins = new WorkerPlugins(options.log);
+    const plugins = new WorkerPlugins(options.log, join(options.stateDir, "plugin-scopes.json"));
     for (const entry of options.bundled ?? BUNDLED_WORKER_PLUGINS) {
       const parsed = pluginManifestSchema.safeParse(entry.manifest);
       if (!parsed.success || parsed.data.id !== entry.worker.id) {
@@ -90,7 +93,30 @@ export class WorkerPlugins {
       this.log.info({ plugin: plugin.id, reason }, "worker plugin not available here");
       return;
     }
-    this.running.set(plugin.id, { instance, scopes: new Map() });
+    this.running.set(plugin.id, { instance, scopes: this.savedScopes(plugin.id) });
+  }
+
+  /** The worktrees a plugin served before a restart, so a removal after one still finds them. */
+  private savedScopes(pluginId: string): Map<string, string> {
+    try {
+      const all = JSON.parse(readFileSync(this.scopesFile, "utf8")) as Record<
+        string,
+        Record<string, string>
+      >;
+      return new Map(Object.entries(all[pluginId] ?? {}));
+    } catch {
+      return new Map();
+    }
+  }
+
+  private saveScopes(): void {
+    const all: Record<string, Record<string, string>> = {};
+    for (const [id, running] of this.running) all[id] = Object.fromEntries(running.scopes);
+    try {
+      writeFileSync(this.scopesFile, JSON.stringify(all), { mode: 0o600 });
+    } catch (err) {
+      this.log.warn({ message: String(err) }, "could not save the worker plugin scopes");
+    }
   }
 
   /** The plugin ids this worker can run. */
@@ -113,7 +139,10 @@ export class WorkerPlugins {
         why ? `this worker cannot run ${pluginId}: ${why}` : `unknown plugin ${pluginId}`,
       );
     }
-    running.scopes.set(worktreeKey, worktreePath);
+    if (running.scopes.get(worktreeKey) !== worktreePath) {
+      running.scopes.set(worktreeKey, worktreePath);
+      this.saveScopes();
+    }
     return running.instance.call(method, params, { worktreeKey, worktreePath });
   }
 
@@ -142,15 +171,20 @@ export class WorkerPlugins {
     match: (key: string, path: string) => boolean,
     reason: ReleaseReason,
   ): Promise<void> {
+    let changed = false;
     for (const [id, running] of this.running) {
       for (const [key, path] of [...running.scopes]) {
         if (!match(key, path)) continue;
-        if (reason === "removed") running.scopes.delete(key);
+        if (reason === "removed") {
+          running.scopes.delete(key);
+          changed = true;
+        }
         await Promise.resolve(running.instance.release?.(key, reason)).catch((err) =>
           this.log.warn({ plugin: id, message: String(err) }, "worker plugin release"),
         );
       }
     }
+    if (changed) this.saveScopes();
   }
 }
 

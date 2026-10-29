@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { run } from "./tools.ts";
 
 export interface Device {
@@ -150,11 +149,6 @@ export class DeviceSet {
     return { ...device, state: "Booted" };
   }
 
-  /** Marks the device as just used, so it is the last to be shut down. */
-  touch(udid: string): void {
-    this.lastUsed.set(udid, Date.now());
-  }
-
   async shutdown(udid: string): Promise<void> {
     this.onShutdown(udid);
     await this.simctl(["shutdown", udid]).catch((err: Error) => {
@@ -189,9 +183,5 @@ export class DeviceSet {
     for (const d of await this.list().catch(() => [])) {
       if (d.state === "Booted") await this.shutdown(d.udid).catch(() => undefined);
     }
-  }
-
-  path(...parts: string[]): string {
-    return join(this.dir, ...parts);
   }
 }

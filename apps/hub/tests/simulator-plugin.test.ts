@@ -353,11 +353,13 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
       call("shot2", "simulator_screenshot"),
       call("tap", "simulator_tap", { x: 200, y: 820 }),
       call("type", "simulator_type", { text: "band" }),
-      { sleep: 1500 },
+      { sleep: 2000 },
       call("shot3", "simulator_screenshot"),
+      { sleep: 3000 },
+      call("shot4", "simulator_screenshot"),
     ]);
     const png = (name: string) => imageOf(r[name] as ToolReply);
-    for (const name of ["shot1", "shot2", "shot3"]) {
+    for (const name of ["shot1", "shot2", "shot3", "shot4"]) {
       expect(png(name)?.mimeType).toBe("image/png");
       expect(
         Buffer.from(png(name)?.data ?? "", "base64")
@@ -366,7 +368,9 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
       ).toBe("PNG");
     }
     expect(png("shot1")?.data).not.toBe(png("shot2")?.data);
-    expect(png("shot2")?.data).not.toBe(png("shot3")?.data);
+    // The keyboard may take longer than a fixed wait to appear, so one of two later shots must differ.
+    const later = [png("shot3")?.data, png("shot4")?.data];
+    expect(later.some((d) => d !== png("shot2")?.data)).toBe(true);
     expect(r.tap?.rpc.result?.isError).toBeFalsy();
     expect(r.type?.rpc.result?.isError).toBeFalsy();
   }, 400_000);
