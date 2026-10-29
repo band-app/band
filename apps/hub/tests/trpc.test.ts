@@ -220,6 +220,59 @@ describe("tRPC — repos CRUD", () => {
     expect(res.status).toBe(404);
   });
 
+  it("worktrees.setTitle sets, trims and clears a title, and a state rewrite keeps it", async () => {
+    const worktreeId = testWorktreeId("myrepo", "main", false);
+    type ListData = {
+      repos: Array<{
+        name: string;
+        worktrees: Array<{ worktreeId: string; title: string | null }>;
+      }>;
+    };
+    const titleOf = async () => {
+      const listed = await trpcData<ListData>(await trpcQuery(server.url, "repos.list"));
+      return listed.repos
+        .find((p) => p.name === "myrepo")!
+        .worktrees.find((w) => w.worktreeId === worktreeId)?.title;
+    };
+    expect(await titleOf()).toBeNull();
+
+    const set = await trpcMutate(server.url, "worktrees.setTitle", {
+      worktreeId,
+      title: "  Login revamp  ",
+    });
+    expect(set.status).toBe(200);
+    expect(await titleOf()).toBe("Login revamp");
+
+    // Reordering repos rewrites the worktrees table through `saveAll`.
+    const reorder = await trpcMutate(server.url, "repos.reorder", {
+      names: ["myrepo", "second-repo"],
+    });
+    expect(reorder.status).toBe(200);
+    expect(await titleOf()).toBe("Login revamp");
+
+    const blank = await trpcMutate(server.url, "worktrees.setTitle", { worktreeId, title: "   " });
+    expect(blank.status).toBe(200);
+    expect(await titleOf()).toBeNull();
+
+    await trpcMutate(server.url, "worktrees.setTitle", { worktreeId, title: "Again" });
+    const cleared = await trpcMutate(server.url, "worktrees.setTitle", { worktreeId, title: null });
+    expect(cleared.status).toBe(200);
+    expect(await titleOf()).toBeNull();
+  });
+
+  it("worktrees.setTitle rejects a title over 100 characters and answers 404 for an unknown worktree", async () => {
+    const tooLong = await trpcMutate(server.url, "worktrees.setTitle", {
+      worktreeId: testWorktreeId("myrepo", "main", false),
+      title: "x".repeat(101),
+    });
+    expect(tooLong.status).toBe(400);
+    const unknown = await trpcMutate(server.url, "worktrees.setTitle", {
+      worktreeId: "no-such-worktree",
+      title: "x",
+    });
+    expect(unknown.status).toBe(404);
+  });
+
   it("repos.reorder changes repo order", async () => {
     const res = await trpcMutate(server.url, "repos.reorder", {
       names: ["second-repo", "myrepo"],

@@ -47,6 +47,7 @@ export const RELAY_CLI_COMMANDS: readonly string[] = [
   "worktrees create",
   "worktrees list",
   "worktrees remove",
+  "worktrees rename",
   "worktrees set-group",
 ];
 

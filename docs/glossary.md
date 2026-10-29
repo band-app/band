@@ -57,6 +57,8 @@ One working copy of a repo that an agent and a user work in. Its id is `<repo>-<
 
 For a git repo a worktree is a git worktree created with `git worktree add`, and the id's branch is the branch it was created on. A plain (non-git) repo uses the word without a git worktree: it has one implicit worktree, the folder itself, with no branch isolation and no git features.
 
+A worktree can have a title, at most 100 characters, that the sidebar and pickers show in place of its name (`worktrees.setTitle`, `band worktrees rename`). The id, the folder and the branch do not change, and clearing the title brings the name back.
+
 In the API a worktree is `worktrees.*`, in the CLI `band worktrees`, and in an agent's environment `BAND_WORKTREE_ID`.
 
 ## Origin link

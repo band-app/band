@@ -165,6 +165,15 @@ band worktrees set-origin <repo> <name> [--worker <worker>] (--origin <worktree 
 
 The parent is the worktree this one was started from. The sidebar shows it in Group by: Origin. `--origin` sets a parent by hand (no chat or terminal is recorded), `--none` removes it. The hub refuses the worktree itself and any of its descendants as the parent, and an unknown worktree id.
 
+### Rename a worktree
+
+```sh
+band worktrees rename <worktree id> "<title>"
+band worktrees rename <worktree id> --clear
+```
+
+Sets the title the sidebar shows in place of the worktree's name (at most 100 characters), or clears it with `--clear`. The worktree id, folder and git branch do not change. `band worktrees list` shows a TITLE column, and `--output json` has a `title` field (null when unset). An agent may run this command for worktrees on its own host.
+
 ### Set a worktree's group
 
 ```sh

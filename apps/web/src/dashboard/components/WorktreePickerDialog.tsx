@@ -76,7 +76,8 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
         entries.push({
           worktreeId,
           repoName: repo.name,
-          name: worktree.name,
+          // The custom title when there is one. `branch` stays searchable.
+          name: worktree.title || worktree.name,
           branch: worktree.branch,
           // A git repo's default-branch worktree is its main checkout (the
           // repo root). Plain repos have no root/feature distinction.

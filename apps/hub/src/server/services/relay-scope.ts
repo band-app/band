@@ -71,6 +71,7 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "repos.remove",
   "groups.list",
   "worktrees.setGroup",
+  "worktrees.setTitle",
   "hosts.list",
   "hosts.forAgents",
   "workers.list",
