@@ -15,9 +15,11 @@ import {
   waitFor,
 } from "./helpers.ts";
 
+/** Real simulators need Xcode, and the suite runs on machines that are not set up for them. It follows the hub test: it runs where idb is installed too. */
 function hasSimctl(): boolean {
   try {
     execFileSync("xcrun", ["simctl", "help"], { stdio: "ignore" });
+    execFileSync("which", ["idb_companion"], { stdio: "ignore" });
     return process.platform === "darwin";
   } catch {
     return false;
