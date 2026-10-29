@@ -215,6 +215,13 @@ describe("a worktree whose folder is gone", () => {
     const [prompt] = stubRequests(workerHome, "session/prompt");
     const pid = prompt.pid;
     expect(isAlive(pid)).toBe(true);
+    const sessionsOf = async () =>
+      (
+        await trpcData<{ agentSessions: unknown[] }>(
+          await trpcQuery(server.url, "agentSessions.list", { worktreeId: id }, TOKEN),
+        )
+      ).agentSessions;
+    expect(await sessionsOf()).toHaveLength(1);
 
     rmSync(join(root, ".band-worktrees", "proj", "held"), { recursive: true, force: true });
     git(join(root, "proj"), "worktree", "prune");
@@ -225,6 +232,14 @@ describe("a worktree whose folder is gone", () => {
       intervalMs: 1_000,
     });
     await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
+    await expect.poll(sessionsOf, { timeout: 15_000 }).toHaveLength(0);
+    // The log line names the chat whose background hold was dropped.
+    const line = server
+      .output()
+      .split("\n")
+      .find((l) => l.includes("pruned a worktree whose folder is gone") && l.includes(id));
+    expect(line).toBeDefined();
+    expect(line).toContain("prune-held-chat");
   }, 120_000);
 
   it("is kept while a turn runs, and pruned once it ends", async () => {
@@ -310,6 +325,40 @@ describe("a worktree whose folder is gone", () => {
     await waitFor(async () => ((await find(id)) ? undefined : true), {
       label: "shelled worktree pruned after the kill",
       timeoutMs: 45_000,
+      intervalMs: 1_000,
+    });
+  }, 120_000);
+
+  it("is kept while a message is queued, and pruned once the queue drains", async () => {
+    const id = await createWorktree("queued");
+    const chatId = "prune-queued-chat";
+    const post = (text: string) =>
+      fetch(`${server.url}/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
+        body: JSON.stringify({ worktreeId: id, text, files: [] }),
+      }).then((r) => r.json() as Promise<{ ok: boolean; queued: boolean }>);
+    const started = stubRequests(workerHome, "session/prompt").length;
+    const first = await post("slow");
+    expect(first.queued).toBe(false);
+    await waitFor(
+      async () => (stubRequests(workerHome, "session/prompt").length > started ? true : undefined),
+      { label: "slow turn started", timeoutMs: 20_000 },
+    );
+    const second = await post("hold");
+    expect(second.queued).toBe(true);
+
+    rmSync(join(root, ".band-worktrees", "proj", "queued"), { recursive: true, force: true });
+    git(join(root, "proj"), "worktree", "prune");
+    await waitFor(async () => ((await find(id))?.missing ? true : undefined), {
+      label: "queued worktree marked missing",
+      timeoutMs: 20_000,
+    });
+    expect(await find(id)).toBeDefined();
+
+    await waitFor(async () => ((await find(id)) ? undefined : true), {
+      label: "queued worktree pruned after the queue drained",
+      timeoutMs: 60_000,
       intervalMs: 1_000,
     });
   }, 120_000);
