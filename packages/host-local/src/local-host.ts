@@ -19,6 +19,8 @@ import { join } from "node:path";
 import { getUsageReader } from "@band-app/coding-agent";
 import type {
   AcpAgentDefinition,
+  AcpLaunch,
+  AgentStdio,
   AgentDescriptor,
   CapabilityReport,
   ClaudeDefaults,
@@ -53,7 +55,11 @@ import type {
   WorktreeSpec,
 } from "@band-app/host-api";
 import { resolveAcpLaunch } from "./agents/acp-launch";
+import { adapterVersionOf } from "./agents/adapter-version";
 import { spawnAgentProcess } from "./agents/agent-spawn";
+import { HeldAgentProcess } from "./agents/daemon/held-agent";
+import type { AgentHolder } from "./agents/daemon/holder";
+import { AgentDaemonUnavailableError } from "./agents/daemon/holder";
 import {
   configuredClaudeDefaults,
   findClaudeCliArgs,
@@ -107,6 +113,11 @@ export interface LocalHostOptions {
    * Defaults to `<BAND_HOME>/repo-mappings.json` and `~/band/repos` (`BAND_REPOS_DIR`).
    */
   repos?: { mappingsFile?: () => string; reposDir?: () => string };
+  /**
+   * Runs the agents of `acp.spawn` in the agent daemon, so they outlive this process. A worker
+   * passes one. Without it, agents are this process's children and die with it.
+   */
+  agentHolder?: AgentHolder;
 }
 
 /**
@@ -138,8 +149,13 @@ export class LocalHost implements Host {
     killAll: async () => killAllServers(),
   };
   readonly acp: HostAcp = {
-    resolveLaunch: (def: AcpAgentDefinition) => resolveAcpLaunch(def),
-    spawn: (launch, cwd) => spawnAgentProcess(launch, cwd),
+    resolveLaunch: async (def: AcpAgentDefinition) => {
+      const launch = await resolveAcpLaunch(def);
+      if (typeof launch === "string") return launch;
+      const adapterVersion = adapterVersionOf(launch);
+      return adapterVersion ? { ...launch, adapterVersion } : launch;
+    },
+    spawn: (launch, cwd) => this.spawnAgent(launch, cwd),
   };
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),
@@ -195,6 +211,37 @@ export class LocalHost implements Host {
     // The first probe takes about half a second (seven processes). Starting it
     // now keeps the first `hosts.list` after boot from waiting on it.
     void this.toolVersions();
+  }
+
+  /** Starts an agent in the agent daemon when this host has one, else as this process's child. */
+  private async spawnAgent(launch: AcpLaunch, cwd: string): Promise<AgentStdio> {
+    const holder = this.options.agentHolder;
+    if (!holder) return spawnAgentProcess(launch, cwd);
+    let agentId: string;
+    try {
+      const env: Record<string, string> = {};
+      for (const [name, value] of Object.entries(process.env)) {
+        if (value !== undefined && !launch.unsetEnv?.includes(name)) env[name] = value;
+      }
+      Object.assign(env, launch.env);
+      const record = await holder.spawn({
+        env,
+        cwd,
+        command: launch.command,
+        args: launch.args,
+        specHash: launch.specHash ?? null,
+        adapterVersion: launch.adapterVersion ?? null,
+        ghToken: Boolean(launch.env.GH_TOKEN),
+      });
+      agentId = record.agentId;
+    } catch (err) {
+      if (!(err instanceof AgentDaemonUnavailableError)) throw err;
+      // Without a daemon the agent is a child of this process: it works, and dies with the worker.
+      return spawnAgentProcess(launch, cwd);
+    }
+    const handle = await HeldAgentProcess.attach(holder, agentId, { stdout: 0, stderr: 0 });
+    if (!handle) throw new Error("The agent daemon lost the agent it just started");
+    return handle;
   }
 
   get pty(): TerminalBackend {
