@@ -1,9 +1,8 @@
 import { delimiter, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { AgentStdio, McpStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
+import type { McpStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-api";
 import { shellPath } from "@band-app/host-local/process/path";
 import { type Channel, decodeFrames, encodeFrame } from "@band-app/link";
-import { agentSpawnEnv } from "./agent-env.ts";
 import { browserProfileDir, type Registrar, type WorkerContext } from "./context.ts";
 import { ghTokenEnv } from "./gh-token.ts";
 import {
@@ -23,11 +22,6 @@ import { ndjson, serve } from "./streams.ts";
 /** A viewer further behind than this holds the PTY, and releases it below the low mark. */
 const PTY_HOLD_BYTES = 256 * 1024;
 const PTY_RELEASE_BYTES = 32 * 1024;
-
-/** Agents the hub started and has not seen exit. */
-interface RunningAgent {
-  stdio: AgentStdio;
-}
 
 interface AttachedPty {
   channel: Channel;
@@ -133,55 +127,7 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     return { chan: ch.id };
   });
 
-  // ---- agents -------------------------------------------------------------
-
-  const agents = new Map<string, RunningAgent>();
   const mcpProcesses = new Set<McpStdio>();
-
-  r.json("acp.resolveLaunch", (a) =>
-    host.acp.resolveLaunch({
-      type: str(a, "type"),
-      label: optStr(a, "label"),
-      command: optStr(a, "command"),
-    }),
-  );
-
-  // Stdio is one channel (hub writes stdin, worker writes stdout) and stderr is another.
-  // The hub ending its side closes stdin. Resetting the stdio channel kills the agent.
-  r.raw("acp.spawn", async (a) => {
-    const env = await agentSpawnEnv(ctx, strRecord(a, "env"));
-    const launch = {
-      command: str(a, "command"),
-      args: strArray(a, "args"),
-      env,
-      unsetEnv: a.unsetEnv === undefined ? undefined : strArray(a, "unsetEnv"),
-    };
-    const cwd = await path(a, "cwd");
-    ctx.lease.assertMayRun(cwd);
-    const stdio = await host.acp.spawn(launch, cwd);
-    const agentId = `a-${stdio.pid ?? "x"}-${agents.size}-${Date.now().toString(36)}`;
-    agents.set(agentId, { stdio });
-
-    const stdout = session.openChannel("acp.stdio", { agentId });
-    const stderr = session.openChannel("acp.stderr", { agentId });
-    serve(stdout, stdio.stdout, {
-      release: activity.hold(),
-      stopSourceOn: "reset",
-      onInput: (chunk) => stdio.stdin.write(chunk),
-      onClosed: (how) => (how === "ended" ? stdio.stdin.end() : stdio.kill()),
-    });
-    serve(stderr, stdio.stderr, { release: activity.hold() });
-    void stdio.exit.then((exit) => {
-      agents.delete(agentId);
-      // After the reply, so a process that dies at once is still reported to a caller who has its id.
-      setImmediate(() => session.notify("acp.exit", { agentId, ...exit }));
-    });
-    return { agentId, pid: stdio.pid ?? null, stdio: stdout.id, stderr: stderr.id };
-  });
-  r.json("acp.kill", (a) => {
-    const signal = optStr(a, "signal") as NodeJS.Signals | undefined;
-    agents.get(str(a, "agentId"))?.stdio.kill(signal);
-  });
 
   // ---- stdio MCP servers --------------------------------------------------
 
@@ -423,7 +369,6 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
 
   // The lease ran out: nothing this worker runs for the hub may go on.
   ctx.lease.onFence(async () => {
-    for (const { stdio } of agents.values()) stdio.kill();
     for (const proc of mcpProcesses) proc.kill();
     await Promise.all([...openBrowsers].map((id) => host.browser.close(id)));
     for (const t of await pty.listAll().catch(() => [])) await pty.kill(t.terminalId);
@@ -432,7 +377,6 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
 
   return async () => {
     unsubscribeExit();
-    for (const { stdio } of agents.values()) stdio.kill();
     for (const proc of mcpProcesses) proc.kill();
     await Promise.all([...openBrowsers].map((id) => host.browser.close(id)));
     await pty.close();

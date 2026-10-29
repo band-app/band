@@ -58,7 +58,13 @@
       ]
     },
     "apps/worker": {
-      "entry": ["src/main.ts", "src/terminal-daemon.ts", "tests/**/*.test.ts", "scripts/*.mjs"],
+      "entry": [
+        "src/main.ts",
+        "src/terminal-daemon.ts",
+        "src/agent-daemon.ts",
+        "tests/**/*.test.ts",
+        "scripts/*.mjs"
+      ],
       "project": ["src/**/*.ts", "tests/**/*.ts", "bin/*.mjs", "scripts/*.mjs"],
       "ignoreDependencies": [
         "@agentclientprotocol/claude-agent-acp",

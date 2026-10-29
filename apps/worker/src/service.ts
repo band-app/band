@@ -11,6 +11,7 @@ import {
 import { homedir, platform as osPlatform } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { stopAgentDaemons } from "./agents.ts";
 import { ConfigError, parseLabels } from "./config.ts";
 import { stopTerminalDaemons } from "./terminals.ts";
 
@@ -348,6 +349,8 @@ export function uninstallService(env: ServiceEnv): void {
   // The terminals run in their own daemon, which the service manager does not stop (see `KillMode=process`).
   const ended = stopTerminalDaemons(stateDir);
   if (ended > 0) env.log("Ended the terminal daemon and its shells.");
+  // Held chat agents run in their own daemon for the same reason, and an uninstalled worker must not leave them.
+  if (stopAgentDaemons(stateDir) > 0) env.log("Ended the agent daemon and its agents.");
   env.log("Removed the band-worker service. The worker's state directory is kept.");
 }
 

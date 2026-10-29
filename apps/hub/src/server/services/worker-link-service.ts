@@ -258,6 +258,12 @@ export class WorkerLinkService {
   private async onConnected(session: ServerSession): Promise<void> {
     const { workerId, hello } = session;
     const at = this.now();
+    // Agents the worker's daemon kept through a restart pick up their streams where they stopped.
+    void this.remoteHost(workerId)
+      .reattachAgents()
+      .catch((err) => {
+        log.warn(`agent reattach on ${workerId}: ${err instanceof Error ? err.message : err}`);
+      });
     let info: HostInfo | null = null;
     try {
       info = await this.remoteHost(workerId).info();
