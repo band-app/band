@@ -1,0 +1,70 @@
+# q1 (S1, S2, S4): Checks lists the pull request's reviewers above the checks with a summary, the
+# state of each, the Required mark, and the initial where the avatar does not load. A pull request
+# with no reviewers says so, and a very long login stays on one row.
+appId: app.getband.mobile
+name: q1 the reviewers of a pull request
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-reviewers
+- extendedWaitUntil:
+    visible:
+      id: pr-reviewers__summary
+      text: "1/3 approved"
+    timeout: 20000
+- assertVisible:
+    id: pr-reviewers__login
+    text: "alice"
+- assertVisible:
+    id: pr-reviewers__login
+    text: "bob"
+- assertVisible:
+    id: pr-reviewers__login
+    text: "carol"
+- assertVisible:
+    id: pr-reviewers__state
+    text: "Approved"
+- assertVisible:
+    id: pr-reviewers__state
+    text: "Changes requested"
+- assertVisible:
+    id: pr-reviewers__state
+    text: "Pending"
+- assertVisible:
+    id: pr-reviewers__required
+- assertVisible:
+    id: pr-reviewers__initial
+- takeScreenshot: q1-reviewers
+- tapOn:
+    id: checks__back
+- tapOn:
+    id: worktree__back
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-nochecks
+- extendedWaitUntil:
+    visible:
+      id: pr-reviewers__empty
+      text: "No reviewers requested yet."
+    timeout: 20000
+- assertVisible:
+    id: pr-reviewers__summary
+    text: "none"
+- takeScreenshot: q1-no-reviewers
+- tapOn:
+    id: checks__back
+- tapOn:
+    id: worktree__back
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-reviewers-long
+- extendedWaitUntil:
+    visible:
+      id: pr-reviewers__state
+      text: "Pending"
+    timeout: 20000
+- takeScreenshot: q1-long-login

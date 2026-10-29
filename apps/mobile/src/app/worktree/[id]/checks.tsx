@@ -34,9 +34,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DiscussionSection } from "../../../components/checks/discussion";
 import { MergeControl } from "../../../components/checks/merge-control";
+import { ReviewersSection } from "../../../components/checks/reviewers";
 import { BackGlyph, Glass, GlassCircle } from "../../../components/glass";
 import { Icon } from "../../../components/icon";
 import { Body, Centered } from "../../../components/ui";
+import { showsReviewers } from "../../../lib/checks/reviewers";
 import { useWorktreeChecks } from "../../../lib/checks/use-checks";
 import { SessionGate, useHubSession } from "../../../lib/hub-session";
 import { colors, tints, tones } from "../../../theme";
@@ -195,6 +197,9 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
       >
         <View>
           {review ? <MergeControl review={review} onMerge={checks.mergeReview} /> : null}
+          {review?.reviewers && showsReviewers(review) ? (
+            <ReviewersSection reviewers={review.reviewers} />
+          ) : null}
           {failing.length > 0 ? (
             <View style={styles.banner} testID="checks__failing-banner">
               <Text style={styles.bannerTitle} testID="checks__failing-count">

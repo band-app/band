@@ -7,6 +7,9 @@
  *   Deploy and a failed check from an app that cannot run again. `finishBuild` completes Build.
  * - `feat/rerun`: PR 43 with three failed jobs in runs 600 and 601. `gh run rerun` starts the
  *   job again, the way GitHub does with a new job id.
+ * - `feat/reviewers`: PR 55 with alice (approved), bob (changes requested) and carol (pending,
+ *   required; GitHub shows a re-requested reviewer as pending, so an approved one is never required). `feat/reviewers-long`: PR 56 with one reviewer whose login is very long. Their
+ *   avatar URLs do not resolve, so the rows show the initial.
  * - `feat/nochecks`: PR 44 with no checks. `feat/nopr`: no PR and no jobs on the branch.
  */
 import { ghStub } from "../../hub/tests/fixtures/gh-stub.ts";
@@ -14,6 +17,7 @@ import {
   checkRunNode,
   commentNode,
   reviewNode,
+  reviewRequestNode,
   reviewThreadNode,
   FAKE_REPO,
   pullRequestNode,
@@ -27,6 +31,8 @@ export const CHECKS_BRANCHES = {
   NO_CHECKS: "feat/nochecks",
   NO_PR: "feat/nopr",
   DISCUSSION: "feat/discussion",
+  REVIEWERS: "feat/reviewers",
+  REVIEWERS_LONG: "feat/reviewers-long",
   MERGE_SQUASH: "feat/merge-squash",
   MERGE_REBASE: "feat/merge-rebase",
   MERGE_BLOCKED: "feat/merge-blocked",
@@ -240,6 +246,40 @@ export async function startGhStub() {
               line: 9,
               isOutdated: true,
               comments: [commentNode({ id: "t3a", login: "carol", body: "This moved." })],
+            }),
+          ],
+        }),
+      ],
+    }),
+  );
+  stub.setReviewQuery(
+    repo,
+    CHECKS_BRANCHES.REVIEWERS,
+    reviewQueryData({
+      pullRequests: [
+        pullRequestNode({
+          number: 55,
+          title: "Review me",
+          reviews: [
+            reviewNode({ id: "rv1", login: "alice", state: "APPROVED" }),
+            reviewNode({ id: "rv2", login: "bob", state: "CHANGES_REQUESTED" }),
+          ],
+          reviewRequests: [reviewRequestNode("carol", { asCodeOwner: true })],
+        }),
+      ],
+    }),
+  );
+  stub.setReviewQuery(
+    repo,
+    CHECKS_BRANCHES.REVIEWERS_LONG,
+    reviewQueryData({
+      pullRequests: [
+        pullRequestNode({
+          number: 56,
+          title: "Long login",
+          reviewRequests: [
+            reviewRequestNode("a-reviewer-with-an-extremely-long-login-name-for-narrow-phones", {
+              asCodeOwner: true,
             }),
           ],
         }),
