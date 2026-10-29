@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -33,8 +34,12 @@ const sha256 = (value: string) => createHash("sha256").update(value).digest();
  * goes up the worker's link as one `relay.http` request, and the hub decides
  * whether the call is allowed.
  *
- * It listens on `127.0.0.1` only, on a port the system picks, and starts when
- * the first token is registered. A call without a registered token gets 401.
+ * It listens on `127.0.0.1` only. The port and the live grants (token hashes
+ * with their scopes, never the tokens) are saved in `<state dir>/relay.json`
+ * (mode 0600), so an agent or terminal that outlives a worker restart finds the
+ * relay at the same URL and its token still works until the hub revokes it. The
+ * relay starts when the first token is registered, or at once when a saved port
+ * exists. A call without a registered token gets 401.
  */
 export class Relay {
   private server: Server | null = null;
@@ -42,32 +47,94 @@ export class Relay {
   /** SHA-256 of a token to its scope, so a lookup never compares token text. */
   private readonly scopes = new Map<string, RelayScopeParams>();
 
-  constructor(private readonly ctx: WorkerContext) {}
+  private savedPort = 0;
+  private readonly file: string;
+
+  constructor(private readonly ctx: WorkerContext) {
+    this.file = join(ctx.stateDir, "relay.json");
+    this.load();
+  }
+
+  /** Whether a previous worker left a port or grants, so the relay should listen before any token is registered. */
+  get hasSavedState(): boolean {
+    return this.savedPort > 0 || this.scopes.size > 0;
+  }
 
   /** Starts listening if needed and returns the relay's URL. */
   url(): Promise<string> {
-    this.listening ??= new Promise<string>((resolve, reject) => {
-      const server = createServer((req, res) => void this.handle(req, res));
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
-        server.off("error", reject);
-        this.server = server;
-        resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
-      });
+    this.listening ??= this.listen(this.savedPort).catch((err: NodeJS.ErrnoException) => {
+      // The saved port is taken by another process: agents started earlier lose the relay, new ones get a fresh port.
+      if (this.savedPort === 0 || err.code !== "EADDRINUSE") throw err;
+      this.ctx.log.warn(
+        { port: this.savedPort },
+        "the saved relay port is in use, picking another",
+      );
+      return this.listen(0);
     });
     return this.listening;
   }
 
+  private listen(port: number): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const server = createServer((req, res) => void this.handle(req, res));
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => {
+        server.off("error", reject);
+        this.server = server;
+        this.savedPort = (server.address() as AddressInfo).port;
+        this.save();
+        resolve(`http://127.0.0.1:${this.savedPort}`);
+      });
+    });
+  }
+
   register(token: string, scope: RelayScopeParams): void {
     this.scopes.set(sha256(token).toString("hex"), scope);
+    this.save();
   }
 
   revoke(token: string): void {
-    this.scopes.delete(sha256(token).toString("hex"));
+    if (this.scopes.delete(sha256(token).toString("hex"))) this.save();
   }
 
+  private load(): void {
+    try {
+      const saved = JSON.parse(readFileSync(this.file, "utf8")) as {
+        port?: unknown;
+        grants?: Record<string, RelayScopeParams>;
+      };
+      if (typeof saved.port === "number" && saved.port > 0 && saved.port < 65536) {
+        this.savedPort = saved.port;
+      }
+      for (const [hash, scope] of Object.entries(saved.grants ?? {})) {
+        if (/^[0-9a-f]{64}$/.test(hash) && typeof scope?.worktreeId === "string") {
+          this.scopes.set(hash, scope);
+        }
+      }
+    } catch {
+      // No saved state, or an unreadable file: start empty.
+    }
+  }
+
+  private save(): void {
+    try {
+      const tmp = `${this.file}.${process.pid}.tmp`;
+      writeFileSync(
+        tmp,
+        JSON.stringify({ port: this.savedPort, grants: Object.fromEntries(this.scopes) }),
+        { mode: 0o600 },
+      );
+      renameSync(tmp, this.file);
+    } catch (err) {
+      this.ctx.log.warn(
+        { message: err instanceof Error ? err.message : String(err) },
+        "could not save the relay state",
+      );
+    }
+  }
+
+  /** Stops listening. The saved grants stay, because agents may outlive this worker. */
   async close(): Promise<void> {
-    this.scopes.clear();
     const server = this.server;
     this.server = null;
     if (!server) return;
@@ -211,6 +278,17 @@ function onceDrained(res: ServerResponse): Promise<void> {
  */
 export function registerRelayMethods(r: Registrar, ctx: WorkerContext): () => Promise<void> {
   const relay = new Relay(ctx);
+  // Agents and terminals that outlived the last worker call the saved port, so listen before the hub registers anything.
+  if (relay.hasSavedState) {
+    void relay
+      .url()
+      .catch((err) =>
+        ctx.log.warn(
+          { message: err instanceof Error ? err.message : String(err) },
+          "relay did not start",
+        ),
+      );
+  }
   r.json("relay.register", async (a) => {
     const chatId = optStr(a, "chatId");
     const terminalId = optStr(a, "terminalId");

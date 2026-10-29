@@ -10,6 +10,7 @@ import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -20,7 +21,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { findCliBinary } from "@band-app/host-local/process/cli-binary";
 import { RPC_METHOD_NOT_FOUND, RpcError } from "@band-app/link";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
@@ -1169,8 +1170,10 @@ describe("the band CLI on a worker", () => {
       async () => (existsSync(join(a.home, ".agents/skills/band/SKILL.md")) ? true : undefined),
       { label: "worker installs the band skills", timeoutMs: 30_000 },
     );
-    // Nothing is fetched from the hub into the state dir any more.
-    expect(existsSync(join(a.state, "bin", "band"))).toBe(false);
+    // Nothing is fetched from the hub into the state dir any more: the stable path is a link to the carried CLI.
+    const link = join(a.state, "bin", "band");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(realpathSync(link)).toBe(realpathSync(cli as string));
   });
 
   it.skipIf(!cli)("finds band in a terminal and runs it through the relay (S1)", async () => {
@@ -1184,7 +1187,7 @@ describe("the band CLI on a worker", () => {
     });
     try {
       socket.type("echo found=$(command -v band)\r");
-      await socket.waitForOutput(`found=${cli}`);
+      await socket.waitForOutput(`found=${join(a.state, "bin", "band")}`);
 
       const version = execFileSync(cli as string, ["--version"], { encoding: "utf8" }).trim();
       socket.type("echo ver=$(band --version)\r");
@@ -1232,7 +1235,7 @@ describe("the band CLI on a worker", () => {
       )
       .reverse()
       .find((r) => r.env.BAND_TOKEN)?.env;
-    expect(env?.PATH?.split(":")[0]).toBe(dirname(cli as string));
+    expect(env?.PATH?.split(":")[0]).toBe(join(a.state, "bin"));
     expect(env?.BAND_WORKTREE_ID).toBe(WT_A);
     expect(env?.LEAK).toBe(false);
     const out = execFileSync(
@@ -1248,7 +1251,7 @@ describe("the band CLI on a worker", () => {
         },
       },
     );
-    expect(out.split("\n")[0]).toBe(cli);
+    expect(out.split("\n")[0]).toBe(join(a.state, "bin", "band"));
   });
 
   it("answers the old cli.fetch call with method-not-found and keeps the session up (S4)", async () => {

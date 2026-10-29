@@ -1,5 +1,5 @@
 import { accessSync, constants } from "node:fs";
-import { rm } from "node:fs/promises";
+import { mkdir, rename, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,24 +57,48 @@ export function resolveCliBinary(
 }
 
 /**
+ * Points `<stateDir>/bin/band` at `binary`, replacing the link or the copy the
+ * old fetch-from-the-hub scheme left there. The new link is made under a
+ * temporary name and renamed over the old one, so the path never goes missing.
+ * Returns the directory, or null where links are not available (Windows).
+ */
+async function linkCli(stateDir: string, binary: string): Promise<string | null> {
+  if (process.platform === "win32") return null;
+  const dir = join(stateDir, "bin");
+  const link = join(dir, exeName);
+  const tmp = `${link}.${process.pid}.tmp`;
+  await mkdir(dir, { recursive: true });
+  await rm(join(dir, `${exeName}.sha256`), { force: true });
+  await rm(tmp, { force: true });
+  await symlink(binary, tmp);
+  await rename(tmp, link);
+  return dir;
+}
+
+/**
  * The `band` CLI that ships with this worker (no hub involved). The agents and
- * terminals the worker starts get its directory first on their PATH.
+ * terminals the worker starts get a directory first on their PATH. That
+ * directory is `<stateDir>/bin`, which holds a link the worker repoints to the
+ * CLI it resolved at each start. An agent or shell that outlives an update,
+ * which may move the CLI package, keeps a PATH that still finds `band`.
  */
 export class WorkerCli {
-  private constructor(readonly binary: string) {}
+  private constructor(
+    readonly binary: string,
+    private readonly pathDir: string,
+  ) {}
 
   /**
-   * Resolves the CLI, drops the copy the old fetch-from-the-hub scheme left in
-   * `<stateDir>/bin` (nothing puts that directory on PATH any more, but a stale
-   * binary there is dead weight), and installs the band skills with it. Returns
-   * null, after one log line, when no CLI can be found.
+   * Resolves the CLI, points the stable link at it and installs the band skills
+   * with it. Returns null, after one log line, when no CLI can be found.
    */
   static async start(stateDir: string, log: Logger): Promise<WorkerCli | null> {
-    await Promise.all(
-      [exeName, `${exeName}.sha256`].map((f) => rm(join(stateDir, "bin", f), { force: true })),
-    ).catch(() => undefined);
     const binary = resolveCliBinary();
     if (!binary) {
+      // No CLI: remove the link (or the copy the old fetch scheme left) so PATH never points at a dead `band`.
+      await Promise.all(
+        [exeName, `${exeName}.sha256`].map((f) => rm(join(stateDir, "bin", f), { force: true })),
+      ).catch(() => undefined);
       log.warn(
         { package: cliPackageName() },
         `no band CLI found: install ${cliPackageName()} or set BAND_CLI_PATH. Agents and terminals on this worker run without band`,
@@ -82,7 +106,14 @@ export class WorkerCli {
       return null;
     }
     log.info({ binary }, "using the band CLI shipped with this worker");
-    const cli = new WorkerCli(binary);
+    const linked = await linkCli(stateDir, binary).catch((err) => {
+      log.warn(
+        { message: err instanceof Error ? err.message : String(err) },
+        "could not link the band CLI in the state dir, using its own folder",
+      );
+      return null;
+    });
+    const cli = new WorkerCli(binary, linked ?? dirname(binary));
     // Not awaited: the worker serves while the skills are written.
     void installSkills({ bandPath: binary })
       .then((result) => {
@@ -99,6 +130,6 @@ export class WorkerCli {
 
   /** The directory to put first on PATH. */
   async dir(): Promise<string> {
-    return dirname(this.binary);
+    return this.pathDir;
   }
 }

@@ -10,10 +10,12 @@
  * terminals holds the helper command and the socket path, never a token.
  */
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmodSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Server } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ensurePrivateDir } from "@band-app/host-local/terminals/daemon/endpoint";
+import { shortSocketDir } from "@band-app/host-local/terminals/daemon/protocol";
 import {
   type GitCredentialParams,
   type GitCredentialReply,
@@ -27,6 +29,9 @@ export const GIT_CREDENTIAL_SUBCOMMAND = "git-credential";
 /** How long the hub may take to answer a credential request. */
 const HUB_ANSWER_MS = 30_000;
 const MAX_REQUEST_BYTES = 8 * 1024;
+
+/** The longest Unix socket path that fits `sun_path` on macOS (104 bytes with the NUL). */
+const MAX_SOCKET_PATH_BYTES = 103;
 
 const shellQuote = (text: string) => `'${text.replace(/'/g, "'\\''")}'`;
 
@@ -64,17 +69,36 @@ export function gitCredentialEnv(
   return out;
 }
 
-/** Answers the helper processes on a Unix socket in a private temp directory. */
+/**
+ * Where the broker's socket lives for a state dir. The path depends only on the
+ * state dir, so a restarted worker listens where the agents and terminals it
+ * started before still look (their environment holds this path). A state dir
+ * whose path is too long for a Unix socket gets a hashed name under
+ * `/tmp/band-<uid>/`.
+ */
+export function gitCredentialSocketPath(stateDir: string): string {
+  const inRunDir = join(stateDir, "run", "git-credential.sock");
+  if (Buffer.byteLength(inRunDir) <= MAX_SOCKET_PATH_BYTES) return inRunDir;
+  const hash = createHash("sha256").update(stateDir).digest("hex").slice(0, 16);
+  return join(shortSocketDir(), `gc-${hash}.sock`);
+}
+
+/**
+ * Answers the helper processes on a Unix socket at a path that stays the same
+ * across worker restarts, in a 0700 directory, the socket mode 0600.
+ */
 export class GitCredentialBroker {
   private server: Server | null = null;
-  private dir: string | null = null;
+  private path: string | null = null;
 
   constructor(private readonly ctx: WorkerContext) {}
 
   /** Starts listening and returns the socket path. */
   async start(): Promise<string> {
-    this.dir = await mkdtemp(join(tmpdir(), "band-gc-"));
-    const path = join(this.dir, "s");
+    const path = gitCredentialSocketPath(this.ctx.stateDir);
+    ensurePrivateDir(join(path, ".."));
+    // A previous worker's socket file is dead (this worker is the only one on the state dir).
+    rmSync(path, { force: true });
     const server = createServer((socket) => {
       let data = "";
       socket.setEncoding("utf8");
@@ -92,10 +116,12 @@ export class GitCredentialBroker {
       server.once("error", reject);
       server.listen(path, () => {
         server.off("error", reject);
+        chmodSync(path, 0o600);
         resolve();
       });
     });
     this.server = server;
+    this.path = path;
     return path;
   }
 
@@ -103,8 +129,9 @@ export class GitCredentialBroker {
     const server = this.server;
     this.server = null;
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (this.dir) await rm(this.dir, { recursive: true, force: true }).catch(() => undefined);
-    this.dir = null;
+    // `close()` unlinks the socket. The next start recreates it at the same path.
+    if (this.path) rmSync(this.path, { force: true });
+    this.path = null;
   }
 
   private async answer(line: string): Promise<string> {
