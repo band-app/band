@@ -27,6 +27,11 @@ interface WorktreeLabelProps {
   repoIcon?: ReactNode;
   /** A small gray tag after the repo name, e.g. the host. */
   hostTag?: string;
+  /** Test id of the name line. */
+  nameTestId?: string;
+  /** Replaces the name line, e.g. with an inline rename field. */
+  nameEditor?: ReactNode;
+  onNameDoubleClick?: () => void;
 }
 
 export function WorktreeLabel({
@@ -36,6 +41,9 @@ export function WorktreeLabel({
   tone = "sidebar",
   repoIcon,
   hostTag,
+  nameTestId = "worktree-label__name",
+  nameEditor,
+  onNameDoubleClick,
 }: WorktreeLabelProps) {
   const nameClass =
     tone === "switcher"
@@ -53,12 +61,22 @@ export function WorktreeLabel({
 
   return (
     <div data-testid="worktree-label" className="flex flex-col min-w-0 leading-tight">
-      <span
-        data-testid="worktree-label__name"
-        className={cn(isSidebar ? "text-[13px]" : "text-sm", "truncate", nameClass)}
-      >
-        {name}
-      </span>
+      {nameEditor ?? (
+        <span
+          data-testid={nameTestId}
+          className={cn(isSidebar ? "text-[13px]" : "text-sm", "truncate", nameClass)}
+          onDoubleClick={
+            onNameDoubleClick
+              ? (e) => {
+                  e.stopPropagation();
+                  onNameDoubleClick();
+                }
+              : undefined
+          }
+        >
+          {name}
+        </span>
+      )}
       <span className="flex min-w-0 items-center gap-1">
         {repoIcon}
         <span

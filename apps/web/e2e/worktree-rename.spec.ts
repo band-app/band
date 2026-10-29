@@ -45,15 +45,17 @@ test.beforeAll(async () => {
   const checkout = join(tmpHome, "feat-x-checkout");
   gitInHome(app, ["worktree", "add", "-b", "feat-x", checkout], tmpHome);
   seedSettings(tmpHome, { tokenSecret: TOKEN });
+  // A group makes the sidebar use the Groups layout, whose cards show the repo name under the title.
   seedState(tmpHome, {
+    groups: [{ id: "g-alpha", name: "Alpha", color: "#8b5cf6" }],
     repos: [
       {
         name: "app",
         path: app,
         defaultBranch: "main",
         worktrees: [
-          { branch: "main", path: app },
-          { branch: "feat-x", path: checkout },
+          { branch: "main", path: app, groupId: "g-alpha" },
+          { branch: "feat-x", path: checkout, groupId: "g-alpha" },
         ],
       },
     ],
@@ -83,6 +85,7 @@ test("S1: Rename… from the context menu shows the title, and a reload keeps it
 }) => {
   const rename = await open(page);
   await expect(rename.title(WORKTREE)).toHaveText("feat-x");
+  await expect(rename.repoLine(WORKTREE)).toBeVisible();
   await rename.renameFromMenu(WORKTREE, "Login revamp");
   await expect(rename.title(WORKTREE)).toHaveText("Login revamp");
   await rename.reload();
@@ -96,6 +99,7 @@ test("S2: clearing the title by double-click brings the name back", async ({ pag
   });
   const rename = await open(page);
   await expect(rename.title(WORKTREE)).toHaveText("Login revamp");
+  await expect(rename.repoLine(WORKTREE)).toBeVisible();
   await rename.startEditingByDoubleClick(WORKTREE);
   await rename.type("");
   await rename.press("Enter");
@@ -126,4 +130,31 @@ test("S4: the tooltip of a renamed worktree still shows the branch", async ({ pa
   const tooltip = await rename.hoverTooltip(WORKTREE);
   await expect(tooltip).toContainText("app/feat-x");
   await expect(tooltip).toContainText("Login revamp");
+});
+
+test("S5: a pinned card, which shows the repo name under the title, renames too", async ({
+  page,
+}) => {
+  await trpcMutate(server.url, TOKEN, "worktrees.setPinned", {
+    repo: "app",
+    name: "feat-x",
+    pinned: true,
+  });
+  try {
+    const rename = await open(page);
+    await expect(rename.repoLine(WORKTREE)).toBeVisible();
+    await rename.renameFromMenu(WORKTREE, "Pinned name");
+    await expect(rename.title(WORKTREE)).toHaveText("Pinned name");
+    await expect(rename.repoLine(WORKTREE)).toBeVisible();
+    await rename.startEditingByDoubleClick(WORKTREE);
+    await rename.press("Escape");
+    await expect(rename.input).toHaveCount(0);
+    await expect(rename.title(WORKTREE)).toHaveText("Pinned name");
+  } finally {
+    await trpcMutate(server.url, TOKEN, "worktrees.setPinned", {
+      repo: "app",
+      name: "feat-x",
+      pinned: false,
+    });
+  }
 });

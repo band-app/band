@@ -473,6 +473,20 @@ export const WorktreeCard = memo(function WorktreeCard({
                       repoName={repoName}
                       isActive={isActive}
                       hostTag={hostTagText}
+                      nameTestId="worktree-card__title"
+                      onNameDoubleClick={() => {
+                        if (!isDeleting) setRenaming(true);
+                      }}
+                      nameEditor={
+                        renaming ? (
+                          <TitleEditor
+                            initial={worktree.title ?? worktree.name}
+                            maxLength={WORKTREE_TITLE_MAX}
+                            onSave={saveTitle}
+                            onCancel={() => setRenaming(false)}
+                          />
+                        ) : undefined
+                      }
                       repoIcon={
                         <RepoAvatar
                           name={repoName}
