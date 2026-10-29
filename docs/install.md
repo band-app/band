@@ -144,11 +144,39 @@ A runner starts workers on demand when a worktree asks for a worker that does no
 
 Settings > Workers shows the Band version each worker runs, and marks a worker that is behind the hub. Once a day the hub asks GitHub for the latest release (`BAND_UPDATE_CHECK=off` turns that off for an air-gapped hub). When a newer one exists, the sidebar footer shows an "update available" badge. It opens a panel that lists the hub and every worker with their version and the version to move to.
 
-Update the workers first and the hub last, so the hub is never older than its workers.
+Without the Update hub button, update the workers first and the hub last, so the hub is never older than its workers.
 
 - **A worker under launchd (`app.band.worker`) or a systemd user unit (`band-worker`)**: an admin clicks Update. A dialog lists the agents on that worker, because the restart ends them. On confirm, the worker runs the `npm` that sits beside its own `node` (`BAND_NPM_BIN` overrides it, and the service file needs no PATH) as `npm i -g --prefix <prefix> @band-app/worker@<version>`, where `<prefix>` is the one the running worker is installed in (`<prefix>/lib/node_modules/@band-app/worker`). It then makes node-pty's `spawn-helper` executable, because npm 11 skips install scripts, and restarts through its service manager. A worker that does not run from such a layout (a checkout, the desktop app, the Docker image) reports why in `updateBlockedReason`, gets no Update button and shows the manual command. If the install fails, the worker keeps running as it was and the error shows on the worker. A worker with the target version is the hub's own when the worker is behind it, otherwise the latest release (when it stays within a minor of the hub).
 - **Any other worker** shows the command to run by hand (`npm i -g @band-app/worker@<version>`, then restart it).
-- **The hub** only shows the command; it never updates itself. The command follows `BAND_INSTALL_METHOD`, which the compose file (`compose`), the Kubernetes manifest (`k8s`, or `helm` for a chart) and the image default (`docker`) set. With none set the panel says to pull `ghcr.io/band-app/band-hub:<version>` and recreate the container.
+- **The hub** shows the command for how it was installed. It follows `BAND_INSTALL_METHOD`, which the compose file (`compose`), the Kubernetes manifest (`k8s`, or `helm` for a chart) and the image default (`docker`) set, and which you set to `npm` for a hub installed with `npm i -g @band-app/server` under a systemd user unit named `band-hub`. With none set the panel says to pull `ghcr.io/band-app/band-hub:<version>` and recreate the container.
+- **The Update hub button** appears for an admin when `hubUpdate.command` is set (a field in the update panel, or `hubUpdate` in `~/.band/settings.json`). The hub runs the command with `sh -c` on its own machine, in its own session, with `BAND_HUB_TARGET_VERSION` set and its output in `<BAND_HOME>/hub-update.log`. It answers at once and the panel shows "updating" until the hub is back. A hub that comes back on the target version is done. A command that exits non-zero, a hub that restarts on another version, or no restart within 10 minutes (`BAND_HUB_UPDATE_TIMEOUT_MS`) shows as failed with the last lines of the log. Only an admin token can set the command or start the update, and agents cannot reach either. Docker, compose, Helm and Kubernetes hubs keep the copy-the-command text.
+- **Update all workers** in the panel updates each online worker that is behind, one after the other, and lists the result per worker. A worker with running agents is skipped until the admin confirms ("Update the skipped workers anyway").
+
+With the button, update the hub first and then the workers. A worker within one minor version of the hub is accepted, so the order is safe for one release step.
+
+#### Example: a hub under systemd
+
+`~/.config/systemd/user/band-hub-update.service` runs the update outside the hub's own process, so restarting the hub does not kill it:
+
+```ini
+[Unit]
+Description=Update the Band hub
+
+[Service]
+Type=oneshot
+ExecStart=%h/band-hub/update.sh
+```
+
+`~/band-hub/update.sh`:
+
+```sh
+#!/bin/sh
+set -e
+npm i -g @band-app/server@"${BAND_HUB_TARGET_VERSION:-latest}"
+systemctl --user restart band-hub
+```
+
+Set `hubUpdate.command` to `systemctl --user start --no-block band-hub-update.service`. `BAND_HUB_TARGET_VERSION` does not reach the unit through `systemctl`, so the example installs `latest`. A timer on the same unit gives you scheduled updates as well.
 
 A hub run from source reports the unreleased version `0.1.0` and accepts every worker (it logs that it skipped the check). A worker whose version differs from a released hub's by more than one minor version (`0.47.0` against `0.50.0`) is refused with a message that says what to do. The worker logs it, waits five minutes (`BAND_WORKER_VERSION_RETRY_MS`) and exits instead of redialing, and its worker shows "update required". A worker from before version reporting is accepted and shown with an unknown version. `band workers list` has a VERSION column with the same marks.
 

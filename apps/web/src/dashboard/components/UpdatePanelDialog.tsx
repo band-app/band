@@ -9,7 +9,9 @@ import {
 import { trpc } from "../../lib/trpc-client";
 import { useHostsList, useUpdateStatus } from "../hooks/use-update-status";
 import { CopyCommand } from "./CopyCommand";
+import { HubUpdateControls } from "./HubUpdateControls";
 import { useIsAdmin } from "./settings/DevicesSettings";
+import { UpdateAllWorkers } from "./UpdateAllWorkers";
 import { WorkerUpdateButton } from "./WorkerUpdateButton";
 
 interface Props {
@@ -28,6 +30,8 @@ export function UpdatePanelDialog({ open, onOpenChange }: Props) {
   const isAdmin = useIsAdmin();
   const workers = (hosts.data ?? []).filter((h) => h.id !== "local");
   const info = status.data;
+  const behindCount = workers.filter((h) => h.updateTarget && h.canUpdate).length;
+  const hubReady = isAdmin && info?.hubUpdate.configured === true && info.updateAvailable === true;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -40,6 +44,11 @@ export function UpdatePanelDialog({ open, onOpenChange }: Props) {
         </DialogHeader>
         {info ? (
           <ul className="space-y-3">
+            {isAdmin && workers.length > 0 ? (
+              <li>
+                <UpdateAllWorkers behindCount={behindCount} canUpdateHub={hubReady} />
+              </li>
+            ) : null}
             {workers.map((host) => (
               <li
                 key={host.id}
@@ -109,6 +118,7 @@ export function UpdatePanelDialog({ open, onOpenChange }: Props) {
                 testId="update-panel__hub"
                 label="Copy the hub update command"
               />
+              {isAdmin ? <HubUpdateControls /> : null}
             </li>
           </ul>
         ) : null}

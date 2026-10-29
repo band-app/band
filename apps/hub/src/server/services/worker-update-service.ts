@@ -14,6 +14,7 @@ import { TokenQueries } from "../infra/db/queries/tokens";
 import { describeHostVersion } from "./_utils/host-version";
 import { HUB_VERSION } from "./_utils/hub-version";
 import { agentSessionService } from "./agent-session-service";
+import { hubUpdateService } from "./hub-update-service";
 import { releaseCheckService } from "./release-check-service";
 import { emit } from "./watcher-service";
 import { workerLinkService } from "./worker-link-service";
@@ -33,6 +34,18 @@ export interface WorkerUpdateStatus {
   error: string | null;
 }
 
+export interface UpdateAllEntry {
+  hostId: string;
+  name: string;
+  state: "pending" | "updating" | "updated" | "skipped" | "failed";
+  message: string | null;
+}
+
+export interface UpdateAllStatus {
+  running: boolean;
+  results: UpdateAllEntry[];
+}
+
 export class WorkerUpdateError extends Error {
   constructor(
     readonly reason: "not-found" | "not-updatable" | "busy",
@@ -46,6 +59,98 @@ export class WorkerUpdateService {
   private readonly updates = new Map<string, WorkerUpdateStatus>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly queries = new TokenQueries();
+
+  private all: UpdateAllStatus = { running: false, results: [] };
+
+  allStatus(): UpdateAllStatus {
+    return this.all;
+  }
+
+  /**
+   * Updates every online worker that is behind, one after the other, and returns at once. A worker
+   * with running agents is skipped unless `confirmInterruptions` is true. `allStatus` reports each
+   * worker as it finishes. With `includeHub` the hub update command runs last, once every worker
+   * update ended without a failure.
+   */
+  updateAll(confirmInterruptions: boolean, includeHub = false): UpdateAllStatus {
+    if (this.all.running)
+      throw new WorkerUpdateError("busy", "An update of all workers is running");
+    const latest = releaseCheckService.status().latest;
+    const results: UpdateAllEntry[] = [];
+    for (const row of this.queries.listHosts(1000)) {
+      if (row.id === "local" || row.status !== "online") continue;
+      const view = describeHostVersion(row, HUB_VERSION, latest);
+      if (!view.updateTarget || !view.serviceManager) continue;
+      results.push({ hostId: row.id, name: row.name, state: "pending", message: null });
+    }
+    if (includeHub) {
+      if (!hubUpdateService.status().configured) {
+        throw new WorkerUpdateError("not-updatable", "No hub update command is set");
+      }
+      results.push({ hostId: "hub", name: "Hub", state: "pending", message: null });
+    }
+    this.all = { running: results.length > 0, results };
+    if (results.length > 0) void this.runAll(confirmInterruptions);
+    return this.all;
+  }
+
+  private async runAll(confirmInterruptions: boolean): Promise<void> {
+    try {
+      for (const entry of this.all.results) {
+        if (entry.hostId === "hub") {
+          this.updateHubEntry(entry);
+          continue;
+        }
+        const agents = this.interruptions(entry.hostId);
+        if (agents.length > 0 && !confirmInterruptions) {
+          entry.state = "skipped";
+          entry.message = `${agents.length === 1 ? "1 agent is" : `${agents.length} agents are`} running`;
+          continue;
+        }
+        entry.state = "updating";
+        try {
+          await this.update(entry.hostId);
+          await this.untilSettled(entry.hostId);
+          const end = this.updates.get(entry.hostId);
+          if (end?.state === "failed") {
+            entry.state = "failed";
+            entry.message = end.error;
+          } else {
+            entry.state = "updated";
+          }
+        } catch (err) {
+          entry.state = "failed";
+          entry.message = err instanceof Error ? err.message : String(err);
+        }
+      }
+    } finally {
+      this.all.running = false;
+    }
+  }
+
+  private updateHubEntry(entry: UpdateAllEntry): void {
+    if (this.all.results.some((r) => r.hostId !== "hub" && r.state === "failed")) {
+      entry.state = "skipped";
+      entry.message = "a worker update failed";
+      return;
+    }
+    try {
+      hubUpdateService.start();
+      entry.state = "updating";
+    } catch (err) {
+      entry.state = "failed";
+      entry.message = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  private async untilSettled(hostId: string): Promise<void> {
+    const deadline = Date.now() + INSTALL_TIMEOUT_MS + RESTART_TIMEOUT_MS + 30_000;
+    while (Date.now() < deadline) {
+      const state = this.updates.get(hostId)?.state;
+      if (state === undefined || state === "failed") return;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
 
   statusOf(hostId: string): WorkerUpdateStatus | null {
     return this.updates.get(hostId) ?? null;

@@ -128,4 +128,35 @@ export class UpdatePanelPage {
     await this.confirmDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(this.confirmDialog).toBeHidden();
   }
+
+  /** Admin controls under the hub row (`HubUpdateControls.tsx`, `UpdateAllWorkers.tsx`). */
+  hubUpdateButton(): Locator {
+    return this.panel.getByTestId("hub-update__button");
+  }
+
+  hubUpdateError(): Locator {
+    return this.panel.getByTestId("hub-update__error");
+  }
+
+  async setHubUpdateCommand(command: string): Promise<void> {
+    await test.step("Save the hub update command", async () => {
+      await this.panel.getByTestId("hub-update__command").fill(command);
+      await this.panel.getByTestId("hub-update__save").click();
+      await expect(this.hubUpdateButton()).toBeVisible();
+    });
+  }
+
+  async clickUpdateHub(): Promise<void> {
+    await this.hubUpdateButton().click();
+  }
+
+  updateAllButton(): Locator {
+    return this.panel.getByTestId("update-all__button");
+  }
+
+  updateAllResult(hostId: string): Locator {
+    return this.panel
+      .getByTestId("update-all__result")
+      .and(this.page.locator(`[data-host-id="${hostId}"]`));
+  }
 }

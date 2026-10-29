@@ -56,6 +56,10 @@ test("relation to the hub", () => {
 test("the update command follows the install method", () => {
   assert.match(hubUpdateCommand("compose", "0.51.0"), /docker compose pull/);
   assert.match(hubUpdateCommand("compose", "0.51.0"), /BAND_VERSION=0\.51\.0/);
+  assert.equal(
+    hubUpdateCommand("npm", "0.51.0"),
+    "npm i -g @band-app/server@0.51.0 && systemctl --user restart band-hub",
+  );
   assert.match(hubUpdateCommand("helm", "0.51.0"), /helm upgrade .*--set image\.tag=0\.51\.0/);
   assert.match(hubUpdateCommand("k8s", "0.51.0"), /kubectl set image .*band-hub:0\.51\.0/);
   assert.match(

@@ -126,7 +126,13 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure === "hosts.setAgentCommand" ||
   procedure === "workers.setAgentCommand" ||
   procedure === "workers.setTrust" ||
-  procedure === "workers.audit";
+  procedure === "workers.audit" ||
+  procedure === "workers.updateHub" ||
+  procedure === "workers.dismissHubUpdate" ||
+  procedure === "workers.updateAll" ||
+  procedure === "hosts.updateHub" ||
+  procedure === "hosts.dismissHubUpdate" ||
+  procedure === "hosts.updateAll";
 
 /**
  * The settings an admin host may change, by allow-list. Everything else (credentials, agent

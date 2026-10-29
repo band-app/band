@@ -309,6 +309,9 @@ beforeAll(async () => {
             worktreeId: WT_A,
             hostId: "h-000000000000",
           }),
+          // Updating the hub runs an admin's command on the hub's machine.
+          post("hub-update", "/trpc/workers.updateHub", {}),
+          post("update-all", "/trpc/workers.updateAll", {}),
           post("vault-oauth", "/trpc/vault.startOAuth", {
             name: "x",
             serverUrl: "http://127.0.0.1:1/mcp",
@@ -558,6 +561,8 @@ describe("the worker relay (S2)", () => {
     expect(by("chat-login-pick")?.status).toBe(403);
     expect(by("chat-login-pick")?.body).toContain("may not change a chat's login");
     expect(by("vault-oauth")?.status).toBe(403);
+    expect(by("hub-update")?.status).toBe(403);
+    expect(by("update-all")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);
     expect(by("other-route")?.status).toBe(403);

@@ -18,6 +18,7 @@ import {
   hostAgentCommandService,
 } from "../../services/host-agent-command-service";
 import { hostTrustService } from "../../services/host-trust-service";
+import { HubUpdateError, hubUpdateService } from "../../services/hub-update-service";
 import { agentHostView } from "../../services/relay-scope";
 import { releaseCheckService } from "../../services/release-check-service";
 import { repoService } from "../../services/repo-service";
@@ -147,7 +148,7 @@ export const hostsRouter = t.router({
    * The hub's version, the newest release GitHub reported and the command that updates the hub for
    * how it was installed. Any device token may read it: the sidebar badge uses it.
    */
-  updateStatus: publicProcedure.query(() => {
+  updateStatus: publicProcedure.query(({ ctx }) => {
     const release = releaseCheckService.status();
     const method = hubInstallMethod();
     const target = release.latest ?? HUB_VERSION;
@@ -159,8 +160,62 @@ export const hostsRouter = t.router({
       checkedAt: release.checkedAt,
       installMethod: method,
       hubCommand: hubUpdateCommand(method, target),
+      hubUpdate: (() => {
+        const st = hubUpdateService.status();
+        return {
+          ...st,
+          // The log tail can name paths and registries, so only an admin sees it.
+          error: st.error && !ctx.admin ? "The hub update failed." : st.error,
+        };
+      })(),
+      updateAll: workerUpdateService.allStatus(),
     };
   }),
+
+  /**
+   * Runs the admin's `hubUpdate.command` on the hub's machine, detached, and answers at once. The
+   * command usually restarts the hub, so `updateStatus` reports progress after it comes back.
+   */
+  updateHub: adminProcedure.mutation(() => {
+    try {
+      return hubUpdateService.start();
+    } catch (err) {
+      if (err instanceof HubUpdateError) {
+        throw new TRPCError({
+          code: err.reason === "not-configured" ? "PRECONDITION_FAILED" : "CONFLICT",
+          message: err.message,
+        });
+      }
+      throw err;
+    }
+  }),
+
+  /** Dismisses a failed hub update. */
+  dismissHubUpdate: adminProcedure.mutation(() => {
+    hubUpdateService.dismiss();
+    return { ok: true };
+  }),
+
+  /** Updates each online worker that is behind, one after the other. Answers at once. */
+  updateAll: adminProcedure
+    .input(
+      z
+        .object({
+          confirmInterruptions: z.boolean().default(false),
+          includeHub: z.boolean().default(false),
+        })
+        .default({}),
+    )
+    .mutation(({ input }) => {
+      try {
+        return workerUpdateService.updateAll(input.confirmInterruptions, input.includeHub);
+      } catch (err) {
+        if (err instanceof WorkerUpdateError) {
+          throw new TRPCError({ code: "CONFLICT", message: err.message });
+        }
+        throw err;
+      }
+    }),
 
   /** The agents on a host that restarting its worker would end, for the confirm dialog. */
   interruptions: adminProcedure
