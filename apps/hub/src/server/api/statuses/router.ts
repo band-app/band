@@ -9,6 +9,7 @@ import {
   setWorktreeSourceStatus,
 } from "../../services/state";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
+import { worktreeService } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -69,8 +70,16 @@ export const statusesRouter = t.router({
     })),
 
   clearNeedsAttention: publicProcedure
-    .input(z.object({ worktreeId: z.string() }))
+    .input(
+      z.object({
+        worktreeId: z.string(),
+        // Opening a worktree also drops a manual unread mark. The UI leaves it out for a
+        // worktree it just marked while that worktree was open.
+        clearUnread: z.boolean().optional(),
+      }),
+    )
     .mutation(({ input }) => {
+      if (input.clearUnread) worktreeService.clearUnreadOnOpen(input.worktreeId);
       const status = acknowledgeWorktreeAttention(input.worktreeId);
       if (status) emit({ kind: "update", status });
       return { ok: true };

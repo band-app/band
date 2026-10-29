@@ -132,6 +132,11 @@ export interface WorktreeState {
    */
   groupId?: string;
   /**
+   * Marked unread by a person. Read-only here like `groupId`: `saveAll` keeps what the database
+   * holds, and `RepoQueries.setUnread` writes it.
+   */
+  unread?: boolean;
+  /**
    * A custom title shown in place of the name. Read-only here like `groupId`: `saveAll` keeps
    * what the database holds, and `RepoQueries.setTitle` writes it.
    */
@@ -210,6 +215,7 @@ export function reconcileKindForRepo(repo: RepoState): boolean {
         pinned: false,
         ...(main?.origin ? { origin: main.origin } : {}),
         ...(main?.groupId ? { groupId: main.groupId } : {}),
+        ...(main?.unread ? { unread: true } : {}),
         ...(main?.title ? { title: main.title } : {}),
       },
     ];
@@ -267,6 +273,7 @@ export class RepoQueries {
             }
           : {}),
         ...(row.groupId ? { groupId: row.groupId } : {}),
+        ...(row.unread ? { unread: true } : {}),
         ...(row.title ? { title: row.title } : {}),
         ...(row.supersededBy ? { supersededBy: row.supersededBy } : {}),
         ...(row.continuedFrom
@@ -340,6 +347,7 @@ export class RepoQueries {
             originChatId: worktreesTable.originChatId,
             originTerminalId: worktreesTable.originTerminalId,
             groupId: worktreesTable.groupId,
+            unread: worktreesTable.unread,
             title: worktreesTable.title,
           })
           .from(worktreesTable)
@@ -402,6 +410,7 @@ export class RepoQueries {
               originChatId: origin?.originChatId ?? null,
               originTerminalId: origin?.originTerminalId ?? null,
               groupId: origin?.groupId ?? null,
+              unread: origin?.unread ?? false,
               title: origin?.title ?? null,
               repoName: repo.name,
               name: wt.name,
@@ -756,6 +765,24 @@ export class RepoQueries {
     getDb()
       .update(worktreesTable)
       .set({ groupId })
+      .where(
+        and(
+          eq(worktreesTable.repoName, repoName),
+          eq(worktreesTable.name, name),
+          ...(hostId === undefined ? [] : [eq(worktreesTable.hostId, hostId)]),
+        ),
+      )
+      .run();
+  }
+
+  /**
+   * Marks a worktree unread or read. Focused UPDATE, because `saveAll` keeps the stored flag and
+   * never writes the one in its snapshot.
+   */
+  setUnread(repoName: string, name: string, unread: boolean, hostId?: string): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ unread })
       .where(
         and(
           eq(worktreesTable.repoName, repoName),

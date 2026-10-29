@@ -70,6 +70,7 @@ import { placementService } from "./placement-service";
 import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
+  acknowledgeWorktreeAttention,
   bandHome,
   deleteWorktreeStatus,
   loadState,
@@ -267,6 +268,13 @@ export const worktreeSetGroupInput = z.object({
 });
 export type WorktreeSetGroupInput = z.infer<typeof worktreeSetGroupInput>;
 
+export const worktreeSetUnreadInput = z.object({
+  worktreeId: z.string().min(1),
+  unread: z.boolean(),
+  // Tells two same-named worktrees on different workers apart.
+  hostId: z.string().optional(),
+});
+export type WorktreeSetUnreadInput = z.infer<typeof worktreeSetUnreadInput>;
 export const worktreeSetTitleInput = z.object({
   worktreeId: z.string().min(1),
   // Blank or null clears the title, so the card shows the name again.
@@ -1496,6 +1504,48 @@ export class WorktreeService {
     }
     emit({ kind: "worktree-origin-changed", worktreeId: input.worktreeId });
     return { ok: true, moved };
+  }
+
+  /**
+   * Marks a worktree unread or read. Reading also clears a `done` or `failed` attention dot, the
+   * way `statuses.clearNeedsAttention` does.
+   */
+  setUnread(input: WorktreeSetUnreadInput): { ok: true } {
+    const row = this.findRowById(input.worktreeId, input.hostId);
+    if (!row) throw new WorktreeNotFoundError(input.worktreeId);
+    this.repoQueries.setUnread(row.repoName, row.name, input.unread, row.hostId);
+    if (!input.unread) {
+      const status = acknowledgeWorktreeAttention(input.worktreeId);
+      if (status) emit({ kind: "update", status });
+    }
+    emit({ kind: "worktree-origin-changed", worktreeId: input.worktreeId });
+    return { ok: true };
+  }
+
+  /**
+   * Clears the unread flag when the user opens the worktree. Does nothing, and emits nothing,
+   * for a worktree that is not marked unread or is gone.
+   */
+  clearUnreadOnOpen(worktreeId: string): void {
+    const row = this.findRowById(worktreeId);
+    if (!row?.unread) return;
+    this.repoQueries.setUnread(row.repoName, row.name, false, row.hostId);
+    emit({ kind: "worktree-origin-changed", worktreeId });
+  }
+
+  private findRowById(
+    worktreeId: string,
+    hostId?: string,
+  ): { repoName: string; name: string; hostId: string; unread: boolean } | undefined {
+    for (const repo of loadState().repos) {
+      for (const wt of repo.worktrees) {
+        if (toWorktreeId(repo.name, wt.name, wt.hostId) !== worktreeId) continue;
+        const rowHost = wt.hostId ?? "local";
+        if (hostId !== undefined && hostId !== rowHost) continue;
+        return { repoName: repo.name, name: wt.name, hostId: rowHost, unread: wt.unread === true };
+      }
+    }
+    return undefined;
   }
 
   /**

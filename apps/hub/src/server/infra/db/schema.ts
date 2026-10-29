@@ -208,6 +208,9 @@ export const worktrees = sqliteTable("worktrees", {
   // id with no foreign key, like the origin columns: only `RepoQueries.setGroup` writes it, and
   // deleting a group nulls it.
   groupId: text("group_id"),
+  // Marked unread by a person: the sidebar shows a dot on every device until the worktree is
+  // opened or marked read. Only `RepoQueries.setUnread` writes it.
+  unread: integer("unread", { mode: "boolean" }).notNull().default(false),
   // A custom title shown in place of the name, or null. Only `RepoQueries.setTitle` writes it.
   title: text("title"),
   // Set when the worktree was restored on another host: the id of the replacement. The copy

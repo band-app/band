@@ -121,8 +121,22 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.worktrees.reorder.mutate(input);
   }
 
-  async clearNeedsAttention(worktreeId: string): Promise<void> {
-    await this.trpc.statuses.clearNeedsAttention.mutate({ worktreeId });
+  async clearNeedsAttention(
+    worktreeId: string,
+    options?: { clearUnread?: boolean },
+  ): Promise<void> {
+    await this.trpc.statuses.clearNeedsAttention.mutate({
+      worktreeId,
+      ...(options?.clearUnread ? { clearUnread: true } : {}),
+    });
+  }
+
+  async setWorktreeUnread(worktreeId: string, unread: boolean, hostId?: string): Promise<void> {
+    await this.trpc.worktrees.setUnread.mutate({
+      worktreeId,
+      unread,
+      ...(hostId ? { hostId } : {}),
+    });
   }
 
   async refreshBranchStatus(worktreeId: string): Promise<void> {
