@@ -318,8 +318,7 @@ async function runSteps(cx, sessionId, steps, signal, record) {
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),
         });
-        const text = await res.text();
-          line = { name, status: res.status, body: fullBody ? text : text.slice(0, 20000) };
+        line = { name, status: res.status, body: (await res.text()).slice(0, 20000) };
       } catch (err) {
         line = { name, status: 0, body: String(err) };
       }
