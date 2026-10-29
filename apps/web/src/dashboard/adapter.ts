@@ -201,7 +201,9 @@ export interface DashboardAdapter {
   dismissUpdate?(): Promise<void>;
 
   // Agent status (optional)
-  clearNeedsAttention?(worktreeId: string): Promise<void>;
+  clearNeedsAttention?(worktreeId: string, options?: { clearUnread?: boolean }): Promise<void>;
+  /** Marks a worktree unread or read on the hub. Reading also clears a done/failed dot. */
+  setWorktreeUnread?(worktreeId: string, unread: boolean, hostId?: string): Promise<void>;
   /** Re-read the worktree's git status now; the result arrives on the status stream. */
   refreshBranchStatus?(worktreeId: string): Promise<void>;
 

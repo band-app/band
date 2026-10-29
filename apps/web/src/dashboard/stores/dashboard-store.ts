@@ -47,6 +47,11 @@ export interface DashboardState {
 
   openWorktree: (worktreeId: string) => void;
   clearNeedsAttention: (worktreeId: string) => void;
+  /**
+   * Marks a worktree unread or read. Marking the worktree that is open keeps the flag until the
+   * user opens another worktree, so it is not cleared by the very screen they are looking at.
+   */
+  setWorktreeUnread: (worktreeId: string, unread: boolean, hostId?: string) => void;
   /** Ask the server to re-read the worktree's git status now (badge refresh). */
   refreshBranchStatus: (worktreeId: string) => void;
   /** Show `err` as an error notice. */
@@ -91,6 +96,9 @@ function reportRefusal(result: GitOpResult, notify: DashboardState["notify"]): v
 
 export function createDashboardStore(adapter: DashboardAdapter): DashboardStore {
   let nextNoticeId = 1;
+  // The worktree the user marked unread while it was open. Selecting it again does not clear the
+  // mark; selecting another worktree does.
+  let protectedUnreadId: string | null = null;
 
   return create<DashboardState>((set, get) => ({
     statuses: new Map(),
@@ -106,7 +114,19 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     },
 
     clearNeedsAttention: (worktreeId: string) => {
-      adapter.clearNeedsAttention?.(worktreeId).catch(() => {});
+      // Opening a worktree drops its unread mark too, except one set on it while it was open.
+      // Opening any other worktree ends that protection.
+      const protectedId = protectedUnreadId;
+      if (protectedId !== worktreeId) protectedUnreadId = null;
+      adapter
+        .clearNeedsAttention?.(worktreeId, { clearUnread: protectedId !== worktreeId })
+        .catch(() => {});
+    },
+
+    setWorktreeUnread: (worktreeId: string, unread: boolean, hostId?: string) => {
+      // Only a change to the open worktree moves the protection; marking another one leaves it.
+      if (get().activeWorktreeId === worktreeId) protectedUnreadId = unread ? worktreeId : null;
+      adapter.setWorktreeUnread?.(worktreeId, unread, hostId).catch((e) => get().setError(e));
     },
 
     refreshBranchStatus: (worktreeId: string) => {

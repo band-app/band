@@ -1,0 +1,1 @@
+ALTER TABLE `worktrees` ADD `unread` integer DEFAULT false NOT NULL;

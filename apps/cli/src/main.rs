@@ -359,6 +359,16 @@ enum WorktreesCmd {
         #[arg(long)]
         with_children: bool,
     },
+    /// Mark a worktree unread, so every device shows its unread dot
+    MarkUnread {
+        /// Worktree ID
+        worktree: String,
+    },
+    /// Mark a worktree read, clearing the unread dot and a done/failed dot
+    MarkRead {
+        /// Worktree ID
+        worktree: String,
+    },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
         /// Worktree ID
@@ -1118,6 +1128,8 @@ fn main() {
                 none,
                 with_children,
             } => cmd_worktrees_set_group(&worktree, group.as_deref(), none, with_children),
+            WorktreesCmd::MarkUnread { worktree } => cmd_worktrees_set_unread(&worktree, true),
+            WorktreesCmd::MarkRead { worktree } => cmd_worktrees_set_unread(&worktree, false),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -1832,10 +1844,17 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 None => "-".to_string(),
             };
             let superseded_by = wt.get("supersededBy").and_then(|v| v.as_str());
-            let id_text = match superseded_by {
+            let unread = wt
+                .get("unread")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let mut id_text = match superseded_by {
                 Some(new_id) => format!("{worktree_id} (superseded by {new_id})"),
                 None => worktree_id.to_string(),
             };
+            if unread {
+                id_text.push_str(" (unread)");
+            }
             rows.push([
                 name.to_string(),
                 branch.to_string(),
@@ -1851,6 +1870,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 "supersededBy": superseded_by,
                 "origin": origin,
                 "groupId": wt.get("groupId").cloned().unwrap_or(serde_json::Value::Null),
+                "unread": unread,
                 "children": wt.get("children").cloned().unwrap_or_else(|| serde_json::json!([])),
             }));
             found_any = true;
@@ -4471,6 +4491,20 @@ fn cmd_groups_remove(group: &str) -> Result<CommandResult, String> {
     })
 }
 
+fn cmd_worktrees_set_unread(worktree: &str, unread: bool) -> Result<CommandResult, String> {
+    validate::validate_name(worktree, "Worktree id")?;
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "worktrees.setUnread",
+        &serde_json::json!({"worktreeId": worktree, "unread": unread}),
+    )?;
+    let state = if unread { "unread" } else { "read" };
+    Ok(CommandResult {
+        text: format!("{worktree} marked {state}\n"),
+        json: serde_json::json!({"ok": true, "worktreeId": worktree, "unread": unread}),
+    })
+}
+
 #[allow(clippy::format_push_string)]
 fn cmd_worktrees_set_group(
     worktree: &str,
@@ -5727,6 +5761,22 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--with-children", "type": "boolean", "required": false, "description": "Also move every worktree started from this one"},
             ],
             "notes": "Prints each worktree that moved. Agents may use this command, but cannot create, rename or delete groups."
+        }),
+        serde_json::json!({
+            "name": "worktrees mark-unread",
+            "description": "Mark a worktree unread so every device shows its unread dot",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+            ],
+            "notes": "The dot stays until someone opens the worktree or runs `worktrees mark-read`."
+        }),
+        serde_json::json!({
+            "name": "worktrees mark-read",
+            "description": "Mark a worktree read, clearing the unread dot and a done/failed dot",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+            ],
+            "notes": "Also clears a `done` or `failed` agent status dot."
         }),
         serde_json::json!({
             "name": "groups list",

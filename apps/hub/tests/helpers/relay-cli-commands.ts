@@ -74,6 +74,8 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "groups rename": "renaming groups is a person's call, not an agent's",
   "groups remove": "deleting groups is a person's call, not an agent's",
   "worktrees set-origin": "rewires the sidebar tree, which is a person's call, not an agent's",
+  "worktrees mark-unread": "a person's reading state, not an agent's",
+  "worktrees mark-read": "a person's reading state, not an agent's",
   "worktrees checkpoints": "reads the hub's checkpoints, which a worker has no need to see",
   "workers evacuate": "admin only, moves every worktree off a worker",
   "workers trust": "no agent may change a worker's trust level, whatever its own",

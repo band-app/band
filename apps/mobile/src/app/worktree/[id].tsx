@@ -56,7 +56,9 @@ function WorktreeScreen({ id, openChat }: { id: string; openChat?: string }) {
 
   // Opening a worktree acknowledges it, as the web dashboard does (`openWorktree`).
   useEffect(() => {
-    void client.statuses.clearNeedsAttention.mutate({ worktreeId: id }).catch(() => {});
+    void client.statuses.clearNeedsAttention
+      .mutate({ worktreeId: id, clearUnread: true })
+      .catch(() => {});
   }, [client, id]);
 
   const row = findRow(repos.data ?? [], id, statuses, hosts.data ?? []);

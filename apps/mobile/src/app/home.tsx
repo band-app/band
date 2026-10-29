@@ -37,6 +37,7 @@ import {
   setParentRequests,
 } from "../lib/parenting";
 import { pinRequest } from "../lib/pinning";
+import { hasUnreadMark, unreadActionLabel, unreadRequest } from "../lib/unread";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
 import { useGroupFilter } from "../lib/use-group-filter";
 import {
@@ -49,6 +50,7 @@ import {
   useReorderGroups,
   useRepos,
   useSetParent,
+  useSetUnread,
   useStatusFeed,
 } from "../lib/use-hub-data";
 import { buildSections, findRow, type RepoSection, type WorktreeRow } from "../lib/worktree-list";
@@ -76,6 +78,7 @@ function WorktreeList() {
   const groups = useGroups();
   const [storedGroup, setGroupFilter] = useGroupFilter();
   const pin = usePinWorktree();
+  const setUnread = useSetUnread();
   const remove = useRemoveWorktree();
   const setParent = useSetParent();
   const removeFromGroup = useRemoveFromGroup();
@@ -222,6 +225,10 @@ function WorktreeList() {
           label: row.pinned ? "Unpin" : "Pin",
           run: () => pin.mutate(pinRequest(row, !row.pinned)),
         },
+        {
+          label: unreadActionLabel(row),
+          run: () => setUnread.mutate(unreadRequest(row, !hasUnreadMark(row))),
+        },
         { label: "Set parent…", run: () => setParentFor(row) },
         ...(row.parentId
           ? [
@@ -271,7 +278,7 @@ function WorktreeList() {
         (index) => actions[index]?.run(),
       );
     },
-    [pin, confirmDelete, setParent, removeFromGroup, repoList, statuses, hostList],
+    [pin, setUnread, confirmDelete, setParent, removeFromGroup, repoList, statuses, hostList],
   );
 
   const candidates = useMemo<ParentCandidate[]>(

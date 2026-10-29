@@ -125,6 +125,8 @@ export interface WorktreeInfo {
   hostId?: string;
   /** The group the worktree is in, or null for none. */
   groupId?: string | null;
+  /** Marked unread by a person, on any device. Shown as a dot until the worktree is opened or marked read. */
+  unread?: boolean;
   /** True when a scan of the host found the worktree's folder gone. Remove drops the record. */
   missing?: boolean;
   /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */

@@ -174,6 +174,15 @@ band worktrees set-group <worktree id> --none [--with-children]
 
 Moves a worktree into a group, or out of its group with `--none`. `--with-children` also moves every worktree started from it, and theirs in turn, on any repo and host. The command prints each worktree that moved. `band worktrees list --output json` shows each worktree's `groupId` (null when ungrouped). An agent may run this command for worktrees on its own host.
 
+### Mark a worktree unread or read
+
+```sh
+band worktrees mark-unread <worktree id>
+band worktrees mark-read <worktree id>
+```
+
+`mark-unread` shows an unread dot on the worktree in the sidebar on every device. It stays until someone opens the worktree or runs `mark-read`, which also clears a `done` or `failed` status dot. `band worktrees list --output json` shows each worktree's `unread`. These commands are for a person: an agent on a worker gets 403.
+
 ### List and manage groups
 
 ```sh

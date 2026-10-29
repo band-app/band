@@ -5,6 +5,7 @@ import type { removeRequest } from "./deleting";
 import { useHubSession } from "./hub-session";
 import type { removeFromGroupRequests, setParentRequests } from "./parenting";
 import { type pinRequest, withPinned } from "./pinning";
+import { type unreadRequest, withUnread } from "./unread";
 import type { GroupDefinition } from "./worktree-list";
 
 type ReposReply = Awaited<ReturnType<HubClient["repos"]["list"]["query"]>>;
@@ -59,6 +60,29 @@ export function usePinWorktree() {
           ...previous,
           repos: withPinned<Repo>(previous.repos, request),
         });
+      }
+      return { previous };
+    },
+    onError: (_error, _request, context) => {
+      if (context?.previous) queryClient.setQueryData(["repos.list"], context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Marks a worktree unread or read: the dot changes at once and the list is read again when the call settles. */
+export function useSetUnread() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ReturnType<typeof unreadRequest>) =>
+      client.worktrees.setUnread.mutate(request),
+    onMutate: async (request) => {
+      await queryClient.cancelQueries({ queryKey: ["repos.list"] });
+      const previous = queryClient.getQueryData<ReposReply>(["repos.list"]);
+      if (previous) {
+        const repos = withUnread<Repo>(previous.repos, request.worktreeId, request.unread);
+        queryClient.setQueryData<ReposReply>(["repos.list"], { ...previous, repos });
       }
       return { previous };
     },

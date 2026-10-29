@@ -1067,6 +1067,37 @@ fn worktrees_set_group_moves_one_worktree_or_its_children() {
 }
 
 #[test]
+fn worktrees_mark_unread_and_mark_read_toggle_the_listed_flag() {
+    let env = TestEnv::new();
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/unread"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let unread_of = || -> serde_json::Value {
+        let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == "my-repo-feat-unread")
+            .unwrap_or_else(|| panic!("worktree in {listed}"))["unread"]
+            .clone()
+    };
+    assert_eq!(unread_of(), serde_json::json!(false));
+
+    let output = env.band(&["worktrees", "mark-unread", "my-repo-feat-unread"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(unread_of(), serde_json::json!(true));
+    let text = env.band(&["worktrees", "list"]);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("(unread)"));
+
+    let output = env.band(&["worktrees", "mark-read", "my-repo-feat-unread"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(unread_of(), serde_json::json!(false));
+
+    let output = env.band(&["worktrees", "mark-unread", "my-repo-nope"]);
+    assert!(!output.status.success());
+}
+
+#[test]
 fn worktrees_create_group_by_name_or_id_and_inherits_from_origin() {
     let env = TestEnv::new();
     let g = json_of(&env.band(&["groups", "create", "Release", "--output", "json"]))["group"]["id"]

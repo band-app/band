@@ -1141,6 +1141,7 @@ export class CheckpointService {
       if (worktree.groupId) {
         this.repos.setGroup(repo.name, worktree.name, worktree.groupId, toHostId);
       }
+      if (worktree.unread) this.repos.setUnread(repo.name, worktree.name, true, toHostId);
       this.repos.setSupersededBy(repo.name, worktree.name, fromHostId, newId);
       // Each worker learns its new blocked list now, not at its next timed renewal.
       await Promise.all([
