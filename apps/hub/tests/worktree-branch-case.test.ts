@@ -122,7 +122,7 @@ describe("worktrees.create keeps the case of a branch name", () => {
       "origin",
       `git@github.com:${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
     ]);
-    const id = testWorktreeId(REPO, BRANCH);
+    const id = testWorktreeId(REPO, BRANCH, false);
     const ws = new WebSocket(`${server.url.replace(/^http/, "ws")}/trpc`, {
       headers: { Cookie: `band_token=${TOKEN}` },
     });
@@ -232,6 +232,6 @@ describe("worktrees.create keeps the case of a branch name", () => {
     const list = await fetch(`${server.url}/trpc/repos.list`, {
       headers: { Cookie: `band_token=${TOKEN}` },
     });
-    expect(await list.text()).toContain(testWorktreeId(REPO, "feat/plain"));
+    expect(await list.text()).toContain(testWorktreeId(REPO, "feat/plain", false));
   });
 });
