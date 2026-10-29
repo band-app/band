@@ -3,14 +3,7 @@
 // started again mid-turn, and the chat must carry on as if nothing happened: the same agent
 // process, no lost, repeated or reordered output.
 
-import {
-  appendFileSync,
-  copyFileSync,
-  existsSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ChatEvent } from "@band-app/shared/chat-events";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -150,6 +143,31 @@ describe("a turn survives a worker restart (S1)", () => {
 
     const events = await turn.events;
     expect(agentText(events)).toBe("A1 A2");
+    // The event sequence: one prompt, one turn start, one turn end, in that order, with the two
+    // message chunks once each and in order, and every logged event id used once and rising.
+    const kinds = events
+      .filter((e) => e.type !== "subscription-opened" && e.type !== "history-meta")
+      .map((e) => (e.type === "update" ? `update:${e.update.sessionUpdate}` : e.type));
+    expect(kinds.filter((k) => k === "prompt")).toHaveLength(1);
+    expect(kinds.filter((k) => k === "turn-started")).toHaveLength(1);
+    expect(kinds.filter((k) => k === "turn-ended")).toHaveLength(1);
+    expect(kinds.indexOf("prompt")).toBeLessThan(kinds.indexOf("turn-started"));
+    expect(kinds.indexOf("turn-started")).toBeLessThan(kinds.indexOf("update:agent_message_chunk"));
+    expect(kinds.lastIndexOf("update:agent_message_chunk")).toBeLessThan(
+      kinds.indexOf("turn-ended"),
+    );
+    const chunks = events.flatMap((e) =>
+      e.type === "update" &&
+      e.update.sessionUpdate === "agent_message_chunk" &&
+      e.update.content.type === "text"
+        ? [e.update.content.text]
+        : [],
+    );
+    expect(chunks.join("")).toBe("A1 A2");
+    expect(chunks.indexOf("A1 ")).toBeLessThanOrEqual(chunks.length - 1);
+    const ids = events.map((e) => e.eventId).filter((id) => id > 0);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect([...ids].sort((a, b) => a - b)).toEqual(ids);
     // The agent was never restarted: one process, one `initialize`, one `session/new`.
     expect(agentPids(worker)).toEqual([pid]);
     expect(stubLog(worker).filter((l) => l.method === "initialize")).toHaveLength(1);
