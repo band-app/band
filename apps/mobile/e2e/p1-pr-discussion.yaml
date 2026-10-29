@@ -19,13 +19,26 @@ name: p1 the discussion of a pull request
     timeout: 20000
 - assertVisible:
     id: pr-comments__summary
-    text: "6, 2 unresolved"
+    text: "7, 2 unresolved"
 - assertVisible:
     text: "bob .*ago"
 - assertVisible:
     text: ".*Can you add a test.*"
 - assertVisible:
     text: "carol approved .*ago"
+- assertVisible:
+    text: ".*Review by Epic PR Reviewer"
+- assertVisible:
+    text: "Expand Resolved & retired \\(5\\)"
+- assertNotVisible:
+    text: ".*(<!--|<img|<details>|&amp;|REVIEW_STATE|psc-adversarial).*"
+- takeScreenshot: p1-comments-collapsed
+- tapOn:
+    text: "Expand Resolved & retired \\(5\\)"
+- assertVisible:
+    text: "Collapse Resolved & retired \\(5\\)"
+- assertVisible:
+    text: ".*link.*"
 - takeScreenshot: p1-comments
 - scrollUntilVisible:
     element:

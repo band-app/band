@@ -33,6 +33,33 @@ export const CHECKS_BRANCHES = {
   MERGE_REFUSED: "feat/merge-refused",
 };
 
+/** A bot comment with GitHub-only HTML: hidden state blocks, an image, a heading and `<details>`. */
+const REVIEWER_COMMENT = [
+  "<!-- claude-review-state -->",
+  "<!-- REVIEW_STATE_START -->",
+  "<!--",
+  "{",
+  '  "agent": "psc-adversarial-pr-reviewer",',
+  "",
+  '  "findings": [',
+  '    { "text": "see <url> and \\"quoted\\" src/a.ts" }',
+  "  ]",
+  "}",
+  "-->",
+  "<!-- REVIEW_STATE_END -->",
+  '## <img src="https://example.invalid/avatar.png" width="32" align="absmiddle"> Review by Epic PR Reviewer',
+  "",
+  "> Nothing blocking.",
+  "",
+  "<details>",
+  "<summary>Resolved &amp; retired (5)</summary>",
+  "",
+  "- one [link](https://example.com)",
+  "- `two`",
+  "",
+  "</details>",
+].join("\n");
+
 /** The `gh pr merge` calls the hub made: `{ number, method }`. */
 export const merges = [];
 const mergedPrs = new Set();
@@ -171,6 +198,12 @@ export async function startGhStub() {
               login: "bob",
               body: "Can you add a test for the `empty` case?",
               createdAt: "2026-01-02T08:30:00Z",
+            }),
+            commentNode({
+              id: "c3",
+              login: "epic-pr-reviewer",
+              body: REVIEWER_COMMENT,
+              createdAt: "2026-01-02T08:35:00Z",
             }),
             commentNode({
               id: "c2",

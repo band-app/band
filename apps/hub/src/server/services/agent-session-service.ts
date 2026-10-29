@@ -1462,6 +1462,22 @@ export class AgentSessionService {
   }
 
   /**
+   * True while a turn runs or a request waits on the user. Unlike `isActive` it ignores work the
+   * agent started on its own (wakeups, crons, background tasks), which is no reason to keep a
+   * worktree whose folder is gone.
+   */
+  isEngaged(chatId: string): boolean {
+    if (chatOwnershipService.isOwned(chatId)) {
+      return (
+        chatOwnershipService.task(chatId) !== null ||
+        chatOwnershipService.pending(chatId).length > 0
+      );
+    }
+    const rt = runtimes.get(chatId);
+    return rt ? rt.inTurn || rt.pending.size > 0 : false;
+  }
+
+  /**
    * Changes a session setting. Saved on the chat row (model and mode, so a
    * later session starts with it) and applied to the agent's session. A
    * chat with no live session gets one first (a new chat starts it, an idle

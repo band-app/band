@@ -104,7 +104,7 @@ function ConversationItem({ item }: { item: Item }) {
   return (
     <View style={styles.message} collapsable={false} testID="pr-comments__item">
       <MessageHeader comment={item} verb={verb} />
-      {item.body.trim() ? <Markdown text={item.body} /> : null}
+      {item.body.trim() ? <Markdown text={item.body} html="github" /> : null}
     </View>
   );
 }
@@ -149,7 +149,7 @@ function ThreadView({ thread }: { thread: Thread }) {
               testID="pr-comments__message"
             >
               <MessageHeader comment={comment} verb={null} />
-              {comment.body.trim() ? <Markdown text={comment.body} /> : null}
+              {comment.body.trim() ? <Markdown text={comment.body} html="github" /> : null}
             </View>
           ))}
           {thread.truncated ? <Text style={styles.empty}>More replies on GitHub.</Text> : null}
