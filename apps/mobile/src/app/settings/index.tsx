@@ -1,4 +1,4 @@
-import { Info, Mic, Server, Smartphone, Sparkles } from "lucide-react-native";
+import { Gauge, Info, Mic, Server, Smartphone, Sparkles } from "lucide-react-native";
 import { Group, LinkRow, SettingsScreen } from "../../components/settings-ui";
 import { SessionGate } from "../../lib/hub-session";
 
@@ -21,6 +21,13 @@ export default function Settings() {
             icon={Sparkles}
             href="/settings/agents"
             testID="settings__open-agents"
+          />
+          <LinkRow
+            title="Usage"
+            detail="Claude and Codex limits"
+            icon={Gauge}
+            href="/settings/usage"
+            testID="settings__open-usage"
           />
           <LinkRow
             title="Voice"

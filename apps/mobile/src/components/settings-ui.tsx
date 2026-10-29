@@ -1,11 +1,12 @@
 import { router, Stack } from "expo-router";
 import { ChevronRight, type LucideIcon } from "lucide-react-native";
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Pressable,
+  type RefreshControlProps,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,16 +20,22 @@ import { Icon } from "./icon";
 export function SettingsScreen({
   title,
   testID,
+  refreshControl,
   children,
 }: {
   title: string;
   testID: string;
+  refreshControl?: ReactElement<RefreshControlProps>;
   children: ReactNode;
 }) {
   return (
     <SafeAreaView style={styles.safe} edges={["bottom", "left", "right"]}>
       <Stack.Screen options={{ title }} />
-      <ScrollView contentContainerStyle={styles.body} testID={testID}>
+      <ScrollView
+        contentContainerStyle={styles.body}
+        refreshControl={refreshControl}
+        testID={testID}
+      >
         {children}
       </ScrollView>
     </SafeAreaView>

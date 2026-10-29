@@ -1,0 +1,50 @@
+# S8 (settings): Usage lists the Claude and Codex accounts with their windows and workers, and a
+# pull to refresh reaches the usage endpoints again (the stub saw new requests).
+appId: app.getband.mobile
+name: Usage limits
+---
+- runFlow: subflows/pair-admin.yaml
+- runFlow:
+    file: subflows/open-settings-section.yaml
+    env:
+      SECTION: usage
+- extendedWaitUntil:
+    visible:
+      id: settings__usage-claude
+    timeout: 20000
+- assertVisible:
+    id: settings__usage-codex
+- assertVisible:
+    text: 42%
+- assertVisible:
+    text: 96%
+- assertVisible:
+    text: 25%
+- assertVisible:
+    text: 83%
+- assertVisible:
+    id: settings__usage-claude-account
+- assertVisible:
+    id: settings__usage-codex-account
+- assertVisible:
+    text: "dev@example.com on .*"
+- assertVisible:
+    text: ".*Resets in.*"
+- takeScreenshot: st8-usage
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: usage-mark
+- swipe:
+    start: 50%, 25%
+    end: 50%, 80%
+    duration: 800
+- extendedWaitUntil:
+    visible:
+      id: settings__usage-claude
+    timeout: 10000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-usage-refresh
+- takeScreenshot: st8-usage-refreshed

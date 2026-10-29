@@ -1,4 +1,4 @@
-# From the home screen, opens Settings and then the section named by SECTION (hosts, agents,
+# From the home screen, opens Settings and then the section named by SECTION (hosts, agents, usage,
 # voice, devices or about).
 appId: app.getband.mobile
 ---

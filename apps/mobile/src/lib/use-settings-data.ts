@@ -187,3 +187,20 @@ export function useAddDevice() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["tokens.list"] }),
   });
 }
+
+/** `accountUsage.list`. `refresh` asks every worker to read its logins again, skipping its cache. */
+export function useAccountUsage() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: ["accountUsage.list"],
+    queryFn: () => client.accountUsage.list.query(),
+    staleTime: 60_000,
+    retry,
+  });
+  const refresh = useMutation({
+    mutationFn: () => client.accountUsage.list.query({ refresh: true }),
+    onSuccess: (data) => queryClient.setQueryData(["accountUsage.list"], data),
+  });
+  return { query, refresh };
+}

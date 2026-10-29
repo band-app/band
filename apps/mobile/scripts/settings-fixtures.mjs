@@ -14,8 +14,11 @@
  *
  * The workers are `connectStandInWorker` stand-ins (the real link protocol, no git or terminals).
  */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { connectStandInWorker } from "../../hub/tests/helpers/stand-in-worker.ts";
 import { startReleasesStub } from "../../hub/tests/fixtures/github-releases-stub.ts";
+import { startUsageStub } from "../../hub/tests/fixtures/usage-stub.ts";
 import { startSttStub } from "../../hub/tests/fixtures/stt-stub.ts";
 
 export const HUB_VERSION = "0.50.0";
@@ -25,13 +28,52 @@ export const STT_TEXT = "Fix the login bug";
 const workers = new Map();
 let releases = null;
 let stt = null;
+let usage = null;
+let usageMark = 0;
+const CLAUDE_TOKEN = "claude-verify-token";
+const CODEX_TOKEN = "codex-verify-token";
 const updates = new Map();
 const pendingReconnect = new Map();
 
 export async function settingsEnv() {
   releases = await startReleasesStub(LATEST_RELEASE);
   stt = await startSttStub({ text: STT_TEXT });
+  const soon = (ms) => Date.now() + ms;
+  usage = await startUsageStub({
+    claude: {
+      [CLAUDE_TOKEN]: {
+        status: 200,
+        body: {
+          five_hour: { utilization: 42, resets_at: new Date(soon(2 * 3_600_000)).toISOString() },
+          seven_day: { utilization: 96, resets_at: new Date(soon(5 * 86_400_000)).toISOString() },
+        },
+      },
+    },
+    codex: {
+      [CODEX_TOKEN]: {
+        status: 200,
+        body: {
+          plan_type: "plus",
+          rate_limit: {
+            primary_window: {
+              used_percent: 25,
+              limit_window_seconds: 18000,
+              reset_at: Math.floor(soon(3_600_000) / 1000),
+            },
+            secondary_window: {
+              used_percent: 83,
+              limit_window_seconds: 604800,
+              reset_at: Math.floor(soon(86_400_000) / 1000),
+            },
+          },
+        },
+      },
+    },
+  });
   return {
+    BAND_CLAUDE_USAGE_URL: usage.claudeUrl,
+    BAND_CODEX_USAGE_URL: usage.codexUrl,
+    BAND_USAGE_KEYCHAIN: "off",
     BAND_GITHUB_API_URL: releases.url,
     BAND_INSTALL_METHOD: "compose",
     BAND_HUB_VERSION: HUB_VERSION,
@@ -86,6 +128,22 @@ export async function seedSettings(hub) {
       apiKeyItemId: "",
     },
   });
+  // The hub's own machine is logged in to Claude and Codex, read from its temp HOME.
+  mkdirSync(join(hub.home, ".claude"), { recursive: true });
+  writeFileSync(
+    join(hub.home, ".claude", ".credentials.json"),
+    JSON.stringify({ claudeAiOauth: { accessToken: CLAUDE_TOKEN, subscriptionType: "max" } }),
+  );
+  writeFileSync(
+    join(hub.home, ".claude.json"),
+    JSON.stringify({ oauthAccount: { emailAddress: "dev@example.com", accountUuid: "uuid-dev" } }),
+  );
+  mkdirSync(join(hub.home, ".codex"), { recursive: true });
+  const idToken = `h.${Buffer.from(JSON.stringify({ email: "dev@example.com" })).toString("base64url")}.s`;
+  writeFileSync(
+    join(hub.home, ".codex", "auth.json"),
+    JSON.stringify({ tokens: { access_token: CODEX_TOKEN, account_id: "acct-1", id_token: idToken } }),
+  );
   return { adminDeviceToken: admin.token };
 }
 
@@ -152,6 +210,18 @@ export async function handleSettingsControl(hub, url, notes) {
       notes.push(`device ${url.searchParams.get("label")} is gone from tokens.list`);
       return true;
     }
+    case "/usage-mark":
+      usageMark = (usage?.requests.claude.length ?? 0) + (usage?.requests.codex.length ?? 0);
+      return true;
+    case "/expect-usage-refresh": {
+      const count = () => (usage?.requests.claude.length ?? 0) + (usage?.requests.codex.length ?? 0);
+      const deadline = Date.now() + 5000;
+      while (count() <= usageMark && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+      const n = count();
+      if (n <= usageMark) throw new Error("pull to refresh sent no new request to the usage stub");
+      notes.push(`pull to refresh made ${n - usageMark} usage request(s)`);
+      return true;
+    }
     case "/expect-stt": {
       const n = stt?.requests.length ?? 0;
       if (n < 1) throw new Error("the speech-to-text stub got no request");
@@ -168,5 +238,6 @@ export async function stopSettingsFixtures() {
   workers.clear();
   await releases?.close();
   await stt?.close();
+  await usage?.close();
 }
 
