@@ -118,14 +118,20 @@ export function WorktreeRowView({
   row,
   onPress,
   onLongPress,
+  holdMenu,
+  onMove,
   deleting,
   first,
   last,
 }: {
   row: WorktreeRow;
   onPress: () => void;
-  /** Opens the row's actions (Pin / Unpin). */
+  /** Opens the row's actions (Pin / Unpin). The list calls it when a hold ends without a drag. */
   onLongPress?: () => void;
+  /** Dragging is off (a search), so the row opens the menu on its own long press. */
+  holdMenu?: boolean;
+  /** Moves the row up or down among its siblings, for VoiceOver users who cannot drag. */
+  onMove?: (delta: -1 | 1) => void;
   /** The worktree is being deleted: a spinner shows and the row ignores taps. */
   deleting?: boolean;
   /** First row of a card with no header on it (Pinned, a group, the rows with no group): round the top. */
@@ -136,11 +142,28 @@ export function WorktreeRowView({
   return (
     <Pressable
       onPress={onPress}
-      onLongPress={onLongPress}
+      onLongPress={holdMenu ? onLongPress : undefined}
       disabled={deleting}
       accessibilityRole="button"
       accessibilityLabel={rowLabel(row)}
-      accessibilityHint={onLongPress ? "Long press for pin and delete options" : undefined}
+      accessibilityHint={
+        onLongPress ? "Hold for pin and delete options, or drag to reorder" : undefined
+      }
+      accessibilityActions={[
+        ...(onLongPress ? [{ name: "options", label: "Options" }] : []),
+        ...(onMove
+          ? [
+              { name: "moveUp", label: "Move up" },
+              { name: "moveDown", label: "Move down" },
+            ]
+          : []),
+      ]}
+      onAccessibilityAction={(e) => {
+        const action = e.nativeEvent.actionName;
+        if (action === "options") onLongPress?.();
+        else if (action === "moveUp") onMove?.(-1);
+        else if (action === "moveDown") onMove?.(1);
+      }}
       testID={`home__worktree-${row.id}`}
       style={({ pressed }) => [
         styles.row,
