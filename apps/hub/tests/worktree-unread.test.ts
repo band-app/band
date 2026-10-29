@@ -67,13 +67,23 @@ describe("worktree unread mark", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome("band-unread-test-");
     const repoPath = createGitRepo(tmpHome, "myrepo");
+    // A second worktree is seeded, not created, so the remote-loopback mode moves both to the worker.
+    const otherPath = join(tmpHome, "feat-b-checkout");
+    execFileSync("git", ["worktree", "add", "-b", "feat-b", otherPath], {
+      cwd: repoPath,
+      env: gitEnv,
+      encoding: "utf-8",
+    });
     seedState(tmpHome, {
       repos: [
         {
           name: "myrepo",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath }],
+          worktrees: [
+            { branch: "main", path: repoPath },
+            { branch: "feat-b", path: otherPath },
+          ],
         },
       ],
     });
@@ -82,8 +92,6 @@ describe("worktree unread mark", () => {
       worktreesDir: join(tmpHome, ".band", "worktrees"),
     });
     server = await startServer({ tmpHome });
-    const created = await mutate("worktrees.create", { repo: "myrepo", branch: "feat-b" });
-    expect(created.status).toBe(200);
     // A finished turn: the `done` dot Band shows today.
     const done = await mutate("statuses.update", {
       worktreeId: MAIN,
