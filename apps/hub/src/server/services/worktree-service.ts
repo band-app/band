@@ -706,6 +706,18 @@ export class WorktreeService {
       (wt) => sameName(wt) && (wt.hostId ?? hostRegistry.local.id) === hostId,
     );
     if (existing) return { ok: true, path: existing.path, hostId };
+    // Refs and folders may share a disk that ignores case, so a name that differs only in case
+    // from a worktree of this repo on this host would collide with it.
+    const caseClash = repo.worktrees.find(
+      (wt) =>
+        (wt.hostId ?? hostRegistry.local.id) === hostId &&
+        [wt.name, wt.branch].some((n) => n.toLowerCase() === input.branch.toLowerCase()),
+    );
+    if (caseClash) {
+      throw new Error(
+        `Branch "${input.branch}" differs only in case from the existing worktree "${caseClash.branch}". Use that name or pick another.`,
+      );
+    }
     // Hard rules, for every entry point: the repo must be allowed on the host, and a branch
     // lives on one host only.
     assertHostAllowed(repo.name, hostId);
