@@ -108,7 +108,7 @@ export function NewWorktreeDialog({
     if (branch && !slug) return "Branch name contains no valid characters.";
     if (onOtherHost) return `${slug} is already on ${hostName(onOtherHost.hostId)}`;
     if (slug) {
-      if (repoInfo?.worktrees.some((wt) => wt.branch === slug)) {
+      if (repoInfo?.worktrees.some((wt) => wt.branch.toLowerCase() === slug.toLowerCase())) {
         return `A worktree named "${slug}" already exists.`;
       }
     }

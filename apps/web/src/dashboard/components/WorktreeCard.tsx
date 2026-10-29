@@ -23,6 +23,8 @@ import {
   GitCompareArrows,
   Link2Off,
   Loader,
+  Mail,
+  MailOpen,
   Moon,
   MoveRight,
   Pencil,
@@ -55,7 +57,7 @@ import type {
   WorktreeInfo,
   WorktreeStatus,
 } from "../types";
-import { AgentStatusIndicator } from "./AgentStatusIndicator";
+import { AgentStatusIndicator, hasUnreadMark } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { ContinuedFromIcon, continuedFromText } from "./ContinuedFromLine";
 import { ContinueOnHostDialog } from "./ContinueOnHostDialog";
@@ -264,6 +266,7 @@ export const WorktreeCard = memo(function WorktreeCard({
 
   const openWorktree = useDashboardStore((s) => s.openWorktree);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
+  const setWorktreeUnread = useDashboardStore((s) => s.setWorktreeUnread);
   const runScript = useDashboardStore((s) => s.runScript);
   const gitPull = useDashboardStore((s) => s.gitPull);
   const gitPush = useDashboardStore((s) => s.gitPush);
@@ -358,6 +361,13 @@ export const WorktreeCard = memo(function WorktreeCard({
     }
   };
 
+  // "Mark as read" when there is something to read: a manual mark or a finished or failed turn.
+  const canMarkRead = hasUnreadMark(worktree.unread, status?.agent?.status ?? "idle");
+  const toggleUnread = () => {
+    if (isDeleting) return;
+    setWorktreeUnread(worktreeId, !canMarkRead, worktree.hostId);
+  };
+
   const handleOpenChecks = () => {
     if (isDeleting) return;
     showChecksTab(worktreeId);
@@ -445,7 +455,12 @@ export const WorktreeCard = memo(function WorktreeCard({
           <Tooltip delayDuration={800}>
             <TooltipTrigger asChild>
               <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
-                <AgentStatusIndicator agent={status?.agent} tabStatuses={status?.tabStatuses} />
+                <AgentStatusIndicator
+                  agent={status?.agent}
+                  tabStatuses={status?.tabStatuses}
+                  unread={worktree.unread}
+                  onToggleUnread={toggleUnread}
+                />
                 {showRepoName ? (
                   // Pinned section: stack the branch name over the repo name
                   // as a compact two-line block so a mixed list of pinned cards
@@ -673,6 +688,10 @@ export const WorktreeCard = memo(function WorktreeCard({
         >
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin worktree" : "Pin worktree"}
+        </ContextMenuItem>
+        <ContextMenuItem data-testid="worktree-card__toggle-unread" onClick={toggleUnread}>
+          {canMarkRead ? <MailOpen /> : <Mail />}
+          {canMarkRead ? "Mark as read" : "Mark as unread"}
         </ContextMenuItem>
         <ContextMenuItem
           data-testid="worktree-card__rename"

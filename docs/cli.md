@@ -27,6 +27,8 @@ band worktrees set-group my-app-feat-auth work --with-children
 band worktrees set-group my-app-feat-auth --none
 ```
 
+`band worktrees mark-unread <id>` shows an unread dot on a worktree on every device, and `mark-read <id>` clears it together with a `done` or `failed` status dot. Agents on a worker cannot run either.
+
 A new worktree joins its origin's group unless `--group` says otherwise. `--with-children` moves the worktrees started from the one named as well. Removing a group leaves its worktrees ungrouped. Agents on a worker can run `groups list` and `worktrees set-group`, but not `groups create`, `rename` or `remove`.
 
 ## Chat labels (#520)

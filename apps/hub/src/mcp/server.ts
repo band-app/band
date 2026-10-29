@@ -68,6 +68,8 @@ function discoverProcedures(): ProcedureInfo[] {
     if (path === "repos.inspectFolder" || path === "repos.resolveRemote") continue;
     // Re-parenting a worktree is a person's decision, and an MCP call is not scoped to a worker.
     if (path === "worktrees.setOrigin") continue;
+    // Unread is a person's reading state, not an agent's.
+    if (path === "worktrees.setUnread") continue;
     // Agents may list groups and assign worktrees, but creating, renaming and deleting groups is a person's call.
     // `worktrees.setGroup` stays on this endpoint as the brief asks. Unlike the relay, an MCP call is not
     // scoped to a worker, so it can move any worktree and, with `withChildren`, its subtree.

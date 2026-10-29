@@ -445,6 +445,10 @@ function startControlServer(hub, chats, udid, notes) {
         const found = await findWorktree(hub, repo, name);
         notes.push(`${repo}/${name}: repos.list ${found ? "holds" : "does not hold"} it`);
         if (Boolean(found) !== want) throw new Error(`${repo}/${name} ${found ? "is" : "is not"} in repos.list`);
+        const unread = url.searchParams.get("unread");
+        if (unread !== null && Boolean(found?.unread) !== (unread === "1")) {
+          throw new Error(`${repo}/${name} unread is ${Boolean(found?.unread)}, expected ${unread === "1"}`);
+        }
         const file = url.searchParams.get("file");
         if (file && found && !existsSync(join(found.path, file))) throw new Error(`${file} is gone from ${found.path}`);
       } else if (await handleSettingsControl(hub, url, notes)) {

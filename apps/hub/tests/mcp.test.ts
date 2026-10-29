@@ -153,6 +153,8 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames.filter((n) => n.startsWith("band_agentLogins_"))).toEqual([]);
     // So does the bearer token for a worker's loopback listener.
     expect(toolNames).not.toContain("band_worktree_directAccess");
+    // Unread is a person's reading state.
+    expect(toolNames).not.toContain("band_worktrees_setUnread");
 
     // Subscriptions should NOT be exposed
     expect(toolNames).not.toContain("band_tasks_stream");

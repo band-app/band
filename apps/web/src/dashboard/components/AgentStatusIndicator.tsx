@@ -86,48 +86,88 @@ interface Props {
   agent?: AgentInfo;
   /** The worktree's chats and terminals with their own states, listed in the tooltip. */
   tabStatuses?: TabAgentStatus[];
+  /** Marked unread by a person: an idle row shows the unread dot instead of the faint one. */
+  unread?: boolean;
+  /** Makes the dot a button that marks the worktree read or unread. */
+  onToggleUnread?: () => void;
 }
 
 const IDLE_LABEL = "No agent activity";
+const UNREAD_LABEL = "Unread";
+
+/** True when the worktree has something to read: a manual mark or a finished or failed turn. */
+export function hasUnreadMark(unread: boolean | undefined, status: AgentStatusType): boolean {
+  return unread === true || status === "done" || status === "failed";
+}
+
+/** The semantic done color marks unread work, the same as a finished turn. */
+function UnreadDot() {
+  return (
+    <span
+      role="img"
+      aria-label={UNREAD_LABEL}
+      className="inline-block size-2 shrink-0 rounded-full bg-status-done"
+    />
+  );
+}
 
 /**
- * The left slot of a worktree row: the agent's state mark, or a faint solid dot
- * when there is no activity.
+ * The left slot of a worktree row: the agent's state mark, the unread dot, or a faint solid dot
+ * when there is no activity. An agent state shows over the unread mark, so a row has one dot.
+ * With `onToggleUnread` the dot is a button, and its name says what a click does.
  */
-export function AgentStatusIndicator({ agent, tabStatuses }: Props) {
+export function AgentStatusIndicator({ agent, tabStatuses, unread, onToggleUnread }: Props) {
   const status: AgentStatusType = agent?.status ?? "idle";
   const tabsText = describeTabStatuses(tabStatuses);
-  if (!isActiveAgentStatus(status)) {
-    // Idle rows are the common case in long lists, so they skip the Tooltip.
-    return (
-      <span
-        className="inline-flex shrink-0 items-center"
-        data-testid="worktree-card__agent-status"
-        data-status={status}
-      >
-        <span
-          role="img"
-          aria-label={IDLE_LABEL}
-          title={tabsText || IDLE_LABEL}
-          className="inline-block size-2 shrink-0 rounded-full bg-muted-foreground/40"
-        />
-      </span>
-    );
-  }
-  const tooltip = AGENT_STATE_INFO[status].tooltip;
+  const active = isActiveAgentStatus(status);
+  const showUnread = unread === true && !active;
+  const dataStatus = showUnread ? "unread" : status;
+  const dot = active ? (
+    <AgentStateDot status={status} />
+  ) : showUnread ? (
+    <UnreadDot />
+  ) : (
+    <span
+      role="img"
+      aria-label={IDLE_LABEL}
+      title={tabsText || IDLE_LABEL}
+      className="inline-block size-2 shrink-0 rounded-full bg-muted-foreground/40"
+    />
+  );
+  const content = onToggleUnread ? (
+    <button
+      type="button"
+      // Keyboard users reach the same action in the card menu, so the dot adds no tab stop.
+      tabIndex={-1}
+      data-testid="worktree-card__unread-toggle"
+      aria-label={hasUnreadMark(unread, status) ? "Mark as read" : "Mark as unread"}
+      className="-m-1 inline-flex shrink-0 cursor-pointer items-center rounded-full p-1"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggleUnread();
+      }}
+    >
+      {dot}
+    </button>
+  ) : (
+    dot
+  );
+  const slot = (
+    <span
+      className="inline-flex shrink-0 items-center"
+      data-testid="worktree-card__agent-status"
+      data-status={dataStatus}
+    >
+      {content}
+    </span>
+  );
+  // Idle rows are the common case in long lists, so they skip the Tooltip.
+  if (!active) return slot;
   return (
     <Tooltip delayDuration={200}>
-      <TooltipTrigger asChild>
-        <span
-          className="inline-flex shrink-0 items-center"
-          data-testid="worktree-card__agent-status"
-          data-status={status}
-        >
-          <AgentStateDot status={status} />
-        </span>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{slot}</TooltipTrigger>
       <TooltipContent side="top" data-testid="worktree-card__agent-status-tooltip">
-        {tabsText || tooltip}
+        {tabsText || AGENT_STATE_INFO[status].tooltip}
       </TooltipContent>
     </Tooltip>
   );

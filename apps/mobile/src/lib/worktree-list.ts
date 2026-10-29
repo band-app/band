@@ -45,6 +45,8 @@ export interface WorktreeLike {
   origin?: { worktreeId: string; removed: boolean } | null;
   /** The group the worktree is in; null or unset means Ungrouped. */
   groupId?: string | null;
+  /** Marked unread by a person, on any device. */
+  unread?: boolean;
   /** A custom title shown in place of the name; null or unset means none. */
   title?: string | null;
 }
@@ -155,6 +157,8 @@ export interface WorktreeRow {
   parentId: string | null;
   /** The group it is in, or null for Ungrouped. */
   groupId: string | null;
+  /** Marked unread by a person; drawn as the unread dot while the agent is idle. */
+  unread: boolean;
 }
 
 export interface RepoSection {
@@ -269,6 +273,7 @@ function toRow(
     depth: 0,
     parentId: worktree.origin && !worktree.origin.removed ? worktree.origin.worktreeId : null,
     groupId: worktree.groupId ?? null,
+    unread: worktree.unread === true,
   };
 }
 

@@ -167,10 +167,18 @@ test("the host picker offers Local next to a worker when local worktrees are on"
 
   // A name that needs slugging shows one muted note, and Create stays enabled.
   await worktreePage.fillNewWorktreeBranch("My Feature");
-  await expect(worktreePage.newWorktreeSlugNote).toContainText("my-feature");
+  await expect(worktreePage.newWorktreeSlugNote).toContainText("My-Feature");
   await expect(
     worktreePage.newWorktreeDialog.getByRole("button", { name: "Create" }),
   ).toBeEnabled();
+
+  // Case, "_" and "." stay; whitespace becomes a hyphen and what git forbids is dropped.
+  await worktreePage.fillNewWorktreeBranch("Fix Login  redirect!");
+  await expect(worktreePage.newWorktreeSlugNote).toContainText("Fix-Login-redirect!");
+  await worktreePage.fillNewWorktreeBranch("feat/a..b~c");
+  await expect(worktreePage.newWorktreeSlugNote).toContainText("feat/a.bc");
+  await worktreePage.fillNewWorktreeBranch("feature/EPCNTR_4055.x");
+  await expect(worktreePage.newWorktreeSlugNote).toHaveCount(0);
 });
 
 test("the host picker does not offer Local when local worktrees are off", async ({ page }) => {

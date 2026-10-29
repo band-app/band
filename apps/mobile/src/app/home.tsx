@@ -47,6 +47,7 @@ import {
 import { pinRequest } from "../lib/pinning";
 import { renameFailure, renameRequest, rowTitle } from "../lib/renaming";
 import { groupOrder, reorderFailure, reorderRequest, siblingBlocks } from "../lib/reordering";
+import { hasUnreadMark, unreadActionLabel, unreadRequest } from "../lib/unread";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
 import { useGroupFilter } from "../lib/use-group-filter";
 import {
@@ -61,6 +62,7 @@ import {
   useReorderWorktrees,
   useRepos,
   useSetParent,
+  useSetUnread,
   useStatusFeed,
 } from "../lib/use-hub-data";
 import { buildSections, findRow, type RepoSection, type WorktreeRow } from "../lib/worktree-list";
@@ -88,6 +90,7 @@ function WorktreeList() {
   const groups = useGroups();
   const [storedGroup, setGroupFilter] = useGroupFilter();
   const pin = usePinWorktree();
+  const setUnread = useSetUnread();
   const remove = useRemoveWorktree();
   const setParent = useSetParent();
   const rename = useRenameWorktree();
@@ -326,6 +329,10 @@ function WorktreeList() {
           run: () => pin.mutate(pinRequest(row, !row.pinned)),
         },
         {
+          label: unreadActionLabel(row),
+          run: () => setUnread.mutate(unreadRequest(row, !hasUnreadMark(row))),
+        },
+        {
           label: "Rename…",
           run: () =>
             Alert.prompt(
@@ -391,7 +398,17 @@ function WorktreeList() {
         (index) => actions[index]?.run(),
       );
     },
-    [pin, rename, confirmDelete, setParent, removeFromGroup, repoList, statuses, hostList],
+    [
+      pin,
+      setUnread,
+      rename,
+      confirmDelete,
+      setParent,
+      removeFromGroup,
+      repoList,
+      statuses,
+      hostList,
+    ],
   );
 
   const candidates = useMemo<ParentCandidate[]>(

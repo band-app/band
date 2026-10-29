@@ -15,11 +15,23 @@ export const SHOWN_LABEL: Record<ShownState, string> = {
  * The agent's state as the web sidebar draws it: a solid dot for working, done and failed, a ring
  * for monitoring, a "?" disc for a question, and a faint solid dot when the agent is idle.
  */
-export function StateIcon({ state, testID }: { state: ShownState; testID?: string }) {
+export function StateIcon({
+  state,
+  unread,
+  testID,
+}: {
+  state: ShownState;
+  /** Marked unread by a person: an idle row shows the unread dot, which is the finished color. */
+  unread?: boolean;
+  testID?: string;
+}) {
+  const showUnread = unread === true && state === "idle";
   return (
     <View
       style={styles.box}
-      accessibilityLabel={state === "idle" ? "No agent activity" : SHOWN_LABEL[state]}
+      accessibilityLabel={
+        showUnread ? "Unread" : state === "idle" ? "No agent activity" : SHOWN_LABEL[state]
+      }
       testID={testID}
     >
       {state === "working" ? (
@@ -34,6 +46,8 @@ export function StateIcon({ state, testID }: { state: ShownState; testID?: strin
         <View style={[styles.dot, { backgroundColor: tones.success }]} />
       ) : state === "failed" ? (
         <View style={[styles.dot, { backgroundColor: tones.failure }]} />
+      ) : showUnread ? (
+        <View style={[styles.dot, { backgroundColor: tones.success }]} />
       ) : (
         <View style={[styles.dot, styles.idle]} />
       )}

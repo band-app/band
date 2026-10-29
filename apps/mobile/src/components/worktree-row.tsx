@@ -40,6 +40,7 @@ const CI_LABEL: Record<CiTone, string> = {
 /** The spoken form of a row, also what Maestro matches on. */
 export function rowLabel(row: WorktreeRow): string {
   const parts = [rowTitle(row), row.branch, row.hostTag, SHOWN_LABEL[row.shown]];
+  if (row.unread && row.shown === "idle") parts.push("unread");
   if (row.pr) parts.push(`PR ${row.pr.number}`);
   return parts.join(", ");
 }
@@ -147,7 +148,7 @@ export function WorktreeRowView({
       accessibilityRole="button"
       accessibilityLabel={rowLabel(row)}
       accessibilityHint={
-        onLongPress ? "Hold for pin and delete options, or drag to reorder" : undefined
+        onLongPress ? "Hold for pin, read and delete options, or drag to reorder" : undefined
       }
       accessibilityActions={[
         ...(onLongPress ? [{ name: "options", label: "Options" }] : []),
@@ -174,7 +175,7 @@ export function WorktreeRowView({
         { paddingLeft: ROW_LEAD + row.depth * INDENT },
       ]}
     >
-      <StateIcon state={row.shown} testID={`home__state-${row.id}`} />
+      <StateIcon state={row.shown} unread={row.unread} testID={`home__state-${row.id}`} />
       <View style={styles.body}>
         <View style={styles.title}>
           <Text style={[styles.name, attention && styles.nameStrong]} numberOfLines={1}>

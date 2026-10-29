@@ -18,6 +18,7 @@ import {
   worktreeSetOriginInput,
   worktreeSetPinnedInput,
   worktreeSetTitleInput,
+  worktreeSetUnreadInput,
 } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -85,6 +86,14 @@ export const worktreesRouter = t.router({
   setGroup: publicProcedure.input(worktreeSetGroupInput).mutation(({ input }) => {
     try {
       return worktreeService.setGroup(input);
+    } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
+  setUnread: publicProcedure.input(worktreeSetUnreadInput).mutation(({ input }) => {
+    try {
+      return worktreeService.setUnread(input);
     } catch (err) {
       throwAsTrpcError(err);
     }

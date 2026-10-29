@@ -1141,6 +1141,7 @@ export class CheckpointService {
       if (worktree.groupId) {
         this.repos.setGroup(repo.name, worktree.name, worktree.groupId, toHostId);
       }
+      if (worktree.unread) this.repos.setUnread(repo.name, worktree.name, true, toHostId);
       if (worktree.title) {
         this.repos.setTitle(repo.name, worktree.name, worktree.title, toHostId);
       }
