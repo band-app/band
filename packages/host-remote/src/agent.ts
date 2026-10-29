@@ -1,4 +1,9 @@
-import { type AgentExit, type AgentStdio, HostOfflineError, HostTimeoutError } from "@band-app/host-api";
+import {
+  type AgentExit,
+  type AgentStdio,
+  HostOfflineError,
+  HostTimeoutError,
+} from "@band-app/host-api";
 import type { Channel } from "@band-app/link";
 import type { RemoteRpc } from "./rpc";
 
@@ -70,7 +75,6 @@ export class RemoteAgent implements AgentStdio {
   /** Stdin bytes written and not yet confirmed by the worker, and the offset of the first. */
   private stdinBuffer: Buffer[] = [];
   private stdinBase = 0;
-  private stdinTotal = 0;
   private endWanted = false;
   private killWanted: NodeJS.Signals | null = null;
 
@@ -108,7 +112,6 @@ export class RemoteAgent implements AgentStdio {
       if (this.exited || this.gone) return;
       const bytes = typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk);
       this.stdinBuffer.push(bytes);
-      this.stdinTotal += bytes.length;
       if (this.detachedAt === null) this.channel.send(bytes).catch(() => undefined);
     },
     end: () => {

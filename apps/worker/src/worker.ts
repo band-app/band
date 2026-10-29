@@ -27,6 +27,7 @@ import { createLogger } from "@band-app/logger";
 import { VERSION_REFUSED_CODE } from "@band-app/shared/versions";
 import pkg from "../package.json" with { type: "json" };
 import { ActivityTracker } from "./activity.ts";
+import { createWorkerAgentHolder } from "./agents.ts";
 import { exchangeBootstrapToken } from "./bootstrap.ts";
 import { ChatOwner } from "./chats/owner.ts";
 import { ChatStore } from "./chats/store.ts";
@@ -35,11 +36,10 @@ import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from 
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerDirectMethods } from "./direct.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
-import { createWorkerAgentHolder } from "./agents.ts";
 import { LeaseGuard } from "./lease.ts";
+import { registerAgentMethods } from "./methods-agents.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
 import { registerLifecycleMethods } from "./methods-lifecycle.ts";
-import { registerAgentMethods } from "./methods-agents.ts";
 import { registerStreamMethods } from "./methods-streams.ts";
 import { PathPolicy } from "./path-policy.ts";
 import { registerRelayMethods } from "./relay.ts";
@@ -186,10 +186,7 @@ export class Worker {
     const backend = terminals.backend;
     // Folders the worker creates itself are served whatever the roots, from the first call on.
     if (config.reposDir) await policy.allowManaged(config.reposDir);
-    const agentHolder = createWorkerAgentHolder(
-      config.stateDir,
-      options.persistentAgents === true,
-    );
+    const agentHolder = createWorkerAgentHolder(config.stateDir, options.persistentAgents === true);
     const host = new LocalHost({
       terminalBackend: () => backend,
       ...(agentHolder ? { agentHolder } : {}),

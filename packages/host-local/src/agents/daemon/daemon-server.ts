@@ -348,7 +348,11 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       const result = await handle(client, request);
       reply = { id: request.id, ok: true, result };
     } catch (err) {
-      reply = { id: request.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+      reply = {
+        id: request.id,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
     send(client, "control", reply);
   }
@@ -434,7 +438,13 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   function onOutput(agent: Held, name: AgentStreamName, chunk: Buffer): void {
     const ring = agent.rings[name];
     const off = ring.push(chunk);
-    emit(agent, { t: "out", id: agent.record.agentId, stream: name, off, d: chunk.toString("base64") });
+    emit(agent, {
+      t: "out",
+      id: agent.record.agentId,
+      stream: name,
+      off,
+      d: chunk.toString("base64"),
+    });
     // Past the cap the agent is not read, so it blocks on a full pipe until an ack frees space.
     if (ring.held >= bufferCap() && !agent.paused[name]) {
       agent.paused[name] = true;

@@ -20,8 +20,8 @@ import { getUsageReader } from "@band-app/coding-agent";
 import type {
   AcpAgentDefinition,
   AcpLaunch,
-  AgentStdio,
   AgentDescriptor,
+  AgentStdio,
   CapabilityReport,
   ClaudeDefaults,
   ExecOptions,
@@ -57,14 +57,14 @@ import type {
 import { resolveAcpLaunch } from "./agents/acp-launch";
 import { adapterVersionOf } from "./agents/adapter-version";
 import { spawnAgentProcess } from "./agents/agent-spawn";
-import { HeldAgentProcess } from "./agents/daemon/held-agent";
-import type { AgentHolder } from "./agents/daemon/holder";
-import { AgentDaemonUnavailableError } from "./agents/daemon/holder";
 import {
   configuredClaudeDefaults,
   findClaudeCliArgs,
   reportedClaudeDefaults,
 } from "./agents/claude-defaults";
+import { HeldAgentProcess } from "./agents/daemon/held-agent";
+import type { AgentHolder } from "./agents/daemon/holder";
+import { AgentDaemonUnavailableError } from "./agents/daemon/holder";
 import { checkHooks, installHooks, removeHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";

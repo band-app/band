@@ -23,6 +23,7 @@ import {
   DEFAULT_CHOICE_REPO,
 } from "../infra/db/queries/agent-logins";
 import { VaultQueries } from "../infra/db/queries/vault";
+import { credentialChanged } from "./_utils/credential-events";
 import { vaultService } from "./vault-service";
 
 const log = createLogger("agent-login-service");
@@ -183,6 +184,8 @@ export class AgentLoginService {
     if (input.secret !== undefined) {
       const vaultItemId = this.storeSecret(row.id, input.secret);
       this.queries.update(row.id, { vaultItemId, updatedAt: Date.now() });
+      // An agent started with the old secret still holds it.
+      credentialChanged({ kind: "agent-login", agentType: row.agentType, loginId: row.id });
     }
     return this.view(this.require(row.id));
   }
@@ -194,6 +197,7 @@ export class AgentLoginService {
     const item = this.vaultQueries.find(row.vaultItemId);
     if (item?.name.startsWith(OWNED_PREFIX)) await vaultService.remove(item.id);
     log.info({ id, agentType: row.agentType }, "agent login removed");
+    credentialChanged({ kind: "agent-login", agentType: row.agentType, loginId: id });
     return { removed: true };
   }
 
@@ -209,11 +213,32 @@ export class AgentLoginService {
   // ---- launch ---------------------------------------------------------------------
 
   /**
+   * The id of the login that applies to `input` right now, in the order `resolve` tries them, or
+   * null for the machine's own. Reads no secret, so it is the cheap check for "would a launch use
+   * the login this process was started with".
+   */
+  pickedId(input: ResolveInput): string | null {
+    const ids = [
+      input.chatLoginId,
+      input.repo ? this.queries.choice(input.agentType, input.repo) : undefined,
+      this.queries.choice(input.agentType, DEFAULT_CHOICE_REPO),
+    ];
+    for (const id of ids) {
+      if (!id) continue;
+      const row = this.queries.find(id);
+      if (row && row.agentType === input.agentType && findLoginKind(row.agentType, row.kind)) {
+        return id;
+      }
+    }
+    return null;
+  }
+
+  /**
    * The environment for an agent about to start, or null for the machine's own login. A chat's pick
    * wins over the repo's override, which wins over the default. A login whose secret is gone is
    * skipped. Reads the vault on every call.
    */
-  async resolve(input: ResolveInput): Promise<LoginEnv | null> {
+  async resolve(input: ResolveInput): Promise<(LoginEnv & { loginId: string }) | null> {
     const ids = [
       input.chatLoginId,
       input.repo ? this.queries.choice(input.agentType, input.repo) : undefined,
@@ -227,7 +252,7 @@ export class AgentLoginService {
       if (!kind) continue;
       try {
         const { value } = await vaultService.getCredential(row.vaultItemId);
-        return loginEnvFor(kind, value);
+        return { ...loginEnvFor(kind, value), loginId: id };
       } catch {
         log.warn({ id, agentType: row.agentType }, "agent login has no readable secret; skipped");
       }
@@ -260,6 +285,7 @@ export class AgentLoginService {
   private setChoice(agentType: string, repo: string, loginId: string | null): void {
     if (loginId === null) {
       this.queries.clearChoice(agentType, repo);
+      credentialChanged({ kind: "agent-login", agentType });
       return;
     }
     const row = this.require(loginId);
@@ -267,6 +293,7 @@ export class AgentLoginService {
       throw new AgentLoginInputError(`That login belongs to ${row.agentType}, not ${agentType}.`);
     }
     this.queries.setChoice(agentType, repo, loginId);
+    credentialChanged({ kind: "agent-login", agentType });
   }
 
   private require(id: string): AgentLoginRow {

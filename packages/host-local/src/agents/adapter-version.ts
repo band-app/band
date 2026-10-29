@@ -9,7 +9,10 @@ function packageVersion(file: string): string | null {
     const manifest = join(dir, "package.json");
     if (existsSync(manifest)) {
       try {
-        const pkg = JSON.parse(readFileSync(manifest, "utf8")) as { name?: string; version?: string };
+        const pkg = JSON.parse(readFileSync(manifest, "utf8")) as {
+          name?: string;
+          version?: string;
+        };
         if (pkg.name?.startsWith("@agentclientprotocol/") && pkg.version) {
           return `${pkg.name}@${pkg.version}`;
         }

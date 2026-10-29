@@ -103,7 +103,8 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
     ctx.lease.assertMayRun(cwd);
     const stdio = await host.acp.spawn(launch, cwd);
     const held = stdio instanceof HeldAgentProcess ? stdio : null;
-    const agentId = held?.record.agentId ?? `a-${stdio.pid ?? "x"}-${++counter}-${Date.now().toString(36)}`;
+    const agentId =
+      held?.record.agentId ?? `a-${stdio.pid ?? "x"}-${++counter}-${Date.now().toString(36)}`;
     const entry: RunningAgent = { stdio, cwd, held, attached: false };
     agents.set(agentId, entry);
     const channels = serveAgent(agentId, entry);
