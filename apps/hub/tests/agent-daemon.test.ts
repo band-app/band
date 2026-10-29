@@ -65,6 +65,10 @@ interface LogLine {
   params: { sessionId?: string };
 }
 
+/** The requests that reattach a chat's session in a new process (the hub prefers resume when the agent can). */
+const reattaches = (worker: Worker) =>
+  stubLog(worker).filter((l) => l.method === "session/load" || l.method === "session/resume");
+
 const stubLog = (worker: Worker): LogLine[] =>
   existsSync(worker.stubLog)
     ? readFileSync(worker.stubLog, "utf8")
@@ -153,7 +157,7 @@ describe("a turn survives a worker restart (S1)", () => {
     const next = await startTurn(wt, chatId, "after the restart", maxId(events));
     expect(agentText(await next.events)).toContain("after the restart");
     expect(agentPids(worker)).toEqual([pid]);
-    expect(stubLog(worker).filter((l) => l.method === "session/load")).toHaveLength(0);
+    expect(reattaches(worker)).toHaveLength(0);
   }, 150_000);
 });
 
@@ -220,9 +224,9 @@ describe("output written while no worker is attached (S3)", () => {
 
 describe("a held agent whose launch changed (S4)", () => {
   it("finishes its turn, then restarts at the next clean point and loads the session", async () => {
-    // A copy of the stub the test can edit, so "the adapter" differs after the restart.
+    // A script that runs the stub and that the test can edit, so "the adapter" differs after the restart.
     const stub = join(w.tmp("band-agent-daemon-stub-"), "stub.mjs");
-    copyFileSync(STUB_AGENT_PATH, stub);
+    writeFileSync(stub, `import ${JSON.stringify(STUB_AGENT_PATH)};\n`);
     let worker = await w.addWorker("w-change", ["proj"], {
       env: { BAND_TEST_ACP_SCENARIO: scenarioFile(), BAND_TEST_ACP_AGENT: stub },
     });
@@ -251,7 +255,7 @@ describe("a held agent whose launch changed (S4)", () => {
     const pids = agentPids(worker);
     expect(pids).toHaveLength(2);
     expect(pids[1]).not.toBe(oldPid);
-    expect(stubLog(worker).filter((l) => l.method === "session/load")).toHaveLength(1);
+    expect(reattaches(worker)).toHaveLength(1);
   }, 180_000);
 });
 
@@ -282,7 +286,7 @@ describe("the agent daemon dies (S6)", () => {
     const next = await startTurn(wt, chatId, "after the daemon died", maxId(events));
     expect(agentText(await next.events)).toContain("after the daemon died");
     expect(agentPids(worker).length).toBeGreaterThanOrEqual(2);
-    expect(stubLog(worker).filter((l) => l.method === "session/load")).toHaveLength(1);
+    expect(reattaches(worker)).toHaveLength(1);
   }, 150_000);
 });
 
