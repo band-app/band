@@ -1587,7 +1587,8 @@ export class WorktreeService {
 
   /**
    * Removes the records of worktrees whose folder is gone from their host (`missing` after a scan),
-   * unless a chat in one still has work: a running task, a live agent or queued messages. Only
+   * unless a chat in one is in use: a running task, a request waiting on the user or queued messages.
+   * Background holds (a wakeup, a cron, a background task) do not keep it. Only
    * records and git's worktree metadata go; no files are deleted.
    */
   async pruneMissing(
@@ -1602,7 +1603,7 @@ export class WorktreeService {
         .some(
           (chat) =>
             hasRunningTask(chat.id) ||
-            agentSessionService.isActive(chat.id) ||
+            agentSessionService.isEngaged(chat.id) ||
             hasQueuedMessages(chat.id),
         );
       if (busy || this.pruning.has(worktreeId)) continue;
@@ -1612,8 +1613,12 @@ export class WorktreeService {
       try {
         // A live terminal counts as work: removing the record would kill it.
         if ((await terminalService.list(worktreeId).catch(() => [])).length > 0) continue;
+        const heldChats = chatService
+          .list(worktreeId)
+          .filter((chat) => agentSessionService.isActive(chat.id))
+          .map((chat) => chat.id);
         await this.remove({ repo: repoName, name: row.name, hostId: row.hostId ?? "local" });
-        log.info({ worktreeId }, "pruned a worktree whose folder is gone");
+        log.info({ worktreeId, droppedHolds: heldChats }, "pruned a worktree whose folder is gone");
       } catch (err) {
         log.warn({ worktreeId, err }, "could not prune a missing worktree");
       } finally {
