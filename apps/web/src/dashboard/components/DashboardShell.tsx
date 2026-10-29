@@ -576,13 +576,23 @@ export function DashboardShell({
       />
 
       {(cliState.status === "manual" || cliState.status === "conflict") && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-info-bg border border-info/30 rounded-lg text-sm flex items-center justify-between gap-2">
-          <span className="text-info">
+        <div
+          role="status"
+          data-testid="cli-banner"
+          className="mx-4 mb-2 px-4 py-2 bg-info-bg border border-info/30 rounded-lg text-sm flex items-center justify-between gap-2"
+        >
+          <span className="min-w-0 break-words text-info" data-testid="cli-banner__message">
             {cliState.status === "conflict"
               ? "A different `band` binary exists — replace it to use the bundled CLI"
               : `Install band CLI${cliState.status === "manual" && cliState.reason ? ` — ${cliState.reason}` : ""}`}
           </span>
-          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installCli}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 text-xs"
+            data-testid="cli-banner__install"
+            onClick={installCli}
+          >
             Install
           </Button>
         </div>

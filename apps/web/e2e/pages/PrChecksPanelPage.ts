@@ -58,6 +58,10 @@ export class PrChecksPanelPage {
   readonly noReview: Locator;
   readonly mergeButton: Locator;
   readonly mergeMenu: Locator;
+  /** The main button once the pull request is merged. */
+  readonly deleteWorktreeButton: Locator;
+  /** The core's delete confirmation, opened when the worktree holds unsaved work. */
+  readonly deleteDialog: Locator;
   readonly mergeConfirmButton: Locator;
   readonly mergeConfirm: Locator;
   readonly mergeCancelButton: Locator;
@@ -109,6 +113,8 @@ export class PrChecksPanelPage {
     this.noReview = page.getByTestId("pr-checks__no-review");
     this.mergeButton = page.getByTestId("pr-checks__merge");
     this.mergeMenu = page.getByTestId("pr-checks__merge-menu");
+    this.deleteWorktreeButton = page.getByTestId("pr-checks__delete-worktree");
+    this.deleteDialog = page.getByRole("dialog", { name: "Delete worktree" });
     this.mergeConfirm = page.getByTestId("pr-checks__merge-confirm");
     this.mergeCancelButton = page.getByTestId("pr-checks__merge-cancel");
     this.mergeConfirmButton = page.getByTestId("pr-checks__merge-confirm-button");
@@ -126,6 +132,12 @@ export class PrChecksPanelPage {
     this.commentsSummary = page.getByTestId("pr-comments__summary");
     this.commentItems = page.getByTestId("pr-comments__item");
     this.threads = page.getByTestId("pr-comments__thread");
+  }
+
+  async deleteWorktree(): Promise<void> {
+    await test.step("Click Delete worktree", async () => {
+      await this.deleteWorktreeButton.click();
+    });
   }
 
   /** The header button of a section: `reviewers`, `checks` (the summary row) or `comments`. */

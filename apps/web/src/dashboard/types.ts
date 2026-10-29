@@ -127,6 +127,8 @@ export interface WorktreeInfo {
   groupId?: string | null;
   /** Marked unread by a person, on any device. Shown as a dot until the worktree is opened or marked read. */
   unread?: boolean;
+  /** A custom title shown in place of `name`, or null when there is none. */
+  title?: string | null;
   /** True when a scan of the host found the worktree's folder gone. Remove drops the record. */
   missing?: boolean;
   /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */
@@ -348,6 +350,12 @@ export type CliStatus =
   | "ConflictingBinary"
   | "DirNotFound"
   | "NotWritable";
+
+export interface CliCheck {
+  status: CliStatus;
+  /** False when the hub runs no worktrees of its own or the caller is not an admin. */
+  applicable: boolean;
+}
 
 export interface DeleteDialogInfo {
   repoName: string;

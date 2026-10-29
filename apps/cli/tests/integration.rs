@@ -1002,6 +1002,34 @@ fn groups_remove_leaves_its_worktrees_ungrouped() {
 }
 
 #[test]
+fn worktrees_rename_sets_and_clears_the_title() {
+    let env = TestEnv::new();
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/title"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let title_of = |env: &TestEnv| -> serde_json::Value {
+        let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == "my-repo-feat-title")
+            .unwrap()["title"]
+            .clone()
+    };
+    assert!(title_of(&env).is_null());
+
+    let output = env.band(&["worktrees", "rename", "my-repo-feat-title", "Login revamp"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(title_of(&env), "Login revamp");
+    let output = env.band(&["worktrees", "list"]);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Login revamp"));
+
+    let output = env.band(&["worktrees", "rename", "my-repo-feat-title", "--clear"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(title_of(&env).is_null());
+}
+
+#[test]
 fn worktrees_set_group_moves_one_worktree_or_its_children() {
     let env = TestEnv::new();
     let a = json_of(&env.band(&["groups", "create", "A", "--output", "json"]))["group"]["id"]

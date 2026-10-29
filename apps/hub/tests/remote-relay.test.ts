@@ -883,6 +883,8 @@ describe("the band CLI through the relay (S2)", () => {
     expect(await ok("repos", "list", "--output", "json")).toContain("proj");
     await ok("groups", "list", "--output", "json");
     await ok("worktrees", "set-group", ws, "--none");
+    await ok("worktrees", "rename", ws, "Renamed by an agent");
+    await ok("worktrees", "rename", ws, "--clear");
     // The host list an agent gets has no roots, home or tools.
     const hostList = await ok("workers", "list", "--output", "json");
     expect(hostList).toContain(b.hostId);

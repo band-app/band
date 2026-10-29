@@ -3,6 +3,7 @@ import {
   BranchOnOtherHostError,
   RepoHostNotAllowedError,
   WorktreeGroupNotFoundError,
+  WorktreeNotFoundError,
 } from "../../errors";
 import {
   InvalidOriginError,
@@ -16,6 +17,7 @@ import {
   worktreeSetGroupInput,
   worktreeSetOriginInput,
   worktreeSetPinnedInput,
+  worktreeSetTitleInput,
   worktreeSetUnreadInput,
 } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
@@ -93,6 +95,17 @@ export const worktreesRouter = t.router({
     try {
       return worktreeService.setUnread(input);
     } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
+  setTitle: publicProcedure.input(worktreeSetTitleInput).mutation(({ input }) => {
+    try {
+      return worktreeService.setTitle(input);
+    } catch (err) {
+      if (err instanceof WorktreeNotFoundError) {
+        throw new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
+      }
       throwAsTrpcError(err);
     }
   }),

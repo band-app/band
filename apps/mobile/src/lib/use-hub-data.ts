@@ -5,6 +5,7 @@ import type { removeRequest } from "./deleting";
 import { useHubSession } from "./hub-session";
 import type { removeFromGroupRequests, setParentRequests } from "./parenting";
 import { type pinRequest, withPinned } from "./pinning";
+import type { renameRequest } from "./renaming";
 import { type unreadRequest, withUnread } from "./unread";
 import type { GroupDefinition } from "./worktree-list";
 
@@ -113,6 +114,17 @@ export function useSetParent() {
       await client.worktrees.setOrigin.mutate(requests.origin);
       if (requests.group) await client.worktrees.setGroup.mutate(requests.group);
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Sets or clears a worktree's title, then reads the list again. */
+export function useRenameWorktree() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ReturnType<typeof renameRequest>) =>
+      client.worktrees.setTitle.mutate(request),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
   });
 }

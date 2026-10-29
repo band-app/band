@@ -369,6 +369,17 @@ enum WorktreesCmd {
         /// Worktree ID
         worktree: String,
     },
+    /// Give a worktree a title shown in place of its name, or clear it
+    Rename {
+        /// Worktree ID
+        worktree: String,
+        /// New title
+        #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+        title: Option<String>,
+        /// Clear the title, so the name shows again
+        #[arg(long)]
+        clear: bool,
+    },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
         /// Worktree ID
@@ -1130,6 +1141,11 @@ fn main() {
             } => cmd_worktrees_set_group(&worktree, group.as_deref(), none, with_children),
             WorktreesCmd::MarkUnread { worktree } => cmd_worktrees_set_unread(&worktree, true),
             WorktreesCmd::MarkRead { worktree } => cmd_worktrees_set_unread(&worktree, false),
+            WorktreesCmd::Rename {
+                worktree,
+                title,
+                clear,
+            } => cmd_worktrees_rename(&worktree, title.as_deref(), clear),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -1808,7 +1824,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
         .unwrap_or_default();
 
     let mut found_any = false;
-    let mut rows: Vec<[String; 5]> = Vec::new();
+    let mut rows: Vec<[String; 6]> = Vec::new();
     let mut listed = Vec::new();
     for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -1855,9 +1871,11 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
             if unread {
                 id_text.push_str(" (unread)");
             }
+            let title = wt.get("title").and_then(|t| t.as_str());
             rows.push([
                 name.to_string(),
                 branch.to_string(),
+                title.unwrap_or("-").to_string(),
                 id_text,
                 path.to_string(),
                 origin_text,
@@ -1866,6 +1884,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 "repo": name,
                 "branch": branch,
                 "worktreeId": worktree_id,
+                "title": title,
                 "path": path,
                 "supersededBy": superseded_by,
                 "origin": origin,
@@ -1883,7 +1902,10 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
         }
     }
 
-    let text = format_table(&["REPO", "BRANCH", "WORKTREE ID", "PATH", "ORIGIN"], &rows);
+    let text = format_table(
+        &["REPO", "BRANCH", "TITLE", "WORKTREE ID", "PATH", "ORIGIN"],
+        &rows,
+    );
 
     Ok(CommandResult {
         text,
@@ -4505,6 +4527,32 @@ fn cmd_worktrees_set_unread(worktree: &str, unread: bool) -> Result<CommandResul
     })
 }
 
+fn cmd_worktrees_rename(
+    worktree: &str,
+    title: Option<&str>,
+    clear: bool,
+) -> Result<CommandResult, String> {
+    validate::validate_name(worktree, "Worktree id")?;
+    let client = api::ApiClient::from_settings()?;
+    let wanted = if clear { None } else { title };
+    let data = client.trpc_mutate(
+        "worktrees.setTitle",
+        &serde_json::json!({"worktreeId": worktree, "title": wanted}),
+    )?;
+    let stored = data
+        .get("title")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let text = match stored.as_str() {
+        Some(t) => format!("{worktree} is now titled \"{t}\"\n"),
+        None => format!("{worktree} has no title\n"),
+    };
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"ok": true, "title": stored}),
+    })
+}
+
 #[allow(clippy::format_push_string)]
 fn cmd_worktrees_set_group(
     worktree: &str,
@@ -5777,6 +5825,16 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "worktree", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
             ],
             "notes": "Also clears a `done` or `failed` agent status dot."
+        }),
+        serde_json::json!({
+            "name": "worktrees rename",
+            "description": "Give a worktree a title shown in place of its name, or clear it",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "title", "type": "string", "required": false, "positional": true, "description": "New title, at most 100 characters (omit with --clear)"},
+                {"name": "--clear", "type": "boolean", "required": false, "description": "Clear the title, so the name shows again"},
+            ],
+            "notes": "Changes only what the sidebar shows. The worktree id, folder and git branch stay the same. Agents may use this command for worktrees on their own worker."
         }),
         serde_json::json!({
             "name": "groups list",

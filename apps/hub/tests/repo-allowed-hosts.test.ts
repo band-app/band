@@ -214,10 +214,10 @@ describe("who may change the hosts of a repo", () => {
 
 describe("the defaults a repo gets when it is added (S2)", () => {
   it("limits a repo added from a worker to that worker and makes it the primary", async () => {
-    const remote = makeRemote(remotes, "epic");
-    git(alpha.root, "clone", "-q", remote, "epic");
-    await m("repos.addFromWorker", { hostId: alpha.hostId, path: join(alpha.root, "epic") });
-    const added = await repo("epic");
+    const remote = makeRemote(remotes, "atlas");
+    git(alpha.root, "clone", "-q", remote, "atlas");
+    await m("repos.addFromWorker", { hostId: alpha.hostId, path: join(alpha.root, "atlas") });
+    const added = await repo("atlas");
     expect(added?.allowedHostIds).toEqual([alpha.hostId]);
     expect(added?.primaryHostId).toBe(alpha.hostId);
   });
@@ -263,7 +263,7 @@ describe("the defaults a repo gets when it is added (S2)", () => {
     expect(unknown.status).toBe(400);
     expect(unknown.body.error.message).toContain("Unknown worker");
     const outside = await refused("repos.update", {
-      name: "epic",
+      name: "atlas",
       primaryHostId: bravo.hostId,
     });
     expect(outside.status).toBe(400);
@@ -271,59 +271,59 @@ describe("the defaults a repo gets when it is added (S2)", () => {
   });
 });
 
-/** Where Bravo would clone `epic` by URL. The repo is limited to Alpha, so nothing may appear here. */
-const epicCloneOnBravo = () => join(bravo.home, "band", "repos", "local", "epic");
+/** Where Bravo would clone `atlas` by URL. The repo is limited to Alpha, so nothing may appear here. */
+const atlasCloneOnBravo = () => join(bravo.home, "band", "repos", "local", "atlas");
 
 describe("a repo limited to one host (S1)", () => {
-  const message = () => `epic is only available on ${alpha.name}`;
+  const message = () => `atlas is only available on ${alpha.name}`;
 
   it("refuses an explicit host through tRPC, and clones nothing there", async () => {
     const res = await refused("worktrees.create", {
-      repo: "epic",
+      repo: "atlas",
       branch: "on-bravo",
       hostId: bravo.hostId,
     });
     expect(res.status).toBe(412);
     expect(res.body.error.message).toBe(message());
-    expect(existsSync(epicCloneOnBravo())).toBe(false);
-    expect(existsSync(join(bravo.root, ".band-worktrees", "epic"))).toBe(false);
-    expect((await repo("epic"))?.clones.map((c) => c.hostId)).toEqual([alpha.hostId]);
+    expect(existsSync(atlasCloneOnBravo())).toBe(false);
+    expect(existsSync(join(bravo.root, ".band-worktrees", "atlas"))).toBe(false);
+    expect((await repo("atlas"))?.clones.map((c) => c.hostId)).toEqual([alpha.hostId]);
   });
 
   it("refuses an explicit host through the MCP tool", async () => {
     const result = await mcpTool("band_worktrees_create", {
-      repo: "epic",
+      repo: "atlas",
       branch: "on-bravo-mcp",
       hostId: bravo.hostId,
     });
     expect(result.isError).toBe(true);
     expect(result.text).toContain(message());
-    expect(existsSync(epicCloneOnBravo())).toBe(false);
+    expect(existsSync(atlasCloneOnBravo())).toBe(false);
   });
 
   it("refuses automatic placement that only another host fits", async () => {
     const res = await refused("worktrees.create", {
-      repo: "epic",
+      repo: "atlas",
       branch: "placed-on-bravo",
       placement: { labels: { pool: "b" } },
     });
     expect(res.status).toBe(412);
     expect(res.body.error.message).toContain(message());
     const viaMcp = await mcpTool("band_worktrees_create", {
-      repo: "epic",
+      repo: "atlas",
       branch: "placed-on-bravo-mcp",
       placement: { labels: { pool: "b" } },
     });
     expect(viaMcp.isError).toBe(true);
     expect(viaMcp.text).toContain(message());
-    expect(existsSync(epicCloneOnBravo())).toBe(false);
+    expect(existsSync(atlasCloneOnBravo())).toBe(false);
     // No runner was asked for a machine either.
     expect((await q<{ requests: unknown[] }>("hostRequests.list", {})).requests).toEqual([]);
   });
 
   it("places automatically on the allowed host", async () => {
     const created = await m<{ hostId?: string }>("worktrees.create", {
-      repo: "epic",
+      repo: "atlas",
       branch: "auto",
       placement: {},
     });
@@ -331,40 +331,40 @@ describe("a repo limited to one host (S1)", () => {
   });
 
   it("accepts the allowed host, and lets the repo onto another host once the rule is widened", async () => {
-    await m("worktrees.create", { repo: "epic", branch: "on-alpha", hostId: alpha.hostId });
-    await m("repos.update", { name: "epic", allowedHostIds: [alpha.hostId, bravo.hostId] });
+    await m("worktrees.create", { repo: "atlas", branch: "on-alpha", hostId: alpha.hostId });
+    await m("repos.update", { name: "atlas", allowedHostIds: [alpha.hostId, bravo.hostId] });
     const created = await m<{ hostId?: string }>("worktrees.create", {
-      repo: "epic",
+      repo: "atlas",
       branch: "now-on-bravo",
       hostId: bravo.hostId,
     });
     expect(created.hostId).toBe(bravo.hostId);
-    await m("repos.update", { name: "epic", allowedHostIds: [alpha.hostId] });
+    await m("repos.update", { name: "atlas", allowedHostIds: [alpha.hostId] });
   });
 
   it("refuses to record a folder on a host the repo is not allowed on", async () => {
-    git(bravo.root, "clone", "-q", join(remotes, "epic.git"), "epic");
+    git(bravo.root, "clone", "-q", join(remotes, "atlas.git"), "atlas");
     const res = await refused("repos.addFromWorker", {
       hostId: bravo.hostId,
-      path: join(bravo.root, "epic"),
+      path: join(bravo.root, "atlas"),
     });
     expect(res.status).toBe(412);
     expect(res.body.error.message).toBe(message());
   });
 
   it("flags worktrees on a host that is no longer allowed and keeps their files", async () => {
-    const before = await repo("epic");
+    const before = await repo("atlas");
     const onBravo = before?.worktrees.find((w) => w.name === "now-on-bravo");
     expect(onBravo).toBeDefined();
-    const folder = join(bravo.root, ".band-worktrees", "epic", "now-on-bravo");
+    const folder = join(bravo.root, ".band-worktrees", "atlas", "now-on-bravo");
     expect(existsSync(folder)).toBe(true);
 
     // Narrow the rule again; the worktree on Bravo stays listed, flagged.
-    await m("repos.update", { name: "epic", allowedHostIds: [alpha.hostId] });
+    await m("repos.update", { name: "atlas", allowedHostIds: [alpha.hostId] });
     const listed = await q<{
       repos: Array<{ name: string; worktrees: Array<{ name: string; hostNotAllowed?: boolean }> }>;
     }>("repos.list");
-    const worktrees = listed.repos.find((r) => r.name === "epic")?.worktrees ?? [];
+    const worktrees = listed.repos.find((r) => r.name === "atlas")?.worktrees ?? [];
     expect(worktrees.find((w) => w.name === "now-on-bravo")?.hostNotAllowed).toBe(true);
     expect(worktrees.find((w) => w.name === "on-alpha")?.hostNotAllowed).toBeUndefined();
     expect(existsSync(folder)).toBe(true);

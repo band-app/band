@@ -69,7 +69,7 @@ export function SetParentDialog({ open, onOpenChange, repoName, worktree }: Prop
         .map((wt) => ({
           worktreeId: toWorktreeId(repo.name, wt.name, wt.hostId),
           repoName: repo.name,
-          name: wt.name,
+          name: wt.title || wt.name,
           branch: wt.branch,
           hostId: wt.hostId,
         }))

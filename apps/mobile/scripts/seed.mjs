@@ -317,6 +317,8 @@ export const WORKTREES = {
   DELTA_MAIN: "delta-main",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
   GAMMA_TABS: "gamma-tabs",
+  /** Exactly two chats, for the pager flow (t8). */
+  GAMMA_TWO: "gamma-two",
   /** Terminal flows: open and type (S2, S4), new and close (S3), background (S5), scroll and copy (S6). */
   GAMMA_TERM: "gamma-term",
   GAMMA_TERM_NEW: "gamma-term-new",
@@ -415,7 +417,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "cutoff", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "cutoff", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "two", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -425,6 +427,7 @@ export async function seedHub(state) {
   for (const chat of TAB_CHATS) {
     await trpc(state, "chats.create", { worktreeId: WORKTREES.GAMMA_TABS, ...chat });
   }
+  await trpc(state, "chats.create", { worktreeId: WORKTREES.GAMMA_TWO, id: "chat_two_2", name: "Family finance query system with a really long title that keeps going and going past the edge of the screen and then some more words so it cannot possibly fit" });
   const chats = {};
   for (const id of Object.values(WORKTREES)) {
     // `worktrees.create` opens a chat already; the app shows a worktree's first chat.
@@ -437,6 +440,7 @@ export async function seedHub(state) {
     pngFile("screenshot.png"),
   ]);
   await seedTurn(state, chats, WORKTREES.GAMMA_LONG, "long: check every module");
+  await seedTurn(state, chats, WORKTREES.GAMMA_TWO, "showcase: fix the parser radix");
   // Two sessions: a turn, then "new session" (no active session), then a turn that starts another.
   await seedTurn(state, chats, WORKTREES.GAMMA_SESSIONS, SESSION_ONE_PROMPT);
   await trpc(state, "chats.setActiveSession", {

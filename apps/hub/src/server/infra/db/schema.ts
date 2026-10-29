@@ -211,6 +211,8 @@ export const worktrees = sqliteTable("worktrees", {
   // Marked unread by a person: the sidebar shows a dot on every device until the worktree is
   // opened or marked read. Only `RepoQueries.setUnread` writes it.
   unread: integer("unread", { mode: "boolean" }).notNull().default(false),
+  // A custom title shown in place of the name, or null. Only `RepoQueries.setTitle` writes it.
+  title: text("title"),
   // Set when the worktree was restored on another host: the id of the replacement. The copy
   // stays on disk untouched and is listed as superseded until a person removes it.
   supersededBy: text("superseded_by"),

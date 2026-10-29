@@ -22,6 +22,8 @@ To use the `band` CLI without the app, install the hub package, which includes i
 npm install -g @band-app/server
 ```
 
+The hub finds its CLI in the `@band-app/worker-cli-<platform>-<arch>` package that npm installs beside it (darwin-arm64, linux-x64 and linux-arm64). On another platform, or with optional dependencies turned off, install that package or set `BAND_CLI_PATH`.
+
 ## 2. A server hub
 
 The hub runs from a published image, `ghcr.io/band-app/band-hub`, for amd64 and arm64.
@@ -160,7 +162,7 @@ A release publishes the desktop DMGs, the Homebrew cask, `@band-app/server` and 
 
 1. **Build (macOS).** Checks the gate, determines the version, builds the UI and hub, then builds, signs and notarizes the DMG. It uploads the DMGs, the zips, `latest-mac.yml`, the hub bundle and the built UI as artifacts.
 2. **CLI (Linux).** Builds the `band` CLI at the release version on an x64 and an arm64 runner.
-3. **Publish (Linux).** Downloads those artifacts, pushes the tag, creates the GitHub release, publishes the three `@band-app/worker-cli-<platform>-<arch>` packages (the `band` CLI for darwin-arm64, linux-x64 and linux-arm64, built by the macOS job and a `cli-linux` matrix) and then `@band-app/server` and `@band-app/worker` to npm, and updates the Homebrew cask. The tag is pushed only after the signed build succeeded.
+3. **Publish (Linux).** Downloads those artifacts, pushes the tag, creates the GitHub release, publishes the three `@band-app/worker-cli-<platform>-<arch>` packages (the `band` CLI for darwin-arm64, linux-x64 and linux-arm64, built by the macOS job and a `cli-linux` matrix) and then `@band-app/server` and `@band-app/worker` to npm (both pin those CLI packages as optional dependencies), and updates the Homebrew cask. The tag is pushed only after the signed build succeeded.
 4. **Images.** Builds the two images from the tag.
 5. **Mobile.** Runs after Publish. Builds the iOS app with the release version and submits it to TestFlight, and builds the Android preview APK, both through EAS with the `EXPO_TOKEN` secret. The `mobile` input is `auto` (only when `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml` changed since the previous release tag), `always` or `skip`. The build links go in the job summary and the release notes. A failure here leaves the rest of the release shipped. App Store review stays manual.
 

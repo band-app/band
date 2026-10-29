@@ -8,6 +8,7 @@ import {
   Star,
 } from "lucide-react-native";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { rowTitle } from "../lib/renaming";
 import type { CiTone, PullRequestTone, WorktreeRow } from "../lib/worktree-list";
 import { colors, tints, tones } from "../theme";
 import { Icon as GlyphIcon } from "./icon";
@@ -38,7 +39,7 @@ const CI_LABEL: Record<CiTone, string> = {
 
 /** The spoken form of a row, also what Maestro matches on. */
 export function rowLabel(row: WorktreeRow): string {
-  const parts = [row.name, row.branch, row.hostTag, SHOWN_LABEL[row.shown]];
+  const parts = [rowTitle(row), row.branch, row.hostTag, SHOWN_LABEL[row.shown]];
   if (row.unread && row.shown === "idle") parts.push("unread");
   if (row.pr) parts.push(`PR ${row.pr.number}`);
   return parts.join(", ");
@@ -155,7 +156,7 @@ export function WorktreeRowView({
       <View style={styles.body}>
         <View style={styles.title}>
           <Text style={[styles.name, attention && styles.nameStrong]} numberOfLines={1}>
-            {row.name}
+            {rowTitle(row)}
           </Text>
           {row.main ? (
             <View

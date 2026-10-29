@@ -148,11 +148,13 @@ test("the status dot toggles the mark without selecting the card", async ({ page
 });
 
 test("a finished worktree offers Mark as read, which clears its dot", async ({ page }) => {
+  const unread = await open(page);
+  await expect(unread.statusSlot(B)).toHaveAttribute("data-status", "idle");
+  // The agent finishes a turn while the page is open, and the status stream delivers it.
   await trpcMutate(server.url, TOKEN, "statuses.update", {
     worktreeId: B,
     agent: { status: "done" },
   });
-  const unread = await open(page);
   await expect(unread.statusSlot(B)).toHaveAttribute("data-status", "done");
   const item = await unread.openMenu(B);
   await expect(item).toHaveText("Mark as read");

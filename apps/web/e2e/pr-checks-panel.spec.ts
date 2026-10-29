@@ -62,6 +62,8 @@ const RERUN_BRANCH = "feat/rerun";
 const RERUN_REFUSED_BRANCH = "feat/rerun-refused";
 const FIX_CHAT_BRANCH = "feat/fix-chat";
 const FIX_TERM_BRANCH = "feat/fix-term";
+const MERGED_CLEAN_BRANCH = "feat/merged-clean";
+const MERGED_DIRTY_BRANCH = "feat/merged-dirty";
 const RUNNING_STARTED_AT = "2026-01-01T10:00:00Z";
 const MERGE_FAIL_MESSAGE =
   "GraphQL: Pull request is not mergeable: the base branch policy prohibits the merge.";
@@ -193,6 +195,8 @@ test.beforeAll(async () => {
     RERUN_REFUSED_BRANCH,
     FIX_CHAT_BRANCH,
     FIX_TERM_BRANCH,
+    MERGED_CLEAN_BRANCH,
+    MERGED_DIRTY_BRANCH,
   ].map((branch) => {
     const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
     git(repo, ["worktree", "add", "-b", branch, path]);
@@ -204,6 +208,11 @@ test.beforeAll(async () => {
   writeFileSync(
     join(discussionPath, "src", "login.ts"),
     Array.from({ length: 60 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join("\n"),
+  );
+  // An uncommitted file in the dirty merged worktree.
+  writeFileSync(
+    join(tmpHome, `wt-${MERGED_DIRTY_BRANCH.replaceAll("/", "-")}`, "scratch.txt"),
+    "unsaved\n",
   );
   const localOnly = join(tmpHome, "local-only");
   mkdirSync(localOnly, { recursive: true });
@@ -326,6 +335,16 @@ test.beforeAll(async () => {
           }),
         ],
       }),
+    );
+  }
+  for (const [branch, number] of [
+    [MERGED_CLEAN_BRANCH, 740],
+    [MERGED_DIRTY_BRANCH, 741],
+  ] as const) {
+    stub.setReviewQuery(
+      FAKE_REPO,
+      branch,
+      reviewQueryData({ pullRequests: [pullRequestNode({ number, state: "MERGED" })] }),
     );
   }
   stub.setPrMerge(700, { onRequest: (r) => merges.push(r) });
@@ -1008,4 +1027,36 @@ test("a refused re-run shows gh's message and the button works again", async ({ 
   await expect(panel.rerunError("Docs")).toHaveText(REFUSED_MESSAGE);
   await expect(panel.check("Docs")).toHaveAttribute("data-check-state", "failure");
   await expect(panel.rerunButton("Docs")).toBeEnabled();
+});
+
+test("a merged pull request's main button deletes a clean worktree", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  const worktreeId = toWorktreeId(REPO, MERGED_CLEAN_BRANCH, "local");
+  await panel.goto(worktreeId);
+
+  await expect(panel.state).toHaveAttribute("data-review-state", "merged");
+  await expect(panel.deleteWorktreeButton).toHaveText("Delete worktree");
+  await expect(panel.mergeButton).toHaveCount(0);
+  await expect(panel.mergeMenu).toHaveCount(0);
+
+  await panel.deleteWorktree();
+  await expect(panel.deleteDialog).toHaveCount(0);
+  await expect(new WorktreePage(page, server.url, TOKEN).worktreeCard(worktreeId)).toHaveCount(0);
+});
+
+test("deleting a merged worktree with uncommitted changes asks first", async ({ page }) => {
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const worktreeId = toWorktreeId(REPO, MERGED_DIRTY_BRANCH, "local");
+  await panel.goto(worktreeId);
+  await expect(worktree.gitDirtyMark(worktreeId)).toBeVisible();
+
+  await panel.deleteWorktree();
+  await expect(panel.deleteDialog).toContainText(
+    "There are uncommitted changes that will be lost.",
+  );
+  await expect(worktree.worktreeCard(worktreeId)).toBeVisible();
+
+  await panel.deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(worktree.worktreeCard(worktreeId)).toHaveCount(0);
 });

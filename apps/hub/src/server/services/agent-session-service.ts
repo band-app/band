@@ -1204,7 +1204,10 @@ export class AgentSessionService {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
     // A chat its worker owns runs there only, never in a second process here.
-    if (chat.ownerHostId) return null;
+    if (chat.ownerHostId) {
+      if (purpose === "view") await chatOwnershipService.viewSession(chatId);
+      return null;
+    }
     // A message to a sleeping worktree brings its worker back first.
     if (purpose === "prompt") await ephemeralLifecycleService.ensureAwake(chat.worktreeId);
     const worktree = worktreeService.resolve(chat.worktreeId);

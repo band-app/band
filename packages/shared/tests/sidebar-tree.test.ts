@@ -92,7 +92,7 @@ describe("buildOriginTree keepAtTop", () => {
 
 describe("groupEntries", () => {
   const groups = [
-    { id: "g1", name: "Epic", color: "#f00" },
+    { id: "g1", name: "Acme", color: "#f00" },
     { id: "g2", name: "Private", color: "#00f" },
   ];
   const mixed: SidebarRepo[] = [
@@ -113,7 +113,7 @@ describe("groupEntries", () => {
 
   it("follows the group order, then ungrouped worktrees, mixing repos in a group", () => {
     assert.deepEqual(names(groupEntries(entriesOf(mixed), groups)), [
-      ["Epic", ["a-x", "b-main"]],
+      ["Acme", ["a-x", "b-main"]],
       ["Private", ["a-main"]],
       [null, ["a-y", "a-z"]],
     ]);
@@ -130,7 +130,7 @@ describe("groupEntries", () => {
 
   it("keeps only the filtered group", () => {
     assert.deepEqual(names(groupEntries(entriesOf(mixed), groups, "g1")), [
-      ["Epic", ["a-x", "b-main"]],
+      ["Acme", ["a-x", "b-main"]],
     ]);
   });
 

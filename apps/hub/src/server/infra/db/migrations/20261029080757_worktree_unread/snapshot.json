@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "f1f73922-76d3-4639-8abe-57dcc30ab85f",
+  "id": "d9e5402a-cd34-4e94-b874-103a1e0bed85",
   "prevIds": [
-    "be5166e2-83d9-4bc0-a327-e609225bb9d6"
+    "cad0cef8-314b-4724-ae02-ca7e1a615499"
   ],
   "ddl": [
     {
@@ -4017,6 +4017,16 @@
       "default": "false",
       "generated": null,
       "name": "unread",
+      "entityType": "columns",
+      "table": "worktrees"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "title",
       "entityType": "columns",
       "table": "worktrees"
     },

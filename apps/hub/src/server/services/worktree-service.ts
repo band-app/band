@@ -15,6 +15,7 @@ import { scriptInvocation } from "@band-app/host-local/process/path";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
+import { WORKTREE_TITLE_MAX } from "@band-app/shared/worktree-display";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { z } from "zod";
 import { BranchOnOtherHostError, WorktreeNotFoundError } from "../errors";
@@ -274,6 +275,12 @@ export const worktreeSetUnreadInput = z.object({
   hostId: z.string().optional(),
 });
 export type WorktreeSetUnreadInput = z.infer<typeof worktreeSetUnreadInput>;
+export const worktreeSetTitleInput = z.object({
+  worktreeId: z.string().min(1),
+  // Blank or null clears the title, so the card shows the name again.
+  title: z.string().max(WORKTREE_TITLE_MAX).nullable(),
+});
+export type WorktreeSetTitleInput = z.infer<typeof worktreeSetTitleInput>;
 
 export const worktreeReorderInput = z.object({
   // The worktrees of one list in their new order.
@@ -1444,6 +1451,21 @@ export class WorktreeService {
     );
     emit({ kind: "worktree-origin-changed", worktreeId });
     return { ok: true };
+  }
+
+  /** Sets the title shown for a worktree, or clears it (blank or null). */
+  setTitle(input: WorktreeSetTitleInput): { ok: true; title: string | null } {
+    const title = input.title?.trim() || null;
+    const state = loadState();
+    for (const repo of state.repos) {
+      for (const wt of repo.worktrees) {
+        if (toWorktreeId(repo.name, wt.name, wt.hostId) !== input.worktreeId) continue;
+        this.repoQueries.setTitle(repo.name, wt.name, title, wt.hostId ?? "local");
+        emit({ kind: "worktree-origin-changed", worktreeId: input.worktreeId });
+        return { ok: true, title };
+      }
+    }
+    throw new WorktreeNotFoundError(input.worktreeId);
   }
 
   /**

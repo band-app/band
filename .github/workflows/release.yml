@@ -378,13 +378,7 @@ jobs:
             apps/desktop/dist-builder/*-mac.zip
             apps/desktop/dist-builder/latest-mac.yml
 
-      - name: Publish to npm
-        working-directory: apps/hub
-        run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      # The worker carries its own band CLI as optional dependencies, one package
+      # The worker and the hub carry their own band CLI as optional dependencies, one package
       # per platform, published first so the worker's pinned versions resolve.
       - name: Download CLI binaries
         uses: actions/download-artifact@v4
@@ -405,6 +399,14 @@ jobs:
           for dir in "$RUNNER_TEMP"/worker-cli/worker-cli-*; do
             (cd "$dir" && npm publish --access public)
           done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The hub carries the same CLI packages (pinned by the script above), so it
+      # publishes after them.
+      - name: Publish to npm
+        working-directory: apps/hub
+        run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

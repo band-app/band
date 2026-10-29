@@ -114,7 +114,7 @@ function useWorktreeNames(worktreeId: string): { name: string; repoName: string 
     for (const repo of repos) {
       for (const worktree of repo.worktrees) {
         if (toWorktreeId(repo.name, worktree.name, worktree.hostId) === worktreeId) {
-          return { name: worktree.name, repoName: repo.name };
+          return { name: worktree.title || worktree.name, repoName: repo.name };
         }
       }
     }
