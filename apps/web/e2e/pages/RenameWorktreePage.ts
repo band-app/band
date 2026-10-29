@@ -17,6 +17,11 @@ export class RenameWorktreePage {
     return this.card(worktreeId).getByTestId("worktree-card__title");
   }
 
+  /** The repo name under the title, shown on two-line cards. */
+  repoLine(worktreeId: string): Locator {
+    return this.card(worktreeId).getByTestId("worktree-label__repo");
+  }
+
   /** The inline text field, while a card is being renamed. */
   get input(): Locator {
     return this.page.getByTestId("worktree-card__title-input");
