@@ -2,6 +2,7 @@
 // A real hub, real `band-worker` processes and the scripted ACP stub agent. A worker is killed and
 // started again mid-turn, and the chat must carry on as if nothing happened: the same agent
 // process, no lost, repeated or reordered output.
+import { execFileSync } from "node:child_process";
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -411,4 +412,40 @@ describe("what the update dialog lists (S8)", () => {
     });
     expect(agents).toEqual([]);
   }, 90_000);
+});
+
+describe("the hub goes away (S10)", () => {
+  it("kills a held agent that nobody reattaches within the reattach timeout after a hub crash", async () => {
+    const world = await startWorld({
+      repos: [{ name: "proj" }],
+      env: { BAND_WORKER_LEASE_MS: "120000" },
+    });
+    try {
+      const worker = await world.addWorker("w-orphan", ["proj"], {
+        env: { BAND_AGENT_REATTACH_TIMEOUT_MS: "3000" },
+      });
+      const wt = await world.createWorktree(worker, "proj", "feat-orphan");
+      const done = await world.turn(wt, "orphan-chat", "hello orphan");
+      expect(agentText(done)).toContain("hello orphan");
+      const [pid] = agentPids(worker);
+      expect(alive(pid as number)).toBe(true);
+
+      // The hub dies without a goodbye. The worker stays up with the agent held in its daemon.
+      const port = new URL(world.server.url).port;
+      const hubPid = Number(
+        execFileSync("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], { encoding: "utf8" })
+          .trim()
+          .split("\n")[0],
+      );
+      process.kill(hubPid, "SIGKILL");
+      expect(worker.child.exitCode).toBeNull();
+
+      await waitFor(() => (alive(pid as number) ? undefined : true), {
+        label: "the orphaned agent to be killed",
+        timeoutMs: 30_000,
+      });
+    } finally {
+      await world.close();
+    }
+  }, 120_000);
 });

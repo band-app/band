@@ -1829,6 +1829,13 @@ async function main() {
     placementService.stop();
     releaseCheckService.stop();
     environmentBuildService.stop();
+    // Agents held by remote workers survive a lost link by design, but the hub keeps their ACP
+    // state and nothing can reattach after it stops, so they end with it.
+    await Promise.all(
+      hostRegistry
+        .all()
+        .map((host) => (host instanceof RemoteHost ? host.stopAgents() : undefined)),
+    ).catch(() => {});
     await workerLinkService.close().catch(() => {});
 
     // Wait for any still-in-flight Phase B work to settle so we don't
@@ -1849,13 +1856,6 @@ async function main() {
     ]);
 
     await tunnelService.stop().catch(() => {});
-    // Agents held by remote workers survive a lost link by design, but the hub keeps their ACP
-    // state and nothing can reattach after it stops, so they end with it.
-    await Promise.all(
-      hostRegistry
-        .all()
-        .map((host) => (host instanceof RemoteHost ? host.stopAgents() : undefined)),
-    ).catch(() => {});
     wssHandler.broadcastReconnectNotification();
     wss.close();
     terminalWss.close();

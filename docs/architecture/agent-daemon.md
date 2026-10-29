@@ -76,7 +76,7 @@ The two-minute timeout and the 8 MiB cap are estimates that cover an `npm i -g` 
 
 At once, for correctness or security:
 
-- The worker's lease runs out and it fences (#905): the worker kills held agents, and `acp.spawn` is refused until the next renewal.
+- The worker's lease runs out and it fences (#905): the worker kills held agents, and `acp.spawn` is refused until the next renewal. The worker also sends each lease renewal to the daemon (`lease {ttlMs}`), and the daemon kills every agent when the lease runs out with no renewal, so a worker that died cannot leave agents running past it.
 - A worktree folder goes on `blockedPaths`: the worker kills held agents whose cwd is inside it.
 - The worker is revoked or removed (the hub rejects its hello): the worker kills held agents before it exits. Uninstalling the service ends the agent daemon, which kills its agents.
 - An agent login is removed, switched or its secret replaced, or a vault git credential the agent holds as `GH_TOKEN` is rotated: the hub stops the runtimes that hold it.
@@ -91,6 +91,14 @@ At the next clean point (no turn, nothing pending), not mid-turn:
 The hub computes one launch-spec hash and stores it with the agent at spawn: command, arguments, adapter version (the adapter's `package.json` version, or the file size and mtime for a bundled or stand-in script), the ACP protocol version, a fingerprint of the client capabilities, the names of the unset variables, and for each environment variable its name and a SHA-256 of its value. It never holds a value on disk. The relay grant (`BAND_TOKEN`, `BAND_SERVER_URL`) and chat ids are not in the hash, because they differ per launch by design. After a reattach the hub resolves the launch again and compares. A difference restarts the process before the next turn and the chat attaches with `session/load`.
 
 This differs from "the worker compares" in the first sketch. The worker never sees the login or the chat environment, so the hub is the only side that can tell whether the launch changed.
+
+### When the hub stops
+
+The hub keeps the ACP client state of a hub-run chat in memory. Only a worker restart may keep a held agent. Once the hub is gone (shutdown, restart or crash), nothing can reattach, so:
+
+- A hub shutdown ends the agents it runs. `start-server.ts` calls `RemoteHost.stopAgents()` for every remote worker before it closes the worker links. Each held agent is sent `acp.kill` and the hub waits, up to 3 seconds, for the worker to report its exit. Agents of the `local` worker are the hub's children and stop as before (`stopAllAgentProcesses`).
+- A hub crash cannot run that code, so the daemon enforces it. An agent is orphaned when no worker watches it: no worker is subscribed, or the subscribed worker reports its hub link down (`hub {up:false}`, sent on the link's disconnect and connect events). After `BAND_AGENT_REATTACH_TIMEOUT_MS` plus 2 seconds (the same setting the hub's own give-up uses, read on every check by the daemon) the daemon kills it with SIGTERM, then SIGKILL after the grace period. A worker restart starts the same clock, so a reattach inside the timeout cancels it.
+- `acp.reconcile` still ends held agents an arriving hub does not know.
 
 Unavoidable, unchanged: reboot or shutdown, ephemeral sleep, the daemon crashing. When the daemon dies the hub's channels end, the agent is reported as exited, and the next prompt reattaches the session through `session/load`.
 
