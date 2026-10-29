@@ -341,8 +341,47 @@ export class LocalHost implements Host {
 // ---------------------------------------------------------------------------
 
 async function createWorktree(spec: WorktreeSpec): Promise<Worktree> {
+  // The disk may ignore case, so a branch that differs from an existing one only in case
+  // would share its ref file and folder.
+  const refs = await execGit(
+    ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin"],
+    spec.repoPath,
+  );
+  const local: string[] = [];
+  const known: string[] = [];
+  for (const ref of refs.split("\n").filter(Boolean)) {
+    if (ref.startsWith("refs/heads/")) {
+      local.push(ref.slice("refs/heads/".length));
+      known.push(ref.slice("refs/heads/".length));
+    } else if (ref.startsWith("refs/remotes/origin/")) {
+      known.push(ref.slice("refs/remotes/origin/".length));
+    }
+  }
+  const clash = known.find(
+    (b) => b !== spec.branch && b.toLowerCase() === spec.branch.toLowerCase(),
+  );
+  if (clash) {
+    throw new Error(
+      `Branch "${spec.branch}" differs only in case from the existing branch "${clash}". Use "${clash}" or pick another name.`,
+    );
+  }
   const args = ["worktree", "add", "-b", spec.branch, spec.path];
-  if (spec.base) args.push(spec.base);
+  if (spec.base) {
+    args.push(spec.base);
+  } else if (!local.includes(spec.branch)) {
+    // An existing remote branch is checked out and tracked under its own name.
+    const remote = `origin/${spec.branch}`;
+    const found = await execGit(
+      ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}`],
+      spec.repoPath,
+    )
+      .then(() => true)
+      .catch(() => false);
+    if (found) {
+      args.splice(2, 0, "--track");
+      args.push(remote);
+    }
+  }
   await execGit(args, spec.repoPath);
   return { path: spec.path, branch: spec.branch };
 }
