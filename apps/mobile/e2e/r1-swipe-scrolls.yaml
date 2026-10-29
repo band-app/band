@@ -1,0 +1,46 @@
+# R1 (S6): a plain vertical swipe over the worktree rows scrolls the list and never lifts a row or
+# changes the order. Maestro cannot hold a finger still and then move it, so the drag itself
+# (S1, S4) is checked by hand.
+appId: app.getband.mobile
+name: R1 vertical swipe scrolls without reordering
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: fill?n=3
+- pressKey: home
+- launchApp:
+    stopApp: false
+- swipe:
+    start: 50%, 30%
+    end: 50%, 70%
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-bulk-3
+    timeout: 20000
+- takeScreenshot: r1-before
+- swipe:
+    start: 50%, 59%
+    end: 50%, 38%
+    duration: 2500
+- takeScreenshot: r1-after-swipe
+- assertVisible:
+    id: home__worktree-alpha-bulk-2
+    above:
+      id: home__worktree-alpha-bulk-3
+- assertVisible:
+    id: home__worktree-alpha-bulk-1
+    above:
+      id: home__worktree-alpha-bulk-2
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: home__worktree-alpha-bulk-3
+    timeout: 20000
+- assertVisible:
+    id: home__worktree-alpha-bulk-1
+    above:
+      id: home__worktree-alpha-bulk-2
+- takeScreenshot: r1-reloaded

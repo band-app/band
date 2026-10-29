@@ -1,6 +1,6 @@
 import { Redirect, router } from "expo-router";
 import { ChevronsDownUp, ChevronsUpDown, Settings as SettingsIcon, Tag } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -15,6 +15,14 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  Draggable,
+  DragOverlay,
+  DragProvider,
+  type Heights,
+  ListDragContext,
+  useListDrag,
+} from "../components/draggable";
 import { ChevronGlyph, Glass, GlassCircle, PlusGlyph, SearchGlyph } from "../components/glass";
 import { Icon } from "../components/icon";
 import { ParentSheet } from "../components/parent-sheet";
@@ -37,6 +45,7 @@ import {
   setParentRequests,
 } from "../lib/parenting";
 import { pinRequest } from "../lib/pinning";
+import { groupOrder, reorderFailure, reorderRequest, siblingBlocks } from "../lib/reordering";
 import { useCollapsedRepos } from "../lib/use-collapsed-repos";
 import { useGroupFilter } from "../lib/use-group-filter";
 import {
@@ -47,6 +56,7 @@ import {
   useRemoveFromGroup,
   useRemoveWorktree,
   useReorderGroups,
+  useReorderWorktrees,
   useRepos,
   useSetParent,
   useStatusFeed,
@@ -81,6 +91,16 @@ function WorktreeList() {
   const removeFromGroup = useRemoveFromGroup();
   const createGroup = useCreateGroup();
   const reorderGroups = useReorderGroups();
+  const reorderWorktrees = useReorderWorktrees();
+  const heights = useRef<Heights>(new Map()).current;
+  const listRef = useRef<SectionList<WorktreeRow, RepoSection>>(null);
+  const listBox = useRef<View>(null);
+  const lastHeight = useRef(0);
+  const listDrag = useListDrag(
+    useCallback((y: number) => {
+      listRef.current?.getScrollResponder()?.scrollTo({ y, animated: false });
+    }, []),
+  );
   const [parentFor, setParentFor] = useState<WorktreeRow | null>(null);
   const [deleting, setDeleting] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -141,7 +161,12 @@ function WorktreeList() {
       const move = (to: number) => {
         const next = [...ids];
         [next[at], next[to]] = [next[to], next[at]];
-        reorderGroups.mutate(next);
+        reorderGroups.mutate(next, {
+          onError: (error) => {
+            const failure = reorderFailure(error);
+            Alert.alert(failure.title, failure.message);
+          },
+        });
       };
       const actions: { label: string; run: () => void }[] = [
         ...(at > 0 ? [{ label: "Move up", run: () => move(at - 1) }] : []),
@@ -157,6 +182,81 @@ function WorktreeList() {
       );
     },
     [groupList, reorderGroups],
+  );
+
+  const showReorderError = useCallback((error: unknown) => {
+    const failure = reorderFailure(error);
+    Alert.alert(failure.title, failure.message);
+  }, []);
+
+  /** The group sections a header drag moves among, in display order. */
+  const groupSections = useMemo(
+    () => sections.filter((s) => s.kind === "group" && s.group?.id),
+    [sections],
+  );
+
+  const grabGroup = useCallback(
+    (name: string) => {
+      const from = groupSections.findIndex((s) => s.name === name);
+      if (from < 0) return null;
+      return {
+        from,
+        keys: groupSections.map((s) => [`header:${s.name}`, ...s.data.map((r) => r.id)]),
+        commit: (to: number) => {
+          const visible = groupSections.map((s) => s.group?.id as string);
+          const next = groupOrder(
+            (groupList ?? []).map((g) => g.id),
+            visible,
+            from,
+            to,
+          );
+          if (next) reorderGroups.mutate(next, { onError: showReorderError });
+        },
+      };
+    },
+    [groupSections, groupList, reorderGroups, showReorderError],
+  );
+
+  const grabRow = useCallback(
+    (row: WorktreeRow, section: RepoSection) => {
+      const found = siblingBlocks(section.data, row.id);
+      if (!found) return null;
+      return {
+        from: found.index,
+        keys: found.blocks.map((b) => b.rowIds),
+        commit: (to: number) => {
+          const request = reorderRequest(section.data, row.id, to, section.kind === "pinned");
+          if (request) reorderWorktrees.mutate(request, { onError: showReorderError });
+        },
+      };
+    },
+    [reorderWorktrees, showReorderError],
+  );
+
+  /** The non-drag way to reorder, for VoiceOver: one step up or down among the siblings. */
+  const moveRow = useCallback(
+    (row: WorktreeRow, section: RepoSection, delta: -1 | 1) => {
+      const found = siblingBlocks(section.data, row.id);
+      if (!found) return;
+      const request = reorderRequest(
+        section.data,
+        row.id,
+        Math.max(0, Math.min(found.blocks.length - 1, found.index + delta)),
+        section.kind === "pinned",
+      );
+      if (request) reorderWorktrees.mutate(request, { onError: showReorderError });
+    },
+    [reorderWorktrees, showReorderError],
+  );
+
+  const moveGroup = useCallback(
+    (name: string, delta: -1 | 1) => {
+      const held = grabGroup(name);
+      if (!held) return;
+      const to = held.from + delta;
+      if (to >= 0 && to < groupSections.length) held.commit(to);
+    },
+    [grabGroup, groupSections.length],
   );
 
   const refresh = useCallback(async () => {
@@ -399,52 +499,86 @@ function WorktreeList() {
           </View>
         </View>
       ) : null}
-      <SectionList<RepoSection["data"][number], RepoSection>
-        sections={sections}
-        keyExtractor={(row) => row.id}
-        stickySectionHeadersEnabled={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refresh}
-            tintColor={colors.mutedForeground}
-          />
-        }
-        renderSectionHeader={({ section }) => (
-          <SectionHeader
-            section={section}
-            filtering={filtering}
-            avatarBase={hub.url}
-            token={hub.token}
-            onToggle={() => toggle(section.name)}
-            onGroupMenu={() =>
-              section.group?.id ? groupActions(section.group.id, section.title) : undefined
-            }
-          />
-        )}
-        renderItem={({ item, index, section }) => (
-          <WorktreeRowView
-            row={item}
-            first={section.kind !== "repo" && index === 0}
-            last={index === section.data.length - 1}
-            onPress={() => router.push({ pathname: "/worktree/[id]", params: { id: item.id } })}
-            deleting={deleting.has(item.id)}
-            onLongPress={() => rowActions(item)}
-          />
-        )}
-        ListEmptyComponent={
-          <Empty
-            loading={loading}
-            error={repos.isError}
-            filtering={filtering}
-            onRetry={() => void repos.refetch()}
-          />
-        }
-        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 110 }]}
-        testID="home__list"
-      />
+      <View
+        ref={listBox}
+        style={styles.listBox}
+        onLayout={(e) => {
+          lastHeight.current = e.nativeEvent.layout.height;
+          listBox.current?.measureInWindow((_x, y, _w, h) => listDrag.setViewport(y, y + h));
+        }}
+      >
+        <DragProvider value={listDrag.state}>
+          <ListDragContext.Provider value={listDrag}>
+            <SectionList<RepoSection["data"][number], RepoSection>
+              ref={listRef}
+              sections={sections}
+              keyExtractor={(row) => row.id}
+              stickySectionHeadersEnabled={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              scrollEnabled={!listDrag.active}
+              scrollEventThrottle={16}
+              onScroll={(e) => listDrag.onScroll(e.nativeEvent.contentOffset.y)}
+              onContentSizeChange={(_w, h) => listDrag.setBounds(h, lastHeight.current)}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={refresh}
+                  tintColor={colors.mutedForeground}
+                />
+              }
+              renderSectionHeader={({ section }) => (
+                <SectionHeader
+                  section={section}
+                  filtering={filtering}
+                  avatarBase={hub.url}
+                  token={hub.token}
+                  heights={heights}
+                  grab={() => (section.group?.id ? grabGroup(section.name) : null)}
+                  onToggle={() => toggle(section.name)}
+                  onGroupMenu={() =>
+                    section.group?.id ? groupActions(section.group.id, section.title) : undefined
+                  }
+                  onMove={(delta) => moveGroup(section.name, delta)}
+                />
+              )}
+              renderItem={({ item, index, section }) => (
+                <Draggable
+                  cellKey={item.id}
+                  heights={heights}
+                  enabled={!filtering && !deleting.has(item.id)}
+                  grab={() => grabRow(item, section)}
+                  onMenu={() => rowActions(item)}
+                >
+                  <WorktreeRowView
+                    row={item}
+                    first={section.kind !== "repo" && index === 0}
+                    last={index === section.data.length - 1}
+                    onPress={() =>
+                      router.push({ pathname: "/worktree/[id]", params: { id: item.id } })
+                    }
+                    deleting={deleting.has(item.id)}
+                    onLongPress={() => rowActions(item)}
+                    holdMenu={filtering}
+                    onMove={filtering ? undefined : (delta) => moveRow(item, section, delta)}
+                  />
+                </Draggable>
+              )}
+              ListEmptyComponent={
+                <Empty
+                  loading={loading}
+                  error={repos.isError}
+                  filtering={filtering}
+                  onRetry={() => void repos.refetch()}
+                />
+              }
+              contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 110 }]}
+              testID="home__list"
+            />
+            <DragOverlay />
+          </ListDragContext.Provider>
+        </DragProvider>
+      </View>
       <Pressable
         onPress={() => setStarting(true)}
         accessibilityRole="button"
@@ -486,16 +620,24 @@ function SectionHeader({
   filtering,
   avatarBase,
   token,
+  heights,
+  grab,
   onToggle,
   onGroupMenu,
+  onMove,
 }: {
   section: RepoSection;
   filtering: boolean;
   avatarBase: string;
   token: string;
+  heights: Heights;
+  /** Describes the group block a drag of this header moves. */
+  grab: () => ReturnType<Parameters<typeof Draggable>[0]["grab"]>;
   onToggle: () => void;
-  /** Long press on a group header: Move up and Move down. */
+  /** Hold and release on a group header: Move up and Move down. */
   onGroupMenu: () => void;
+  /** Moves the group one place, for VoiceOver users who cannot drag. */
+  onMove: (delta: -1 | 1) => void;
 }) {
   if (section.kind === "pinned") {
     return (
@@ -507,37 +649,52 @@ function SectionHeader({
   return (
     <View>
       {section.kind === "top" ? null : section.kind === "group" ? (
-        <Pressable
-          onPress={onToggle}
-          onLongPress={onGroupMenu}
-          disabled={filtering}
-          accessibilityRole="button"
-          accessibilityLabel={`${section.title}, ${section.total} worktrees, ${section.collapsed ? "collapsed" : "expanded"}`}
-          accessibilityHint="Long press to move the group"
-          accessibilityState={{ expanded: !section.collapsed }}
-          testID={`home__${section.name}`}
-          style={styles.groupRow}
+        <Draggable
+          cellKey={`header:${section.name}`}
+          heights={heights}
+          enabled={!filtering}
+          grab={grab}
+          onMenu={onGroupMenu}
         >
-          {section.group?.color ? (
-            <View style={[styles.groupDot, { backgroundColor: section.group.color }]} />
-          ) : (
-            <View style={[styles.groupDot, styles.groupDotEmpty]} />
-          )}
-          <Text style={styles.groupName} numberOfLines={1}>
-            {section.title}
-          </Text>
-          {section.collapsed && section.attention > 0 ? (
-            <View style={styles.repoAttention} testID={`home__repo-attention-${section.name}`}>
-              <Text style={styles.repoAttentionText}>{section.attention} need you</Text>
-            </View>
-          ) : null}
-          <Text style={styles.repoCount}>{section.total}</Text>
-          <ChevronGlyph
-            direction={section.collapsed ? "right" : "down"}
-            size={7}
-            color={colors.faint}
-          />
-        </Pressable>
+          <Pressable
+            onPress={onToggle}
+            disabled={filtering}
+            accessibilityRole="button"
+            accessibilityLabel={`${section.title}, ${section.total} worktrees, ${section.collapsed ? "collapsed" : "expanded"}`}
+            accessibilityHint="Hold and drag to move the group"
+            accessibilityActions={[
+              { name: "moveUp", label: "Move up" },
+              { name: "moveDown", label: "Move down" },
+            ]}
+            onAccessibilityAction={(e) => {
+              if (e.nativeEvent.actionName === "moveUp") onMove(-1);
+              else if (e.nativeEvent.actionName === "moveDown") onMove(1);
+            }}
+            accessibilityState={{ expanded: !section.collapsed }}
+            testID={`home__${section.name}`}
+            style={styles.groupRow}
+          >
+            {section.group?.color ? (
+              <View style={[styles.groupDot, { backgroundColor: section.group.color }]} />
+            ) : (
+              <View style={[styles.groupDot, styles.groupDotEmpty]} />
+            )}
+            <Text style={styles.groupName} numberOfLines={1}>
+              {section.title}
+            </Text>
+            {section.collapsed && section.attention > 0 ? (
+              <View style={styles.repoAttention} testID={`home__repo-attention-${section.name}`}>
+                <Text style={styles.repoAttentionText}>{section.attention} need you</Text>
+              </View>
+            ) : null}
+            <Text style={styles.repoCount}>{section.total}</Text>
+            <ChevronGlyph
+              direction={section.collapsed ? "right" : "down"}
+              size={7}
+              color={colors.faint}
+            />
+          </Pressable>
+        </Draggable>
       ) : (
         <Pressable
           onPress={onToggle}
@@ -659,6 +816,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     paddingHorizontal: 16,
   },
+  listBox: { flex: 1 },
   list: { flexGrow: 1 },
   sectionRow: {
     alignItems: "baseline",

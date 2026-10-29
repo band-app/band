@@ -1,6 +1,7 @@
 import { Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { type ReactNode, useEffect } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { restoreAppearance } from "../lib/appearance";
@@ -20,41 +21,43 @@ export default function RootLayout() {
     void restoreAppearance();
   }, []);
   return (
-    <KeyboardProvider>
-      <SafeAreaProvider>
-        <ThemeProvider value={scheme === "light" ? navigationLight : navigationDark}>
-          <HubsProvider>
-            <ActiveHubSession>
-              <StatusBar style={scheme === "light" ? "dark" : "light"} />
-              <Stack
-                screenOptions={{
-                  headerStyle: { backgroundColor: colors.background },
-                  headerTintColor: colors.foreground,
-                  contentStyle: { backgroundColor: colors.background },
-                }}
-              >
-                <Stack.Screen name="index" options={{ headerShown: false }} />
-                <Stack.Screen name="connect" options={{ title: "Band" }} />
-                <Stack.Screen name="scan" options={{ title: "Scan QR code" }} />
-                <Stack.Screen name="manual" options={{ title: "Enter URL and token" }} />
-                <Stack.Screen name="pair" options={{ title: "Pairing" }} />
-                <Stack.Screen name="home" options={{ headerShown: false }} />
-                <Stack.Screen name="worktree/[id]" options={{ headerShown: false }} />
-                <Stack.Screen name="worktree/[id]/explorer" options={{ headerShown: false }} />
-                <Stack.Screen name="worktree/[id]/file" options={{ headerShown: false }} />
-                <Stack.Screen name="worktree/[id]/changes" options={{ headerShown: false }} />
-                <Stack.Screen name="worktree/[id]/diff" options={{ headerShown: false }} />
-                <Stack.Screen name="worktree/[id]/checks" options={{ headerShown: false }} />
-                <Stack.Screen name="hubs" options={{ title: "Hubs" }} />
-                <Stack.Screen
-                  name="unreachable"
-                  options={{ title: "Band", headerBackVisible: false }}
-                />
-              </Stack>
-            </ActiveHubSession>
-          </HubsProvider>
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </KeyboardProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardProvider>
+        <SafeAreaProvider>
+          <ThemeProvider value={scheme === "light" ? navigationLight : navigationDark}>
+            <HubsProvider>
+              <ActiveHubSession>
+                <StatusBar style={scheme === "light" ? "dark" : "light"} />
+                <Stack
+                  screenOptions={{
+                    headerStyle: { backgroundColor: colors.background },
+                    headerTintColor: colors.foreground,
+                    contentStyle: { backgroundColor: colors.background },
+                  }}
+                >
+                  <Stack.Screen name="index" options={{ headerShown: false }} />
+                  <Stack.Screen name="connect" options={{ title: "Band" }} />
+                  <Stack.Screen name="scan" options={{ title: "Scan QR code" }} />
+                  <Stack.Screen name="manual" options={{ title: "Enter URL and token" }} />
+                  <Stack.Screen name="pair" options={{ title: "Pairing" }} />
+                  <Stack.Screen name="home" options={{ headerShown: false }} />
+                  <Stack.Screen name="worktree/[id]" options={{ headerShown: false }} />
+                  <Stack.Screen name="worktree/[id]/explorer" options={{ headerShown: false }} />
+                  <Stack.Screen name="worktree/[id]/file" options={{ headerShown: false }} />
+                  <Stack.Screen name="worktree/[id]/changes" options={{ headerShown: false }} />
+                  <Stack.Screen name="worktree/[id]/diff" options={{ headerShown: false }} />
+                  <Stack.Screen name="worktree/[id]/checks" options={{ headerShown: false }} />
+                  <Stack.Screen name="hubs" options={{ title: "Hubs" }} />
+                  <Stack.Screen
+                    name="unreachable"
+                    options={{ title: "Band", headerBackVisible: false }}
+                  />
+                </Stack>
+              </ActiveHubSession>
+            </HubsProvider>
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </KeyboardProvider>
+    </GestureHandlerRootView>
   );
 }

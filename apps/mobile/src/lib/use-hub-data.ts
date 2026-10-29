@@ -5,6 +5,7 @@ import type { removeRequest } from "./deleting";
 import { useHubSession } from "./hub-session";
 import type { removeFromGroupRequests, setParentRequests } from "./parenting";
 import { type pinRequest, withPinned } from "./pinning";
+import { type ReorderRequest, withGroupOrder, withOrder } from "./reordering";
 import type { GroupDefinition } from "./worktree-list";
 
 type ReposReply = Awaited<ReturnType<HubClient["repos"]["list"]["query"]>>;
@@ -116,12 +117,50 @@ export function useCreateGroup() {
   });
 }
 
-/** Saves a new group order; the list reads the groups again when the call settles. */
+/** Saves a new group order: the list shows it at once and goes back to the old one if the hub refuses. */
 export function useReorderGroups() {
   const { client } = useHubSession();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (ids: string[]) => client.groups.reorder.mutate({ ids }),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ["repos.list"] });
+      const previous = queryClient.getQueryData<ReposReply>(["repos.list"]);
+      if (previous) {
+        queryClient.setQueryData<ReposReply>(["repos.list"], {
+          ...previous,
+          groups: withGroupOrder(previous.groups, ids),
+        });
+      }
+      return { previous };
+    },
+    onError: (_error, _ids, context) => {
+      if (context?.previous) queryClient.setQueryData(["repos.list"], context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
+  });
+}
+
+/** Saves a new worktree order: the list shows it at once and goes back if the hub refuses. */
+export function useReorderWorktrees() {
+  const { client } = useHubSession();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ReorderRequest) => client.worktrees.reorder.mutate(request),
+    onMutate: async (request) => {
+      await queryClient.cancelQueries({ queryKey: ["repos.list"] });
+      const previous = queryClient.getQueryData<ReposReply>(["repos.list"]);
+      if (previous) {
+        queryClient.setQueryData<ReposReply>(["repos.list"], {
+          ...previous,
+          repos: withOrder<Repo>(previous.repos, request),
+        });
+      }
+      return { previous };
+    },
+    onError: (_error, _request, context) => {
+      if (context?.previous) queryClient.setQueryData(["repos.list"], context.previous);
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos.list"] }),
   });
 }
