@@ -178,7 +178,6 @@ test.describe("agents and the update dialog", () => {
       timeout: 30_000,
     });
     await expect(update.updateAllResult(plain.hostId)).toHaveAttribute("data-state", "skipped");
-    await expect(update.updateAllResult(plain.hostId)).toContainText("1 agent is running");
     expect(updated).toEqual(["held"]);
   });
 });

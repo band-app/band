@@ -56,8 +56,9 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
         return;
       }
       if (entry.held) {
-        // The link is gone, not the agent.
-        entry.held.release();
+        // The link is gone, not the agent. A reattach may already have replaced this entry, and
+        // releasing then would take the new handle's listeners.
+        if (agents.get(agentId) === entry) entry.held.release();
         entry.attached = false;
       } else {
         stdio.kill();
@@ -101,13 +102,21 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
     };
     const cwd = await policy.resolve(str(a, "cwd"), true);
     ctx.lease.assertMayRun(cwd);
-    const stdio = await host.acp.spawn(launch, cwd);
+    const stdio = await host.acp.spawn(launch, cwd, { held: true });
     const held = stdio instanceof HeldAgentProcess ? stdio : null;
     const agentId =
       held?.record.agentId ?? `a-${stdio.pid ?? "x"}-${++counter}-${Date.now().toString(36)}`;
     const entry: RunningAgent = { stdio, cwd, held, attached: false };
     agents.set(agentId, entry);
-    const channels = serveAgent(agentId, entry);
+    let channels: ReturnType<typeof serveAgent>;
+    try {
+      channels = serveAgent(agentId, entry);
+    } catch (err) {
+      // The hub never learns this id, so nothing else would stop the process.
+      agents.delete(agentId);
+      stdio.kill();
+      throw err;
+    }
     watchExit(agentId, entry);
     return {
       agentId,

@@ -152,6 +152,14 @@ export class AgentHolder {
     return client ? client.request("kill", { agentId, signal }) : false;
   }
 
+  /** Tells the daemons the worker's lease now runs `ttlMs` more. Starts no daemon. */
+  async lease(ttlMs: number): Promise<void> {
+    await this.discover().catch(() => undefined);
+    await Promise.all(
+      this.clients().map((client) => client.request("lease", { ttlMs }).catch(() => false)),
+    );
+  }
+
   async forget(agentId: string): Promise<void> {
     const client = this.owners.get(agentId);
     this.owners.delete(agentId);

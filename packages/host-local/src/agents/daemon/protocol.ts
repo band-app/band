@@ -69,6 +69,11 @@ export interface DaemonRequests {
   list: [Record<string, never>, AgentRecord[]];
   /** Drops an exited agent the hub has seen exit. */
   forget: [{ agentId: string }, boolean];
+  /**
+   * The worker's lease runs this long from now. Past the deadline with no renewal the daemon kills
+   * every agent, so a worker that died cannot leave agents running after the hub let the lease go.
+   */
+  lease: [{ ttlMs: number }, boolean];
   ping: [Record<string, never>, { pid: number; agents: number }];
 }
 

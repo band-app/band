@@ -261,6 +261,21 @@ describe("chat agents survive a worker restart", () => {
     await call(session, "acp.kill", { agentId: again.agentId });
   });
 
+  it("kills held agents when the lease runs out while no worker is running", async () => {
+    const agent = await spawnAgent("cat", []);
+    await session.request("lease.renew", { ttlMs: 2500, blockedPaths: [] });
+    await killWorker();
+    // Nobody renews: the daemon enforces the lease itself.
+    await waitFor(() => !isAlive(agent.pid as number), 12_000, "the daemon to end the agent");
+    await startWorker({ BAND_AGENT_BUFFER_BYTES: "100000" });
+    await assert
+      .rejects(
+        session.request("acp.reattach", { agentId: agent.agentId, stdout: 0, stderr: 0 }),
+        /no such agent|exited/,
+      )
+      .catch(() => undefined);
+  });
+
   it("keeps the daemon's socket and run dir private, in the worker's state dir", () => {
     const runDir = agentRunDir(stateDir);
     assert.equal(statSync(runDir).mode & 0o777, 0o700);

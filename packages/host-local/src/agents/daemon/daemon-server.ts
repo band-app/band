@@ -119,6 +119,8 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   let spawning = 0;
   let endpointLost = false;
   let retirementRequested = false;
+  /** Wall-clock end of the worker's lease, or null before the first renewal (an older hub). */
+  let leaseExpiresAt: number | null = null;
 
   const server = createServer((socket) => acceptConnection(socket));
   const bindPath = privateBindPath(paths.socket);
@@ -169,6 +171,10 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     if (!existsSync(paths.runDir)) {
       shutdown("run dir removed");
       return;
+    }
+    if (leaseExpiresAt !== null && Date.now() > leaseExpiresAt) {
+      leaseExpiresAt = null;
+      killAllAgents("the worker's lease ran out");
     }
     if (!endpointLost && endpointOwnership(paths.socket, identity) === "lost") {
       endpointLost = true;
@@ -244,6 +250,22 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       clearInterval(wait);
       process.exit(0);
     }, 50);
+  }
+
+  /** Stops every running agent, with the same escalation as a `kill` request. */
+  function killAllAgents(reason: string): void {
+    const running = [...held.values()].filter((agent) => !agent.record.exit);
+    if (running.length === 0) return;
+    log.warn({ agents: running.length, reason }, "killing the held agents");
+    for (const agent of running) {
+      signalGroup(agent.child, "SIGTERM");
+      const pid = agent.record.pid;
+      if (pid) {
+        setTimeout(() => {
+          if (groupAlive(pid)) killGroup(pid, "SIGKILL");
+        }, SHUTDOWN_GRACE_MS).unref();
+      }
+    }
   }
 
   function acceptConnection(socket: Socket): void {
@@ -377,9 +399,20 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       case "kill": {
         const agent = held.get(request.agentId);
         if (!agent || agent.record.exit) return false;
-        signalGroup(agent.child, (request.signal as NodeJS.Signals | undefined) ?? "SIGTERM");
+        const signal = (request.signal as NodeJS.Signals | undefined) ?? "SIGTERM";
+        signalGroup(agent.child, signal);
+        const pid = agent.record.pid;
+        if (signal !== "SIGKILL" && pid) {
+          // An adapter that ignores SIGTERM must not outlive a fence or a revoked credential.
+          setTimeout(() => {
+            if (groupAlive(pid)) killGroup(pid, "SIGKILL");
+          }, SHUTDOWN_GRACE_MS).unref();
+        }
         return true;
       }
+      case "lease":
+        leaseExpiresAt = Date.now() + request.ttlMs;
+        return true;
       case "list":
         return [...held.values()].map((agent) => ({ ...agent.record }));
       case "forget":

@@ -212,6 +212,14 @@ export class AgentLoginService {
 
   // ---- launch ---------------------------------------------------------------------
 
+  /** Ids of the logins whose secret is the vault item `itemId`. */
+  loginIdsUsingItem(itemId: string): string[] {
+    return this.queries
+      .list()
+      .filter((row) => row.vaultItemId === itemId)
+      .map((row) => row.id);
+  }
+
   /**
    * The id of the login that applies to `input` right now, in the order `resolve` tries them, or
    * null for the machine's own. Reads no secret, so it is the cheap check for "would a launch use

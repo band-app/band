@@ -276,6 +276,8 @@ export class Worker {
       if (typeof p.ttlMs !== "number" || !Number.isFinite(p.ttlMs) || p.ttlMs <= 0) {
         throw new Error("lease.renew needs a positive ttlMs");
       }
+      // The daemon enforces the lease too, for the time the worker itself is not running.
+      void agentHolder?.lease(p.ttlMs);
       return ctx.lease.renew(
         p.ttlMs,
         Array.isArray(p.blockedPaths) ? p.blockedPaths.filter((x) => typeof x === "string") : [],

@@ -234,6 +234,7 @@ export class VaultService {
       // An agent started with a token from the old value still holds it.
       if (existing.kind === "git" || input.kind === "git")
         credentialChanged({ kind: "git-credential" });
+      credentialChanged({ kind: "vault-item", itemId: existing.id });
       return view(this.queries.find(existing.id) as VaultRow);
     }
     const id = `v-${randomUUID().slice(0, 12)}`;
@@ -262,6 +263,7 @@ export class VaultService {
     this.queries.remove(id);
     log.info({ id, name: row.name, scope: row.scope, revoked }, "vault item deleted");
     if (row.kind === "git") credentialChanged({ kind: "git-credential" });
+    credentialChanged({ kind: "vault-item", itemId: id });
     return { removed: true, revoked };
   }
 

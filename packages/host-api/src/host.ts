@@ -502,7 +502,7 @@ export interface HostAcp {
   /** The launch for an agent, or a message saying why it can't start (for example, not installed). */
   resolveLaunch(def: AcpAgentDefinition): Promise<AcpLaunch | string>;
   /** Starts the adapter in `cwd`. Rejects when the process cannot start. */
-  spawn(launch: AcpLaunch, cwd: string): Promise<AgentStdio>;
+  spawn(launch: AcpLaunch, cwd: string, options?: { held?: boolean }): Promise<AgentStdio>;
 }
 
 /** What it takes to start a stdio MCP server (plan step 4.4). */

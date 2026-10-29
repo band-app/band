@@ -106,9 +106,11 @@ export class RemoteHost implements Host {
     );
     session.onNotification("acp.exit", (params) => {
       const { agentId, code, signal } = params as { agentId: string } & AgentExit;
+      const held = this.heldAgents.has(agentId);
       this.agents.get(agentId)?.({ code: code ?? null, signal: signal ?? null });
       this.agents.delete(agentId);
-      if (this.heldAgents.delete(agentId)) {
+      if (held) {
+        this.heldAgents.delete(agentId);
         // The daemon keeps an exited agent until told the hub has seen it.
         this.rpc.request("acp.forget", { agentId }).catch(() => undefined);
       }

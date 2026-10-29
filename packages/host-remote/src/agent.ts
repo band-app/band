@@ -11,7 +11,7 @@ const DEFAULT_REATTACH_TIMEOUT_MS = 2 * 60_000;
 const ACK_DELAY_MS = 250;
 /** Unacknowledged output above which the acknowledgement goes out at once. */
 const ACK_NOW_BYTES = 1024 * 1024;
-/** How long a stream that ended gracefully waits for the exit that explains it. */
+/** How long a stream that ended gracefully waits for the exit that explains it, before it counts as a lost link. */
 const EXIT_WAIT_MS = 5_000;
 
 /**
@@ -245,7 +245,11 @@ export class RemoteAgent implements AgentStdio {
         if (this.exited || this.gone) return;
         // A stream that ended on its own is waiting for the exit that explains it.
         const timer = lane.eof
-          ? setTimeout(() => this.notifyExit({ code: null, signal: null }), EXIT_WAIT_MS)
+          ? setTimeout(() => {
+              // No exit came: the worker stopped (a graceful restart ends the channels cleanly),
+              // so wait for it like any lost link. A reattach says whether the agent exited.
+              this.detach();
+            }, EXIT_WAIT_MS)
           : null;
         await this.changed();
         if (timer) clearTimeout(timer);

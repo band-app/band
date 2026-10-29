@@ -161,6 +161,27 @@ describe("a turn survives a worker restart (S1)", () => {
   }, 150_000);
 });
 
+describe("a graceful worker stop (S1, the update path)", () => {
+  it("keeps the agent when the worker is stopped with SIGTERM and returns late", async () => {
+    let worker = await w.addWorker("w-term", ["proj"], {
+      env: { BAND_TEST_ACP_SCENARIO: scenarioFile() },
+    });
+    const wt = await w.createWorktree(worker, "proj", "feat-term");
+    const turn = await startTurn(wt, "term-chat", "slow term");
+    await waitFor(() => (agentText(turn.seen).includes("A1") ? true : undefined), {
+      label: "the first part of the reply",
+      timeoutMs: 30_000,
+    });
+    const [pid] = agentPids(worker);
+    await w.killWorker(worker, "SIGTERM", { waitForLease: false });
+    // Longer than the hub waits for an exit to explain an ended stream.
+    await new Promise((r) => setTimeout(r, 6000));
+    worker = await w.restartWorker(worker);
+    expect(agentText(await turn.events)).toBe("A1 A2");
+    expect(agentPids(worker)).toEqual([pid]);
+  }, 150_000);
+});
+
 describe("a pending request survives a worker restart (S2)", () => {
   it("delivers the answer once the worker is back", async () => {
     let worker = await w.addWorker("w-ask", ["proj"], {

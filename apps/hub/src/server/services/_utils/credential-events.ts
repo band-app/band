@@ -7,7 +7,9 @@ export type CredentialChange =
   /** A login was removed, replaced or re-chosen. `loginId` is set when its secret or row changed. */
   | { kind: "agent-login"; agentType?: string; chatId?: string; loginId?: string }
   /** A vault git credential was replaced or deleted, so a `GH_TOKEN` taken from it is stale. */
-  | { kind: "git-credential" };
+  | { kind: "git-credential" }
+  /** A vault item was replaced or deleted. A login that reads it may have given an agent its secret. */
+  | { kind: "vault-item"; itemId: string };
 
 const listeners = new Set<(change: CredentialChange) => void>();
 

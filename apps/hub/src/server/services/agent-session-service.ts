@@ -338,6 +338,13 @@ onCredentialChange((change) => {
     stopRuntimesWhere((rt) => rt.process?.holdsGhToken === true, "git credential changed");
     return;
   }
+  if (change.kind === "vault-item") {
+    const ids = new Set(agentLoginService.loginIdsUsingItem(change.itemId));
+    if (ids.size > 0) {
+      stopRuntimesWhere((rt) => rt.loginId !== null && ids.has(rt.loginId), "login secret changed");
+    }
+    return;
+  }
   stopRuntimesWhere((rt) => {
     if (change.chatId && rt.chatId !== change.chatId) return false;
     // Removed, or its secret replaced.
