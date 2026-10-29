@@ -95,6 +95,10 @@ export class WorkerCli {
   static async start(stateDir: string, log: Logger): Promise<WorkerCli | null> {
     const binary = resolveCliBinary();
     if (!binary) {
+      // No CLI: remove the link (or the copy the old fetch scheme left) so PATH never points at a dead `band`.
+      await Promise.all(
+        [exeName, `${exeName}.sha256`].map((f) => rm(join(stateDir, "bin", f), { force: true })),
+      ).catch(() => undefined);
       log.warn(
         { package: cliPackageName() },
         `no band CLI found: install ${cliPackageName()} or set BAND_CLI_PATH. Agents and terminals on this worker run without band`,
