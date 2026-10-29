@@ -122,7 +122,9 @@ async function restart(worker: Worker): Promise<Worker> {
 }
 
 beforeAll(async () => {
-  w = await startWorld({ repos: [{ name: "proj" }] });
+  // A lease far longer than any outage here: the agent daemon ends agents when the lease runs out
+  // with no worker to renew it, which is the behaviour under test in agent-persistence.test.ts.
+  w = await startWorld({ repos: [{ name: "proj" }], env: { BAND_WORKER_LEASE_MS: "120000" } });
 }, 120_000);
 
 afterAll(async () => {
