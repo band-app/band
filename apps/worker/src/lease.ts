@@ -52,6 +52,7 @@ export class LeaseGuard {
   private timer: NodeJS.Timeout | null = null;
   private ttlMs = 0;
   private readonly stoppers: Array<() => void | Promise<void>> = [];
+  private readonly blockListeners: Array<(blocked: string[]) => void | Promise<void>> = [];
 
   constructor(private readonly options: LeaseGuardOptions) {}
 
@@ -60,11 +61,27 @@ export class LeaseGuard {
     this.stoppers.push(stop);
   }
 
+  /** Registers what a new list of blocked folders stops, such as the agents running inside them. */
+  onBlocked(stop: (blocked: string[]) => void | Promise<void>): void {
+    this.blockListeners.push(stop);
+  }
+
   /** The hub's renewal: extends the lease, lifts a fence and records the folders another host owns. */
   async renew(ttlMs: number, blockedPaths: string[]): Promise<LeaseRenewReply> {
     // A renewal never lands between a fence's snapshot and its kills.
     await this.fencing;
     this.blocked = await Promise.all(blockedPaths.map((p) => realpath(p).catch(() => resolve(p))));
+    // What already runs in a folder another host now owns stops at once, not at its next start.
+    if (this.blocked.length > 0) {
+      for (const stop of this.blockListeners) {
+        await Promise.resolve(stop(this.blocked)).catch((err) =>
+          this.options.log.warn(
+            { message: err instanceof Error ? err.message : String(err) },
+            "blocked stop",
+          ),
+        );
+      }
+    }
     if (ttlMs !== this.ttlMs && this.timer) {
       // The poll interval follows the lease time, so a new time needs a new interval.
       clearInterval(this.timer);

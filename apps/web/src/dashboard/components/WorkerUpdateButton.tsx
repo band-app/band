@@ -82,8 +82,9 @@ export function WorkerUpdateButton({ host }: Props) {
               Update {host.name} to {host.updateTarget}?
             </DialogTitle>
             <DialogDescription>
-              The worker installs the new version and restarts. Restarting ends every agent running
-              on this worker, and a turn in progress is lost.
+              The worker installs the new version and restarts. Agents held by the worker keep
+              running through the restart. Any agent listed below cannot, so it stops and a turn in
+              progress is lost.
             </DialogDescription>
           </DialogHeader>
           <div
@@ -106,11 +107,13 @@ export function WorkerUpdateButton({ host }: Props) {
                 Could not check which agents are running on this worker.
               </span>
             ) : agents.length === 0 ? (
-              <span className="text-muted-foreground">No agents are running on this worker.</span>
+              <span className="text-muted-foreground">
+                No agent will be interrupted. Running agents carry on after the restart.
+              </span>
             ) : (
               <>
                 <div className="mb-1 font-medium">
-                  {agents.length === 1 ? "1 agent" : `${agents.length} agents`} will be interrupted:
+                  {agents.length === 1 ? "1 agent" : `${agents.length} agents`} will be restarted:
                 </div>
                 <ul className="list-disc pl-5">
                   {agents.map((a) => (

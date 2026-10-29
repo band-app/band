@@ -13,6 +13,7 @@ import { pipeline, Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import { createTerminalBackend } from "@band-app/host-local/terminals/create-backend";
+import { RemoteHost } from "@band-app/host-remote";
 import { VOICE_TRANSCRIBE_PATH } from "@band-app/shared/speech-transcription";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
@@ -1828,6 +1829,13 @@ async function main() {
     placementService.stop();
     releaseCheckService.stop();
     environmentBuildService.stop();
+    // Agents held by remote workers survive a lost link by design, but the hub keeps their ACP
+    // state and nothing can reattach after it stops, so they end with it.
+    await Promise.all(
+      hostRegistry
+        .all()
+        .map((host) => (host instanceof RemoteHost ? host.stopAgents() : undefined)),
+    ).catch(() => {});
     await workerLinkService.close().catch(() => {});
 
     // Wait for any still-in-flight Phase B work to settle so we don't

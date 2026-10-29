@@ -13,6 +13,7 @@
  * (Codex runs a separate app-server).
  */
 
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
@@ -48,6 +49,31 @@ const CLIENT_CAPABILITIES: acp.ClientCapabilities = {
   // alive while that work runs.
   _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks"] } } },
 };
+
+/**
+ * A hash of what makes two launches of an agent the same: the command, the adapter version, the
+ * ACP protocol version and the client capabilities Band depends on, and the environment as names
+ * with a hash of each value. The values never leave the hash. The relay grant and the chat ids
+ * are left out by the caller, because they differ per launch by design.
+ */
+export function launchSpecHash(launch: AcpLaunch): string {
+  const env = Object.entries(launch.env)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([name, value]) => [name, createHash("sha256").update(value).digest("hex")]);
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        protocol: acp.PROTOCOL_VERSION,
+        capabilities: CLIENT_CAPABILITIES,
+        command: launch.command,
+        args: launch.args,
+        adapterVersion: launch.adapterVersion ?? null,
+        unsetEnv: [...(launch.unsetEnv ?? [])].sort(),
+        env,
+      }),
+    )
+    .digest("hex");
+}
 
 /** An AIR `async_task_*` update. Not part of ACP's `SessionUpdate` union,
  *  so the SDK's validator would reject it; Band takes it off the stream
@@ -334,6 +360,26 @@ export class AcpAgentProcess {
       child.kill("SIGTERM");
       throw withStderr(label, err, stderr.text(), lifecycle.exit, scrub);
     }
+  }
+
+  /** The agent lives in the worker's agent daemon, so it survives the link and the worker restarting. */
+  get held(): AgentStdio["held"] {
+    return this.child.held;
+  }
+
+  /** The launch-spec hash this agent was started with, when a daemon holds it. */
+  get heldSpecHash(): string | null {
+    return this.child.held?.specHash ?? null;
+  }
+
+  /** The agent's environment holds a GitHub token from the vault. */
+  get holdsGhToken(): boolean {
+    return this.child.ghToken === true;
+  }
+
+  /** Calls `listener` each time the held agent is reattached after its worker came back. */
+  onReattached(listener: () => void): void {
+    this.child.onReattached?.(listener);
   }
 
   /** The agent process id, while it runs. */
