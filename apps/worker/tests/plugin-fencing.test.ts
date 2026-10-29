@@ -15,11 +15,9 @@ import {
   waitFor,
 } from "./helpers.ts";
 
-/** Real simulators need Xcode, and the suite runs on machines that are not set up for them. It follows the hub test: it runs where idb is installed too. */
 function hasSimctl(): boolean {
   try {
     execFileSync("xcrun", ["simctl", "help"], { stdio: "ignore" });
-    execFileSync("which", ["idb_companion"], { stdio: "ignore" });
     return process.platform === "darwin";
   } catch {
     return false;
@@ -45,14 +43,21 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
         .devices,
     ).flat();
   };
+  // A cold boot can take minutes on a CI runner. `RemoteHost` gives `plugin.call` five minutes
+  // (`SLOW_CALLS` in packages/host-remote/src/rpc.ts), so the stand-in hub does the same.
   const status = () =>
-    call<{ udid: string; state: string }>(w.session, METHOD_PLUGIN_CALL, {
-      pluginId: "simulator",
-      method: "screenshot",
-      params: {},
-      worktreeKey: "ws",
-      worktreePath: repo,
-    });
+    call<{ udid: string; state: string }>(
+      w.session,
+      METHOD_PLUGIN_CALL,
+      {
+        pluginId: "simulator",
+        method: "screenshot",
+        params: {},
+        worktreeKey: "ws",
+        worktreePath: repo,
+      },
+      { timeoutMs: 5 * 60_000 },
+    );
   const renew = (ttlMs: number) =>
     call<LeaseRenewReply>(w.session, METHOD_LEASE_RENEW, { ttlMs, blockedPaths: [] });
 
