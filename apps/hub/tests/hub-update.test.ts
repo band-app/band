@@ -38,9 +38,12 @@ async function boot(command: string | null, env: Record<string, string> = {}): P
     tokenSecret: TOKEN,
     ...(command === null ? {} : { hubUpdate: { command: `sh ${script} ${record}` } }),
   });
+  // No loopback worker: the one the remote-loopback CI job adds runs this checkout's version,
+  // which a hub told to report 0.50.0 correctly refuses.
   server = await startServer({
     tmpHome: home,
     env: { BAND_GITHUB_API_URL: stub.url, BAND_HUB_VERSION: "0.50.0", ...env },
+    remoteHost: false,
   });
   await waitFor(async () => ((await status()).updateAvailable ? true : undefined), {
     label: "the release check",
