@@ -3,7 +3,11 @@
 // `LinkClient`, the class the `band-worker` binary uses, so the hub cannot tell the difference. It
 // does not serve files, git or terminals.
 
-import { LinkClient } from "@band-app/link";
+import { type ChildProcess, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { type Channel, LinkClient } from "@band-app/link";
+
+const STUB_AGENT = fileURLToPath(new URL("../fixtures/acp-stub-agent.mjs", import.meta.url));
 
 export interface StandInWorkerOptions {
   /** The hub's URL (`http://127.0.0.1:<port>`). */
@@ -14,6 +18,11 @@ export interface StandInWorkerOptions {
   /** The version in the hello. Omit it to model a worker from before version reporting. */
   version?: string;
   serviceManager?: "launchd" | "systemd";
+  /**
+   * Runs chat agents (the scripted ACP stub) for the hub's `acp.*` calls, as plain child processes.
+   * `held` makes the stand-in say the agents live in an agent daemon, the way a real worker does.
+   */
+  agents?: { held: boolean };
 }
 
 export interface StandInWorker {
@@ -70,6 +79,7 @@ export async function connectStandInWorker(
       },
     });
     if (onUpdate) client.session.handle("worker.update", (params) => onUpdate(params));
+    if (opts.agents) serveAgents(client, opts.agents.held);
     await client.connect();
     return client;
   };
@@ -84,4 +94,50 @@ export async function connectStandInWorker(
     close: () => worker.client.close(),
   };
   return worker;
+}
+
+/** The `acp.*` calls of a chat agent, answered with the stub agent as a child of this process. */
+function serveAgents(client: LinkClient, held: boolean): void {
+  const { session } = client;
+  const children = new Map<string, ChildProcess>();
+  let count = 0;
+  session.handle("acp.resolveLaunch", () => ({
+    json: { command: process.execPath, args: [STUB_AGENT], env: {} },
+  }));
+  session.handle("relay.register", () => ({ json: { url: "http://127.0.0.1:9" } }));
+  session.handle("acp.spawn", (raw) => {
+    const params = raw as { cwd: string; env?: Record<string, string> };
+    const child = spawn(process.execPath, [STUB_AGENT], {
+      cwd: params.cwd,
+      env: { ...process.env, ...params.env },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const agentId = `a-stand-in-${++count}`;
+    children.set(agentId, child);
+    const stdout: Channel = session.openChannel("acp.stdio", { agentId });
+    const stderr: Channel = session.openChannel("acp.stderr", { agentId });
+    child.stdout?.on("data", (d: Buffer) => void stdout.send(d).catch(() => undefined));
+    child.stderr?.on("data", (d: Buffer) => void stderr.send(d).catch(() => undefined));
+    void (async () => {
+      try {
+        for await (const chunk of stdout) child.stdin?.write(chunk);
+      } catch {
+        child.kill();
+      }
+    })();
+    child.once("exit", (code, signal) => {
+      children.delete(agentId);
+      stdout.end();
+      stderr.end();
+      setImmediate(() => session.notify("acp.exit", { agentId, code, signal }));
+    });
+    return { agentId, pid: child.pid ?? null, stdio: stdout.id, stderr: stderr.id, held };
+  });
+  session.handle("acp.kill", (raw) => {
+    children.get((raw as { agentId: string }).agentId)?.kill();
+    return { json: null };
+  });
+  session.handle("acp.ack", () => ({ json: { stdin: 0 } }));
+  session.handle("acp.reconcile", () => ({ json: { killed: 0 } }));
+  session.handle("acp.forget", () => ({ json: null }));
 }

@@ -30,6 +30,7 @@ import {
   AcpAgentProcess,
   AgentProcessError,
   type AttachedSession,
+  launchSpecHash,
   type PermissionOutcome,
 } from "@band-app/chat-runtime/acp-agent-process";
 import {
@@ -70,6 +71,7 @@ import {
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { commandFor, launchFailure } from "./_utils/agent-command";
+import { onCredentialChange } from "./_utils/credential-events";
 import { agentExtraDirs, openSharedDir } from "./_utils/shared-dir";
 // FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in method bodies.
 import { agentLoginService } from "./agent-login-service";
@@ -148,6 +150,13 @@ interface Runtime {
   claudeCli: ClaudeCliArgs | null;
   /** `BAND_SERVER_URL` and `BAND_TOKEN` of the host's relay, for an agent on a worker. */
   relayEnv: Record<string, string> | null;
+  /** The Band login the process was started with, or null for the machine's own. */
+  loginId: string | null;
+  /**
+   * A held agent was reattached after its worker restarted. Before the next turn the launch is
+   * resolved again, and a process started with a different one is restarted (never mid-turn).
+   */
+  checkLaunch: boolean;
 }
 
 /** What an agent offers before a chat has a session: gathered from probes
@@ -292,6 +301,8 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       idleTimer: null,
       claudeCli: null,
       relayEnv: null,
+      loginId: null,
+      checkLaunch: false,
     };
     runtimes.set(chat.id, rt);
   }
@@ -306,6 +317,87 @@ function stopRuntime(rt: Runtime): void {
   rt.sessionId = null;
   runtimes.delete(rt.chatId);
   mcpProxyService.revokeSession(rt.chatId);
+}
+
+/**
+ * Stops the process of a runtime and forgets the runtime, at once. For a credential the process
+ * holds that is no longer valid. The chat keeps its session, so the next message starts a process
+ * and loads it.
+ */
+function stopRuntimesWhere(matches: (rt: Runtime) => boolean, reason: string): void {
+  for (const rt of [...runtimes.values()]) {
+    if (!rt.process && !rt.starting) continue;
+    if (!matches(rt)) continue;
+    log.warn({ chatId: rt.chatId, reason }, "stopping the agent");
+    stopRuntime(rt);
+  }
+}
+
+onCredentialChange((change) => {
+  if (change.kind === "git-credential") {
+    stopRuntimesWhere((rt) => rt.process?.holdsGhToken === true, "git credential changed");
+    return;
+  }
+  if (change.kind === "vault-item") {
+    const ids = new Set(agentLoginService.loginIdsUsingItem(change.itemId));
+    if (ids.size > 0) {
+      stopRuntimesWhere((rt) => rt.loginId !== null && ids.has(rt.loginId), "login secret changed");
+    }
+    return;
+  }
+  stopRuntimesWhere((rt) => {
+    if (change.chatId && rt.chatId !== change.chatId) return false;
+    // Removed, or its secret replaced.
+    if (change.loginId && rt.loginId === change.loginId) return true;
+    // Re-chosen: stop when a launch now would use another login than the process holds.
+    const chat = chatService.get(rt.chatId);
+    if (!chat) return false;
+    const def = definitionFor(chat);
+    if (change.agentType && def.type !== change.agentType) return false;
+    if (!change.agentType && !change.chatId) return false;
+    return (
+      agentLoginService.pickedId({
+        agentType: def.type,
+        repo: worktreeService.resolve(rt.worktreeId)?.repo.name,
+        chatLoginId: chat.loginId ?? undefined,
+      }) !== rt.loginId
+    );
+  }, "agent login changed");
+});
+
+/**
+ * Before a turn: a held agent that came back after its worker restarted is compared with what a
+ * launch would be now. One started with a different command, adapter, login or environment is
+ * stopped here, between turns, and the turn starts a new process that loads the session.
+ */
+async function restartIfLaunchChanged(
+  chat: ChatSession,
+  def: CodingAgentDefinition,
+): Promise<void> {
+  const rt = runtimes.get(chat.id);
+  const proc = rt?.process;
+  if (!rt || !proc?.alive || !rt.checkLaunch) return;
+  // Not a clean point: the check stays due and runs before the next turn.
+  if (rt.inTurn || rt.pending.size > 0 || rt.attaching || rt.starting) return;
+  rt.checkLaunch = false;
+  const wanted = proc.heldSpecHash;
+  if (!wanted) return;
+  const host = hostRegistry.hostFor(rt.worktreeId);
+  const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
+  if (typeof resolved === "string") return;
+  const { launch } = await withAgentLogin(resolved, def.type, {
+    worktreeId: rt.worktreeId,
+    chatLoginId: chat.loginId ?? undefined,
+  });
+  if (launchSpecHash(launch) === wanted) return;
+  // A turn could have started while the launch was resolved.
+  if (rt.inTurn || rt.pending.size > 0 || runtimes.get(chat.id) !== rt) return;
+  log.info({ chatId: chat.id }, "the agent was started with another launch; restarting it");
+  if (rt.idleTimer) clearTimeout(rt.idleTimer);
+  rt.process?.close();
+  rt.process = null;
+  rt.sessionId = null;
+  runtimes.delete(chat.id);
 }
 
 /** The opt-in idle stop, from `BAND_AGENT_IDLE_TIMEOUT_MS`. Unset (the
@@ -676,15 +768,18 @@ async function withAgentLogin(
   launch: AcpLaunch,
   agentType: string,
   scope: { worktreeId?: string; chatLoginId?: string } = {},
-): Promise<AcpLaunch> {
+): Promise<{ launch: AcpLaunch; loginId: string | null }> {
   const repo = scope.worktreeId ? worktreeService.resolve(scope.worktreeId)?.repo.name : undefined;
   const login = await agentLoginService.resolve({
     agentType,
     repo,
     chatLoginId: scope.chatLoginId,
   });
-  if (!login) return launch;
-  return { ...launch, env: { ...launch.env, ...login.env }, unsetEnv: login.unsetEnv };
+  if (!login) return { launch, loginId: null };
+  return {
+    launch: { ...launch, env: { ...launch.env, ...login.env }, unsetEnv: login.unsetEnv },
+    loginId: login.loginId,
+  };
 }
 
 async function ensureProcess(
@@ -699,10 +794,12 @@ async function ensureProcess(
     const host = hostRegistry.hostFor(rt.worktreeId);
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const launch = await withAgentLogin(resolved, def.type, {
+    const { launch: loginLaunch, loginId } = await withAgentLogin(resolved, def.type, {
       worktreeId: rt.worktreeId,
       chatLoginId: chatService.get(rt.chatId)?.loginId,
     });
+    // What a later launch is compared with. The relay grant and chat ids below differ per launch.
+    const launch = { ...loginLaunch, specHash: launchSpecHash(loginLaunch) };
     // An agent on a remote host reaches the hub through the worker's relay,
     // with a token that works for this chat's host only.
     const grant = await host.relay?.issue({ worktreeId: rt.worktreeId, chatId: rt.chatId });
@@ -735,6 +832,12 @@ async function ensureProcess(
       throw err;
     }
     rt.relayEnv = grant?.env ?? null;
+    rt.loginId = loginId;
+    rt.checkLaunch = false;
+    // A held agent that came back after its worker restarted may be running code the update replaced.
+    proc.onReattached(() => {
+      rt.checkLaunch = true;
+    });
     remember(def, { agentName: proc.agentName, canList: proc.canList });
     return proc;
   })();
@@ -1214,6 +1317,7 @@ export class AgentSessionService {
     if (!worktree) throw new Error(`Worktree not found: ${chat.worktreeId}`);
     const cwd = worktree.worktree.path;
     const def = definitionFor(chat);
+    if (purpose === "prompt") await restartIfLaunchChanged(chat, def);
     const rt = runtimeFor(chat, def);
     while (rt.attaching) await rt.attaching.catch(() => undefined);
     const fresh = chatService.get(chatId) ?? chat;
@@ -1433,10 +1537,14 @@ export class AgentSessionService {
     return Boolean(rt?.starting || rt?.attaching);
   }
 
-  /** Chats with an agent process, started or starting, and whether each is mid-work. A host restart ends them. */
+  /**
+   * Chats with an agent process, started or starting, and whether each is mid-work, that a worker
+   * restart would end. An agent held in the worker's agent daemon is left out: it survives the
+   * restart and the hub reattaches it.
+   */
   liveAgents(): { chatId: string; worktreeId: string; busy: boolean }[] {
     return [...runtimes.values()]
-      .filter((rt) => rt.process !== null || rt.starting !== null)
+      .filter((rt) => (rt.process !== null && !rt.process.held) || rt.starting !== null)
       .map((rt) => ({
         chatId: rt.chatId,
         worktreeId: rt.worktreeId,
@@ -1459,6 +1567,22 @@ export class AgentSessionService {
     const rt = runtimes.get(chatId);
     if (!rt) return false;
     return rt.inTurn || rt.pending.size > 0 || rt.work.outstanding().length > 0;
+  }
+
+  /**
+   * True while a turn runs or a request waits on the user. Unlike `isActive` it ignores work the
+   * agent started on its own (wakeups, crons, background tasks), which is no reason to keep a
+   * worktree whose folder is gone.
+   */
+  isEngaged(chatId: string): boolean {
+    if (chatOwnershipService.isOwned(chatId)) {
+      return (
+        chatOwnershipService.task(chatId) !== null ||
+        chatOwnershipService.pending(chatId).length > 0
+      );
+    }
+    const rt = runtimes.get(chatId);
+    return rt ? rt.inTurn || rt.pending.size > 0 : false;
   }
 
   /**
@@ -1754,7 +1878,7 @@ export class AgentSessionService {
   ): Promise<CatalogEntry> {
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const launch = await withAgentLogin(resolved, def.type);
+    const { launch } = await withAgentLogin(resolved, def.type);
     let commands: acp.AvailableCommand[] = [];
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {
       onUpdate: (n) => {
@@ -1823,7 +1947,7 @@ export class AgentSessionService {
   ): Promise<string> {
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const launch = await withAgentLogin(resolved, def.type);
+    const { launch } = await withAgentLogin(resolved, def.type);
     let sessionId: string | null = null;
     let text = "";
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {

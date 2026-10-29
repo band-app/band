@@ -4,7 +4,7 @@
 // the native modules sit beside it in node_modules: node-pty and the ripgrep binary.
 //
 // Layout, which the worker's own lookups expect:
-//   band-worker.mjs, terminal-daemon.mjs   the worker and its terminal daemon
+//   band-worker.mjs, terminal-daemon.mjs, agent-daemon.mjs   the worker and its two daemons
 //   agents/<name>.mjs                      the ACP adapters (acp-launch.ts looks next to the bundle)
 //   node_modules/node-pty, node_modules/@vscode/ripgrep(+ platform packages)
 import {
@@ -32,6 +32,7 @@ mkdirSync(out, { recursive: true });
 for (const [entry, outfile] of [
   ["src/main.ts", "band-worker.mjs"],
   ["src/terminal-daemon.ts", "terminal-daemon.mjs"],
+  ["src/agent-daemon.ts", "agent-daemon.mjs"],
 ]) {
   await build({
     entryPoints: [join(root, entry)],

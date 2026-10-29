@@ -457,6 +457,16 @@ export interface AcpLaunch {
   env: Record<string, string>;
   /** Removed from the host's environment before `env` is merged. */
   unsetEnv?: string[];
+  /**
+   * Version of the adapter that `command` runs, set by `resolveLaunch`. Part of the launch-spec
+   * hash, so a worker update that changes the adapter restarts a held agent at the next clean point.
+   */
+  adapterVersion?: string;
+  /**
+   * The hub's hash of this launch (see `launchSpecHash`), stored beside a held agent so the hub
+   * can tell later whether a fresh launch would differ.
+   */
+  specHash?: string;
 }
 
 /** The parts of a settings agent definition the launcher reads. */
@@ -481,13 +491,25 @@ export interface AgentStdio {
   /** Resolves once, when the process ends. */
   exit: Promise<AgentExit>;
   kill(signal?: NodeJS.Signals): void;
+  /**
+   * Set when a process outside the caller's reach holds the agent (the worker's agent daemon), so it
+   * survives the link and the worker restarting. The same `agentId` reattaches it.
+   */
+  held?: { agentId: string; specHash: string | null };
+  /** The process holds a GitHub token from the hub's vault in its environment. */
+  ghToken?: boolean;
+  /**
+   * Calls `listener` each time the agent is reattached after the link or the worker was lost.
+   * A host that cannot lose its agents never calls it.
+   */
+  onReattached?(listener: () => void): void;
 }
 
 export interface HostAcp {
   /** The launch for an agent, or a message saying why it can't start (for example, not installed). */
   resolveLaunch(def: AcpAgentDefinition): Promise<AcpLaunch | string>;
   /** Starts the adapter in `cwd`. Rejects when the process cannot start. */
-  spawn(launch: AcpLaunch, cwd: string): Promise<AgentStdio>;
+  spawn(launch: AcpLaunch, cwd: string, options?: { held?: boolean }): Promise<AgentStdio>;
 }
 
 /** What it takes to start a stdio MCP server (plan step 4.4). */

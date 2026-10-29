@@ -8,10 +8,11 @@ import { build } from "esbuild";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const external = Object.keys(pkg.dependencies ?? {});
 
-// The worker, and the terminal daemon it launches (a separate process, so a worker restart leaves the shells running).
+// The worker, and the terminal and agent daemons it launches (separate processes, so a worker restart leaves the shells and agents running).
 for (const [entry, outfile] of [
   ["src/main.ts", "dist/band-worker.mjs"],
   ["src/terminal-daemon.ts", "dist/terminal-daemon.mjs"],
+  ["src/agent-daemon.ts", "dist/agent-daemon.mjs"],
 ]) {
   await build({
     entryPoints: [entry],

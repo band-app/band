@@ -1,4 +1,4 @@
-import { Square, SquareCheck } from "lucide-react-native";
+import { ChevronDown, ChevronRight, Square, SquareCheck } from "lucide-react-native";
 import {
   type ComponentProps,
   createContext,
@@ -6,8 +6,17 @@ import {
   type ReactNode,
   useContext,
   useMemo,
+  useState,
 } from "react";
-import { Linking, ScrollView, StyleSheet, Text, type TextStyle, View } from "react-native";
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  type TextStyle,
+  View,
+} from "react-native";
 import { UITextView } from "react-native-uitextview";
 import {
   type Align,
@@ -35,8 +44,17 @@ function SelectableText(props: ComponentProps<typeof UITextView>) {
 export const PlainTextContext = createContext(false);
 
 /** Agent or user markdown as native text. Parsed again only when the text changes. */
-export const Markdown = memo(function Markdown({ text, muted }: { text: string; muted?: boolean }) {
-  const blocks = useMemo(() => parseMarkdown(text), [text]);
+export const Markdown = memo(function Markdown({
+  text,
+  muted,
+  html,
+}: {
+  text: string;
+  muted?: boolean;
+  /** `"github"` reads the HTML GitHub allows in comments instead of showing it as text. */
+  html?: "github";
+}) {
+  const blocks = useMemo(() => parseMarkdown(text, { html }), [text, html]);
   return (
     <View style={styles.stack}>
       {blocks.map((block, i) => (
@@ -196,6 +214,50 @@ function TableView({
   );
 }
 
+function DetailsView({
+  summary,
+  open: initial,
+  blocks,
+  muted,
+}: {
+  summary: Span[];
+  open: boolean;
+  blocks: Block[];
+  muted?: boolean;
+}) {
+  const [open, setOpen] = useState(initial);
+  const title = spansText(summary).trim() || "Details";
+  return (
+    <View style={styles.details}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${open ? "Collapse" : "Expand"} ${title}`}
+        onPress={() => setOpen((v) => !v)}
+        style={styles.detailsHeader}
+        testID="markdown__details-toggle"
+      >
+        {open ? (
+          <ChevronDown size={16} color={colors.mutedForeground} />
+        ) : (
+          <ChevronRight size={16} color={colors.mutedForeground} />
+        )}
+        <Text style={[styles.text, styles.bold, styles.detailsTitle]} numberOfLines={open ? 0 : 2}>
+          {title}
+        </Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.detailsBody}>
+          {blocks.map((b, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: blocks have no identity beyond position
+            <BlockView key={i} block={b} muted={muted} />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function BlockView({ block, muted }: { block: Block; muted?: boolean }) {
   const tone = muted ? styles.muted : undefined;
   switch (block.type) {
@@ -233,6 +295,15 @@ function BlockView({ block, muted }: { block: Block; muted?: boolean }) {
       return <TableView align={block.align} header={block.header} rows={block.rows} />;
     case "rule":
       return <View style={styles.rule} />;
+    case "details":
+      return (
+        <DetailsView
+          summary={block.summary}
+          open={block.open}
+          blocks={block.blocks}
+          muted={muted}
+        />
+      );
   }
 }
 
@@ -274,5 +345,9 @@ const styles = StyleSheet.create({
   headRow: { backgroundColor: colors.muted, borderTopWidth: 0 },
   cell: { paddingHorizontal: 10, paddingVertical: 6 },
   cellText: { fontSize: 14, lineHeight: 20 },
+  details: { gap: 8 },
+  detailsHeader: { alignItems: "center", flexDirection: "row", gap: 6 },
+  detailsTitle: { flex: 1 },
+  detailsBody: { gap: 10, paddingLeft: 22 },
   rule: { backgroundColor: colors.border, height: StyleSheet.hairlineWidth },
 });

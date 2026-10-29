@@ -1,10 +1,8 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, lstatSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 import { createLogger } from "@band-app/logger";
-import { preloadNodePty } from "../node-pty-loader";
-import { TerminalPool } from "../terminal-pool";
 import {
   type EndpointIdentity,
   endpointOwnership,
@@ -13,27 +11,37 @@ import {
   privateBindPath,
   probeEndpoint,
   publishEndpoint,
-} from "./endpoint";
-import { writeExitRecord } from "./exit-records";
+} from "../../daemon-kit/endpoint";
+import {
+  copyPrivateFile,
+  removeRetiredFiles,
+  tokenMatches as tokenEquals,
+  writePrivateFile,
+} from "../../daemon-kit/private-files";
 import {
   type ClientRole,
+  type DaemonPaths,
+  EXIT_ENDPOINT_OCCUPIED,
+  EXIT_ENDPOINT_UNAVAILABLE,
+  type HelloReply,
+  type PidRecord,
+  parseHello,
+  readFrames,
+  retiredDaemonPaths,
+  writeFrame,
+} from "../../daemon-kit/protocol";
+import { preloadNodePty } from "../node-pty-loader";
+import { TerminalPool } from "../terminal-pool";
+import { writeExitRecord } from "./exit-records";
+import {
   type ControlNotify,
   type ControlReply,
   type ControlRequest,
-  type DaemonPaths,
   type DaemonRequests,
   ENDPOINT_LOST_ERROR,
-  EXIT_ENDPOINT_OCCUPIED,
-  EXIT_ENDPOINT_UNAVAILABLE,
   EXIT_NODE_PTY_UNAVAILABLE,
-  type HelloMessage,
-  type HelloReply,
-  type PidRecord,
   PROTOCOL_VERSION,
-  readFrames,
-  retiredDaemonPaths,
   type StreamEvent,
-  writeFrame,
 } from "./protocol";
 
 const log = createLogger("terminal-daemon");
@@ -612,9 +620,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   }
 
   function tokenMatches(candidate: string): boolean {
-    const expected = Buffer.from(token);
-    const actual = Buffer.from(candidate);
-    return actual.length === expected.length && timingSafeEqual(actual, expected);
+    return tokenEquals(token, candidate);
   }
 }
 
@@ -634,52 +640,6 @@ function hasValidIds(message: Record<string, unknown>): boolean {
     }
   }
   return true;
-}
-
-function parseHello(frame: unknown): HelloMessage | null {
-  if (typeof frame !== "object" || frame === null) return null;
-  const hello = frame as Partial<HelloMessage>;
-  if (
-    hello.t !== "hello" ||
-    typeof hello.protocol !== "number" ||
-    typeof hello.token !== "string" ||
-    (hello.role !== "control" && hello.role !== "stream") ||
-    typeof hello.clientId !== "string" ||
-    typeof hello.buildId !== "string"
-  ) {
-    return null;
-  }
-  return hello as HelloMessage;
-}
-
-/** Write `path` with mode 0600, atomically, so a reader never sees half a token. */
-function writePrivateFile(path: string, content: string): void {
-  // A random suffix, not the pid: a recycled pid could share a tmp name.
-  const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
-  writeFileSync(tmp, content, { mode: 0o600 });
-  renameSync(tmp, path);
-}
-
-/** Copy a private runtime file, if it exists. */
-function copyPrivateFile(from: string, to: string): void {
-  let content: string;
-  try {
-    content = readFileSync(from, "utf8");
-  } catch {
-    return;
-  }
-  writePrivateFile(to, content);
-}
-
-/** Remove the retired names this daemon created. */
-function removeRetiredFiles(retired: DaemonPaths): void {
-  for (const path of [retired.socket, retired.token, retired.pid]) {
-    try {
-      unlinkSync(path);
-    } catch {
-      // Already gone.
-    }
-  }
 }
 
 function exists(path: string): boolean {

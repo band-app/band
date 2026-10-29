@@ -133,3 +133,119 @@ describe("highlight", () => {
     assert.deepEqual(highlight("x y", "nope"), [{ text: "x y" }]);
   });
 });
+
+describe("parseMarkdown with github html", () => {
+  const gh = (src: string) => parseMarkdown(src, { html: "github" });
+  const reviewer = [
+    "<!-- epic-pr-reviewer:sticky:v1 -->",
+    '## <img src="https://github.ol.epicgames.net/x/argus-avatar-64.png" width="32" align="absmiddle"> Review by Epic PR Reviewer',
+    "",
+    "> quote",
+    "",
+    "<details>",
+    "<summary>Resolved &amp; retired (5)</summary>",
+    "",
+    "- one [link](https://example.com)",
+    "- `two`",
+    "",
+    "</details>",
+  ].join("\n");
+
+  it("drops comments, single and multi line", () => {
+    assert.deepEqual(gh("<!-- a -->\n\ntext"), [{ type: "paragraph", spans: [{ text: "text" }] }]);
+    assert.deepEqual(gh("<!-- a\nb -->\n\ntext"), [
+      { type: "paragraph", spans: [{ text: "text" }] },
+    ]);
+  });
+
+  it("drops a long multi line comment with blank lines and keeps what follows", () => {
+    const src = [
+      "<!-- claude-review-state -->",
+      "<!-- REVIEW_STATE_START -->",
+      "<!--",
+      "{",
+      '  "agent": "psc-adversarial-pr-reviewer",',
+      "",
+      '  "findings": ["see <url> and \\"q\\" in src/a.ts"]',
+      "}",
+      "-->",
+      "<!-- REVIEW_STATE_END -->",
+      "",
+      "after",
+    ].join("\n");
+    assert.deepEqual(gh(src), [{ type: "paragraph", spans: [{ text: "after" }] }]);
+    assert.deepEqual(gh("a <!-- x\n\ny --> b"), [{ type: "paragraph", spans: [{ text: "a  b" }] }]);
+  });
+
+  it("keeps comments in code and an unclosed comment as text", () => {
+    assert.deepEqual(gh("```\n<!-- keep -->\n```"), [
+      { type: "code", lang: "", text: "<!-- keep -->" },
+    ]);
+    const out = gh("<!-- unclosed\n\nnext");
+    assert.ok(out.length > 0);
+    assert.ok(out.some((b) => b.type === "paragraph" && spansText(b.spans).includes("next")));
+  });
+
+  it("shows an image's alt text and nothing without one", () => {
+    const [withAlt, without] = gh('## <img src="u" alt="Logo"> Title\n\n<img src="u"> after');
+    assert.equal(withAlt.type === "heading" && spansText(withAlt.spans), "Logo Title");
+    assert.equal(without.type === "paragraph" && spansText(without.spans).trim(), "after");
+  });
+
+  it("reads the reviewer comment: no tag or entity is left", () => {
+    const out = gh(reviewer);
+    assert.equal(out[0].type, "heading");
+    assert.equal(
+      out[0].type === "heading" && spansText(out[0].spans).trim(),
+      "Review by Epic PR Reviewer",
+    );
+    assert.equal(out[1].type, "quote");
+    const details = out[2];
+    assert.equal(details.type, "details");
+    if (details.type !== "details") return;
+    assert.equal(spansText(details.summary), "Resolved & retired (5)");
+    assert.equal(details.open, false);
+    assert.equal(details.blocks.length, 1);
+    assert.equal(details.blocks[0].type, "list");
+    assert.equal(out.length, 3);
+  });
+
+  it("starts expanded with the open attribute and reads one-block details", () => {
+    const [d] = gh("<details open><summary>T</summary>\n\n**x**\n\n</details>");
+    assert.equal(d.type === "details" && d.open, true);
+    const [one] = gh("<details><summary>T &lt;1&gt;</summary>inner text</details>");
+    assert.equal(one.type, "details");
+    if (one.type !== "details") return;
+    assert.equal(spansText(one.summary), "T <1>");
+    assert.equal(one.blocks.length, 1);
+  });
+
+  it("decodes entities, including in table cells", () => {
+    const [table] = gh("| a &amp; b |\n| - |\n| &#39;x&#39; &lt;y&gt; &quot; |");
+    assert.equal(table.type === "table" && spansText(table.header[0]), "a & b");
+    assert.equal(table.type === "table" && spansText(table.rows[0][0]), "'x' <y> \"");
+  });
+
+  it("keeps inline tag styles, links only http(s), and drops other tags", () => {
+    const [p] = gh(
+      'a<br>b <b>B</b> <i>I</i> <kbd>K</kbd> H<sub>2</sub>O <a href="https://e.com">L</a> <a href="javascript:x">J</a> <script>alert(1)</script><span style="x">S</span>',
+    );
+    assert.equal(p.type, "paragraph");
+    if (p.type !== "paragraph") return;
+    const find = (t: string) => p.spans.find((s) => s.text === t);
+    assert.equal(find("B")?.bold, true);
+    assert.equal(find("I")?.italic, true);
+    assert.equal(find("K")?.code, true);
+    assert.deepEqual(find("L")?.link, { url: "https://e.com" });
+    assert.equal(find("J")?.link, undefined);
+    const text = spansText(p.spans);
+    assert.ok(text.startsWith("a\nb "));
+    assert.ok(text.includes("H2O"));
+    assert.ok(!text.includes("<"));
+  });
+
+  it("leaves html as literal text without the option", () => {
+    const [p] = parseMarkdown("use <div> here");
+    assert.equal(p.type === "paragraph" && spansText(p.spans), "use <div> here");
+  });
+});

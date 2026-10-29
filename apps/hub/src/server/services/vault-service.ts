@@ -17,6 +17,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { VaultInputError, VaultNotFoundError } from "../errors";
 import { type VaultKind, VaultQueries, type VaultRow } from "../infra/db/queries/vault";
+import { credentialChanged } from "./_utils/credential-events";
 import {
   type AuthServerMetadata,
   accountFromIdToken,
@@ -230,6 +231,10 @@ export class VaultService {
         updatedAt: now,
       });
       log.info({ id: existing.id, name, scope }, "vault item updated");
+      // An agent started with a token from the old value still holds it.
+      if (existing.kind === "git" || input.kind === "git")
+        credentialChanged({ kind: "git-credential" });
+      credentialChanged({ kind: "vault-item", itemId: existing.id });
       return view(this.queries.find(existing.id) as VaultRow);
     }
     const id = `v-${randomUUID().slice(0, 12)}`;
@@ -257,6 +262,8 @@ export class VaultService {
     if (row.kind === "oauth") revoked = await this.revoke(row);
     this.queries.remove(id);
     log.info({ id, name: row.name, scope: row.scope, revoked }, "vault item deleted");
+    if (row.kind === "git") credentialChanged({ kind: "git-credential" });
+    credentialChanged({ kind: "vault-item", itemId: id });
     return { removed: true, revoked };
   }
 
