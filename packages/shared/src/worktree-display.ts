@@ -2,6 +2,9 @@ import { toWorktreeId } from "./worktree-id.ts";
 
 const LOCAL_HOST_ID = "local";
 
+/** The longest custom title `worktrees.setTitle` accepts. */
+export const WORKTREE_TITLE_MAX = 100;
+
 export interface DisplayHost {
   id: string;
   name?: string | null;
@@ -9,13 +12,13 @@ export interface DisplayHost {
 
 export interface DisplayRepo {
   name: string;
-  worktrees: ReadonlyArray<{ name: string; hostId?: string | null }>;
+  worktrees: ReadonlyArray<{ name: string; hostId?: string | null; title?: string | null }>;
 }
 
 export interface WorktreeDisplay {
   /** The repo name, or null when the worktree is not in the list. */
   repo: string | null;
-  /** The worktree (branch) name. */
+  /** What to show for the worktree: its custom title, else its name. */
   name: string;
   /** The name of the host, or null for the hub's own host. */
   host: string | null;
@@ -50,9 +53,9 @@ export function worktreeDisplay(
         const host = onOtherHost ? hostDisplay(wt.hostId, hosts) : null;
         return {
           repo: repo.name,
-          name: wt.name,
+          name: wt.title || wt.name,
           host,
-          label: `${repo.name} · ${wt.name}${host ? ` on ${host}` : ""}`,
+          label: `${repo.name} · ${wt.title || wt.name}${host ? ` on ${host}` : ""}`,
         };
       }
     }

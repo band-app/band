@@ -208,6 +208,8 @@ export const worktrees = sqliteTable("worktrees", {
   // id with no foreign key, like the origin columns: only `RepoQueries.setGroup` writes it, and
   // deleting a group nulls it.
   groupId: text("group_id"),
+  // A custom title shown in place of the name, or null. Only `RepoQueries.setTitle` writes it.
+  title: text("title"),
   // Set when the worktree was restored on another host: the id of the replacement. The copy
   // stays on disk untouched and is listed as superseded until a person removes it.
   supersededBy: text("superseded_by"),

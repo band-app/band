@@ -103,6 +103,12 @@ export interface ChatListSessionsReply {
   sessions: { sessionId: string; title?: string; updatedAt?: string }[] | null;
 }
 
+/**
+ * Loads a session Band has no log for, so its history is logged and replicated before the
+ * reply. Does nothing for a logged or busy session. Replies once the rows are on the hub.
+ */
+export const METHOD_CHAT_VIEW_SESSION = "chat.viewSession";
+
 // ---- worker → hub ----------------------------------------------------------
 
 /**

@@ -1,3 +1,4 @@
+import { WORKTREE_TITLE_MAX } from "@band-app/shared/worktree-display";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   ContextMenu,
@@ -24,6 +25,7 @@ import {
   Loader,
   Moon,
   MoveRight,
+  Pencil,
   Pin,
   PinOff,
   Play,
@@ -40,6 +42,7 @@ import { useHostLabel, useHostNames } from "../hooks/use-host-names";
 import { timeAgo, useHostSeen } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
+import { deleteDialogInfoFor } from "../lib/worktree-delete";
 import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
@@ -106,6 +109,61 @@ function consumeRecentActivation(worktreeId: string): boolean {
     recentlyActivatedTimer = null;
   }
   return true;
+}
+
+/**
+ * Inline text field that replaces a worktree's title while it is renamed. Enter saves, Escape
+ * cancels and leaving the field saves. Key and click events stop here, because the card around
+ * it treats Enter and Space as "open this worktree".
+ */
+function TitleEditor({
+  initial,
+  maxLength,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  maxLength: number;
+  onSave: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const finished = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+  const finish = (save: boolean) => {
+    if (finished.current) return;
+    finished.current = true;
+    if (save) onSave(value);
+    else onCancel();
+  };
+  return (
+    <input
+      ref={inputRef}
+      data-testid="worktree-card__title-input"
+      aria-label="Worktree title"
+      value={value}
+      maxLength={maxLength}
+      className="min-w-0 flex-1 rounded border border-input bg-background px-1 text-[13px] font-medium text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      onChange={(e) => setValue(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(false);
+        }
+      }}
+      onBlur={() => finish(true)}
+    />
+  );
 }
 
 /** A status mark on a card: an icon with an accessible name and a tooltip, no visible text. */
@@ -217,6 +275,9 @@ export const WorktreeCard = memo(function WorktreeCard({
   const lastCheckpointAt = worktree.lastCheckpointAt ?? null;
   const [moveOpen, setMoveOpen] = useState(false);
   const [parentOpen, setParentOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  // Set by "Rename…" so the menu, closing, does not hand focus back to the card and blur the field.
+  const keepFocusOnClose = useRef(false);
   const queryClient = useQueryClient();
   const setError = useDashboardStore((s) => s.setError);
   const [divergenceOpen, setDivergenceOpen] = useState(false);
@@ -338,10 +399,18 @@ export const WorktreeCard = memo(function WorktreeCard({
     },
   };
 
-  const ciState = branchStatus?.ci.state;
-  const hasUnmergedPR = ciState !== undefined && ciState !== "none" && ciState !== "merged";
-  const isDirty = branchStatus?.git.dirty ?? false;
-  const hasUnpushedCommits = (branchStatus?.git.ahead ?? 0) > 0;
+  const displayName = worktree.title || worktree.name;
+  const saveTitle = (value: string) => {
+    setRenaming(false);
+    const next = value.trim();
+    if (next === (worktree.title ?? "")) return;
+    // Confirming the untouched name of an untitled worktree must not store it as a title.
+    if (!worktree.title && next === worktree.name) return;
+    trpc.worktrees.setTitle
+      .mutate({ worktreeId, title: next === "" ? null : next })
+      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.repos }))
+      .catch((err) => setError(err));
+  };
 
   const removeParent = () => {
     trpc.worktrees.setOrigin
@@ -351,20 +420,15 @@ export const WorktreeCard = memo(function WorktreeCard({
   };
 
   const handleDelete = () => {
-    if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
+    const target = { repoName, name: worktree.name, hostId: worktree.hostId };
+    const info = deleteDialogInfoFor(target, branchStatus);
+    if (info) {
+      onShowDeleteDialog(info);
+    } else {
       removeWorktreeMutation.mutate({
         repo: repoName,
         name: worktree.name,
         hostId: worktree.hostId,
-      });
-    } else {
-      onShowDeleteDialog({
-        repoName,
-        name: worktree.name,
-        hostId: worktree.hostId,
-        isUnmerged: hasUnmergedPR,
-        isDirty,
-        hasUnpushedCommits,
       });
     }
   };
@@ -390,7 +454,7 @@ export const WorktreeCard = memo(function WorktreeCard({
                   // worktree picker via `WorktreeLabel`.
                   <>
                     <WorktreeLabel
-                      name={worktree.name}
+                      name={displayName}
                       repoName={repoName}
                       isActive={isActive}
                       hostTag={hostTagText}
@@ -408,11 +472,25 @@ export const WorktreeCard = memo(function WorktreeCard({
                   </>
                 ) : (
                   <>
-                    <span
-                      className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
-                    >
-                      {worktree.name}
-                    </span>
+                    {renaming ? (
+                      <TitleEditor
+                        initial={worktree.title ?? worktree.name}
+                        maxLength={WORKTREE_TITLE_MAX}
+                        onSave={saveTitle}
+                        onCancel={() => setRenaming(false)}
+                      />
+                    ) : (
+                      <span
+                        data-testid="worktree-card__title"
+                        className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          if (!isDeleting) setRenaming(true);
+                        }}
+                      >
+                        {displayName}
+                      </span>
+                    )}
                     {isRoot && <RootStar />}
                     {hostTagText && (
                       <span
@@ -438,7 +516,11 @@ export const WorktreeCard = memo(function WorktreeCard({
                 repo/name string doesn't cover the next card down
                 — fans out into open viewport space instead of
                 overlapping siblings. */}
-            <TooltipContent side="right">{`${repoName}/${worktree.name}`}</TooltipContent>
+            <TooltipContent side="right" data-testid="worktree-card__tooltip">
+              {worktree.title
+                ? `${worktree.title} (${repoName}/${worktree.name})`
+                : `${repoName}/${worktree.name}`}
+            </TooltipContent>
           </Tooltip>
           {isDeleting && (
             <StatusIcon testId="worktree-card__deleting" label="Deleting">
@@ -564,7 +646,16 @@ export const WorktreeCard = memo(function WorktreeCard({
           )}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent>
+      <ContextMenuContent
+        // Without this the menu hands focus back to the card as it closes, which would blur the
+        // title field that "Rename…" just opened and save it at once.
+        onCloseAutoFocus={(e) => {
+          if (keepFocusOnClose.current) {
+            keepFocusOnClose.current = false;
+            e.preventDefault();
+          }
+        }}
+      >
         <ContextMenuLabel>Worktree</ContextMenuLabel>
         {worktree.continuedFrom && (
           <ContextMenuLabel
@@ -582,6 +673,16 @@ export const WorktreeCard = memo(function WorktreeCard({
         >
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin worktree" : "Pin worktree"}
+        </ContextMenuItem>
+        <ContextMenuItem
+          data-testid="worktree-card__rename"
+          onClick={() => {
+            keepFocusOnClose.current = true;
+            requestAnimationFrame(() => setRenaming(true));
+          }}
+        >
+          <Pencil />
+          Rename…
         </ContextMenuItem>
         <ContextMenuItem
           data-testid="worktree-card__set-parent"

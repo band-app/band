@@ -23,6 +23,7 @@ interface FileReply {
 interface Worktree {
   name: string;
   groupId?: string | null;
+  title?: string | null;
   path: string;
   hostId?: string;
   supersededBy?: string;
@@ -175,6 +176,7 @@ describe("offline view, restore and supersede (S2, S3)", () => {
     const { group } = await w.m<{ group: { id: string } }>("groups.create", { name: "Restored" });
     groupId = group.id;
     await w.m("worktrees.setGroup", { worktreeId: wt(), groupId });
+    await w.m("worktrees.setTitle", { worktreeId: wt(), title: "Restored title" });
     const result = await w.m<MoveReply>("checkpoints.restore", {
       worktreeId: wt(),
       toHostId: b.hostId,
@@ -184,6 +186,7 @@ describe("offline view, restore and supersede (S2, S3)", () => {
     expect(result.supersededId).toBe(wt());
     // The restored copy stays in the group of the one it replaces (S5).
     expect((await findWorktree("proj", "feat-x", b.hostId))?.groupId).toBe(groupId);
+    expect((await findWorktree("proj", "feat-x", b.hostId))?.title).toBe("Restored title");
 
     const path = w.worktreePath(b, "proj", "feat-x");
     expect(readFileSync(join(path, "hello.txt"), "utf8")).toBe(
@@ -255,6 +258,7 @@ describe("move to host and evacuate (S4)", () => {
   it("moves a worktree and removes the source only after the target has it", async () => {
     const wt = await w.createWorktree(a, "proj", "feat-m");
     await w.m("worktrees.setGroup", { worktreeId: wt, groupId });
+    await w.m("worktrees.setTitle", { worktreeId: wt, title: "Moved title" });
     const src = w.worktreePath(a, "proj", "feat-m");
     appendFileSync(join(src, "hello.txt"), "moving\n");
     writeFileSync(join(src, "new.txt"), "new\n");
@@ -268,6 +272,7 @@ describe("move to host and evacuate (S4)", () => {
     });
 
     expect((await findWorktree("proj", "feat-m", b.hostId))?.groupId).toBe(groupId);
+    expect((await findWorktree("proj", "feat-m", b.hostId))?.title).toBe("Moved title");
     const dst = w.worktreePath(b, "proj", "feat-m");
     expect(readFileSync(join(dst, "hello.txt"), "utf8")).toBe("hello\nmoving\n");
     expect(readFileSync(join(dst, "new.txt"), "utf8")).toBe("new\n");

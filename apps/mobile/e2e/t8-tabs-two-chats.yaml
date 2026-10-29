@@ -1,0 +1,42 @@
+# t8: with two chats, a swipe to the other chat and back leaves the pager on a page boundary: the
+# shown chat fills the screen and no neighbour placeholder is visible once the swipe has settled.
+appId: app.getband.mobile
+name: t8 two chats swipe settles
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-two
+- extendedWaitUntil:
+    visible:
+      id: tabs__switcher
+      text: ".*1 of 2.*"
+    timeout: 15000
+- assertNotVisible:
+    id: worktree__neighbour-next
+- takeScreenshot: t8-start
+- swipe:
+    start: 85%, 50%
+    end: 15%, 50%
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: tabs__switcher
+      text: ".*2 of 2.*"
+    timeout: 5000
+- assertNotVisible:
+    id: worktree__neighbour-prev
+- takeScreenshot: t8-second
+- swipe:
+    start: 15%, 50%
+    end: 85%, 50%
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: tabs__switcher
+      text: ".*1 of 2.*"
+    timeout: 5000
+- assertNotVisible:
+    id: worktree__neighbour-next
+- takeScreenshot: t8-first-again

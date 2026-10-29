@@ -162,6 +162,8 @@ export class RepoService {
         agent: WorktreeAgentInfo | null;
         /** The group the worktree is in, or null for Ungrouped. */
         groupId: string | null;
+        /** The worktree's custom title, or null to show its name. */
+        title: string | null;
         /** Where the worktree was started from, or null for top-level work. */
         origin: WorktreeOriginInfo | null;
         /** Ids of the worktrees started from this one, on any repo and host. */
@@ -257,6 +259,7 @@ export class RepoService {
                 head: wt.head,
                 pinned: tracked?.pinned ?? false,
                 ...(tracked?.groupId ? { groupId: tracked.groupId } : {}),
+                ...(tracked?.title ? { title: tracked.title } : {}),
                 ...(tracked?.sortIndex === undefined ? {} : { sortIndex: tracked.sortIndex }),
                 ...(tracked?.pinSortIndex === undefined
                   ? {}
@@ -305,6 +308,7 @@ export class RepoService {
             lastCheckpointAt: lastCheckpoints.get(worktreeId) ?? null,
             agent: status?.agent ?? null,
             groupId: wt.groupId ?? null,
+            title: wt.title ?? null,
             origin: links.origins.get(worktreeId) ?? null,
             children: links.children.get(worktreeId) ?? [],
           };

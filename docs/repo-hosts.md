@@ -15,8 +15,8 @@ A repo can be limited to some workers, and a branch of a repo has a Band worktre
 The defaults are editable in the Add repo dialog ("Available on: All workers | Only: [workers]" and "Primary worker"), and later in Settings > Repos or with the CLI:
 
 ```sh
-band repos set epic --workers mac,contabo --primary mac
-band repos set epic --workers all --primary auto
+band repos set atlas --workers mac,contabo --primary mac
+band repos set atlas --workers all --primary auto
 ```
 
 `--workers` takes worker ids or names from `band workers list`. Changing the allowed workers or the primary worker needs an admin token.

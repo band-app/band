@@ -102,6 +102,11 @@ import {
   type WorktreeEntry,
   withoutPinned,
 } from "../lib/sidebar-grouping";
+import {
+  DELETE_WORKTREE_EVENT,
+  type DeleteWorktreeEventDetail,
+  deleteDialogInfoFor,
+} from "../lib/worktree-delete";
 import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
@@ -600,6 +605,26 @@ export function RepoList({ groupFilter }: RepoListProps) {
   /** Group header "+": the group whose repo is being picked. */
   const [pickingRepoFor, setPickingRepoFor] = useState<{ groupId: string | null } | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogInfo | null>(null);
+  // A plugin's "delete worktree" request. It follows the card's Delete: remove at once when
+  // nothing is at risk, else open the shared confirmation dialog.
+  useEffect(() => {
+    const onDelete = (e: Event) => {
+      const { worktreeId } = (e as CustomEvent<DeleteWorktreeEventDetail>).detail;
+      const found = findWorktree(repos, worktreeId);
+      if (!found || found.wt.supersededBy || found.wt.name === found.repo.defaultBranch) return;
+      const target = { repoName: found.repo.name, name: found.wt.name, hostId: found.wt.hostId };
+      const info = deleteDialogInfoFor(target, branchStatuses.get(worktreeId));
+      if (info) setDeleteDialog(info);
+      else
+        removeWorktreeMutation.mutate({
+          repo: target.repoName,
+          name: target.name,
+          hostId: target.hostId,
+        });
+    };
+    window.addEventListener(DELETE_WORKTREE_EVENT, onDelete);
+    return () => window.removeEventListener(DELETE_WORKTREE_EVENT, onDelete);
+  }, [repos, branchStatuses, removeWorktreeMutation]);
   /** Repo name whose "Promote to git" confirmation dialog is open. */
   const [promoteDialog, setPromoteDialog] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);

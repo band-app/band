@@ -398,8 +398,15 @@ function NeighbourPage({
 
 const local = StyleSheet.create({
   edge: { bottom: 0, left: 0, position: "absolute", top: 0, width: 18 },
-  neighbour: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "center" },
-  neighbourText: { color: colors.mutedForeground, fontSize: 16 },
+  neighbour: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    overflow: "hidden",
+    paddingHorizontal: 24,
+  },
+  neighbourText: { color: colors.mutedForeground, flexShrink: 1, fontSize: 16 },
   screen: { backgroundColor: colors.background, flex: 1 },
   fill: { flex: 1 },
   chats: { flex: 1 },

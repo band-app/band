@@ -23,6 +23,7 @@ import { AgentLoginInputError } from "../../errors";
 import { sessionIdSchema } from "../../services/_utils/session-id";
 import { agentLoginService } from "../../services/agent-login-service";
 import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
+import { chatOwnershipService } from "../../services/chat-ownership-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import { settingsService } from "../../services/settings-service";
 import { taskService } from "../../services/task-service";
@@ -237,6 +238,7 @@ export const chatsRouter = t.router({
         summary,
         lastModified,
       });
+      chatOwnershipService.syncActiveSession(input.chatId);
       return { ok: true };
     }),
 

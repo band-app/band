@@ -132,6 +132,11 @@ export interface WorktreeState {
    */
   groupId?: string;
   /**
+   * A custom title shown in place of the name. Read-only here like `groupId`: `saveAll` keeps
+   * what the database holds, and `RepoQueries.setTitle` writes it.
+   */
+  title?: string;
+  /**
    * The id of the worktree that replaced this one when it was restored on another host. The copy
    * stays on its host untouched. Read-only here: `saveAll` keeps what the database holds, and
    * `RepoQueries.setSupersededBy` writes it.
@@ -205,6 +210,7 @@ export function reconcileKindForRepo(repo: RepoState): boolean {
         pinned: false,
         ...(main?.origin ? { origin: main.origin } : {}),
         ...(main?.groupId ? { groupId: main.groupId } : {}),
+        ...(main?.title ? { title: main.title } : {}),
       },
     ];
   }
@@ -261,6 +267,7 @@ export class RepoQueries {
             }
           : {}),
         ...(row.groupId ? { groupId: row.groupId } : {}),
+        ...(row.title ? { title: row.title } : {}),
         ...(row.supersededBy ? { supersededBy: row.supersededBy } : {}),
         ...(row.continuedFrom
           ? { continuedFrom: row.continuedFrom as unknown as ContinuedFrom }
@@ -333,6 +340,7 @@ export class RepoQueries {
             originChatId: worktreesTable.originChatId,
             originTerminalId: worktreesTable.originTerminalId,
             groupId: worktreesTable.groupId,
+            title: worktreesTable.title,
           })
           .from(worktreesTable)
           .all()
@@ -394,6 +402,7 @@ export class RepoQueries {
               originChatId: origin?.originChatId ?? null,
               originTerminalId: origin?.originTerminalId ?? null,
               groupId: origin?.groupId ?? null,
+              title: origin?.title ?? null,
               repoName: repo.name,
               name: wt.name,
               branch: wt.branch,
@@ -722,6 +731,21 @@ export class RepoQueries {
     return row
       ? { allowedHostIds: row.allowedHostIds ?? null, primaryHostId: row.primaryHostId ?? null }
       : undefined;
+  }
+
+  /** Sets a worktree's custom title, or clears it with `null`. Focused UPDATE, like `setGroup`. */
+  setTitle(repoName: string, name: string, title: string | null, hostId?: string): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ title })
+      .where(
+        and(
+          eq(worktreesTable.repoName, repoName),
+          eq(worktreesTable.name, name),
+          ...(hostId === undefined ? [] : [eq(worktreesTable.hostId, hostId)]),
+        ),
+      )
+      .run();
   }
 
   /**

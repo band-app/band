@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@band-app/ui";
-import { ChevronDown, GitMerge } from "lucide-react";
+import { ChevronDown, GitMerge, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 /** The merge button, its method menu and the inline confirm step. */
@@ -45,11 +45,25 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [confirming, merging]);
 
-  const tone = merged
-    ? "bg-merged text-merged-foreground"
-    : status.canMerge
-      ? "bg-success text-success-foreground hover:bg-success/90"
-      : "bg-success/50 text-success-foreground/80";
+  const tone = status.canMerge
+    ? "bg-success text-success-foreground hover:bg-success/90"
+    : "bg-success/50 text-success-foreground/80";
+
+  if (merged) {
+    // The merge is done, so the useful next step is removing the worktree. The host
+    // asks first when it holds uncommitted or unpushed work.
+    return (
+      <button
+        type="button"
+        onClick={() => host.deleteWorktree(worktreeId)}
+        data-testid="pr-checks__delete-worktree"
+        className="flex h-8 items-center justify-center gap-1.5 rounded-md bg-danger text-xs font-medium text-danger-foreground hover:bg-danger/90"
+      >
+        <Trash2 className="size-3.5" aria-hidden />
+        Delete worktree
+      </button>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -105,9 +119,7 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
                 data-testid="pr-checks__merge-menu"
                 className={cn(
                   "flex w-8 items-center justify-center border-l border-scrim",
-                  merged
-                    ? "bg-merged text-merged-foreground"
-                    : "bg-success text-success-foreground hover:bg-success/90",
+                  "bg-success text-success-foreground hover:bg-success/90",
                 )}
               >
                 <ChevronDown className="size-3.5" />

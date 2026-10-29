@@ -481,16 +481,19 @@ export class ChatRuntime {
     }
   }
 
-  private async attach(): Promise<void> {
+  private async attach(purpose: "prompt" | "view" = "prompt"): Promise<void> {
     const info = this.info;
     const target = info.activeSessionId;
+    const logged = target ? this.env.store.events.currentRevision(target) > 0 : false;
+    // Viewing a session this worker has a log for needs no agent at all, and a session
+    // with a turn in flight is never loaded.
+    if (purpose === "view" && (!target || logged || this.inTurn)) return;
     if (target && this.sessionId === target && this.process?.alive) return;
     const proc = await this.ensureProcess(info.agentId);
     if (!target) {
       await this.attachNew(proc);
       return;
     }
-    const logged = this.env.store.events.currentRevision(target) > 0;
     const plan: Array<{ how: "load" | "resume"; writeReplay: boolean }> = [];
     if (logged) {
       if (proc.canResume) plan.push({ how: "resume", writeReplay: false });
@@ -513,6 +516,16 @@ export class ChatRuntime {
         if (!proc.alive) throw err;
       }
     }
+    if (purpose === "view") {
+      const reason =
+        lastError instanceof Error ? lastError.message : "the agent can't reopen sessions";
+      this.broadcastTransient({
+        type: "notice",
+        level: "warning",
+        text: `This session's history couldn't be loaded: ${reason}`,
+      });
+      return;
+    }
     await this.attachNew(proc);
     this.record({
       type: "notice",
@@ -525,9 +538,9 @@ export class ChatRuntime {
   }
 
   /** Starts the agent when needed and attaches the chat's session. Returns the session id. */
-  async ensureSession(): Promise<string | null> {
+  async ensureSession(purpose: "prompt" | "view" = "prompt"): Promise<string | null> {
     while (this.attaching) await this.attaching.catch(() => undefined);
-    this.attaching = this.attach();
+    this.attaching = this.attach(purpose);
     try {
       await this.attaching;
     } finally {
