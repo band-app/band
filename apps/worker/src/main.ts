@@ -84,6 +84,7 @@ try {
   worker = await Worker.start(config, {
     gitCredentialHelper: helperCommand(process.execPath, process.argv[1] ?? ""),
     persistentTerminals: true,
+    persistentAgents: true,
   });
 } catch (err) {
   if (err instanceof ConfigError) {

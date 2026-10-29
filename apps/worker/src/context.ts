@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { Host, HostDirs, HostInfo } from "@band-app/host-api";
+import type { AgentHolder } from "@band-app/host-local/agents/daemon/holder";
 import { type LinkSession, RPC_METHOD_NOT_FOUND, RpcError } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
 import type { ActivityTracker } from "./activity.ts";
@@ -25,6 +26,8 @@ export interface WorkerContext {
   reposDir?: string;
   /** This worker runs the chats of its worktrees (`--own-chats`). */
   ownsChats?: boolean;
+  /** The agent daemon connection, when agents persist across worker restarts (`agents.ts`). */
+  agentHolder?: AgentHolder;
 }
 
 /** What `host.info` reports: the host's own facts with this worker's labels and roots. */

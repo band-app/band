@@ -35,9 +35,11 @@ import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from 
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerDirectMethods } from "./direct.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
+import { createWorkerAgentHolder } from "./agents.ts";
 import { LeaseGuard } from "./lease.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
 import { registerLifecycleMethods } from "./methods-lifecycle.ts";
+import { registerAgentMethods } from "./methods-agents.ts";
 import { registerStreamMethods } from "./methods-streams.ts";
 import { PathPolicy } from "./path-policy.ts";
 import { registerRelayMethods } from "./relay.ts";
@@ -89,6 +91,11 @@ export interface WorkerOptions {
    * `terminals.ts`). Off by default: a worker started in a test process would leave a daemon behind.
    */
   persistentTerminals?: boolean;
+  /**
+   * Run chat agents in a detached daemon that outlives the worker, so they survive a restart (see
+   * `agents.ts`). Off by default for the same reason as `persistentTerminals`.
+   */
+  persistentAgents?: boolean;
   /** The service manager that supervises this worker. Defaults to what the environment says. */
   serviceManager?: ServiceManager | null;
   /** How long a worker the hub refused for its version waits before it gives up. Default 5 minutes. */
@@ -133,6 +140,8 @@ export class Worker {
   chats: ChatOwner | null = null;
   /** The daemon backend, when terminals persist. It reports the exits that happened while the worker was down. */
   private terminalDaemon: { recoverExits(): Promise<number> } | null = null;
+  /** Kills every agent, held ones included. Set once the agent methods are registered. */
+  private killAgents: (() => Promise<void>) | null = null;
 
   private constructor(
     client: LinkClient,
@@ -177,8 +186,13 @@ export class Worker {
     const backend = terminals.backend;
     // Folders the worker creates itself are served whatever the roots, from the first call on.
     if (config.reposDir) await policy.allowManaged(config.reposDir);
+    const agentHolder = createWorkerAgentHolder(
+      config.stateDir,
+      options.persistentAgents === true,
+    );
     const host = new LocalHost({
       terminalBackend: () => backend,
+      ...(agentHolder ? { agentHolder } : {}),
       repos: {
         mappingsFile: () => join(config.stateDir, "repos.json"),
         ...(config.reposDir ? { reposDir: () => config.reposDir as string } : {}),
@@ -257,6 +271,7 @@ export class Worker {
       reposDir: config.reposDir,
       cli: (await WorkerCli.start(config.stateDir, log)) ?? undefined,
       ownsChats: config.ownChats,
+      ...(agentHolder ? { agentHolder } : {}),
     };
     const registrar = new Registrar(ctx);
     registrar.json(METHOD_LEASE_RENEW, (a) => {
@@ -272,6 +287,10 @@ export class Worker {
     worker.disposers.push(() => ctx.lease.close());
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
+    const agentControl = registerAgentMethods(registrar, ctx);
+    worker.disposers.push(() => agentControl.dispose());
+    worker.disposers.push(() => agentHolder?.close());
+    worker.killAgents = () => agentControl.killAll();
     worker.disposers.push(registerRelayMethods(registrar, ctx));
     if (config.ownChats) {
       const chats = new ChatOwner(ctx, await ChatStore.open(join(config.stateDir, "chats.db")));
@@ -444,7 +463,10 @@ export class Worker {
         this.refusalWaiting = true;
         void this.waitOutRefusal(reason, this.versionRetryMs).then(() => this.stop(1));
       } else if (this.connectedOnce || code !== VERSION_REFUSED_CODE) {
-        void this.stop(1);
+        // A revoked worker takes its agents with it: they hold credentials the hub no longer vouches for.
+        void (this.killAgents?.() ?? Promise.resolve())
+          .catch(() => undefined)
+          .then(() => this.stop(1));
       }
     });
     client.on("mismatch", (need: number) => {
