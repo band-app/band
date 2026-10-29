@@ -148,7 +148,7 @@ export class HubUpdateService {
       writeFileSync(fd, `$ ${command}\n`);
       // A minimal environment, like a runner hook: the hub's own env holds its admin token.
       // The session bus variables let `systemctl --user` reach the user's manager.
-      const env: NodeJS.ProcessEnv = { BAND_HUB_TARGET_VERSION: target };
+      const env: Record<string, string> = { BAND_HUB_TARGET_VERSION: target };
       for (const key of [
         "PATH",
         "HOME",
@@ -166,7 +166,7 @@ export class HubUpdateService {
       const child = spawn("sh", ["-c", command], {
         detached: true,
         stdio: ["ignore", fd, fd],
-        env,
+        env: env as NodeJS.ProcessEnv,
       });
       child.on("error", (err) => {
         this.write({ ...run, failure: `The command could not start: ${err.message}` });
