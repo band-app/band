@@ -16,6 +16,7 @@ import { hostRegistry } from "../../infra/host/registry";
 import { chatService } from "../../services/chat-service";
 import { crossHostRefusal, restrictedHostRefusal } from "../../services/cross-host-policy";
 import { hostTrustService } from "../../services/host-trust-service";
+import { pluginHost } from "../../services/plugin-host-service";
 import { worktreeService } from "../../services/worktree-service";
 
 const createInput = z.object({
@@ -121,7 +122,49 @@ function createServer(chatId: string): McpServer {
       }
     },
   );
+  registerPluginTools(server, chatId);
   return server;
+}
+
+/**
+ * Adds the tools bundled plugins registered. Each acts on the worktree of the chat whose session
+ * token made the request, and the arguments cannot name another one.
+ */
+function registerPluginTools(server: McpServer, chatId: string): void {
+  for (const { pluginId, tool } of pluginHost.agentTools()) {
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        // biome-ignore lint/suspicious/noExplicitAny: the SDK accepts a Zod object here
+        inputSchema: tool.inputSchema as any,
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: arguments are validated by the schema above
+      async (args: any) => {
+        try {
+          const chat = chatService.get(chatId);
+          const resolved = chat?.worktreeId ? worktreeService.resolve(chat.worktreeId) : null;
+          if (!chat || !resolved) return jsonText({ error: "This chat has no worktree" }, true);
+          const hostId = resolved.host.id;
+          const worktreeKey = chat.worktreeId;
+          const worktreePath = resolved.worktree.path;
+          const result = await tool.handler(tool.inputSchema.parse(args) as never, {
+            chatId,
+            worktreeId: worktreeKey,
+            hostId,
+            call: (method, params) =>
+              pluginHost.callWorker(pluginId, hostId, method, params ?? {}, {
+                worktreeKey,
+                worktreePath,
+              }),
+          });
+          return { ...result };
+        } catch (err) {
+          return jsonText({ error: err instanceof Error ? err.message : String(err) }, true);
+        }
+      },
+    );
+  }
 }
 
 export async function handleBandTools(

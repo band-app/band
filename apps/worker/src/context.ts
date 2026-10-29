@@ -6,6 +6,7 @@ import type { ActivityTracker } from "./activity.ts";
 import type { WorkerCli } from "./cli.ts";
 import type { LeaseGuard } from "./lease.ts";
 import type { PathPolicy } from "./path-policy.ts";
+import type { WorkerPlugins } from "./plugins.ts";
 import { asParams, encodeBytes, encodeJson, mapError, type Params } from "./rpc-util.ts";
 
 export interface WorkerContext {
@@ -25,6 +26,8 @@ export interface WorkerContext {
   reposDir?: string;
   /** This worker runs the chats of its worktrees (`--own-chats`). */
   ownsChats?: boolean;
+  /** The worker halves of the bundled plugins. */
+  plugins?: WorkerPlugins;
 }
 
 /** What `host.info` reports: the host's own facts with this worker's labels and roots. */
@@ -32,7 +35,11 @@ export async function describeHost(ctx: WorkerContext): Promise<HostInfo> {
   const info = await ctx.host.info();
   return {
     ...info,
-    capabilities: { ...info.capabilities, ...(ctx.ownsChats ? { chatOwnership: true } : {}) },
+    capabilities: {
+      ...info.capabilities,
+      ...(ctx.ownsChats ? { chatOwnership: true } : {}),
+      ...Object.fromEntries((ctx.plugins?.capabilities() ?? []).map((id) => [id, true])),
+    },
     labels: Object.entries(ctx.labels).map(([k, v]) => `${k}=${v}`),
     roots: ctx.policy.rootPaths,
     dirs: hostDirs(ctx.policy.rootPaths),
