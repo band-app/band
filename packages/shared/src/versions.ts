@@ -79,7 +79,7 @@ export function compatibilityProblem(
 /** Machine-readable code a refusal carries on the link, so a worker can wait instead of retrying. */
 export const VERSION_REFUSED_CODE = "version-incompatible";
 
-export const INSTALL_METHODS = ["compose", "helm", "k8s", "docker"] as const;
+export const INSTALL_METHODS = ["compose", "helm", "k8s", "docker", "npm"] as const;
 export type InstallMethod = (typeof INSTALL_METHODS)[number];
 
 export function parseInstallMethod(value: string | undefined): InstallMethod | null {
@@ -98,6 +98,8 @@ export function hubUpdateCommand(method: InstallMethod | null, version: string):
       return `helm upgrade band-hub <chart> --reuse-values --set image.tag=${version}`;
     case "k8s":
       return `kubectl set image deployment/band-hub hub=${HUB_IMAGE}:${version}`;
+    case "npm":
+      return `npm i -g @band-app/server@${version} && systemctl --user restart band-hub`;
     case "docker":
       return `docker pull ${HUB_IMAGE}:${version} && docker stop band-hub && docker rm band-hub && docker run -d --name band-hub <your usual options> ${HUB_IMAGE}:${version}`;
     default:

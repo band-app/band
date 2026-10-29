@@ -143,6 +143,14 @@ export const settingsUpdateInput = z
       })
       .passthrough()
       .optional(),
+    // The command the "Update hub" button runs on the hub's machine (`services/hub-update-service.ts`).
+    // Admin only: the hub runs it with `sh -c`.
+    hubUpdate: z
+      .object({
+        command: z.string().max(1000).optional(),
+      })
+      .passthrough()
+      .optional(),
     // Where environment images are built (plan step 3.2).
     environmentBuilder: z
       .object({
