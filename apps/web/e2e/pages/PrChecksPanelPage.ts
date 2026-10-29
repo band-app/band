@@ -1,8 +1,8 @@
 /**
- * Page object for the GitHub plugin's Checks tab in the right sidepanel
- * (`plugins/github/src/client/PullRequestPanel.tsx`, contributed through the
- * `worktree.sideTabs` slot). Its tab is `right-sidepanel__tab--github-pull-request`
- * and its body `pr-checks`:
+ * Page object for the Checks tab in the right sidepanel, drawn by the core for
+ * any review provider (`src/components/review/PullRequestPanel.tsx`). The tab
+ * shows only when a provider serves the worktree's repo. Its tab is
+ * `right-sidepanel__tab--github-pull-request` and its body `pr-checks`:
  *
  *   - the header: `pr-checks__number`, `pr-checks__state`, `pr-checks__title`,
  *     `pr-checks__refresh`, and for a branch without a pull request
@@ -16,8 +16,9 @@
  *     `pr-checks__check-name`, `-state`, `-link`, `-toggle`, `-rerun` (with `-rerun-error`) and `-details`
  *     (with `pr-checks__check-duration`);
  *   - the overflow menu `pr-checks__menu` (`pr-checks__menu-open`, `-copy`);
- *   - instead of the panel, `pr-checks__error` (with `-retry`) when `gh`
- *     fails and `pr-checks__unavailable` when no plugin serves the repo.
+ *   - the header actions the provider offers besides merge: `pr-checks__action`
+ *     (`data-action-id`, with `pr-checks__action-error`);
+ *   - instead of the panel, `pr-checks__error` (with `-retry`) when `gh` fails.
  *
  * Sections: reviewers and comments have a header `pr-<id>__header`
  * (`aria-expanded`) with `pr-<id>__summary`; checks uses its `pr-checks__summary` row. Reviewers: `pr-reviewers__reviewer`
@@ -42,7 +43,9 @@ export class PrChecksPanelPage {
   readonly root: Locator;
   readonly error: Locator;
   readonly errorRetry: Locator;
-  readonly unavailable: Locator;
+  readonly readyButton: Locator;
+  /** The Checks tab button, absent when no provider serves the repo. */
+  readonly tab: Locator;
   readonly updated: Locator;
   readonly refreshButton: Locator;
   readonly menuButton: Locator;
@@ -97,7 +100,10 @@ export class PrChecksPanelPage {
     this.root = page.getByTestId("pr-checks");
     this.error = page.getByTestId("pr-checks__error");
     this.errorRetry = page.getByTestId("pr-checks__error-retry");
-    this.unavailable = page.getByTestId("pr-checks__unavailable");
+    this.readyButton = page
+      .getByTestId("pr-checks__action")
+      .and(page.locator('[data-action-id="ready"]'));
+    this.tab = this.worktree.rightPanelTab("github-pull-request");
     this.updated = page.getByTestId("pr-checks__updated");
     this.refreshButton = page.getByTestId("pr-checks__refresh");
     this.menuButton = page.getByTestId("pr-checks__menu");
@@ -228,6 +234,19 @@ export class PrChecksPanelPage {
     await this.worktree.selectRightPanelTab("github-pull-request");
     await expect(this.body).toBeVisible();
     await expect(this.loading).toHaveCount(0, { timeout: 15_000 });
+  }
+
+  /** Open the worktree and its right panel without selecting the Checks tab. */
+  async gotoWithoutTab(worktreeId: string): Promise<void> {
+    await this.worktree.goto(worktreeId);
+    await this.worktree.waitForReady();
+    await this.worktree.revealRightPanel();
+  }
+
+  async markReady(): Promise<void> {
+    await test.step("Click Ready for review", async () => {
+      await this.readyButton.click();
+    });
   }
 
   /** Switch to another worktree from the sidebar, without a page reload, and wait for its Checks tab. */

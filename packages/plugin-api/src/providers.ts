@@ -63,6 +63,45 @@ export interface RerunTarget {
   failedOnly?: boolean;
 }
 
+/** The icons an action may name. A fixed set, so the core draws every icon itself. */
+export type ReviewActionIcon = "merge" | "rerun" | "ready";
+
+/** Argument values an action carries. Plain JSON only. */
+export type ReviewActionArgs = Record<string, string | number | boolean>;
+
+/**
+ * Ids the core's own API knows (`reviews.merge`, `reviews.rerunChecks`). A provider that
+ * supports these operations offers actions with these ids; others are free-form.
+ */
+export const REVIEW_ACTION_MERGE = "merge";
+export const REVIEW_ACTION_RERUN_JOB = "rerun-job";
+export const REVIEW_ACTION_RERUN_FAILED = "rerun-failed";
+export const REVIEW_ACTION_READY = "ready";
+
+/**
+ * Something a person can do to a review, described as data. The core draws it and sends
+ * `runAction` back to the provider. An action is identified by its `id` and `args`: several
+ * actions may share an id when their args differ (one `merge` action per merge method).
+ */
+export interface ReviewAction {
+  id: string;
+  label: string;
+  icon: ReviewActionIcon;
+  /**
+   * `header` shows in the panel's header. `check` belongs to one check row; its `args.checkId`
+   * names the `CheckRun.id`. A `header` action with the `rerun` icon appears in the failing
+   * checks banner instead.
+   */
+  placement: "header" | "check";
+  /** Header actions with the same group show as one split button, the first being the default. */
+  group?: string;
+  args?: ReviewActionArgs;
+  /** When set, the core asks for confirmation with this text before it runs the action. */
+  confirm?: string;
+  /** When set, the action is shown but cannot run, and this says why. */
+  disabledReason?: string;
+}
+
 /** The overall state of a set of checks. `none` means there are no checks. */
 export type ChecksState = "success" | "failure" | "running" | "pending" | "cancelled" | "none";
 
@@ -171,6 +210,8 @@ export interface ReviewInfo {
   reviewers?: Reviewer[];
   /** Absent when the provider does not report comments. */
   discussion?: ReviewDiscussion;
+  /** What the person may do to this review now. */
+  actions: ReviewAction[];
 }
 
 export interface ReviewProvider {
@@ -178,15 +219,25 @@ export interface ReviewProvider {
   id: string;
   /** Shown in the UI, e.g. `GitHub`. */
   name: string;
+  /** Used in the Fix prompt: how an agent can read a failing job's log, e.g. a `gh run view` command. */
+  fixHint: string;
   matches(repo: RepoInfo): boolean;
   getReviewForBranch(
     repo: RepoInfo,
     branch: string,
     ctx: ProviderContext,
   ): Promise<ReviewInfo | null>;
-  merge?(repo: RepoInfo, number: number, method: MergeMethod, ctx: ProviderContext): Promise<void>;
-  /** Run CI jobs again. Rejects with the forge's message when it refuses. */
-  rerunChecks?(repo: RepoInfo, target: RerunTarget, ctx: ProviderContext): Promise<void>;
+  /**
+   * Run one of the `actions` the review offered. Rejects with the forge's message when it
+   * refuses or when the id or args are unknown.
+   */
+  runAction(
+    repo: RepoInfo,
+    number: number,
+    actionId: string,
+    args: ReviewActionArgs,
+    ctx: ProviderContext,
+  ): Promise<void>;
 }
 
 /** Checks for a ref that has no review, e.g. the default branch. */
@@ -203,7 +254,7 @@ export interface ChecksProvider {
 export type WorktreeReview =
   | {
       status: "ok";
-      provider: { id: string; name: string };
+      provider: { id: string; name: string; fixHint: string };
       repo: RepoInfo;
       branch: string;
       review: ReviewInfo | null;

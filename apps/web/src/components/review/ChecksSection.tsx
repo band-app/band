@@ -1,5 +1,4 @@
-import type { CheckRun, ChecksReport, ReviewInfo } from "@band-app/plugin-api";
-import { useClientPluginHost } from "@band-app/plugin-api/client";
+import type { CheckRun, ChecksReport, ReviewAction, ReviewInfo } from "@band-app/plugin-api";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import {
   ChevronDown,
@@ -11,6 +10,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
+import { clientPluginHost as host } from "../../plugins/client-plugin-host";
 import {
   CheckStateIcon,
   checkDuration,
@@ -19,9 +19,15 @@ import {
   countChecks,
   isCountingUp,
 } from "./check-status";
+import { runReviewAction, useReviewProviderInfo } from "./review-query";
 import { useSectionOpen } from "./section-state";
 
-function fixPrompt(branch: string, review: ReviewInfo | null, failing: CheckRun[]): string {
+function fixPrompt(
+  branch: string,
+  review: ReviewInfo | null,
+  failing: CheckRun[],
+  fixHint: string,
+): string {
   const subject = review ? `pull request #${review.number} (${review.title})` : `branch ${branch}`;
   const lines = failing.map((check) => {
     const name = check.workflowName ? `${check.workflowName} / ${check.name}` : check.name;
@@ -31,7 +37,7 @@ function fixPrompt(branch: string, review: ReviewInfo | null, failing: CheckRun[
     `These CI checks are failing on ${subject}:`,
     ...lines,
     "",
-    "Read the failing job logs (for example with `gh run view <run-id> --log-failed`), fix the causes, run the relevant checks locally, and push the fix.",
+    `Read the failing job logs${fixHint ? ` (${fixHint})` : ""}, fix the causes, run the relevant checks locally, and push the fix.`,
   ].join("\n");
 }
 
@@ -53,9 +59,19 @@ function useNow(ticking: boolean): number {
 // While a re-run waits to show up on GitHub, ask for the checks this often.
 const RERUN_POLL_MS = 5000;
 
-/** A finished job of a workflow run is the only kind GitHub can run again. */
-function canRerun(check: CheckRun): boolean {
-  return !!check.rerun && check.state !== "running" && check.state !== "pending";
+/** A job that finished can be run again; one still going cannot. */
+function isFinished(check: CheckRun): boolean {
+  return check.state !== "running" && check.state !== "pending";
+}
+
+/** The review's re-run action for one check row, when the provider offers one. */
+function rowAction(actions: ReviewAction[], check: CheckRun): ReviewAction | undefined {
+  return actions.find((a) => a.placement === "check" && a.args?.checkId === check.id);
+}
+
+/** Header actions that re-run checks show in the failing banner. */
+function bannerActions(actions: ReviewAction[]): ReviewAction[] {
+  return actions.filter((a) => a.placement === "header" && a.icon === "rerun");
 }
 
 function errorMessage(err: unknown): string {
@@ -80,7 +96,8 @@ export function ChecksSection({
   /** Asks for fresh checks; called every few seconds while a re-run is not yet listed. */
   refetch: () => void;
 }) {
-  const host = useClientPluginHost();
+  const provider = useReviewProviderInfo();
+  const actions = review?.actions ?? [];
   const [open, setOpen] = useSectionOpen("checks");
   const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");
@@ -96,7 +113,7 @@ export function ChecksSection({
   useEffect(() => {
     if (requeued.size === 0) return;
     const stale = new Set(
-      checks.checks.filter((c) => requeued.has(c.id) && canRerun(c)).map((c) => c.id),
+      checks.checks.filter((c) => requeued.has(c.id) && isFinished(c)).map((c) => c.id),
     );
     if (stale.size !== requeued.size) setRequeued(stale);
   }, [checks, requeued]);
@@ -108,13 +125,12 @@ export function ChecksSection({
     return () => clearInterval(timer);
   }, [waiting, visible, refetch]);
 
-  const rerunChecks = host.rerunChecks;
   const rerun = useCallback(
-    async (targets: CheckRun[], request: Parameters<typeof rerunChecks>[1]) => {
+    async (targets: CheckRun[], toRun: ReviewAction[]) => {
       const ids = targets.map((c) => c.id);
       setRerunning((prev) => new Set([...prev, ...ids]));
       try {
-        await rerunChecks(worktreeId, request);
+        for (const action of toRun) await runReviewAction(worktreeId, action.id, action.args);
         setRequeued((prev) => new Set([...prev, ...ids]));
         setRerunErrors((prev) =>
           Object.fromEntries(Object.entries(prev).filter(([k]) => !ids.includes(k))),
@@ -123,14 +139,13 @@ export function ChecksSection({
         setRerunning((prev) => new Set([...prev].filter((id) => !ids.includes(id))));
       }
     },
-    [rerunChecks, worktreeId],
+    [worktreeId],
   );
 
   const rerunOne = useCallback(
-    async (check: CheckRun) => {
-      if (!check.rerun) return;
+    async (check: CheckRun, action: ReviewAction) => {
       try {
-        await rerun([check], [{ runId: check.rerun.runId, jobId: check.rerun.jobId }]);
+        await rerun([check], [action]);
       } catch (err) {
         setRerunErrors((prev) => ({ ...prev, [check.id]: errorMessage(err) }));
       }
@@ -141,9 +156,7 @@ export function ChecksSection({
   if (checks.checks.length === 0) {
     return (
       <p className="px-3 py-4 text-xs text-muted-foreground" data-testid="pr-checks__empty">
-        {review
-          ? "No checks reported for this pull request."
-          : "No GitHub Actions jobs ran on this branch."}
+        {review ? "No checks reported for this pull request." : "No CI jobs ran on this branch."}
       </p>
     );
   }
@@ -151,18 +164,13 @@ export function ChecksSection({
   const counts = countChecks(checks.checks);
   const failing = checks.checks.filter((c) => c.state === "failure");
 
-  // One `--failed` request per workflow run, however many of its jobs failed.
-  const failedRuns = [
-    ...new Set(failing.flatMap((c) => (c.rerun && canRerun(c) ? [c.rerun.runId] : []))),
-  ];
-  const rerunnableFailing = failing.filter((c) => c.rerun && canRerun(c));
+  // One request per workflow run, however many of its jobs failed.
+  const failedActions = bannerActions(actions);
+  const rerunnableFailing = failing.filter((c) => rowAction(actions, c) && isFinished(c));
   const rerunFailed = async () => {
     setRerunFailedError(null);
     try {
-      await rerun(
-        rerunnableFailing,
-        failedRuns.map((runId) => ({ runId, failedOnly: true })),
-      );
+      await rerun(rerunnableFailing, failedActions);
     } catch (err) {
       setRerunFailedError(errorMessage(err));
     }
@@ -173,7 +181,10 @@ export function ChecksSection({
     setFixState("starting");
     setFixError(null);
     try {
-      const started = await host.startAgent(worktreeId, fixPrompt(branch, review, failing));
+      const started = await host.startAgent(
+        worktreeId,
+        fixPrompt(branch, review, failing, provider.fixHint),
+      );
       setFixPaneId(started.chatId ?? started.terminalId ?? null);
       setFixState("started");
     } catch (err) {
@@ -219,7 +230,7 @@ export function ChecksSection({
               )}
             </p>
           </div>
-          {failedRuns.length > 0 && (
+          {failedActions.length > 0 && (
             <button
               type="button"
               onClick={() => void rerunFailed()}
@@ -232,7 +243,7 @@ export function ChecksSection({
               ) : (
                 <RotateCw className="size-3.5" aria-hidden />
               )}
-              Re-run failed
+              {failedActions[0]?.label}
             </button>
           )}
           <button
@@ -276,6 +287,7 @@ export function ChecksSection({
                 check={requeued.has(check.id) ? asQueued(check) : check}
                 rerunning={rerunning.has(check.id)}
                 rerunError={rerunErrors[check.id] ?? null}
+                rerunAction={rowAction(actions, check)}
                 onRerun={rerunOne}
                 // Rows without a growing elapsed time keep a stable prop and skip the tick.
                 now={isCountingUp(check) ? now : 0}
@@ -322,15 +334,17 @@ const CheckRow = memo(function CheckRow({
   now,
   rerunning,
   rerunError,
+  rerunAction,
   onRerun,
 }: {
   check: CheckRun;
   now: number;
   rerunning: boolean;
   rerunError: string | null;
-  onRerun: (check: CheckRun) => void;
+  rerunAction: ReviewAction | undefined;
+  onRerun: (check: CheckRun, action: ReviewAction) => void;
 }) {
-  const host = useClientPluginHost();
+  const provider = useReviewProviderInfo();
   const [open, setOpen] = useState(false);
   const duration = checkDuration(check) ?? checkElapsed(check, now);
   return (
@@ -368,13 +382,13 @@ const CheckRow = memo(function CheckRow({
               </span>
             </button>
           </CollapsibleTrigger>
-          {(canRerun(check) || rerunning) && (
+          {((rerunAction && isFinished(check)) || rerunning) && (
             <button
               type="button"
               aria-label={`Re-run ${check.name}`}
-              title="Re-run job"
+              title={rerunAction?.label ?? "Re-run job"}
               disabled={rerunning}
-              onClick={() => onRerun(check)}
+              onClick={() => rerunAction && onRerun(check, rerunAction)}
               data-testid="pr-checks__check-rerun"
               className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
             >
@@ -390,7 +404,7 @@ const CheckRow = memo(function CheckRow({
               href={check.url}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Open ${check.name} on GitHub`}
+              aria-label={`Open ${check.name} on ${provider.name}`}
               data-testid="pr-checks__check-link"
               onClick={(e) => {
                 // Electron would navigate the dashboard's own webview.

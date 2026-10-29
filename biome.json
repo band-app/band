@@ -237,6 +237,37 @@
           }
         }
       }
+    },
+    {
+      "includes": ["plugins/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@band-app/*",
+                      "@band-app/*/**",
+                      "!@band-app/plugin-api",
+                      "!@band-app/plugin-api/**",
+                      "!@band-app/ui",
+                      "!@band-app/ui/**"
+                    ],
+                    "message": "A plugin imports only @band-app/plugin-api, @band-app/ui and its own dependencies. Anything else of Band's goes through the plugin API."
+                  },
+                  {
+                    "group": ["**/apps/**", "**/packages/**"],
+                    "message": "A plugin must not import Band's apps or packages by path. Use @band-app/plugin-api."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

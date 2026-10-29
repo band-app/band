@@ -52,6 +52,7 @@ const TOKEN = "e2e-pr-checks-token";
 const REPO = "widgets";
 const PR_BRANCH = "feat/login";
 const READY_BRANCH = "feat/ready";
+const DRAFT_BRANCH = "feat/draft";
 const MERGE_FAIL_BRANCH = "feat/merge-blocked";
 const REFRESH_BRANCH = "feat/refresh";
 const GH_DOWN_BRANCH = "feat/gh-down";
@@ -73,6 +74,9 @@ let stub: GhStub;
 let tmpHome: string;
 const merges: GhInvocation[] = [];
 const reruns: GhInvocation[] = [];
+const readies: GhInvocation[] = [];
+// The draft test swaps this once `gh pr ready` ran.
+let draftAnswer: unknown;
 // The re-run test swaps this once GitHub has started the job again.
 let rerunAnswer: unknown;
 // The refresh test swaps this between lookups.
@@ -197,6 +201,7 @@ test.beforeAll(async () => {
     FIX_TERM_BRANCH,
     MERGED_CLEAN_BRANCH,
     MERGED_DIRTY_BRANCH,
+    DRAFT_BRANCH,
   ].map((branch) => {
     const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
     git(repo, ["worktree", "add", "-b", branch, path]);
@@ -347,6 +352,18 @@ test.beforeAll(async () => {
       reviewQueryData({ pullRequests: [pullRequestNode({ number, state: "MERGED" })] }),
     );
   }
+  draftAnswer = reviewQueryData({
+    pullRequests: [pullRequestNode({ number: 750, isDraft: true, mergeStateStatus: "DRAFT" })],
+  });
+  stub.setReviewQuery(FAKE_REPO, DRAFT_BRANCH, () => draftAnswer);
+  stub.setPrReady(750, {
+    onRequest: (r) => {
+      readies.push(r);
+      draftAnswer = reviewQueryData({
+        pullRequests: [pullRequestNode({ number: 750, mergeStateStatus: "CLEAN" })],
+      });
+    },
+  });
   stub.setPrMerge(700, { onRequest: (r) => merges.push(r) });
   stub.setReviewQuery(
     FAKE_REPO,
@@ -646,6 +663,37 @@ test("merging from the menu runs gh pr merge with the chosen method", async ({ p
     .toEqual([["pr", "merge", "700", "--rebase", "--repo", "github.com/acme/widgets"]]);
 });
 
+test("the main merge button squashes by default", async ({ page }) => {
+  merges.length = 0;
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, READY_BRANCH, "local"));
+  await expect(panel.mergeButton).toBeEnabled();
+
+  await panel.mergeButton.click();
+  await expect(panel.mergeConfirm).toContainText("Squash and merge #700?");
+  await panel.mergeConfirmButton.click();
+
+  await expect
+    .poll(() => merges.map((m) => m.args))
+    .toEqual([["pr", "merge", "700", "--squash", "--repo", "github.com/acme/widgets"]]);
+});
+
+test("a draft pull request offers Ready for review, which runs gh pr ready", async ({ page }) => {
+  readies.length = 0;
+  const panel = new PrChecksPanelPage(page, server.url, TOKEN);
+  await panel.goto(toWorktreeId(REPO, DRAFT_BRANCH, "local"));
+  await expect(panel.state).toHaveAttribute("data-review-state", "draft");
+  await expect(panel.mergeButton).toBeDisabled();
+
+  await panel.markReady();
+
+  await expect
+    .poll(() => readies.map((r) => r.args))
+    .toEqual([["pr", "ready", "750", "--repo", "github.com/acme/widgets"]]);
+  await expect(panel.state).toHaveAttribute("data-review-state", "open");
+  await expect(panel.readyButton).toHaveCount(0);
+});
+
 test("the merge confirm replaces the button in place and names the method", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
   await panel.goto(toWorktreeId(REPO, READY_BRANCH, "local"));
@@ -769,11 +817,11 @@ test("a gh failure shows the error with a retry button", async ({ page }) => {
   await expect(panel.root).toHaveCount(0);
 });
 
-test("a repo without an origin remote shows why the tab is empty", async ({ page }) => {
+test("a repo without an origin remote has no Checks tab", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
-  await panel.goto(toWorktreeId("local-only", "main", "local"));
+  await panel.gotoWithoutTab(toWorktreeId("local-only", "main", "local"));
 
-  await expect(panel.unavailable).toBeVisible();
+  await expect(panel.tab).toHaveCount(0);
   await expect(panel.root).toHaveCount(0);
 });
 

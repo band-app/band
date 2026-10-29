@@ -1,13 +1,13 @@
 /**
- * The GitHub plugin's Checks tab (`plugins/github`), named the way
- * `RightSidepanel` names plugin tabs: `plugin:<pluginId>.<tabId>`.
+ * The core's Checks tab (`components/review`), named the way `RightSidepanel`
+ * names tabs from `useWorktreeSideTabs`: `plugin:<pluginId>.<tabId>`.
  */
-export const CHECKS_SIDE_TAB = "plugin:github.pull-request";
+export const CHECKS_SIDE_TAB = "plugin:core.checks";
 
 /**
  * Reveal the right sidepanel on the Checks tab. `RightSidepanel` remembers
  * the tab, so call this before navigating to another worktree and that
- * worktree's panel opens on it. With the GitHub plugin disabled the panel
+ * worktree's panel opens on it. With no review provider for the worktree the panel
  * shows Explorer.
  *
  * `worktreeId` names the worktree the tab is for. The mobile layout has no

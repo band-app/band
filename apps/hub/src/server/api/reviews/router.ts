@@ -9,6 +9,19 @@ import {
 } from "../../services/review-service";
 import { publicProcedure, t } from "../trpc";
 
+function toTrpcError(err: unknown): unknown {
+  if (err instanceof WorktreeNotFoundError) {
+    return new TRPCError({ code: "NOT_FOUND", message: err.message });
+  }
+  if (err instanceof NoOpenReviewError) {
+    return new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
+  }
+  if (err instanceof ReviewProviderError) {
+    return new TRPCError({ code: "BAD_REQUEST", message: err.message });
+  }
+  return err;
+}
+
 /**
  * Code reviews (pull requests) and checks for a worktree's branch. The data
  * comes from the review provider a plugin registers for the repo's
@@ -26,14 +39,41 @@ export const reviewsRouter = t.router({
       try {
         return await reviewService.forWorktree(input.worktreeId);
       } catch (err) {
-        if (err instanceof WorktreeNotFoundError) {
-          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
-        }
-        throw err;
+        throw toTrpcError(err);
       }
     }),
 
-  /** Merge the worktree branch's open review. */
+  /** The provider that serves the worktree's repo, or null. Runs no forge command, so it is cheap to ask. */
+  provider: publicProcedure.input(z.object({ worktreeId: z.string() })).query(async ({ input }) => {
+    try {
+      return await reviewService.providerFor(input.worktreeId);
+    } catch (err) {
+      throw toTrpcError(err);
+    }
+  }),
+
+  /** Run one of the actions the provider listed in the review's `actions`. */
+  runAction: publicProcedure
+    .input(
+      z.object({
+        worktreeId: z.string(),
+        actionId: z.string().min(1).max(100),
+        args: z
+          .record(z.union([z.string().max(500), z.number(), z.boolean()]))
+          .refine((o) => Object.keys(o).length <= 10, "Too many arguments.")
+          .default({}),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        await reviewService.runAction(input.worktreeId, input.actionId, input.args);
+        return { ok: true as const };
+      } catch (err) {
+        throw toTrpcError(err);
+      }
+    }),
+
+  /** Merge the worktree branch's open review. Wraps the `merge` action. */
   merge: publicProcedure
     .input(
       z.object({
@@ -46,16 +86,7 @@ export const reviewsRouter = t.router({
         await reviewService.merge(input.worktreeId, input.method);
         return { ok: true as const };
       } catch (err) {
-        if (err instanceof WorktreeNotFoundError) {
-          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
-        }
-        if (err instanceof NoOpenReviewError) {
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
-        }
-        if (err instanceof ReviewProviderError) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
-        }
-        throw err;
+        throw toTrpcError(err);
       }
     }),
 
@@ -81,16 +112,7 @@ export const reviewsRouter = t.router({
         await reviewService.rerunChecks(input.worktreeId, input.targets);
         return { ok: true as const };
       } catch (err) {
-        if (err instanceof WorktreeNotFoundError) {
-          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
-        }
-        if (err instanceof NoOpenReviewError) {
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
-        }
-        if (err instanceof ReviewProviderError) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
-        }
-        throw err;
+        throw toTrpcError(err);
       }
     }),
 });
