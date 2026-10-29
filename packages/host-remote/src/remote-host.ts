@@ -53,6 +53,7 @@ import {
   METHOD_RELAY_REVOKE,
   type RelayRegisterReply,
 } from "@band-app/link";
+import { RemoteAgent } from "./agent";
 import { RemoteTerminalBackend } from "./pty";
 import { channelBytes, channelJsonLines, RemoteRpc } from "./rpc";
 
@@ -88,6 +89,8 @@ export class RemoteHost implements Host {
   private readonly rpc: RemoteRpc;
 
   private readonly agents = new Map<string, (exit: AgentExit) => void>();
+  /** Agents in the worker's agent daemon, which outlive a link session. */
+  private readonly heldAgents = new Map<string, RemoteAgent>();
   private readonly plans = new Map<string, PendingPlan>();
 
   constructor(options: RemoteHostOptions) {
@@ -105,6 +108,10 @@ export class RemoteHost implements Host {
       const { agentId, code, signal } = params as { agentId: string } & AgentExit;
       this.agents.get(agentId)?.({ code: code ?? null, signal: signal ?? null });
       this.agents.delete(agentId);
+      if (this.heldAgents.delete(agentId)) {
+        // The daemon keeps an exited agent until told the hub has seen it.
+        this.rpc.request("acp.forget", { agentId }).catch(() => undefined);
+      }
     });
     session.onNotification("scripts.exited", (params) => {
       const { planId, code } = params as { planId: string; code: number };
@@ -114,13 +121,31 @@ export class RemoteHost implements Host {
     session.once("destroyed", () => this.handleSessionLost());
   }
 
-  /** The session ended for good: whatever ran on it is gone. */
+  /** The session ended for good: whatever ran on it is gone, except agents the worker's daemon holds. */
   private handleSessionLost(): void {
-    for (const resolve of this.agents.values()) resolve({ code: null, signal: "link-lost" });
-    this.agents.clear();
+    for (const [agentId, resolve] of [...this.agents]) {
+      const held = this.heldAgents.get(agentId);
+      if (held) {
+        // Still running on the worker. It waits there for the worker to come back.
+        held.detach();
+        continue;
+      }
+      resolve({ code: null, signal: "link-lost" });
+      this.agents.delete(agentId);
+    }
     for (const plan of this.plans.values()) plan.resolve(-1);
     this.plans.clear();
     this.pty.handleSessionLost();
+  }
+
+  /**
+   * Reattaches the agents that waited for this worker, then tells it which agents the hub still
+   * wants so it can end the ones nobody does. Call it after the worker's hello.
+   */
+  async reattachAgents(): Promise<void> {
+    await Promise.all([...this.heldAgents.values()].map((agent) => agent.reattach()));
+    const keep = [...this.heldAgents.values()].filter((a) => !a.isGone).map((a) => a.agentId);
+    await this.rpc.request("acp.reconcile", { keep }).catch(() => undefined);
   }
 
   async info(): Promise<HostInfo> {
@@ -425,9 +450,28 @@ export class RemoteHost implements Host {
       pid: number | null;
       stdio: number;
       stderr: number;
+      held?: boolean;
+      ghToken?: boolean;
     }>("acp.spawn", { ...launch, cwd });
     const stdio = this.rpc.channel(reply.stdio);
     const stderr = this.rpc.channel(reply.stderr);
+    if (reply.held) {
+      const agent = new RemoteAgent(
+        this.rpc,
+        reply.agentId,
+        reply.pid ?? undefined,
+        stdio,
+        stderr,
+        { specHash: launch.specHash ?? null, ghToken: reply.ghToken === true },
+        (agentId) => {
+          this.heldAgents.delete(agentId);
+          this.agents.delete(agentId);
+        },
+      );
+      this.heldAgents.set(reply.agentId, agent);
+      this.agents.set(reply.agentId, (exit) => agent.notifyExit(exit));
+      return agent;
+    }
     let closed = false;
     // Whoever never calls `stdin.end()` would leave the worker waiting on this channel for good,
     // so the agent exiting ends the hub's side.
@@ -440,6 +484,7 @@ export class RemoteHost implements Host {
     );
     return {
       pid: reply.pid ?? undefined,
+      ghToken: reply.ghToken === true,
       stdin: {
         write: (chunk) => {
           if (closed) return;

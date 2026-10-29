@@ -101,11 +101,11 @@ export class HeldAgentProcess implements AgentStdio {
   }
 
   get held(): NonNullable<AgentStdio["held"]> {
-    return {
-      agentId: this.record.agentId,
-      specHash: this.record.specHash,
-      ghToken: this.record.ghToken,
-    };
+    return { agentId: this.record.agentId, specHash: this.record.specHash };
+  }
+
+  get ghToken(): boolean {
+    return this.record.ghToken;
   }
 
   readonly stdin: AgentStdio["stdin"] = {

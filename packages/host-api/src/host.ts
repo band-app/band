@@ -488,7 +488,9 @@ export interface AgentStdio {
    * Set when a process outside the caller's reach holds the agent (the worker's agent daemon), so it
    * survives the link and the worker restarting. The same `agentId` reattaches it.
    */
-  held?: { agentId: string; specHash: string | null; ghToken: boolean };
+  held?: { agentId: string; specHash: string | null };
+  /** The process holds a GitHub token from the hub's vault in its environment. */
+  ghToken?: boolean;
   /**
    * Calls `listener` each time the agent is reattached after the link or the worker was lost.
    * A host that cannot lose its agents never calls it.

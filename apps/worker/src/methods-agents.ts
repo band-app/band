@@ -112,7 +112,8 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
       agentId,
       pid: stdio.pid ?? null,
       ...channels,
-      ...(held ? { held: true, ghToken: held.record.ghToken } : {}),
+      ghToken: Boolean(env.GH_TOKEN),
+      ...(held ? { held: true } : {}),
     };
   });
 
