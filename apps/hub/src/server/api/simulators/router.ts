@@ -6,7 +6,7 @@ import { publicProcedure, t } from "../trpc";
 const input = z.object({ worktreeId: z.string().min(1) });
 
 /**
- * A worktree's iOS simulator for the Simulator tab (the `simulator` plugin, `docs/simulator.md`).
+ * A worktree's iOS simulator for the Simulator tab (the `simulator` plugin).
  * The live screen is the WebSocket route `/api/plugins/simulator/worktrees/<id>/stream`. These
  * procedures are a person's: the MCP endpoint and the worker relay leave them out, and an agent
  * uses the `simulator_*` tools.

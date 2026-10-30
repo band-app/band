@@ -182,6 +182,9 @@ test.beforeAll(async () => {
       BAND_WORKER_ID: hostId,
       BAND_SIMULATOR_NAME_PREFIX: PREFIX,
       BAND_SIMULATOR_MAX_BOOTED: "1",
+      // The scripted agent, so a chat on the Mac worker's worktree answers.
+      ...acpStubEnv(tmpHome),
+      BAND_TEST_ACP_SCENARIO: join(tmpHome, "acp-scenario.json"),
     },
     root,
     stateDir: tmpDir("band-e2e-sim-state-"),
@@ -309,8 +312,10 @@ test.describe("with a Mac worker", () => {
 
     // The Maps widget sits in the upper left of a fresh iPhone's home screen.
     await sim.clickAt(0.27, 0.21);
-    await page.waitForTimeout(2000);
-    expect(await foreground(udid)).toBe("com.apple.springboard");
+    // Nothing happens, so give the click a window in which it would have, and check the app stayed.
+    await expect(async () => {
+      expect(await foreground(udid)).toBe("com.apple.springboard");
+    }).toPass({ timeout: 4000, intervals: [500] });
 
     await sim.takeControl();
     await sim.clickAt(0.27, 0.21);
@@ -321,6 +326,38 @@ test.describe("with a Mac worker", () => {
     // (`apps/hub/tests/simulator-plugin.test.ts`) checks that on the device.
     await sim.release();
     await expect(sim.status).toHaveText("View only");
+  });
+
+  test("the header controls: rotate is gated by control, the screenshot downloads, Reveal is absent in a browser", async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    const sim = new SimulatorPage(page, server.url, TOKEN);
+    await sim.open(simWorktree);
+    await sim.openFromMenu();
+    await sim.waitLive();
+    await expect(sim.revealButton).toHaveCount(0);
+
+    const download = await sim.saveScreenshot();
+    expect(download.suggestedFilename()).toMatch(/\.png$/);
+
+    // Rotate needs control. serve-sim keeps the captured framebuffer portrait on this Xcode
+    // (probe in docs/simulator.md), so the test checks that the press leaves the stream live.
+    await expect(sim.rotateButton).toBeDisabled();
+    await sim.takeControl();
+    await sim.rotateButton.click();
+    await expect(sim.screen).toHaveAttribute("data-phase", "live");
+  });
+
+  test("the Open simulator button on a simulator tool call opens the tab", async ({ page }) => {
+    test.setTimeout(300_000);
+    const sim = new SimulatorPage(page, server.url, TOKEN);
+    await sim.open(simWorktree);
+    await expect(sim.tab).toHaveCount(0);
+    await sim.say("take a screenshot", "Here is the screen.");
+    await sim.openSimulatorButton.click();
+    await expect(sim.tab).toBeVisible();
+    await sim.waitLive();
   });
 
   test("S9: band simulators open opens the tab for the connected client", async ({ page }) => {

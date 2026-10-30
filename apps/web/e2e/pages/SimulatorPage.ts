@@ -20,6 +20,9 @@ export class SimulatorPage {
   readonly status: Locator;
   readonly controlToggle: Locator;
   readonly homeButton: Locator;
+  readonly rotateButton: Locator;
+  readonly revealButton: Locator;
+  readonly screenshotButton: Locator;
   readonly toolImage: Locator;
   readonly toolImageFull: Locator;
   readonly openSimulatorButton: Locator;
@@ -40,6 +43,9 @@ export class SimulatorPage {
     this.status = page.getByTestId("remote-screen__status");
     this.controlToggle = page.getByTestId("remote-screen__control");
     this.homeButton = page.getByTestId("simulator-panel__home");
+    this.rotateButton = page.getByTestId("simulator-panel__rotate");
+    this.revealButton = page.getByTestId("simulator-panel__reveal");
+    this.screenshotButton = page.getByTestId("remote-screen__screenshot");
     this.toolImage = page.getByTestId("tool-call__image").first();
     this.toolImageFull = page.getByTestId("tool-call__image-full");
     this.openSimulatorButton = page.getByTestId("tool-call__open-simulator").first();
@@ -147,6 +153,15 @@ export class SimulatorPage {
   /** The canvas as a PNG, for telling whether the screen changed. */
   canvasPixels(): Promise<Buffer> {
     return this.canvas.screenshot();
+  }
+
+  /** Clicks the screenshot button and returns the download it starts. */
+  async saveScreenshot() {
+    const [download] = await Promise.all([
+      this.page.waitForEvent("download"),
+      this.screenshotButton.click(),
+    ]);
+    return download;
   }
 
   async closeTab(): Promise<void> {

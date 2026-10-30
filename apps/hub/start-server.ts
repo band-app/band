@@ -39,6 +39,7 @@ import {
   isPairLinkRequest,
   PAIR_EXCHANGE_PATH,
 } from "./src/server/api/pairing/handler.ts";
+import { handlePluginStream, pluginStreamTarget } from "./src/server/api/plugins/stream-handler.ts";
 import { handleProvision, isProvisionRequest } from "./src/server/api/provisioning/handler.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
@@ -65,7 +66,6 @@ import {
 } from "./src/server/infra/host/desktop-proxy.ts";
 import { hostRegistry } from "./src/server/infra/host/registry.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
-import { handlePluginStream, pluginStreamTarget } from "./src/server/infra/plugins/stream-proxy.ts";
 import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
 import {
   startUsageScanner,

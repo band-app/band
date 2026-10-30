@@ -37,6 +37,9 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
   const [info, setInfo] = useState<RemoteScreenInfo | null>(null);
   const [attempt, setAttempt] = useState(0);
   const retriesRef = useRef(0);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const pendingRef = useRef<ArrayBuffer | null>(null);
 
   useEffect(() => {
     // `attempt` re-runs this effect to reconnect.
@@ -50,14 +53,14 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     let drawing = false;
-    let pending: ArrayBuffer | null = null;
     const draw = async () => {
-      if (drawing) return;
+      // A hidden tab keeps the newest frame and decodes it when it is shown again.
+      if (drawing || !visibleRef.current) return;
       drawing = true;
       try {
-        while (pending && !disposed) {
-          const bytes = pending;
-          pending = null;
+        while (pendingRef.current && !disposed && visibleRef.current) {
+          const bytes = pendingRef.current;
+          pendingRef.current = null;
           const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
           const canvas = canvasRef.current;
           if (canvas) {
@@ -89,7 +92,7 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
         }
         return;
       }
-      pending = event.data as ArrayBuffer;
+      pendingRef.current = event.data as ArrayBuffer;
       void draw();
     });
     ws.addEventListener("close", (event) => {
@@ -112,6 +115,28 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
       ws.close();
     };
   }, [pluginId, worktreeId, attempt]);
+
+  // Showing the tab again draws the frame that arrived while it was hidden.
+  useEffect(() => {
+    if (!visible || !pendingRef.current) return;
+    const canvas = canvasRef.current;
+    const bytes = pendingRef.current;
+    pendingRef.current = null;
+    void createImageBitmap(new Blob([bytes], { type: "image/jpeg" })).then((bitmap) => {
+      if (canvas) {
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+      }
+      bitmap.close();
+    });
+  }, [visible]);
+
+  const reconnect = useCallback(() => {
+    retriesRef.current = 0;
+    setCloseReason(null);
+    setAttempt((n) => n + 1);
+  }, []);
 
   const send = useCallback((message: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -185,6 +210,16 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
             </PopoverTrigger>
             <PopoverContent className="text-xs">{closeReason}</PopoverContent>
           </Popover>
+        )}
+        {phase === "closed" && (
+          <button
+            type="button"
+            data-testid="remote-screen__reconnect"
+            onClick={reconnect}
+            className="inline-flex h-6 items-center rounded px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            Reconnect
+          </button>
         )}
         <div className="ml-auto flex items-center gap-0.5">
           {actions?.(api)}

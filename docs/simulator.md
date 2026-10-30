@@ -52,13 +52,15 @@ The viewer starts view-only. Take control sends `{"type":"control","enabled":tru
 
 ### The stream
 
-`GET /api/plugins/<plugin id>/worktrees/<worktree id>/stream` is a WebSocket (`infra/plugins/stream-proxy.ts`), built like the desktop route. It takes a device token. The worker relay lists no such route, so an agent gets 403 (`remote-relay.test.ts`). The hub opens a `plugin.stream` link channel (`packages/link/src/plugins.ts`, `PluginStream` in `plugin-api`) to the worker's plugin; messages are text or bytes framed by `encodeMessageFrame`. The browser never connects to the worker, so it works through a remote hub.
+`GET /api/plugins/<plugin id>/worktrees/<worktree id>/stream` is a WebSocket (`api/plugins/stream-handler.ts`), built like the desktop route. It takes a device token. The worker relay lists no such route, so an agent gets 403 (`remote-relay.test.ts`). The hub opens a `plugin.stream` link channel (`packages/link/src/plugins.ts`, `PluginStream` in `plugin-api`) to the worker's plugin; messages are text or bytes framed by `encodeMessageFrame`. The browser never connects to the worker, so it works through a remote hub.
 
 Messages to the browser: one text `{"type":"info"}` (screen size in points, device udid and name), then one binary JPEG per frame. serve-sim's MJPEG is parsed by `Content-Length` on the worker; a slow viewer gets the newest frame, not a queue. H.264 is not used. Messages from the browser are JSON. The hub handles `control` and drops every other message, and every binary one, until control is on. Several viewers may connect; each has its own channel.
 
 ## Adopting this for the VNC desktop viewer
 
 `RemoteScreen` is generic over what draws the frames and what the input messages mean. The desktop viewer could adopt it by a plugin-style stream whose messages are RFB bytes: swap the canvas drawing for noVNC's, and keep the header, the control toggle and the reconnect rules, which are the same. That is not done here.
+
+Rotate: the header button sends `serve-sim rotate`, but on Xcode 26.6 the captured framebuffer and the accessibility screen stayed 1206x2622 and 402x874 after `landscape_left`, so the viewer shows no rotation there. The button is wired and gated by control; a visible effect is not verified.
 
 ## What breaks it
 

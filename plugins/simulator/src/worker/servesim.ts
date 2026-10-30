@@ -53,8 +53,18 @@ function serveSimEntry(): string {
 function serveSim(args: string[], options: { stdin?: string; timeoutMs?: number } = {}) {
   return run(process.execPath, [serveSimEntry(), ...args], {
     ...options,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    // The helper outlives the call and runs third-party code, so it gets no Band or credential variables.
+    env: childEnv(),
   });
+}
+
+function childEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: "1" };
+  for (const key of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "USER", "DEVELOPER_DIR"]) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -146,8 +156,16 @@ export class ServeSimHelpers {
   }
 
   private async tree(udid: string): Promise<AxNode[]> {
-    const helper = await this.helper(udid);
-    const res = await fetch(helper.axUrl, { signal: AbortSignal.timeout(20_000) });
+    let helper = await this.helper(udid);
+    let res: Response;
+    try {
+      res = await fetch(helper.axUrl, { signal: AbortSignal.timeout(20_000) });
+    } catch {
+      // The helper died (its device was shut down elsewhere): start a new one once.
+      this.forget(udid);
+      helper = await this.helper(udid);
+      res = await fetch(helper.axUrl, { signal: AbortSignal.timeout(20_000) });
+    }
     if (!res.ok) {
       this.forget(udid);
       throw new Error(`serve-sim accessibility request failed: ${res.status}`);

@@ -1,4 +1,4 @@
-import type { PluginStream, StreamMessage } from "@band-app/plugin-api/worker";
+import type { PluginStream } from "@band-app/plugin-api/worker";
 import WebSocket from "ws";
 import type { Helper, ServeSimHelpers } from "./servesim.ts";
 
@@ -124,14 +124,13 @@ export function openScreenStream(
   info: { width: number; height: number; udid: string; name: string },
 ): PluginStream {
   const abort = new AbortController();
-  const latest = new Latest<StreamMessage>();
+  const latest = new Latest<Buffer>();
   const hid = openHid(helper);
 
   void (async () => {
     try {
       const res = await fetch(helper.streamUrl, { signal: abort.signal });
       if (!res.ok || !res.body) throw new Error(`serve-sim stream answered ${res.status}`);
-      latest.push(JSON.stringify({ type: "info", ...info }));
       for await (const frame of mjpegFrames(res.body as unknown as AsyncIterable<Uint8Array>)) {
         latest.push(frame);
       }
@@ -143,8 +142,15 @@ export function openScreenStream(
   })();
 
   let typing: Promise<unknown> = Promise.resolve();
+  // The info message goes first and is never coalesced; only frames are.
+  const output = (async function* () {
+    yield JSON.stringify({ type: "info", ...info });
+    yield* latest;
+  })();
+  let rotating = false;
+  let queuedText = 0;
   return {
-    output: latest,
+    output,
     write(message) {
       if (typeof message !== "string") return;
       let msg: Record<string, unknown>;
@@ -178,12 +184,25 @@ export function openScreenStream(
         case "text": {
           const text = msg.text;
           if (typeof text !== "string" || text === "" || text.length > 1000) return;
-          typing = typing.then(() => helpers.type(helper.udid, text)).catch(() => undefined);
+          // A controlling viewer cannot queue more than a few typed chunks at once.
+          if (queuedText >= 20) return;
+          queuedText++;
+          typing = typing
+            .then(() => helpers.type(helper.udid, text))
+            .catch(() => undefined)
+            .finally(() => queuedText--);
           return;
         }
         case "rotate": {
           if (typeof msg.orientation === "string" && ORIENTATIONS.has(msg.orientation)) {
-            void helpers.rotate(helper.udid, msg.orientation).catch(() => undefined);
+            if (rotating) return;
+            rotating = true;
+            void helpers
+              .rotate(helper.udid, msg.orientation)
+              .catch(() => undefined)
+              .finally(() => {
+                rotating = false;
+              });
           }
           return;
         }
