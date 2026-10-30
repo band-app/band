@@ -45,7 +45,7 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
   };
   // A cold boot can take minutes on a CI runner. `RemoteHost` gives `plugin.call` five minutes
   // (`SLOW_CALLS` in packages/host-remote/src/rpc.ts), so the stand-in hub does the same.
-  const status = () =>
+  const rawStatus = () =>
     call<{ udid: string; state: string }>(
       w.session,
       METHOD_PLUGIN_CALL,
@@ -58,6 +58,20 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
       },
       { timeoutMs: 5 * 60_000 },
     );
+  const dropped = (err: unknown) => /link dropped|link closed/i.test(String(err));
+  // The stand-in hub heartbeats every second and gives up after three misses, so a loaded CI runner
+  // can drop the link during a cold boot. The session resumes and the worker keeps booting, so a call
+  // that met the drop is made again; the worker queues it behind the boot.
+  const status = async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await rawStatus();
+      } catch (err) {
+        if (!dropped(err) || attempt >= 10) throw err;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  };
   const renew = (ttlMs: number) =>
     call<LeaseRenewReply>(w.session, METHOD_LEASE_RENEW, { ttlMs, blockedPaths: [] });
 
@@ -100,12 +114,11 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
     let refusal = "";
     for (let attempt = 0; attempt < 20 && !refusal; attempt++) {
       try {
-        await status();
+        await rawStatus();
         assert.fail("a fenced worker answered a plugin call");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (/link dropped|link closed/i.test(message))
-          await new Promise((r) => setTimeout(r, 1000));
+        if (dropped(err)) await new Promise((r) => setTimeout(r, 1000));
         else refusal = message;
       }
     }
