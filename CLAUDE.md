@@ -61,6 +61,17 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 - Network: after the install and the CLI build, the suite needs none. `runner-docker`, `runner-k8s-kind` and `environment-build-docker` skip without Docker or a cluster.
 - Teardown: start servers with `startServer` from `tests/helpers/server.ts`, which waits for the server's process group before the test deletes its temp home, and delete the home with `removeTmpHome` (`tests/helpers/tmp-home.ts`), which lists leftover files when the delete fails with ENOTEMPTY.
 
+### Running the suites inside a Band worker
+
+An agent session runs in a Band worker, so its environment carries the worker's identity: `BAND_WORKER_ID`, `BAND_HUB_URL`, `BAND_SERVER_URL`, `BAND_TOKEN`, `BAND_WORKTREE_ID`, `BAND_CHAT_ID`, `BAND_GIT_CREDENTIAL_SOCK`, a credential helper in `GIT_CONFIG_*`, and possibly `GIT_ASKPASS`, `SSH_ASKPASS` and `GH_TOKEN`. A test that starts a hub, a `band-worker` or the CLI used to inherit them. The hub then refused a test worker's bootstrap token with HTTP 401 (the id belonged to the real worker), and the CLI talked to the real hub (`Repo "my-repo" not found`). Tests that fetch fake repos such as `acme/widgets` (`pr-checks`, `subscriptions-github*`, `subscriptions-guards`) also made the real hub log credential requests through the inherited helper. The suites now drop these variables themselves, through `scripts/test-env.mjs` (called by `apps/hub/vitest.config.ts` and `apps/web/playwright.config.ts`) and `command()` in `apps/cli/tests/integration.rs`. A new helper that spawns a process still builds its environment from `process.env`, which is clean by then. Do not add a spawn that reads the real `~/.band`.
+
+- Use Node 24: `export PATH=~/.nvm/versions/node/v24.22.1/bin:$PATH` (the default Node here is newer).
+- Hub: `pnpm --filter @band-app/server test`. The full run takes 30+ minutes.
+- Web e2e: `pnpm --filter @band-app/web test:e2e`. Specs that start a real `band-worker` failed at the 5 s `expect` default, because the worker runs from TypeScript source through tsx and needs longer on a cold start. `playwright.config.ts` sets `expect.timeout` to 30 s. The `webkit-iphone` project is skipped, with a message, when WebKit is missing. Install it with `pnpm --filter @band-app/web exec playwright install webkit` to run it.
+- CLI: `cargo test --manifest-path apps/cli/Cargo.toml`. It needs `apps/hub/dist`, so run `pnpm --filter @band-app/server build` first.
+- macOS has no `timeout`. Bound a command with `node scripts/with-timeout.mjs <seconds> <command> [args...]`. It stops the whole process group after the limit and exits 124.
+- `pnpm install --ignore-scripts` leaves node-pty's `spawn-helper` non-executable, so terminal tests fail until you run `chmod +x node_modules/node-pty/prebuilds/*/spawn-helper`.
+
 ### Exceptions
 
 - `apps/web/tests/theme-derive.test.ts` calls the pure functions in `apps/web/src/lib/theme/` (color math, surface derivation, contrast) with colors in and CSS variables out. There is no state to fake, and the 4.5:1 contrast guarantee for arbitrary user colors can only be checked across many inputs at this level. The e2e suite `apps/web/e2e/appearance.spec.ts` covers what the user sees.
