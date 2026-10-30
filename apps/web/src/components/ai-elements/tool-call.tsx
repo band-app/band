@@ -3,6 +3,8 @@ import {
   describeTool,
   formatToolDuration,
   hasToolDetails,
+  type ImageContent,
+  isSimulatorTool,
   OUTPUT_LIMIT,
   shellRun,
   shownExitCode,
@@ -13,9 +15,20 @@ import {
   toolState,
 } from "@band-app/client/tool-summary";
 import type { ToolEntry } from "@band-app/client/transcript";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@band-app/ui";
 import { ChevronRightIcon } from "lucide-react";
-import { memo, type ReactNode, useMemo } from "react";
+import { memo, type ReactNode, useMemo, useState } from "react";
+import { OPEN_PANE_EVENT } from "../../lib/agent-pane-events";
+import { pluginPanelTabId } from "../../plugins/use-plugin-slot";
+import { usePanelVisibility } from "../panel-visibility-context";
 import { MessageResponse } from "./message";
 import { ToolInput, ToolOutput } from "./tool";
 
@@ -153,11 +166,44 @@ function ShellDetails({ entry, failed }: { entry: ToolEntry; failed: boolean }) 
   );
 }
 
-/** What the agent reported for any other call: diffs, text, raw input and output. */
-function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
-  const { diffs, texts, prose } = toolDetails(entry);
+/** A picture a tool returned, sized to fit the chat. A click opens it full size. */
+function ToolImage({ image }: { image: ImageContent }) {
+  const [open, setOpen] = useState(false);
+  const src = `data:${image.mimeType};base64,${image.data}`;
   return (
     <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Open image full size"
+        data-testid="tool-call__image"
+        className="block max-w-full cursor-zoom-in overflow-hidden rounded-md border border-border/40 bg-muted/30"
+      >
+        <img src={src} alt="Tool result" className="max-h-80 max-w-full object-contain" />
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-[90vw] sm:max-w-[90vw]" data-testid="tool-call__image-full">
+          <DialogTitle className="sr-only">Tool result image</DialogTitle>
+          <img
+            src={src}
+            alt="Tool result, full size"
+            className="max-h-[80vh] w-full object-contain"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** What the agent reported for any other call: diffs, images, text, raw input and output. */
+function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
+  const { diffs, images, texts, prose } = toolDetails(entry);
+  return (
+    <>
+      {images.map((image, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+        <ToolImage key={i} image={image} />
+      ))}
       {diffs.map((d) => (
         <Diff key={d.path} path={d.path} oldText={d.oldText} newText={d.newText} cwd={cwd} />
       ))}
@@ -170,12 +216,16 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
           <ToolOutput key={i} output={text.slice(0, 20_000)} errorText={undefined} />
         ),
       )}
-      {diffs.length === 0 && texts.length === 0 && entry.rawInput !== undefined && (
-        <ToolInput input={entry.rawInput} />
-      )}
-      {diffs.length === 0 && texts.length === 0 && entry.rawOutput !== undefined && (
-        <ToolOutput output={entry.rawOutput} errorText={undefined} />
-      )}
+      {diffs.length === 0 &&
+        images.length === 0 &&
+        texts.length === 0 &&
+        entry.rawInput !== undefined && <ToolInput input={entry.rawInput} />}
+      {diffs.length === 0 &&
+        images.length === 0 &&
+        texts.length === 0 &&
+        entry.rawOutput !== undefined && (
+          <ToolOutput output={entry.rawOutput} errorText={undefined} />
+        )}
     </>
   );
 }
@@ -190,6 +240,8 @@ export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntr
   const failed = state === "error";
   const shell = entry.toolKind === "execute";
   const hasBody = hasToolDetails(entry);
+  const { worktreeId } = usePanelVisibility();
+  const simulator = isSimulatorTool(entry) && worktreeId;
 
   return (
     <Collapsible
@@ -214,6 +266,26 @@ export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntr
           </span>
           {hasBody && <Chevron openClass="group-data-[state=open]/tool-call:rotate-90" />}
         </CollapsibleTrigger>
+        {simulator && (
+          <button
+            type="button"
+            data-testid="tool-call__open-simulator"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent(OPEN_PANE_EVENT, {
+                  detail: {
+                    worktreeId,
+                    paneId: pluginPanelTabId("simulator", "simulator"),
+                    kind: "plugin",
+                  },
+                }),
+              )
+            }
+            className="shrink-0 rounded px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            Open simulator
+          </button>
+        )}
       </ToolRow>
 
       <CollapsibleContent className="mt-2 space-y-3 text-popover-foreground">

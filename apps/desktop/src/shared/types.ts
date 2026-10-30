@@ -161,6 +161,10 @@ export interface CheckAppExistsArgs {
   appName: string;
 }
 
+export interface RevealSimulatorArgs {
+  udid: string;
+}
+
 export interface RevealInFinderArgs {
   path: string;
 }

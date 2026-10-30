@@ -203,6 +203,14 @@ band groups remove <group id|name>
 
 Groups are the sections of the sidebar. `list` shows each group's id, name and color in sidebar order. `create` prints the new group's id. `remove` deletes the group and leaves its worktrees ungrouped. An agent on a worker may list groups but cannot create, rename or remove them.
 
+### Open a worktree's iOS simulator
+
+```sh
+band simulators open [worktree id]
+```
+
+Boots the worktree's iOS simulator and opens its Simulator tab for every connected Band client, view-only until a person takes control. The worktree's worker must be a Mac with Xcode. An agent on a worker gets 403: an agent drives the simulator with the `simulator_*` tools (`simulator_describe`, `simulator_tap`, `simulator_type`, `simulator_button`, `simulator_screenshot`, `simulator_open_url`, `simulator_install`, `simulator_launch`).
+
 ### Remove a worktree (git worktree + state cleanup)
 
 ```sh

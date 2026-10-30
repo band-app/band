@@ -364,6 +364,14 @@ beforeAll(async () => {
           // route for it, so no host id gets an agent through, including the hub's own.
           probe("desktop-local", "/api/hosts/local/desktop"),
           probe("desktop-worker", "/api/hosts/h-0123456789ab/desktop"),
+          // A plugin's live stream (the simulator's screen) is for a person's device token too, and
+          // so are the procedures that open the Simulator tab.
+          probe("plugin-stream", `/api/plugins/simulator/worktrees/${WT_A}/stream`),
+          post("simulators-open", "/trpc/simulators.open", { worktreeId: WT_A }),
+          probe(
+            "simulators-status",
+            `/trpc/simulators.status?input=${encodeURIComponent(JSON.stringify({ worktreeId: WT_A }))}`,
+          ),
           // Dictation spends the hub's speech-to-text key, so an agent gets neither the audio
           // route nor the voice procedures.
           post("voice-transcribe", "/api/voice/transcribe", {}),
@@ -574,6 +582,9 @@ describe("the worker relay (S2)", () => {
     expect(by("file-range")?.status).toBe(403);
     expect(by("desktop-local")?.status).toBe(403);
     expect(by("desktop-worker")?.status).toBe(403);
+    expect(by("plugin-stream")?.status).toBe(403);
+    expect(by("simulators-open")?.status).toBe(403);
+    expect(by("simulators-status")?.status).toBe(403);
     expect(by("voice-transcribe")?.status).toBe(403);
     expect(by("voice-status")?.status).toBe(403);
     expect(by("voice-test")?.status).toBe(403);

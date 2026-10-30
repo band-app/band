@@ -40,6 +40,7 @@ const SLOW_CALLS: Record<string, number> = {
   "agentEnv.removeHooks": 60_000,
   // A plugin service may boot a device or build on a call.
   "plugin.call": 5 * 60_000,
+  "plugin.stream": 5 * 60_000,
   exec: 10 * 60_000,
 };
 

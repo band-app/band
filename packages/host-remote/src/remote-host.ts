@@ -48,12 +48,16 @@ import {
   type DirectRegisterReply,
   decodeFrames,
   encodeFrame,
+  encodeMessageFrame,
   type LinkSession,
   METHOD_DIRECT_REGISTER,
   METHOD_PLUGIN_CALL,
+  METHOD_PLUGIN_STREAM,
   METHOD_RELAY_REGISTER,
   METHOD_RELAY_REVOKE,
+  MessageFrameReader,
   type PluginCallParams,
+  type PluginStreamParams,
   type RelayRegisterReply,
 } from "@band-app/link";
 import { RemoteAgent } from "./agent";
@@ -375,6 +379,21 @@ export class RemoteHost implements Host {
     call: (pluginId, method, params, scope) => {
       const call: PluginCallParams = { pluginId, method, params, ...scope };
       return this.rpc.call(METHOD_PLUGIN_CALL, call);
+    },
+    stream: async (pluginId, stream, params, scope) => {
+      const request: PluginStreamParams = { pluginId, stream, params, ...scope };
+      const reply = await this.rpc.request<{ chan: number }>(METHOD_PLUGIN_STREAM, request);
+      const ch = this.rpc.channel(reply.chan);
+      const reader = new MessageFrameReader();
+      return {
+        messages: (async function* () {
+          for await (const chunk of ch) yield* reader.push(chunk);
+        })(),
+        send: (message) => {
+          ch.send(encodeMessageFrame(message)).catch(() => undefined);
+        },
+        close: () => ch.reset("plugin stream closed"),
+      };
     },
   };
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { type LeaseRenewReply, METHOD_LEASE_RENEW, METHOD_PLUGIN_CALL } from "@band-app/link";
 import {
@@ -19,9 +18,9 @@ function hasSimctl(): boolean {
   try {
     execFileSync("xcrun", ["simctl", "help"], { stdio: "ignore" });
     // Booting a device takes several minutes on a CI runner, and "Web Tests (macOS)" already runs
-    // close to its 45 minute limit (this test pushed it over and the job was cancelled). The hub's
-    // simulator test uses the same gate: it runs on a machine set up for simulators, which has idb.
-    execFileSync("which", ["idb_companion"], { stdio: "ignore" });
+    // close to its 45 minute limit (this test pushed it over and the job was cancelled). So CI skips
+    // it unless BAND_TEST_SIMULATOR=1. The hub's simulator test uses the same gate.
+    if (process.env.CI && process.env.BAND_TEST_SIMULATOR !== "1") return false;
     return process.platform === "darwin";
   } catch {
     return false;
@@ -30,22 +29,25 @@ function hasSimctl(): boolean {
 
 // The simulator plugin on a real worker whose lease runs out (the hub's side is a stand-in that stops
 // renewing). A booted device is shut down by the fence, and a call is refused until the hub renews.
-// Devices live in a device set under the worker's temp state dir, and the test deletes what it creates.
+// The worker names its devices with a prefix of this run's own, so a person's simulators are never
+// matched, and the test deletes every device with it.
 describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
   let hub: TestHub;
   let w: TestWorker;
   let repo = "";
 
-  const set = () => join(w.stateDir, "simulator", "devices");
+  const prefix = `Band fence ${randomBytes(4).toString("hex")}`;
   const devices = (): Array<{ udid: string; state: string }> => {
-    if (!existsSync(set())) return [];
-    const out = execFileSync("xcrun", ["simctl", "--set", set(), "list", "devices", "-j"], {
-      encoding: "utf8",
-    });
+    const out = execFileSync("xcrun", ["simctl", "list", "devices", "-j"], { encoding: "utf8" });
     return Object.values(
-      (JSON.parse(out) as { devices: Record<string, Array<{ udid: string; state: string }>> })
-        .devices,
-    ).flat();
+      (
+        JSON.parse(out) as {
+          devices: Record<string, Array<{ udid: string; name: string; state: string }>>;
+        }
+      ).devices,
+    )
+      .flat()
+      .filter((d) => d.name.startsWith(`${prefix} \u2013 `));
   };
   // A cold boot can take minutes on a CI runner. `RemoteHost` gives `plugin.call` five minutes
   // (`SLOW_CALLS` in packages/host-remote/src/rpc.ts), so the stand-in hub does the same.
@@ -80,19 +82,21 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
     call<LeaseRenewReply>(w.session, METHOD_LEASE_RENEW, { ttlMs, blockedPaths: [] });
 
   before(async () => {
+    process.env.BAND_SIMULATOR_NAME_PREFIX = prefix;
     hub = await startHub();
     w = await startWorker(hub);
     repo = makeRepo(w.root);
   });
   after(async () => {
     await w.worker.stop();
-    if (existsSync(set())) {
+    for (const d of devices()) {
       for (const cmd of ["shutdown", "delete"]) {
         try {
-          execFileSync("xcrun", ["simctl", "--set", set(), cmd, "all"], { stdio: "ignore" });
+          execFileSync("xcrun", ["simctl", cmd, d.udid], { stdio: "ignore" });
         } catch {}
       }
     }
+    Reflect.deleteProperty(process.env, "BAND_SIMULATOR_NAME_PREFIX");
     await hub.close();
     cleanup(w.root, w.stateDir);
   });

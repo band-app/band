@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { run } from "./tools.ts";
 
 export interface Device {
@@ -25,7 +24,14 @@ interface SimctlRuntimes {
   }>;
 }
 
-const BASE_NAME = "band-base";
+/** The prefix of every device name Band creates. Tests set their own, so they never match a person's devices. */
+export function namePrefix(): string {
+  return process.env.BAND_SIMULATOR_NAME_PREFIX?.trim() || "Band";
+}
+
+function baseName(): string {
+  return `${namePrefix()} \u2013 base`;
+}
 
 /** The most devices that may be booted at once. Read on every call. */
 export function maxBooted(): number {
@@ -33,9 +39,9 @@ export function maxBooted(): number {
   return Number.isInteger(n) && n >= 1 ? n : 2;
 }
 
-/** The device name of a worktree. A hash, because the id holds characters a name may not. */
+/** The device name of a worktree: "Band \u2013 <worktree id>", the way Simulator.app lists it. */
 export function deviceName(worktreeKey: string): string {
-  return `band-${createHash("sha256").update(worktreeKey).digest("hex").slice(0, 16)}`;
+  return `${namePrefix()} \u2013 ${worktreeKey}`;
 }
 
 function versionParts(v: string): number[] {
@@ -53,17 +59,43 @@ function compareVersions(a: string, b: string): number {
 }
 
 /**
- * The Band-owned device set: `xcrun simctl --set <dir>`. Nothing here touches the user's own
- * simulators. One device per worktree is cloned from a base device, and at most `maxBooted()`
- * are booted at once; the least recently used one is shut down, never deleted.
+ * The worktrees' devices, in the machine's default device set because serve-sim sees only that
+ * set. Band owns the devices whose name starts with "Band \u2013 " (`namePrefix()`) and never
+ * lists, shuts down or deletes any other. One device per worktree is cloned from a base device,
+ * and at most `maxBooted()` are booted at once; the least recently used one is shut down, never
+ * deleted.
  */
 export class DeviceSet {
   private chain: Promise<unknown> = Promise.resolve();
   private readonly lastUsed = new Map<string, number>();
-  /** Called after a device shuts down, so its companion process goes too. */
+  /** Called after a device shuts down, so its serve-sim helper goes too. */
   onShutdown: (udid: string) => void = () => {};
 
-  constructor(readonly dir: string) {}
+  /** @param legacyDir the device set the first version kept its devices in, deleted on first use */
+  constructor(private readonly legacyDir?: string) {}
+
+  private legacyDone = false;
+
+  /**
+   * The first version kept its devices in a private device set, which serve-sim cannot see. They
+   * are deleted, so the next use of a worktree clones a new one into the default set.
+   */
+  private async dropLegacy(): Promise<void> {
+    if (this.legacyDone || !this.legacyDir) return;
+    this.legacyDone = true;
+    const set = this.legacyDir;
+    try {
+      const { stdout } = await run("xcrun", ["simctl", "--set", set, "list", "devices", "-j"]);
+      const parsed = JSON.parse(stdout) as SimctlDevices;
+      for (const d of Object.values(parsed.devices).flat()) {
+        await run("xcrun", ["simctl", "--set", set, "shutdown", d.udid]).catch(() => undefined);
+        await run("xcrun", ["simctl", "--set", set, "delete", d.udid]).catch(() => undefined);
+      }
+    } catch {
+      // No such set: nothing to drop.
+    }
+    await rm(set, { recursive: true, force: true });
+  }
 
   /** Runs `fn` after every earlier lifecycle operation, so creates, boots and shutdowns never overlap. */
   exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -73,15 +105,16 @@ export class DeviceSet {
   }
 
   private simctl(args: string[], timeoutMs?: number) {
-    return run("xcrun", ["simctl", "--set", this.dir, ...args], { timeoutMs });
+    return run("xcrun", ["simctl", ...args], { timeoutMs });
   }
 
   async list(): Promise<Device[]> {
     const { stdout } = await this.simctl(["list", "devices", "-j"]);
     const parsed = JSON.parse(stdout) as SimctlDevices;
+    const owned = `${namePrefix()} \u2013 `;
     return Object.values(parsed.devices)
       .flat()
-      .filter((d) => d.isAvailable !== false)
+      .filter((d) => d.isAvailable !== false && d.name.startsWith(owned))
       .map(({ udid, name, state }) => ({ udid, name, state }));
   }
 
@@ -109,16 +142,16 @@ export class DeviceSet {
   }
 
   private async baseDevice(): Promise<Device> {
-    const existing = (await this.list()).find((d) => d.name === BASE_NAME);
+    const existing = (await this.list()).find((d) => d.name === baseName());
     if (existing) return existing;
     const { type, runtime } = await this.pickBase();
-    const { stdout } = await this.simctl(["create", BASE_NAME, type, runtime]);
-    return { udid: stdout.trim(), name: BASE_NAME, state: "Shutdown" };
+    const { stdout } = await this.simctl(["create", baseName(), type, runtime]);
+    return { udid: stdout.trim(), name: baseName(), state: "Shutdown" };
   }
 
   /** The worktree's device, cloned from the base device on first use. */
   async ensureDevice(worktreeKey: string): Promise<Device> {
-    await mkdir(this.dir, { recursive: true });
+    await this.dropLegacy();
     const name = deviceName(worktreeKey);
     const found = (await this.list()).find((d) => d.name === name);
     if (found) return found;
@@ -137,7 +170,7 @@ export class DeviceSet {
     this.lastUsed.set(device.udid, Date.now());
     if (device.state === "Booted") return device;
     const booted = (await this.list()).filter(
-      (d) => d.state === "Booted" && d.udid !== device.udid && d.name !== BASE_NAME,
+      (d) => d.state === "Booted" && d.udid !== device.udid && d.name !== baseName(),
     );
     booted.sort((a, b) => (this.lastUsed.get(a.udid) ?? 0) - (this.lastUsed.get(b.udid) ?? 0));
     const room = maxBooted() - 1;

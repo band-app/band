@@ -278,9 +278,16 @@ export function shownExitCode(run: ShellRun, failed: boolean): number | undefine
 
 export type DiffContent = Extract<ToolCallContent, { type: "diff" }>;
 
+export type ImageContent = Extract<
+  Extract<ToolCallContent, { type: "content" }>["content"],
+  { type: "image" }
+>;
+
 export interface ToolDetails {
   /** File edits, as old and new text. */
   diffs: DiffContent[];
+  /** Pictures the call returned, such as a simulator screenshot. */
+  images: ImageContent[];
   texts: string[];
   /** Plans and thinking come back as prose to render as markdown; other text is raw output. */
   prose: boolean;
@@ -290,6 +297,9 @@ export interface ToolDetails {
 export function toolDetails(entry: ToolEntry): ToolDetails {
   return {
     diffs: entry.content.filter((c): c is DiffContent => c.type === "diff"),
+    images: entry.content.flatMap((c) =>
+      c.type === "content" && c.content.type === "image" ? [c.content] : [],
+    ),
     texts: entry.content.flatMap((c) =>
       c.type === "content" && c.content.type === "text" ? [c.content.text] : [],
     ),
@@ -302,9 +312,16 @@ export function hasToolDetails(entry: ToolEntry): boolean {
   return (
     entry.toolKind === "execute" ||
     entry.content.some(
-      (c) => c.type === "diff" || (c.type === "content" && c.content.type === "text"),
+      (c) =>
+        c.type === "diff" ||
+        (c.type === "content" && (c.content.type === "text" || c.content.type === "image")),
     ) ||
     entry.rawInput !== undefined ||
     entry.rawOutput !== undefined
   );
+}
+
+/** Whether the call is one of the simulator plugin's tools (`simulator_tap`, `simulator_screenshot`, ...). */
+export function isSimulatorTool(entry: ToolEntry): boolean {
+  return /(^|[_\s.-])simulator_[a-z_]+/.test(entry.name ?? entry.title);
 }

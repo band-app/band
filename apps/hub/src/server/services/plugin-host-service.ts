@@ -1,4 +1,4 @@
-import type { Host } from "@band-app/host-api";
+import type { Host, PluginStreamConnection } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import {
   type BranchStatusProvider,
@@ -18,6 +18,7 @@ import type {
 import { hostRegistry } from "../infra/host/registry";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled-plugins";
 import { loadSettings } from "./state";
+import { worktreeService } from "./worktree-service";
 
 const log = createLogger("plugin-host");
 
@@ -131,6 +132,51 @@ export class PluginHost {
       );
     }
     return host.plugins.call(pluginId, method, params, scope);
+  }
+
+  /**
+   * Calls a worker service of plugin `pluginId` for a worktree the caller names, on the worktree's
+   * own worker. For hub code that acts for a person (the simulator panel); an agent's tool calls
+   * go through its `ToolContext` instead.
+   */
+  async callForWorktree(
+    pluginId: string,
+    worktreeId: string,
+    method: string,
+    params: unknown = {},
+  ): Promise<unknown> {
+    const { hostId, scope } = this.scopeOf(worktreeId);
+    return this.callWorker(pluginId, hostId, method, params, scope);
+  }
+
+  /** Opens plugin `pluginId`'s live stream `stream` for a worktree, on the worktree's worker. */
+  async openStream(
+    pluginId: string,
+    worktreeId: string,
+    stream: string,
+    params: unknown = {},
+  ): Promise<PluginStreamConnection> {
+    const { hostId, scope } = this.scopeOf(worktreeId);
+    const host = this.hostById(hostId);
+    if (!host.plugins) {
+      throw new Error(
+        `Worker ${hostId} is the hub's own machine, which runs no worker plugins. Use a worktree on a connected worker.`,
+      );
+    }
+    const info = await host.info();
+    if (!info.capabilities[pluginId]) {
+      throw new Error(`Worker ${hostId} cannot run the ${pluginId} plugin.`);
+    }
+    return host.plugins.stream(pluginId, stream, params, scope);
+  }
+
+  private scopeOf(worktreeId: string): { hostId: string; scope: WorkerScope } {
+    const resolved = worktreeService.resolve(worktreeId);
+    if (!resolved) throw new Error(`Worktree ${worktreeId} does not exist`);
+    return {
+      hostId: resolved.host.id,
+      scope: { worktreeKey: worktreeId, worktreePath: resolved.worktree.path },
+    };
   }
 
   async branchStatusProviderFor(repo: RepoInfo): Promise<BranchStatusProvider | null> {

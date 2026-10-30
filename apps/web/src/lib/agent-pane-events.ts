@@ -5,7 +5,7 @@
 
 /** Sent before the launch call, with the ids the new chat and terminal will have. */
 export const AGENT_LAUNCHING_EVENT = "band:agent-launching";
-/** Sent to make a chat or terminal tab the active one. */
+/** Sent to make a chat, terminal or plugin panel tab the active one. */
 export const OPEN_PANE_EVENT = "band:open-pane";
 
 export interface AgentLaunchingDetail {
@@ -18,7 +18,7 @@ export interface OpenPaneDetail {
   worktreeId: string;
   paneId: string;
   /** Set when the pane may not exist yet, so the dock can add it. */
-  kind?: "chat" | "term";
+  kind?: "chat" | "term" | "plugin";
 }
 
 /**

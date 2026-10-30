@@ -884,6 +884,24 @@ export interface HostPlugins {
     params: unknown,
     scope: { worktreeKey: string; worktreePath: string },
   ): Promise<unknown>;
+  /**
+   * Opens the plugin's live stream `stream` for one worktree. Messages are text or bytes in both
+   * directions; closing the stream stops it on the host.
+   */
+  stream(
+    pluginId: string,
+    stream: string,
+    params: unknown,
+    scope: { worktreeKey: string; worktreePath: string },
+  ): Promise<PluginStreamConnection>;
+}
+
+/** The hub's end of a plugin stream. */
+export interface PluginStreamConnection {
+  /** Messages from the plugin. Ends when the stream does. */
+  messages: AsyncIterable<string | Uint8Array>;
+  send(message: string | Uint8Array): void;
+  close(): void;
 }
 
 export interface HostDirect {

@@ -65,6 +65,7 @@ import {
 } from "./src/server/infra/host/desktop-proxy.ts";
 import { hostRegistry } from "./src/server/infra/host/registry.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { handlePluginStream, pluginStreamTarget } from "./src/server/infra/plugins/stream-proxy.ts";
 import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
 import {
   startUsageScanner,
@@ -1485,6 +1486,16 @@ async function main() {
     maxPayload: 1024 * 1024,
   });
 
+  // ---------------------------------------------------------------------------
+  // WebSocket server for plugin live streams (the simulator's screen)
+  // ---------------------------------------------------------------------------
+  const pluginStreamWss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: selectWsProtocol,
+    // Viewer messages are small JSON.
+    maxPayload: 1024 * 1024,
+  });
+
   httpServer.on("upgrade", (req, socket, head) => {
     // Vite's HMR WebSocket lives on this same http server in dev mode. It
     // identifies itself with the `vite-hmr` subprotocol — leave that
@@ -1548,6 +1559,14 @@ async function main() {
     if (desktopHost !== null) {
       desktopWss.handleUpgrade(req, socket, head, (ws) => {
         void handleDesktopConnection(ws, req, desktopHost);
+      });
+      return;
+    }
+
+    const pluginStream = pluginStreamTarget(url.pathname);
+    if (pluginStream !== null) {
+      pluginStreamWss.handleUpgrade(req, socket, head, (ws) => {
+        void handlePluginStream(ws, req, pluginStream);
       });
       return;
     }
@@ -1860,6 +1879,7 @@ async function main() {
     wss.close();
     terminalWss.close();
     desktopWss.close();
+    pluginStreamWss.close();
     lspWss.close();
     cdpWss.close();
     httpServer.close();

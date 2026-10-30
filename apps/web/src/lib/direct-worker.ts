@@ -50,7 +50,7 @@ const NO_LOCAL_WORKER_TTL_MS = 60_000;
 let localId: { promise: Promise<string | null>; at: number } | null = null;
 
 /** This computer's worker id for the current hub, from the desktop app. Null in a browser. */
-async function localWorkerId(): Promise<string | null> {
+export async function localWorkerId(): Promise<string | null> {
   if (!isDesktop) return null;
   const now = Date.now();
   if (!localId || (now - localId.at > NO_LOCAL_WORKER_TTL_MS && (await localId.promise) === null)) {
