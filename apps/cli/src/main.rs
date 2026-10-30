@@ -2479,7 +2479,14 @@ fn cmd_chats_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
         let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let name = chat.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let agent = chat.get("agent").and_then(|v| v.as_str()).unwrap_or("");
-        let status = chat.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let mut status = chat
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if chat.get("stalled").and_then(serde_json::Value::as_bool) == Some(true) {
+            status.push_str(" (stalled)");
+        }
         // Labels are persisted as a Record<string, string> on the server and
         // returned inline on each chat. Render them as `k=v,k=v` to keep the
         // table compact — empty record or missing field both render as an
@@ -2502,7 +2509,7 @@ fn cmd_chats_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
             id.to_string(),
             name.to_string(),
             agent.to_string(),
-            status.to_string(),
+            status,
             labels,
         ]);
         json_chats.push(chat.clone());
@@ -6206,7 +6213,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
             ],
-            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable."
+            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}, \"lastActivityAt\": 1767225600000, \"stalled\": false}]}`. `lastActivityAt` is when the chat's agent last sent anything (ms since epoch, `null` if never). `stalled` is true while a turn runs and the agent has sent nothing for `BAND_TURN_QUIET_STALL_MS` (20 minutes by default); the text output then shows `running (stalled)`. Band does not stop a stalled turn, so decide with `band chats stop`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable."
         }),
         serde_json::json!({
             "name": "chats create",

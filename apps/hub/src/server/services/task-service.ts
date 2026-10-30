@@ -20,6 +20,7 @@ import {
 import { openSharedDir, sharedFileUrl } from "./_utils/shared-dir";
 import { emitTurnEnded } from "./_utils/turn-events";
 import { agentSessionService, findOption } from "./agent-session-service";
+import { observeBackgroundWake } from "./background-wake-service";
 // FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in function bodies.
 import { chatOwnershipService } from "./chat-ownership-service";
 import { chatService } from "./chat-service";
@@ -215,6 +216,12 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     throw new TaskConflictError(chatId);
   }
   observeAgentStatus(hasRunningTask);
+  observeBackgroundWake({
+    hasRunningTurn: hasRunningTask,
+    send: (wakeWorktreeId, wakeChatId, prompt) => {
+      submitOrQueueTask({ worktreeId: wakeWorktreeId, chatId: wakeChatId, prompt });
+    },
+  });
 
   const task: InternalTask = {
     id: generateTaskId(),

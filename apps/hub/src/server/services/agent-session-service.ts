@@ -29,6 +29,7 @@ import {
   type AcpAgentHandlers,
   AcpAgentProcess,
   AgentProcessError,
+  type AsyncTaskUpdate,
   type AttachedSession,
   launchSpecHash,
   type PermissionOutcome,
@@ -145,6 +146,11 @@ interface Runtime {
   /** Work the agent process runs on its own, which holds off the idle stop. */
   work: PendingWork;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** When the agent last sent an update, an async task update or got an answer to a request (ms
+   *  since epoch). Null before the first. */
+  lastActivityAt: number | null;
+  /** Names of the async tasks this process announced, for the message that wakes the chat. */
+  taskNames: Map<string, string>;
   /** Claude Code: flags on the command line of the CLI behind the session,
    *  which a wrapper script may have added. */
   claudeCli: ClaudeCliArgs | null;
@@ -198,6 +204,18 @@ const defaultsChangedAt = g[DEFAULTS_CHANGED_KEY] as Map<string, number>;
 /** Ids for events broadcast without a log row. Negative, so they never move
  *  a client's gap-fill cursor. */
 let transientId = -1_000_000_000;
+
+/** What happened to the background work of a chat, for the service that wakes an idle agent. */
+export type BackgroundTaskEvent =
+  /** A task the agent started ended while no Band turn ran. */
+  | { kind: "ended"; name: string; state: "completed" | "failed" | "stopped" }
+  /** The agent started a turn of its own, so it already knows what ended. */
+  | { kind: "agent-turn" }
+  /** The process stopped or exited, so nothing is left to wake. */
+  | { kind: "gone" };
+let backgroundObserver:
+  | ((chatId: string, worktreeId: string, event: BackgroundTaskEvent) => void)
+  | null = null;
 
 let pendingObserver: ((chatId: string, worktreeId: string) => void) | null = null;
 
@@ -299,6 +317,8 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       pending: new Map(),
       work: new PendingWork(),
       idleTimer: null,
+      lastActivityAt: null,
+      taskNames: new Map(),
       claudeCli: null,
       relayEnv: null,
       loginId: null,
@@ -316,6 +336,7 @@ function stopRuntime(rt: Runtime): void {
   rt.process = null;
   rt.sessionId = null;
   runtimes.delete(rt.chatId);
+  backgroundObserver?.(rt.chatId, rt.worktreeId, { kind: "gone" });
   mcpProxyService.revokeSession(rt.chatId);
 }
 
@@ -627,10 +648,12 @@ function routeUpdate(rt: Runtime, notification: acp.SessionNotification): void {
   applyLive(rt, update);
   // An attach's replay is history, not work in flight.
   if (!rt.attaching) {
+    rt.lastActivityAt = Date.now();
     rt.work.observeUpdate(update, rt.inTurn);
     agentActive(rt);
     if (!rt.inTurn && rt.routing === "log" && AGENT_WORK_UPDATES.has(update.sessionUpdate)) {
       activityObserver?.(rt.chatId, rt.worktreeId, "update");
+      backgroundObserver?.(rt.chatId, rt.worktreeId, { kind: "agent-turn" });
     }
   }
   if (rt.routing === "drop") return;
@@ -658,6 +681,7 @@ function openRequest(
   const done = (answer: string) => {
     if (settled) return;
     settled = true;
+    rt.lastActivityAt = Date.now();
     rt.pending.delete(requestId);
     record(rt, { type: "request-resolved", requestId, answer });
     pendingObserver?.(rt.chatId, rt.worktreeId);
@@ -719,14 +743,36 @@ function requestElicitation(
   });
 }
 
+/** Remembers a task's name when it starts and reports it when it ends outside a Band turn. */
+function trackBackgroundTask(rt: Runtime, update: AsyncTaskUpdate): void {
+  if (update.sessionUpdate === "async_task_spawned") {
+    rt.taskNames.set(update.asyncTaskId, update.name || update.taskType || "background task");
+    return;
+  }
+  if (
+    update.sessionUpdate !== "async_task_state_update" ||
+    (update.state !== "completed" && update.state !== "failed" && update.state !== "stopped")
+  ) {
+    return;
+  }
+  const name = rt.taskNames.get(update.asyncTaskId);
+  // A task this process never announced is not one to wake the chat for.
+  if (name === undefined) return;
+  rt.taskNames.delete(update.asyncTaskId);
+  if (rt.inTurn) return;
+  backgroundObserver?.(rt.chatId, rt.worktreeId, { kind: "ended", name, state: update.state });
+}
+
 function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
   return {
     onUpdate: (n) => routeUpdate(rt, n),
     onAsyncTask: (n) => {
       if (n.sessionId !== rt.sessionId || rt.attaching) return;
+      rt.lastActivityAt = Date.now();
       rt.work.observeAsyncTask(n.update);
       agentActive(rt);
       activityObserver?.(rt.chatId, rt.worktreeId, "work");
+      trackBackgroundTask(rt, n.update);
     },
     onPermission: (req, signal) => requestPermission(rt, req, signal),
     onElicitation: (req, signal) => requestElicitation(rt, req, signal),
@@ -738,6 +784,8 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
       for (const p of [...rt.pending.values()]) p.cancel();
       // Whatever the process was running died with it.
       rt.work.clear();
+      rt.taskNames.clear();
+      backgroundObserver?.(rt.chatId, rt.worktreeId, { kind: "gone" });
       // `sessionId` stays: the failed turn still logs its end there. With
       // no process, the next `ensureSession` reattaches.
       rt.process = null;
@@ -1282,6 +1330,19 @@ export class AgentSessionService {
     observer: (chatId: string, worktreeId: string, kind: AgentActivityKind) => void,
   ): void {
     activityObserver = observer;
+  }
+
+  /** Called when background work a chat's agent started ends, and when the wake it may need no
+   *  longer applies (the agent started a turn, or the process went away). */
+  observeBackgroundTasks(
+    observer: (chatId: string, worktreeId: string, event: BackgroundTaskEvent) => void,
+  ): void {
+    backgroundObserver = observer;
+  }
+
+  /** When the chat's agent last sent anything (ms since epoch), or null. */
+  lastActivityAt(chatId: string): number | null {
+    return runtimes.get(chatId)?.lastActivityAt ?? null;
   }
 
   /** The soonest time one of the chat's pending-work holds lapses, or null with none. */

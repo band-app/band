@@ -191,6 +191,8 @@ export class ChatPanePage {
   /** The "Listening" pill in the chat's top right corner. Absent while the
    *  chat has no subscriptions. */
   readonly listeningPill: Locator;
+  /** The marker for a running turn whose agent has gone quiet. Absent otherwise. */
+  readonly stalledPill: Locator;
   /** The card shown when the agent fails. */
   readonly failureCards: Locator;
   /** The number of subscriptions the pill shows. */
@@ -268,6 +270,7 @@ export class ChatPanePage {
     this.virtualList = page.getByTestId("chat-pane__virtual-list");
     this.messageRows = page.getByTestId("chat-pane__message-row");
     this.listeningPill = page.getByTestId("listening-pill").filter({ visible: true });
+    this.stalledPill = page.getByTestId("stalled-pill").filter({ visible: true });
     this.listeningCount = page.getByTestId("listening-pill__count").filter({ visible: true });
     this.listeningList = page.getByTestId("listening-pill__list");
     this.listeningItems = page.getByTestId(/^listening-pill__item--/);
