@@ -432,16 +432,27 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
         (await turn(sim, a, `a-shot-${chatCount}`, [call("shot", "simulator_screenshot")]))
           .shot as ToolReply,
       )?.data;
-    await turn(sim, a, "a-open-safari", [
+    // A screen that is still animating (an app launching, a spinner) is not a baseline: wait until
+    // two screenshots in a row are the same.
+    const settled = async () => {
+      let last = await shot();
+      for (let i = 0; i < 20; i++) {
+        const next = await shot();
+        if (next === last) return next;
+        last = next;
+      }
+      throw new Error("the screen never settled");
+    };
+    await turn(sim, a, "a-open-settings", [
       call("open", "simulator_launch", { bundleId: "com.apple.Preferences" }),
       { sleep: 2500 },
     ]);
-    const before = await shot();
+    const before = await settled();
 
     // View-only: a Home press from the viewer does not reach the device.
     screen.ws.send(JSON.stringify({ type: "button", name: "HOME" }));
     await new Promise((r) => setTimeout(r, 2500));
-    expect(await shot()).toBe(before);
+    expect(await settled()).toBe(before);
 
     // After the control request the same press does.
     screen.ws.send(JSON.stringify({ type: "control", enabled: true }));
