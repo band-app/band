@@ -104,11 +104,10 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     return created;
   });
   r.json("worktree.remove", async (a) => {
-    await host.worktree.remove({
-      repoPath: await path(a, "repoPath"),
-      path: await path(a, "path"),
-    });
+    const worktreePath = await path(a, "path");
+    await host.worktree.remove({ repoPath: await path(a, "repoPath"), path: worktreePath });
     policy.invalidateWorktrees();
+    await ctx.plugins?.releasePath(worktreePath);
   });
   r.json("worktree.list", async (a) => host.worktree.list(await path(a, "repoPath")));
 

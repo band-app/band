@@ -1,5 +1,5 @@
-import type { ChecksReport, ReviewInfo } from "@band-app/plugin-api";
-import { type CIStatus, statePriority } from "./github-graphql";
+import { type ChecksReport, type ReviewInfo, statePriority } from "@band-app/plugin-api";
+import type { CIStatus } from "./ci-status";
 
 /**
  * The branch-status CI fields for a review panel result, by the rules the

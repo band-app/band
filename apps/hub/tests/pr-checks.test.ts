@@ -92,6 +92,12 @@ const DISCUSSION_BRANCH = "feat/discussion";
 const MERGE_BRANCH = "feat/merge-me";
 const MERGE_FAIL_BRANCH = "feat/merge-blocked";
 const RERUN_BRANCH = "feat/rerun";
+const DRAFT_BRANCH = "feat/draft";
+
+/** The `plugins.list` entries for the GitHub plugin; other bundled plugins (the simulator) are not under test here. */
+async function githubPlugins(res: Response): Promise<unknown[]> {
+  return ((await trpcData(res)) as Array<{ id: string }>).filter((p) => p.id === "github");
+}
 
 describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
   let tmpHome: string;
@@ -114,6 +120,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     mergeWorktree = addWorktree(repo, tmpHome, MERGE_BRANCH);
     const mergeFailWorktree = addWorktree(repo, tmpHome, MERGE_FAIL_BRANCH);
     const rerunWorktree = addWorktree(repo, tmpHome, RERUN_BRANCH);
+    const draftWorktree = addWorktree(repo, tmpHome, DRAFT_BRANCH);
     const noRemote = createRepo(tmpHome, "local-only", null);
     const gitlab = createRepo(tmpHome, "on-gitlab", "https://gitlab.com/acme/widgets.git");
 
@@ -132,6 +139,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
             { name: MERGE_BRANCH, branch: MERGE_BRANCH, path: mergeWorktree },
             { name: MERGE_FAIL_BRANCH, branch: MERGE_FAIL_BRANCH, path: mergeFailWorktree },
             { name: RERUN_BRANCH, branch: RERUN_BRANCH, path: rerunWorktree },
+            { name: DRAFT_BRANCH, branch: DRAFT_BRANCH, path: draftWorktree },
           ],
         },
         {
@@ -223,6 +231,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     const expectedChecks = {
       state: "failure",
       headSha: "abcdef1234567890abcdef1234567890abcdef12",
+      actions: [],
       checks: [
         {
           id: "check-run-12",
@@ -281,7 +290,11 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
 
     expect(data).toEqual({
       status: "ok",
-      provider: { id: "github", name: "GitHub" },
+      provider: {
+        id: "github",
+        name: "GitHub",
+        fixHint: "for example with `gh run view <run-id> --log-failed`",
+      },
       repo: { host: "github.com", owner: "acme", repo: "widgets" },
       branch: PR_BRANCH,
       review: {
@@ -295,6 +308,20 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
         checks: expectedChecks,
         reviewers: [],
         discussion: { items: [], threads: [] },
+        actions: [
+          ["squash", "Squash and merge"],
+          ["merge", "Create a merge commit"],
+          ["rebase", "Rebase and merge"],
+        ].map(([method, label]) => ({
+          id: "merge",
+          label,
+          icon: "merge",
+          placement: "header",
+          group: "merge",
+          args: { method },
+          confirm: `${label} #697?`,
+          disabledReason: "Required reviews or checks are missing.",
+        })),
       },
       checks: expectedChecks,
       fetchedAt: expect.any(String),
@@ -480,13 +507,18 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
 
     expect(data).toEqual({
       status: "ok",
-      provider: { id: "github", name: "GitHub" },
+      provider: {
+        id: "github",
+        name: "GitHub",
+        fixHint: "for example with `gh run view <run-id> --log-failed`",
+      },
       repo: { host: "github.com", owner: "acme", repo: "widgets" },
       branch: BRANCH_ONLY,
       review: null,
       checks: {
         state: "pending",
         headSha: "3333333333333333333333333333333333333333",
+        actions: [],
         checks: [
           {
             id: "check-run-22",
@@ -530,6 +562,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     expect(data.checks).toEqual({
       state: "success",
       headSha: "2222222222222222222222222222222222222222",
+      actions: [],
       checks: [
         {
           id: "check-run-41",
@@ -606,6 +639,56 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     ]);
   });
 
+  it("offers merge, ready and re-run as actions, and runs one by id", async () => {
+    stub.setReviewQuery(
+      FAKE_REPO,
+      DRAFT_BRANCH,
+      reviewQueryData({
+        pullRequests: [pullRequestNode({ number: 802, isDraft: true, mergeStateStatus: "DRAFT" })],
+      }),
+    );
+    const ready: GhInvocation[] = [];
+    stub.setPrReady(802, { onRequest: (r) => ready.push(r) });
+    const worktreeId = testWorktreeId(REPO, DRAFT_BRANCH);
+
+    const data = (await forWorktree(server, worktreeId)) as {
+      review: { actions: Array<Record<string, unknown>> };
+    };
+    const actions = data.review.actions;
+    expect(actions.map((a) => a.id)).toEqual(["merge", "merge", "merge", "ready"]);
+    expect(actions[0]).toMatchObject({
+      args: { method: "squash" },
+      group: "merge",
+      confirm: "Squash and merge #802?",
+      disabledReason: "Mark the PR ready for review first.",
+    });
+    expect(actions[3]).toEqual({
+      id: "ready",
+      label: "Ready for review",
+      icon: "ready",
+      placement: "header",
+    });
+
+    const res = await trpcMutate(
+      server.url,
+      "reviews.runAction",
+      { worktreeId, actionId: "ready", args: {} },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(ready.map((r) => r.args)).toEqual([
+      ["pr", "ready", "802", "--repo", "github.com/acme/widgets"],
+    ]);
+
+    const unknown = await trpcMutate(
+      server.url,
+      "reviews.runAction",
+      { worktreeId, actionId: "delete-everything", args: {} },
+      TOKEN,
+    );
+    expect(unknown.status).toBe(400);
+  });
+
   it("returns gh's message when the merge fails", async () => {
     stub.setReviewQuery(
       FAKE_REPO,
@@ -665,6 +748,18 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     ).checks.checks;
     const byName = Object.fromEntries(checks.map((c) => [c.name, c]));
     expect(byName.Unit.rerun).toEqual({ runId: "700", jobId: "21" });
+    // The review offers a re-run for the finished job only, and one "re-run failed" per run with a failure.
+    const actions = (data as { review: { actions: unknown[] } }).review.actions;
+    expect(actions).toContainEqual({
+      id: "rerun-job",
+      label: "Re-run job",
+      icon: "rerun",
+      placement: "check",
+      args: { runId: "700", jobId: "21", checkId: "check-run-21" },
+    });
+    expect(actions).not.toContainEqual(
+      expect.objectContaining({ args: expect.objectContaining({ jobId: "22" }) }),
+    );
     // The panel hides the button for a running job; the data still names its run.
     expect(byName.Build.state).toBe("running");
     expect(byName["External app"].rerun).toBeUndefined();
@@ -725,6 +820,23 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
     );
   });
 
+  it("re-runs a job on a branch with no pull request", async () => {
+    const calls: GhInvocation[] = [];
+    stub.setRunRerun(710, { onRequest: (r) => calls.push(r) });
+
+    const res = await trpcMutate(
+      server.url,
+      "reviews.rerunChecks",
+      { worktreeId: testWorktreeId(REPO, BRANCH_ONLY), targets: [{ runId: "710", jobId: "5" }] },
+      TOKEN,
+    );
+
+    expect(res.status).toBe(200);
+    expect(calls.map((c) => c.args)).toEqual([
+      ["run", "rerun", "710", "--job", "5", "--repo", "github.com/acme/widgets"],
+    ]);
+  });
+
   it("rejects a re-run that names neither a job nor the failed jobs", async () => {
     const res = await trpcMutate(
       server.url,
@@ -781,14 +893,14 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
 
     const res = await trpcQuery(server.url, "plugins.list", undefined, TOKEN);
     expect(res.status).toBe(200);
-    expect(await trpcData(res)).toEqual([
+    expect(await githubPlugins(res)).toEqual([
       {
         id: "github",
         name: "GitHub",
         version: "0.1.0",
         status: "active",
         error: null,
-        slots: ["worktree.sideTabs"],
+        slots: [],
       },
     ]);
   });
@@ -837,14 +949,14 @@ describe("a disabled GitHub plugin", () => {
     });
 
     const res = await trpcQuery(server.url, "plugins.list", undefined, TOKEN);
-    expect(await trpcData(res)).toEqual([
+    expect(await githubPlugins(res)).toEqual([
       {
         id: "github",
         name: "GitHub",
         version: "0.1.0",
         status: "disabled",
         error: null,
-        slots: ["worktree.sideTabs"],
+        slots: [],
       },
     ]);
     // `stub.requests` logs every gh call on any route; the enabled suite's

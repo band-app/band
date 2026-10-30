@@ -1,76 +1,13 @@
-import type { WorktreeReview } from "@band-app/plugin-api";
 import type { ClientPluginHost } from "@band-app/plugin-api/client";
-import { useQuery } from "@tanstack/react-query";
 import { readAgentMode } from "@/dashboard/lib/agent-mode";
-import { queryClient } from "@/dashboard/query-client";
 import { DELETE_WORKTREE_EVENT } from "../dashboard/lib/worktree-delete";
 import { AGENT_LAUNCHING_EVENT, OPEN_PANE_EVENT } from "../lib/agent-pane-events";
 import { markChatFresh, newChatId, newTerminalId } from "../lib/leaf-instance-ids";
 import { openExternalUrl } from "../lib/open-external-url";
 import { trpc } from "../lib/trpc-client";
-import { PluginMarkdown } from "./PluginMarkdown";
-
-const reviewQueryKey = (worktreeId: string) => ["worktreeReview", worktreeId] as const;
-
-/**
- * A poller tick or another device learned a CI state for the worktree. An open
- * Checks panel that still shows another state refetches; a closed one is only
- * marked stale, so nothing is fetched while it is hidden. A state the panel
- * already shows (its own load put it in the sidebar) costs no query.
- */
-export function syncReviewWithCI(worktreeId: string, ciState: string): void {
-  const key = reviewQueryKey(worktreeId);
-  const cached = queryClient.getQueryData<WorktreeReview>(key);
-  if (cached?.status === "ok") {
-    const shown = cached.review?.state === "merged" ? "merged" : cached.checks.state;
-    if (shown === ciState) return;
-  }
-  void queryClient.invalidateQueries({ queryKey: key });
-}
 
 /** The core's side of the plugin client API, backed by tRPC and TanStack Query. */
 export const clientPluginHost: ClientPluginHost = {
-  useWorktreeReview(worktreeId, { enabled, refetchInterval }) {
-    const query = useQuery({
-      queryKey: reviewQueryKey(worktreeId),
-      queryFn: () => trpc.reviews.forWorktree.query({ worktreeId }),
-      enabled,
-      // Polling refreshes the panel; this only saves a `gh` call when the
-      // user flips between tabs or worktrees.
-      staleTime: 15_000,
-      // Coming back to a worktree within 30 minutes shows the last data at
-      // once while it refetches.
-      gcTime: 30 * 60_000,
-      refetchInterval:
-        typeof refetchInterval === "function"
-          ? (q) => refetchInterval(q.state.data)
-          : refetchInterval,
-    });
-    return {
-      data: query.data,
-      isLoading: query.isLoading,
-      isFetching: query.isFetching,
-      error: query.error,
-      refetch: () => void query.refetch(),
-    };
-  },
-
-  async mergeReview(worktreeId, method) {
-    try {
-      await trpc.reviews.merge.mutate({ worktreeId, method });
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: reviewQueryKey(worktreeId) });
-    }
-  },
-
-  async rerunChecks(worktreeId, targets) {
-    try {
-      await trpc.reviews.rerunChecks.mutate({ worktreeId, targets });
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: reviewQueryKey(worktreeId) });
-    }
-  },
-
   async startAgent(worktreeId, prompt) {
     // The dock activates the tab of every id announced here, whether the
     // server's `chat-created` / `terminal-created` event or this call's
@@ -128,6 +65,4 @@ export const clientPluginHost: ClientPluginHost = {
       new CustomEvent("band:lsp-navigate", { detail: { filePath: path, worktreeId, line } }),
     );
   },
-
-  Markdown: PluginMarkdown,
 };

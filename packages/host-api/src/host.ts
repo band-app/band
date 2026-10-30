@@ -52,6 +52,11 @@ export interface Host {
    * one. The hub's own machine is served by the hub already.
    */
   readonly direct?: HostDirect;
+  /**
+   * The worker halves of bundled plugins. Only a remote host has it: the hub's own machine runs
+   * no worker plugins.
+   */
+  readonly plugins?: HostPlugins;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +80,8 @@ export interface HostCapabilities {
    * Absent from the hub's own host and older workers.
    */
   chatOwnership?: boolean;
+  /** One key per worker plugin the host runs, named by the plugin id (`simulator`). */
+  [plugin: string]: boolean | undefined;
 }
 
 /** One coding agent as a host sees it: is its CLI installed, and is it logged in. */
@@ -496,6 +503,8 @@ export interface AgentStdio {
    * A host that cannot lose its agents never calls it.
    */
   onReattached?(listener: () => void): void;
+  /** True while a held agent has no link to its worker, waiting for a reattach. */
+  readonly detached?: boolean;
 }
 
 export interface HostAcp {
@@ -864,6 +873,19 @@ export interface DirectGrant {
   token: string;
   /** Epoch ms after which the listener refuses the token. */
   expiresAt: number;
+}
+
+export interface HostPlugins {
+  /**
+   * Calls `method` on the plugin's service for one worktree. Rejects when the host is offline
+   * or does not run the plugin.
+   */
+  call(
+    pluginId: string,
+    method: string,
+    params: unknown,
+    scope: { worktreeKey: string; worktreePath: string },
+  ): Promise<unknown>;
 }
 
 export interface HostDirect {

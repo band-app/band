@@ -340,7 +340,7 @@ function MobileWorktreeChrome({
   const worktreePath = useWorktreePath(worktreeId);
   const { changes, changeCount } = useChangesSummary(worktreeId);
   const { name, repoName } = useWorktreeNames(worktreeId);
-  const pluginTabs = useWorktreeSideTabs();
+  const pluginTabs = useWorktreeSideTabs(worktreeId);
 
   // The layout is always the main editor surface. The header menu opens
   // Explorer / Changes / plugin tabs as a bottom sheet; closing it returns to

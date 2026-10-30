@@ -2840,6 +2840,16 @@ fn hosts_set_agent_command_sets_and_clears_the_override() {
 fn hosts_alias_works_and_stays_out_of_help() {
     let env = TestEnv::new();
 
+    // The local worker's capability report fills in a moment after boot, and the listing changes
+    // when it does (`report`, `agents`). Wait for it, so the two listings below see the same state.
+    for _ in 0..100 {
+        let probe = json_of(&env.band(&["workers", "list", "--output", "json"]));
+        if !probe["hosts"][0]["report"].is_null() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
     let old = json_of(&env.band(&["hosts", "list", "--output", "json"]));
     let new = json_of(&env.band(&["workers", "list", "--output", "json"]));
     assert_eq!(old["hosts"][0]["id"], "local", "old: {old}");

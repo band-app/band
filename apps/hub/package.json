@@ -57,6 +57,7 @@
     "@band-app/logger": "workspace:^",
     "@band-app/plugin-api": "workspace:^",
     "@band-app/plugin-github": "workspace:^",
+    "@band-app/plugin-simulator": "workspace:^",
     "@band-app/shared": "workspace:^",
     "@band-app/worktree-ops": "workspace:^",
     "@modelcontextprotocol/sdk": "^1.29.0",

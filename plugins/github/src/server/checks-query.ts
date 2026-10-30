@@ -14,6 +14,7 @@ import type {
   ReviewState,
   ReviewThread,
 } from "@band-app/plugin-api";
+import { rerunActions, reviewActions } from "./actions";
 
 // What one query fetches of the discussion. Past a cap the newest messages
 // win for comments and reviews, and the first ones for threads; the
@@ -266,7 +267,7 @@ export function parseReview(
     }
   }
 
-  return {
+  const review = {
     number: pr.number,
     url: pr.url,
     title: pr.title,
@@ -278,6 +279,7 @@ export function parseReview(
     reviewers: parseReviewers(pr),
     discussion: parseDiscussion(pr),
   };
+  return { ...review, actions: reviewActions(review) };
 }
 
 const REVIEWER_STATES: Record<string, ReviewerState> = {
@@ -524,7 +526,7 @@ function report(headSha: string | null, checks: CheckRun[]): ChecksReport {
       state = check.state as ChecksState;
     }
   }
-  return { state, headSha, checks: sorted };
+  return { state, headSha, checks: sorted, actions: rerunActions(sorted) };
 }
 
 function reviewState(pr: PullRequestNode): ReviewState {
