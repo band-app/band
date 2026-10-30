@@ -17,9 +17,9 @@ import { takeCIRefreshRequest } from "./_utils/ci-refresh-request";
 import type { CIStatus } from "./_utils/ci-status";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { clientActivityService } from "./client-activity-service";
-import { githubPollService } from "./github-poll-service";
 import { pluginHost } from "./plugin-host-service";
 import { loadState } from "./state";
+import { subscriptionPollService } from "./subscription-poll-service";
 import { syncService } from "./sync-service";
 import { emit } from "./watcher-service";
 
@@ -606,7 +606,7 @@ async function pollTick() {
   // Subscriptions of repos with no webhook are polled on the same cadence.
   // The call is not awaited: a slow `gh` must not hold up the status pass.
   if (queryCI) {
-    void githubPollService
+    void subscriptionPollService
       .poll()
       .catch((err) => log.warn({ err }, "github subscription poll failed"));
   }

@@ -1,5 +1,11 @@
 import type { z } from "zod";
-import type { BranchStatusProvider, ChecksProvider, RepoInfo, ReviewProvider } from "./providers";
+import type {
+  BranchStatusProvider,
+  ChecksProvider,
+  RepoInfo,
+  ReviewProvider,
+  SubscriptionSourceProvider,
+} from "./providers";
 
 export interface ExecOptions {
   cwd: string;
@@ -51,6 +57,7 @@ export interface BandServerApi {
     registerReviewProvider(provider: ReviewProvider): void;
     registerChecksProvider(provider: ChecksProvider): void;
     registerBranchStatusProvider(provider: BranchStatusProvider): void;
+    registerSubscriptionSourceProvider(provider: SubscriptionSourceProvider): void;
   };
   reviews: {
     /**

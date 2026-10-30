@@ -187,6 +187,18 @@ test("a completed check_run webhook shows the check's final state within seconds
 test("a webhook for another branch makes no lookup for this worktree", async ({ page }) => {
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
   await panel.goto(toWorktreeId(REPO, QUIET_BRANCH, "local"));
+  // The panel's own startup lookups can land after goto returns; take the baseline once they stop.
+  let last = -1;
+  await expect
+    .poll(
+      () => {
+        const settled = quietLookups === last;
+        last = quietLookups;
+        return settled;
+      },
+      { intervals: [500], timeout: 10_000 },
+    )
+    .toBe(true);
   const before = quietLookups;
 
   await deliver("check_run", {

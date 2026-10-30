@@ -1,25 +1,9 @@
-import type { SubscriptionEvent } from "./event";
-import { githubPrKey } from "./github";
+import type { SourceEvent } from "@band-app/plugin-api";
+import { type Json, obj, prKey, snippet, str } from "./json";
 
-const SNIPPET_LIMIT = 200;
 /** Newest comments, reviews and review threads one query reads per PR. */
 const PAGE = 30;
 const THREAD_COMMENTS = 10;
-
-type Json = Record<string, unknown>;
-
-function obj(value: unknown): Json | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : undefined;
-}
-
-function str(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function snippet(text: unknown): string {
-  const flat = str(text).replace(/\s+/g, " ").trim();
-  return flat.length > SNIPPET_LIMIT ? `${flat.slice(0, SNIPPET_LIMIT)}...` : flat;
-}
 
 function nodes(value: unknown): Json[] {
   const list = obj(value)?.nodes;
@@ -58,7 +42,7 @@ export interface PrActivity {
   /** Stable across polls: GraphQL node id. */
   id: string;
   createdAt: string;
-  event: SubscriptionEvent;
+  event: SourceEvent;
 }
 
 /**
@@ -78,7 +62,7 @@ export function parsePrActivity(
   for (const number of numbers) {
     const pr = obj(repository[`pr${number}`]);
     if (!pr) continue;
-    const key = githubPrKey(repo, number);
+    const key = prKey(repo, number);
     const prUrl = str(pr.url);
     const items: PrActivity[] = [];
     const add = (
@@ -96,7 +80,6 @@ export function parsePrActivity(
         createdAt,
         event: {
           id: `poll:${id}`,
-          source: "github",
           kind,
           key,
           url: str(node.url) || fallbackUrl,
