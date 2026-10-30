@@ -58,7 +58,7 @@ export interface GhStub {
   setReviewQueryError: (repo: RepoCoords, branch: string, stderr: string) => void;
   /**
    * Answer the branch-status poller's batched CI query
-   * (`buildBatchedCIQuery`, one `ws_<n>: repository(...)` alias per
+   * (`buildBranchStatusQuery`, one `ws_<n>: repository(...)` alias per
    * worktree). One registration answers the whole query: each alias of
    * `repo` gets `answer(branch)`, a `repository` object, and `null` when that
    * returns undefined; aliases of any other repository get `null`. Called
