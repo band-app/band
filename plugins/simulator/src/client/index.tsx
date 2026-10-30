@@ -4,14 +4,11 @@ import {
   useClientPluginHost,
   type WorktreePanelProps,
 } from "@band-app/plugin-api/client";
-import { Home, RotateCw, ScanEye } from "lucide-react";
+import { Home, ScanEye } from "lucide-react";
 import { useEffect, useState } from "react";
-
-const ORIENTATIONS = ["portrait", "landscape_left", "portrait_upside_down", "landscape_right"];
 
 function SimulatorPanel({ worktreeId, visible }: WorktreePanelProps) {
   const host = useClientPluginHost();
-  const [orientation, setOrientation] = useState(0);
   const Screen = host.RemoteScreen;
   const [canReveal, setCanReveal] = useState(false);
   useEffect(() => {
@@ -39,21 +36,6 @@ function SimulatorPanel({ worktreeId, visible }: WorktreePanelProps) {
           className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
         >
           <Home className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          aria-label="Rotate"
-          title="Rotate"
-          disabled={!api.controlling}
-          data-testid="simulator-panel__rotate"
-          onClick={() => {
-            const next = (orientation + 1) % ORIENTATIONS.length;
-            setOrientation(next);
-            api.send({ type: "rotate", orientation: ORIENTATIONS[next] });
-          }}
-          className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-        >
-          <RotateCw className="size-3.5" />
         </button>
         {canReveal && host.revealSimulator && udid && (
           <button

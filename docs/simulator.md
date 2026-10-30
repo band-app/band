@@ -28,7 +28,7 @@ So the devices moved into the default set under the `Band – ` prefix. The cap,
 
 ## Tests
 
-The tests that boot devices (`apps/hub/tests/simulator-plugin.test.ts`, `apps/worker/tests/plugin-fencing.test.ts`, the live part of `apps/web/e2e/simulator-panel.spec.ts`) skip without Xcode, and on CI unless `BAND_TEST_SIMULATOR=1`, because a cold boot takes minutes there. Keep 15 GB of disk free: the base device and each clone take about 5 GB.
+The tests that boot devices (`apps/hub/tests/simulator-plugin.test.ts`, `apps/worker/tests/plugin-fencing.test.ts`, the live part of `apps/web/e2e/simulator-panel.spec.ts`) skip without Xcode, and on CI unless `BAND_TEST_SIMULATOR=1`, because a cold boot takes minutes there. The `Web Tests (macOS)` CI job sets it with `BAND_SIMULATOR_MAX_BOOTED=1` for two cases only: the hub test "stream carries frames" and the e2e "S3, S6". That adds two cold boots (about 3 to 6 minutes each) and raises the job's timeout from 45 to 60 minutes; the rest stay local. Keep 15 GB of disk free: the base device and each clone take about 5 GB.
 
 ## Agent tools
 
@@ -46,7 +46,7 @@ Entry points:
 
 Nothing opens the tab by itself when an agent uses the simulator.
 
-The tab is a `RemoteScreen` (`apps/web/src/components/remote-screen/RemoteScreen.tsx`, handed to the plugin through the client host). It stays mounted while hidden (layout renderer `always`), so switching tabs does not reconnect. Closing the tab ends the stream only; the device stays booted until the cap or the worktree's removal. The header shows the device name and state, Take control / Release, Home, rotate, a screenshot button (saves the current frame as a PNG), and Reveal in Simulator.app only in the desktop app when the worktree's worker is this Mac's own worker (IPC `reveal_simulator`).
+The tab is a `RemoteScreen` (`apps/web/src/components/remote-screen/RemoteScreen.tsx`, handed to the plugin through the client host). It stays mounted while hidden (layout renderer `always`), so switching tabs does not reconnect. Closing the tab ends the stream only; the device stays booted until the cap or the worktree's removal. The header shows the device name and state, Take control / Release, Home, a screenshot button (saves the current frame as a PNG), and Reveal in Simulator.app only in the desktop app when the worktree's worker is this Mac's own worker (IPC `reveal_simulator`).
 
 The viewer starts view-only. Take control sends `{"type":"control","enabled":true}`; from then on a pointer press, move and release go to the device as touches (positions as fractions of the screen, mapped to points by serve-sim), printable keys type text, and Enter, Backspace, Tab and Escape are key presses. Release sends `enabled: false`.
 
@@ -60,7 +60,7 @@ Messages to the browser: one text `{"type":"info"}` (screen size in points, devi
 
 `RemoteScreen` is generic over what draws the frames and what the input messages mean. The desktop viewer could adopt it by a plugin-style stream whose messages are RFB bytes: swap the canvas drawing for noVNC's, and keep the header, the control toggle and the reconnect rules, which are the same. That is not done here.
 
-Rotate: the header button sends `serve-sim rotate`, but on Xcode 26.6 the captured framebuffer and the accessibility screen stayed 1206x2622 and 402x874 after `landscape_left`, so the viewer shows no rotation there. The button is wired and gated by control; a visible effect is not verified.
+Rotate is not offered. `serve-sim rotate` runs, but on Xcode 26.6 the captured framebuffer and the accessibility screen stayed 1206x2622 and 402x874 after `landscape_left`, so a rotate control would do nothing visible. The header has no rotate button, the stream takes no `rotate` message, and no tool takes an orientation. Revisit it when a newer Xcode or serve-sim rotates the capture.
 
 ## What breaks it
 

@@ -17,12 +17,6 @@ export function serveSimButton(name: string): string {
 }
 
 const KEY_USAGE: Record<string, number> = { Enter: 0x28, Backspace: 0x2a, Tab: 0x2b, Escape: 0x29 };
-const ORIENTATIONS = new Set([
-  "portrait",
-  "portrait_upside_down",
-  "landscape_left",
-  "landscape_right",
-]);
 
 const JPEG_START = Buffer.from([0xff, 0xd8]);
 
@@ -116,7 +110,7 @@ const unit = (v: unknown): number | null =>
 /**
  * The live screen of one device. Messages to the viewer are text `{"type":"info"}` and then one
  * binary JPEG per frame (the newest one when the viewer is slow). Messages from the viewer are
- * JSON: `touch` (phase and 0..1 coordinates), `button`, `key`, `text` and `rotate`.
+ * JSON: `touch` (phase and 0..1 coordinates), `button`, `key` and `text`.
  */
 export function openScreenStream(
   helper: Helper,
@@ -147,7 +141,6 @@ export function openScreenStream(
     yield JSON.stringify({ type: "info", ...info });
     yield* latest;
   })();
-  let rotating = false;
   let queuedText = 0;
   return {
     output,
@@ -191,19 +184,6 @@ export function openScreenStream(
             .then(() => helpers.type(helper.udid, text))
             .catch(() => undefined)
             .finally(() => queuedText--);
-          return;
-        }
-        case "rotate": {
-          if (typeof msg.orientation === "string" && ORIENTATIONS.has(msg.orientation)) {
-            if (rotating) return;
-            rotating = true;
-            void helpers
-              .rotate(helper.udid, msg.orientation)
-              .catch(() => undefined)
-              .finally(() => {
-                rotating = false;
-              });
-          }
           return;
         }
       }

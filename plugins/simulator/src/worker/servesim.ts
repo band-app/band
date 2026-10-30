@@ -213,11 +213,6 @@ export class ServeSimHelpers {
     await serveSim(["button", "-d", udid, name]);
   }
 
-  async rotate(udid: string, orientation: string): Promise<void> {
-    await this.helper(udid);
-    await serveSim(["rotate", "-d", udid, orientation]);
-  }
-
   /** Stops the device's helper. */
   async stop(udid: string): Promise<void> {
     this.helpers.delete(udid);

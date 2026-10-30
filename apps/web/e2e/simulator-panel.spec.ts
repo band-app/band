@@ -328,7 +328,7 @@ test.describe("with a Mac worker", () => {
     await expect(sim.status).toHaveText("View only");
   });
 
-  test("the header controls: rotate is gated by control, the screenshot downloads, Reveal is absent in a browser", async ({
+  test("the header controls: the screenshot downloads, Home needs control, Reveal is absent in a browser", async ({
     page,
   }) => {
     test.setTimeout(300_000);
@@ -341,12 +341,10 @@ test.describe("with a Mac worker", () => {
     const download = await sim.saveScreenshot();
     expect(download.suggestedFilename()).toMatch(/\.png$/);
 
-    // Rotate needs control. serve-sim keeps the captured framebuffer portrait on this Xcode
-    // (probe in docs/simulator.md), so the test checks that the press leaves the stream live.
-    await expect(sim.rotateButton).toBeDisabled();
+    await expect(sim.homeButton).toBeDisabled();
     await sim.takeControl();
-    await sim.rotateButton.click();
-    await expect(sim.screen).toHaveAttribute("data-phase", "live");
+    await expect(sim.homeButton).toBeEnabled();
+    await expect(sim.rotateButton).toHaveCount(0);
   });
 
   test("the Open simulator button on a simulator tool call opens the tab", async ({ page }) => {

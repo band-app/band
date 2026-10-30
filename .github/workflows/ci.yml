@@ -1132,8 +1132,9 @@ jobs:
   web-macos:
     name: Web Tests (macOS)
     runs-on: macos-latest
-    # A hung test must not hold the job for the 6 hour default.
-    timeout-minutes: 45
+    # A hung test must not hold the job for the 6 hour default. The simulator steps below add a
+    # cold device boot each (about 3 to 6 minutes on a runner).
+    timeout-minutes: 60
     needs: macos-changes
     if: needs.macos-changes.outputs.web == 'true'
     env:
@@ -1229,6 +1230,28 @@ jobs:
           pnpm --filter @band-app/shared test
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
+
+      # The simulator tests boot real iOS simulators and skip on CI unless BAND_TEST_SIMULATOR=1.
+      # Only two cases run here, one device each at a time (BAND_SIMULATOR_MAX_BOOTED=1): the hub
+      # test that the stream carries frames and stays view-only until control (S4), and the e2e
+      # that the Simulator tab opens and shows the screen (S3, S6). The rest run locally.
+      - name: Build worker (simulator tests start the real binary)
+        run: pnpm --filter @band-app/worker build
+
+      - name: Test simulator stream (hub)
+        env:
+          BAND_TEST_SIMULATOR: "1"
+          BAND_SIMULATOR_MAX_BOOTED: "1"
+        run: pnpm --filter @band-app/server exec vitest run tests/simulator-plugin.test.ts -t "stream carries"
+
+      - name: Install Playwright Chromium (simulator tab)
+        run: pnpm --filter @band-app/web exec playwright install chromium
+
+      - name: Test simulator tab (e2e)
+        env:
+          BAND_TEST_SIMULATOR: "1"
+          BAND_SIMULATOR_MAX_BOOTED: "1"
+        run: pnpm --filter @band-app/web exec playwright test e2e/simulator-panel.spec.ts -g "S3, S6"
 
       - name: Save Cargo registry cache
         if: |

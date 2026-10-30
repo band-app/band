@@ -84,7 +84,7 @@ A client half contributes `worktree.panels` entries (`WorktreePanel`: id, label,
 
 ## Tests
 
-`apps/hub/tests/simulator-plugin.test.ts` runs a real hub and real `band-worker` processes with the ACP stub calling the tools, then opens the stream and checks view-only and control on a device. `apps/worker/tests/plugin-fencing.test.ts` checks the lease fence. `apps/web/e2e/simulator-panel.spec.ts` drives the tab in a browser, the chat image and `band simulators open`. CI skips the tests that boot a device unless `BAND_TEST_SIMULATOR=1`.
+`apps/hub/tests/simulator-plugin.test.ts` runs a real hub and real `band-worker` processes with the ACP stub calling the tools, then opens the stream and checks view-only and control on a device. `apps/worker/tests/plugin-fencing.test.ts` checks the lease fence. `apps/web/e2e/simulator-panel.spec.ts` drives the tab in a browser, the chat image and `band simulators open`. CI skips the tests that boot a device unless `BAND_TEST_SIMULATOR=1`; the macOS web job turns it on for the stream test and the Simulator tab e2e.
 
 ## Comparison with VS Code's SCM API
 

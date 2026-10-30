@@ -20,6 +20,7 @@ export class SimulatorPage {
   readonly status: Locator;
   readonly controlToggle: Locator;
   readonly homeButton: Locator;
+  /** Not offered: rotate does nothing visible on the current Xcode. */
   readonly rotateButton: Locator;
   readonly revealButton: Locator;
   readonly screenshotButton: Locator;
@@ -43,7 +44,7 @@ export class SimulatorPage {
     this.status = page.getByTestId("remote-screen__status");
     this.controlToggle = page.getByTestId("remote-screen__control");
     this.homeButton = page.getByTestId("simulator-panel__home");
-    this.rotateButton = page.getByTestId("simulator-panel__rotate");
+    this.rotateButton = page.getByRole("button", { name: "Rotate" });
     this.revealButton = page.getByTestId("simulator-panel__reveal");
     this.screenshotButton = page.getByTestId("remote-screen__screenshot");
     this.toolImage = page.getByTestId("tool-call__image").first();

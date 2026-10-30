@@ -19,6 +19,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
@@ -386,6 +387,30 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     expect(tapped.type?.rpc.result?.isError).toBeFalsy();
   }, 400_000);
 
+  it("simulator_open_url opens an http URL that a local server serves", async () => {
+    const hits: string[] = [];
+    const web = createServer((req, res) => {
+      hits.push(req.url ?? "");
+      res.setHeader("content-type", "text/html");
+      res.end("<h1>band</h1>");
+    });
+    await new Promise<void>((resolve) => web.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (web.address() as { port: number }).port;
+      const r = await turn(sim, a, "a-open-url", [
+        call("openurl", "simulator_open_url", { url: `http://127.0.0.1:${port}/band` }),
+      ]);
+      expect(r.openurl?.rpc.result?.isError).toBeFalsy();
+      // Safari fetches the page from the host, which the simulator shares the network of.
+      await waitFor(async () => (hits.includes("/band") ? true : undefined), {
+        label: "Safari requested the page",
+        timeoutMs: 60_000,
+      });
+    } finally {
+      await new Promise<void>((resolve) => web.close(() => resolve()));
+    }
+  }, 200_000);
+
   it("S1: the device is in the default device set under the run's own prefix", async () => {
     const mine = listDevices();
     expect(mine.length).toBeGreaterThan(0);
@@ -462,7 +487,9 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     expect(homeLabels).toContain("Maps");
     screen.ws.send(JSON.stringify({ type: "button", name: "LOCK" }));
     await new Promise((r) => setTimeout(r, 2500));
-    expect(await labels()).toBe(homeLabels);
+    // Widgets change their text over time, so the home screen is recognised by its icons: a
+    // locked device shows none of them.
+    expect(await labels()).toContain("Maps");
     screen.ws.close();
   }, 400_000);
 
