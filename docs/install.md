@@ -1,6 +1,11 @@
-# Install Band
+---
+title: Install
+description: Install the Band desktop app, run a hub on a server, or add a worker, and get the band CLI.
+section: get-started
+order: 20
+---
 
-Band has three parts. The desktop app is the interface. The hub holds data and runs agents' chats. Workers are the machines worktrees live on. You need the first, or the first two, or all three, depending on where your code runs.
+Band has three parts. The hub holds data and runs the agents' chats. Workers are the machines that hold worktrees and run agents. The desktop app and the web UI are the interface. Pick the layout that matches where your code runs.
 
 | You want | Install |
 | --- | --- |
@@ -10,19 +15,24 @@ Band has three parts. The desktop app is the interface. The hub holds data and r
 
 ## 1. Desktop app only
 
-```sh
-brew install --cask band
-```
-
-Or download the DMG for your chip from the [latest release](https://github.com/band-app/band/releases/latest). The app starts its own hub and runs worktrees on this Mac. Nothing else is needed.
-
-To use the `band` CLI without the app, install the hub package, which includes it:
+The desktop app runs on macOS 11 or newer on Apple Silicon. There is no Intel build. Install it with Homebrew:
 
 ```sh
-npm install -g @band-app/server
+brew install --cask band-app/band/band
 ```
 
-The hub finds its CLI in the `@band-app/worker-cli-<platform>-<arch>` package that npm installs beside it (darwin-arm64, linux-x64 and linux-arm64). On another platform, or with optional dependencies turned off, install that package or set `BAND_CLI_PATH`.
+Or download `Band-<version>-apple-silicon.dmg` from the [latest release](https://github.com/band-app/band/releases/latest), open it and drag Band to Applications. The app starts its own hub and runs worktrees on this Mac. Nothing else is needed, except `git` and the coding agents you want to use. Install and log in to those yourself.
+
+### The `band` CLI
+
+The app bundles the `band` CLI. Two ways to put it on your PATH:
+
+- The Homebrew cask links it into Homebrew's `bin` for you.
+- With the DMG, the dashboard shows an "Install band CLI" banner. Click Install to link it as `/usr/local/bin/band`. macOS may ask for an administrator password. If a different `band` binary already sits there, the banner offers to replace it.
+
+Check it with `band repos list`. The CLI reads the hub's address and token from `~/.band/settings.json`. Point it at another hub with `BAND_SERVER_URL` and `BAND_TOKEN`.
+
+On a hub you installed from npm (`@band-app/server`, command `band-server`), the same banner links the CLI that npm installed beside it. The CLI comes in the `@band-app/worker-cli-<platform>-<arch>` package (darwin-arm64, linux-x64 and linux-arm64). On another platform, or with optional dependencies turned off, install that package or set `BAND_CLI_PATH`. Agents and terminals on a worker get `band` on their PATH without any of this.
 
 ## 2. A server hub
 
@@ -34,7 +44,7 @@ docker compose up -d
 docker compose logs band   # the first run prints an admin token once
 ```
 
-The hub listens on `127.0.0.1:3456`. To pin a release, set `BAND_VERSION` (for example `BAND_VERSION=1.4.0 docker compose up -d`). Without it, compose pulls `latest`. Put settings such as `BAND_PORT` and `BAND_ADMIN_TOKEN` in an `.env` file next to `compose.yml`. [`deploy/compose/.env.example`](../deploy/compose/.env.example) lists them.
+Compose publishes the hub on `127.0.0.1:3456`. To pin a release, set `BAND_VERSION` (for example `BAND_VERSION=1.4.0 docker compose up -d`). Without it, compose pulls `latest`. Put settings such as `BAND_PORT` and `BAND_ADMIN_TOKEN` in an `.env` file next to `compose.yml`. [`deploy/compose/.env.example`](../deploy/compose/.env.example) lists them.
 
 To build the image from a checkout instead of pulling it:
 
@@ -49,188 +59,8 @@ In the desktop app, choose the remote hub in Settings > Hub. A hub with no local
 
 ## 3. Workers and runners
 
-A worker dials the hub, so it needs no inbound port. Open Settings > Workers, choose Add worker, give it a name and copy the command from the tab you want. The token in it works once and expires in an hour.
-
-### This Mac, from the desktop app
-
-On a Mac the desktop app is the main way to add a worker. When the app connects to a remote hub (Settings > Hub), it asks "Use this Mac as a worker?" once for that hub. Yes asks the hub for a one-time token, installs the launchd agent `app.band.worker` and waits until the worker shows online. The name defaults to the macOS computer name and can be changed. Folders the worker may use start empty, and a repo added later through the folder picker adds its folder. Not now is remembered for that hub. The app with its own local hub never asks, because the hub's local worker already covers the machine.
-
-The same action stays in Settings > Workers under This computer. It shows the worker's status and the worker version, which is the app version. Remove this computer uninstalls the service, ends the terminals' daemon and removes the worker from the hub once it is offline. A worker that still has worktrees stays on the hub, and the section says so.
-
-The service runs the worker inside the app (`Band.app/Contents/Resources/worker`) with the app's own executable (`ELECTRON_RUN_AS_NODE=1`), so the Mac needs no Node or npm. An app update replaces the files and the app restarts the service with `launchctl kickstart -k` the first time it starts after the update. The service keeps running when you quit the app. The token never appears in the UI or the logs. It is in the plist (mode 0600), as with the npm install.
-
-When `app.band.worker` was installed from npm, Settings > Workers offers Switch to the worker in this app. The switch keeps the worker id, name, roots and state directory, so the worker and its worktrees stay.
-
-The npm path below stays for Linux and servers.
-
-### npm with a service
-
-```sh
-npm install -g @band-app/worker
-band-worker install-service --hub https://band.example.com --worker-id <id> --token <bootstrap token>
-```
-
-Node 22.5 or newer is required. `install-service` writes the worker's settings and starts it:
-
-- On Linux it creates the systemd user unit `~/.config/systemd/user/band-worker.service` and enables it with `systemctl --user enable --now`. It then runs `loginctl enable-linger` so the worker keeps running after you log out. When that is refused it prints the `sudo loginctl enable-linger $USER` command.
-- The unit sets `OOMPolicy=continue`. When the kernel kills an agent or a build for running out of memory, only that process dies, and the worker and the other chats keep running. Without it systemd stops the whole worker. An install from an older Band gets the setting the next time `install-service` runs. The original bootstrap token works for that run: the worker keeps the session token and worker id saved in its state directory, and never trades the spent token again. Pass the same flags as the first install (including `--state-dir` if you set one), because `install-service` rewrites the env file from them. To add the setting without reinstalling, use a drop-in:
-
-  ```sh
-  mkdir -p ~/.config/systemd/user/band-worker.service.d
-  printf '[Service]\nOOMPolicy=continue\n' > ~/.config/systemd/user/band-worker.service.d/oom.conf
-  systemctl --user daemon-reload
-  ```
-- On macOS it creates the launchd agent `~/Library/LaunchAgents/app.band.worker.plist` and loads it.
-- The macOS worker writes its own log, `~/.band/worker-service/worker.log`, and rotates it at 10 MB, keeping 3 files (`worker.log`, `worker.log.1`, `worker.log.2`). A larger existing log is rotated when the worker starts. launchd's own output goes to `/dev/null`, because launchd cannot rotate a file. On Linux the unit logs to journald and writes no file: read it with `journalctl --user -u band-worker`.
-
-The token lives in `~/.band/worker-service/worker.env` (Linux) or in the plist (macOS), both mode 0600 in a 0700 directory. After the first connect the worker keeps its own session token in its state directory and the bootstrap token is no longer used.
-
-Options: `--root <dir>` (repeatable, the directories the worker may serve), `--name`, `--labels k=v,k=v`, `--state-dir`.
-
-```sh
-band-worker status            # exit code 0 running, 3 installed but stopped, 4 not installed
-band-worker uninstall-service # removes the unit or plist and the env file, ends the terminals, keeps the worker's state
-```
-
-To run the worker in the foreground without a service, use `band-worker --hub <url> --token <token>`.
-
-### Docker
-
-```sh
-docker run -d --name band-worker --restart unless-stopped \
-  -v band-work:/work -v band-worker-state:/home/worker/.band/worker \
-  -e BAND_HUB_URL=https://band.example.com -e BAND_WORKER_ID=<id> -e BAND_WORKER_TOKEN=<bootstrap token> \
-  ghcr.io/band-app/band-worker:latest
-```
-
-The worker takes plain `http` only for a loopback hub. A hub on the same machine is reached with `--network host` and `http://127.0.0.1:3456`. Add worker shows the same command as a compose file in its Docker compose tab.
-
-### What a static worker must have
-
-A worker runs the coding agents. Band does not install or log in an agent for you, so before a worker can take a worktree, each agent it should run must be installed and logged in for the user the worker runs as. Run `band-worker doctor` on the machine to check:
-
-```
-ok   claude-code  2.4.1  installed, logged in
-FAIL codex        0.9.0  installed, not logged in
-       fix: codex login
-FAIL gh           -      not installed
-       fix: install the GitHub CLI from https://cli.github.com
-```
-
-It checks `claude`, `codex`, `opencode`, `gemini` and `cursor-agent`, then `git` and `gh`, and prints the command that fixes each gap. It exits 1 when `git` is missing or no agent is usable. On Linux it also warns, with the fix commands, when the machine has no swap and less than 16 GiB of memory, or when `fs.inotify.max_user_watches` is below 262144. It changes nothing itself, and these warnings do not change the exit code:
-
-```
-WARN worker       no swap and 7.8 GiB of memory: builds that agents run at once can be killed for running out of memory
-       fix: sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
-       fix: grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-WARN worker       fs.inotify.max_user_watches is 61656: agents that watch files fail with ENOSPC
-       fix: echo 'fs.inotify.max_user_watches=524288' | sudo tee /etc/sysctl.d/60-band-inotify.conf
-       fix: sudo sysctl --system
-```
-
-`BAND_AGENT_BIN_DIRS` (a PATH-style list) names extra directories to search first, for CLIs that sit outside the service's PATH.
-
-A connected worker sends the same report to the hub on connect and every few minutes (`BAND_CAPABILITY_REFRESH_MS`, default 3 minutes). Settings > Workers shows it for each worker (installed, version, logged in), instead of the agents in your settings.
-
-### Repos on a worker
-
-A worker owns a table from remote URL to folder (`repos.json` in its state directory). The first worktree of a repo on a worker clones it to `~/band/repos/<owner>/<name>`. Run the worker with `--repos-dir <dir>` (or `BAND_REPOS_DIR`) to clone elsewhere, and the worker serves that directory as a root. To use a checkout that already exists, add the repo from the worker's folder picker or with `band repos add --from <worker id> <path>`. See [Add a repo](run-the-hub-on-a-server.md#add-a-repo).
-
-### Runners
-
-A runner starts workers on demand when a worktree asks for a worker that does not exist yet (a Docker container, a Kubernetes Pod, a cloud VM, an SSH machine). The hooks and their settings are in [Runner hooks](runner-hooks.md), and sleeping workers in [Ephemeral workers](ephemeral-workers.md).
+A worker is a computer that runs worktrees and agents for a hub. Add one with a one-line command from Settings > Workers, from the desktop app (This Mac), or by hand with npm or Docker. [Add a worker](adding-workers.md) has the steps and what a worker needs. To start workers on demand in Docker, Kubernetes or a cloud, see [Runners](runner-hooks.md).
 
 ## Updating
 
-Settings > Workers shows the Band version each worker runs, and marks a worker that is behind the hub. Once a day the hub asks GitHub for the latest release (`BAND_UPDATE_CHECK=off` turns that off for an air-gapped hub). When a newer one exists, the sidebar footer shows an "update available" badge. It opens a panel that lists the hub and every worker with their version and the version to move to.
-
-Without the Update hub button, update the workers first and the hub last, so the hub is never older than its workers.
-
-- **A worker under launchd (`app.band.worker`) or a systemd user unit (`band-worker`)**: an admin clicks Update. A dialog lists the agents on that worker, because the restart ends them. On confirm, the worker runs the `npm` that sits beside its own `node` (`BAND_NPM_BIN` overrides it, and the service file needs no PATH) as `npm i -g --prefix <prefix> @band-app/worker@<version>`, where `<prefix>` is the one the running worker is installed in (`<prefix>/lib/node_modules/@band-app/worker`). It then makes node-pty's `spawn-helper` executable, because npm 11 skips install scripts, and restarts through its service manager. A worker that does not run from such a layout (a checkout, the desktop app, the Docker image) reports why in `updateBlockedReason`, gets no Update button and shows the manual command. If the install fails, the worker keeps running as it was and the error shows on the worker. A worker with the target version is the hub's own when the worker is behind it, otherwise the latest release (when it stays within a minor of the hub).
-- **Any other worker** shows the command to run by hand (`npm i -g @band-app/worker@<version>`, then restart it).
-- **The hub** shows the command for how it was installed. It follows `BAND_INSTALL_METHOD`, which the compose file (`compose`), the Kubernetes manifest (`k8s`, or `helm` for a chart) and the image default (`docker`) set, and which you set to `npm` for a hub installed with `npm i -g @band-app/server` under a systemd user unit named `band-hub`. With none set the panel says to pull `ghcr.io/band-app/band-hub:<version>` and recreate the container.
-- **The Update hub button** appears for an admin when `hubUpdate.command` is set (a field in the update panel, or `hubUpdate` in `~/.band/settings.json`). The hub runs the command with `sh -c` on its own machine, in its own session, with `BAND_HUB_TARGET_VERSION` set and its output in `<BAND_HOME>/hub-update.log`. It answers at once and the panel shows "updating" until the hub is back. A hub that comes back on the target version is done. A command that exits non-zero, a hub that restarts on another version, or no restart within 10 minutes (`BAND_HUB_UPDATE_TIMEOUT_MS`) shows as failed with the last lines of the log. Only an admin token can set the command or start the update, and agents cannot reach either. Docker, compose, Helm and Kubernetes hubs keep the copy-the-command text.
-- **Update all workers** in the panel updates each online worker that is behind, one after the other, and lists the result per worker. A worker with running agents is skipped until the admin confirms ("Update the skipped workers anyway").
-
-With the button, update the hub first and then the workers. A worker within one minor version of the hub is accepted, so the order is safe for one release step.
-
-#### Example: a hub under systemd
-
-`~/.config/systemd/user/band-hub-update.service` runs the update outside the hub's own process, so restarting the hub does not kill it:
-
-```ini
-[Unit]
-Description=Update the Band hub
-
-[Service]
-Type=oneshot
-ExecStart=%h/band-hub/update.sh
-```
-
-`~/band-hub/update.sh`:
-
-```sh
-#!/bin/sh
-set -e
-PORT="${BAND_PORT:-3456}"
-TOKEN=$(jq -r .tokenSecret ~/.band/settings.json)
-MAX_TASK_AGE_MIN="${BAND_HUB_UPDATE_MAX_TASK_AGE_MIN:-180}"
-MAX_DEFER_H="${BAND_HUB_UPDATE_MAX_DEFER_H:-6}"
-STATE="${XDG_STATE_HOME:-$HOME/.local/state}/band-hub-update-deferred"
-
-# Restarting the hub ends every agent turn it runs. Ask the hub which turns run.
-# If it does not answer, update at once, because it is not serving turns anyway.
-running=$(curl -fsS -m 10 -H "Authorization: Bearer $TOKEN" \
-  "http://127.0.0.1:$PORT/trpc/tasks.list?input=$(printf %s '{"status":"running"}' | jq -sRr @uri)" \
-  | jq -r --argjson now "$(date +%s)" --argjson age "$MAX_TASK_AGE_MIN" \
-      '[.result.data.tasks[] | select(.status == "running" and (($now * 1000 - .startedAt) / 60000) < $age)] | length') \
-  || running=0
-running="${running:-0}"
-
-if [ "$running" -gt 0 ]; then
-  mkdir -p "$(dirname "$STATE")"
-  [ -f "$STATE" ] || date +%s > "$STATE"
-  waited_h=$(( ($(date +%s) - $(cat "$STATE")) / 3600 ))
-  if [ "$waited_h" -lt "$MAX_DEFER_H" ]; then
-    echo "$running agent turn(s) running, deferring the update"
-    exit 0
-  fi
-fi
-rm -f "$STATE"
-
-npm i -g @band-app/server@"${BAND_HUB_TARGET_VERSION:-latest}"
-systemctl --user restart band-hub
-```
-
-The script reads the running turns from `tasks.list`. `workers.hubInterruptions` (admin token) is the same question the Update hub button asks, and lists every live agent with a `busy` flag, but `tasks.list` filters by turn age, which the script needs, so the example uses it.
-
-Two settings, read from the environment of the unit, control the wait:
-
-- `BAND_HUB_UPDATE_MAX_TASK_AGE_MIN` (default 180). Only turns that started within this many minutes count as running. An older turn is treated as stuck and does not hold the update.
-- `BAND_HUB_UPDATE_MAX_DEFER_H` (default 6). Once the first deferral is this many hours old, the script updates even if turns run.
-
-Set `hubUpdate.command` to `systemctl --user start --no-block band-hub-update.service`. `BAND_HUB_TARGET_VERSION` does not reach the unit through `systemctl`, so the example installs `latest`. A timer on the same unit gives you scheduled updates as well, and the deferral makes an hourly timer safe: each run skips while turns run and updates once they finish.
-
-The Update hub button in the update panel does not defer. It lists the running turns and asks you to confirm, and `workers.updateHub` refuses with a message naming them until called with `confirmInterruptions: true`. With no turn running it starts at once.
-
-A hub run from source reports the unreleased version `0.1.0` and accepts every worker (it logs that it skipped the check). A worker whose version differs from a released hub's by more than one minor version (`0.47.0` against `0.50.0`) is refused with a message that says what to do. The worker logs it, waits five minutes (`BAND_WORKER_VERSION_RETRY_MS`) and exits instead of redialing, and its worker shows "update required". A worker from before version reporting is accepted and shown with an unknown version. `band workers list` has a VERSION column with the same marks.
-
-## Releases
-
-A release publishes the desktop DMGs, the Homebrew cask, `@band-app/server` and `@band-app/worker` on npm, and the two images `ghcr.io/band-app/band-hub` and `ghcr.io/band-app/band-worker`. Each image is tagged with the release version and `latest`. Pull requests that change `docker/`, `deploy/compose/` or the release workflows build both images for both architectures without pushing them (`.github/workflows/images.yml`).
-
-### How the release workflow runs
-
-`release.yml` is started by hand (Actions > Release > Run workflow) and has these jobs:
-
-1. **Build (macOS).** Checks the gate, determines the version, builds the UI and hub, then builds, signs and notarizes the DMG. It uploads the DMGs, the zips, `latest-mac.yml`, the hub bundle and the built UI as artifacts.
-2. **CLI (Linux).** Builds the `band` CLI at the release version on an x64 and an arm64 runner.
-3. **Publish (Linux).** Downloads those artifacts, pushes the tag, creates the GitHub release, publishes the three `@band-app/worker-cli-<platform>-<arch>` packages (the `band` CLI for darwin-arm64, linux-x64 and linux-arm64, built by the macOS job and a `cli-linux` matrix) and then `@band-app/server` and `@band-app/worker` to npm (both pin those CLI packages as optional dependencies), and updates the Homebrew cask. The tag is pushed only after the signed build succeeded.
-4. **Images.** Builds the two images from the tag.
-5. **Mobile.** Runs after Publish. Builds the iOS app with the release version and submits it to TestFlight, and builds the Android preview APK, both through EAS with the `EXPO_TOKEN` secret. The `mobile` input is `auto` (only when `apps/mobile`, `packages/client`, `packages/shared` or `pnpm-lock.yaml` changed since the previous release tag), `always` or `skip`. The build links go in the job summary and the release notes. A failure here leaves the rest of the release shipped. App Store review stays manual.
-
-Build and Publish use the `production` environment, so the signing, npm and tap secrets stay with the jobs that need them.
-
-Lint and tests do not run in the release. The Build job runs `scripts/check-ci-green.sh <sha>`, which asks the GitHub API for a completed `ci.yml` run on the exact commit being released with conclusion `success` (every job succeeded or was skipped, and a re-run that succeeded counts). Runs of the `pull_request` event are ignored, because they test a merge ref. Without such a run the job fails and names the commit and the state of each `ci.yml` run it found. Start releases only after CI on main has finished.
-
-To release a commit that CI has not passed, run the workflow with `force_tests` set to true. The gate is skipped, and the job builds the CLI, runs lint, and runs the server, web and CLI tests before building the DMG, as releases did before the gate.
+See [Updates](updates.md) for the desktop app, workers and the hub, and for the version rules between them.
