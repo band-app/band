@@ -14,16 +14,12 @@ import { getDb } from "../infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { hostRegistry } from "../infra/host/registry";
 import { takeCIRefreshRequest } from "./_utils/ci-refresh-request";
-import {
-  buildBatchedCIQuery,
-  type CIStatus,
-  parseBatchedCIResponse,
-} from "./_utils/github-graphql";
+import type { CIStatus } from "./_utils/ci-status";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { clientActivityService } from "./client-activity-service";
-import { githubPollService } from "./github-poll-service";
 import { pluginHost } from "./plugin-host-service";
 import { loadState } from "./state";
+import { subscriptionPollService } from "./subscription-poll-service";
 import { syncService } from "./sync-service";
 import { emit } from "./watcher-service";
 
@@ -50,7 +46,7 @@ interface WorktreeInfo {
   /**
    * Whether the repo's git repo has an `origin` remote. Populated
    * from `RepoState.hasOrigin`, which `syncWorktrees` keeps in sync
-   * at the CI tick cadence. Used to skip the CI / GraphQL probe for
+   * at the CI tick cadence. Used to skip the CI probe for
    * origin-less repos — see issue #458.
    */
   hasOrigin: boolean;
@@ -104,7 +100,7 @@ const pollerState = {
 };
 
 /**
- * Per-host throttle for CI-poll GraphQL failures. Keyed by the GitHub
+ * Per-host throttle for CI-poll failures. Keyed by the GitHub
  * host (the same key `getBatchedCIStatuses` batches by), the value is the
  * last error message logged for that host.
  *
@@ -228,10 +224,10 @@ async function getGitStatus(ws: WorktreeInfo): Promise<GitStatus> {
 }
 
 /**
- * Fetch CI status for all worktrees using batched GraphQL queries.
+ * Fetch the CI and PR status of all worktrees, one batched provider call per repo.
  *
- * Groups worktrees by GitHub host and executes one GraphQL query per host,
- * fetching PR status and check suite results for all branches in a single request.
+ * Groups worktrees by repo checkout (per worker) and asks the plugin that handles the repo's
+ * forge for the status of every branch at once. The query itself lives in the plugin.
  *
  * The caller is responsible for pre-filtering to worktrees whose repo
  * has `hasOrigin === true` (see `RepoState.hasOrigin`, written by
@@ -246,143 +242,102 @@ async function getGitStatus(ws: WorktreeInfo): Promise<GitStatus> {
 export async function getBatchedCIStatuses(
   worktrees: WorktreeInfo[],
 ): Promise<Map<string, CIStatus>> {
-  // Dedupe `getRepoInfo` calls by repo path. A repo with N
-  // worktrees produces N `WorktreeInfo` entries that all share the
-  // same `repoPath`; without this, each tick fans out to N
-  // identical `git remote get-url origin` subprocesses. One probe per
-  // unique repo per tick is all we need.
+  // A repo with N worktrees produces N `WorktreeInfo` entries that share the
+  // same `repoPath`; one `getRepoInfo` probe and one provider call per unique
+  // repo per tick is all we need.
   const repoKey = (ws: WorktreeInfo) => `${ws.hostId ?? "local"}\0${ws.repoPath}`;
-  const repoWorktrees = new Map(worktrees.map((ws) => [repoKey(ws), ws]));
-  const uniqueRepoPaths = [...repoWorktrees.keys()];
-  const repoInfoByPath = new Map<string, RepoInfo | null>();
-  await forEachLimited(uniqueRepoPaths, async (key) => {
-    const ws = repoWorktrees.get(key) as WorktreeInfo;
-    repoInfoByPath.set(key, await getRepoInfo(ws.repoPath, gitRunner(hostOf(ws))));
+  const byRepo = new Map<string, WorktreeInfo[]>();
+  for (const ws of worktrees) {
+    const group = byRepo.get(repoKey(ws)) ?? [];
+    group.push(ws);
+    byRepo.set(repoKey(ws), group);
+  }
+  const repoInfoByKey = new Map<string, RepoInfo | null>();
+  await forEachLimited([...byRepo], async ([key, group]) => {
+    repoInfoByKey.set(key, await getRepoInfo(group[0].repoPath, gitRunner(hostOf(group[0]))));
   });
 
   // Caller already filtered to `hasOrigin === true`, so a null result
-  // here is genuinely unexpected — origin was removed externally
-  // between the last sync tick and this CI tick, OR git itself is
-  // misbehaving (binary missing, auth broken, FS perms). Surface those
-  // at `warn` so operators don't miss them. `syncWorktrees` will rewrite
-  // `hasOrigin` on its next tick and the noise stops on its own.
-  for (const [key, ws] of repoWorktrees) {
-    if (repoInfoByPath.get(key) === null && ws.hostId === undefined) {
+  // here is genuinely unexpected. Surface it at `warn` so operators don't miss it.
+  for (const [key, group] of byRepo) {
+    if (repoInfoByKey.get(key) === null && group[0].hostId === undefined) {
       log.warn(
         "CI poll: getRepoInfo returned null for %s despite hasOrigin=true; will reconcile on next sync tick",
-        ws.repoPath,
+        group[0].repoPath,
       );
     }
   }
 
-  const resolved: Array<{
-    ws: WorktreeInfo;
-    repoInfo: RepoInfo;
-    alias: string;
-  }> = [];
-  for (const [index, ws] of worktrees.entries()) {
-    const repoInfo = repoInfoByPath.get(repoKey(ws));
-    if (repoInfo) {
-      resolved.push({ ws, repoInfo, alias: `ws_${index}` });
-    }
+  // Group repos by the machine that runs `gh` and the forge host (for correct
+  // auth), the unit the failure throttle works on.
+  const byHost = new Map<string, Array<{ repoInfo: RepoInfo; worktrees: WorktreeInfo[] }>>();
+  for (const [key, group] of byRepo) {
+    const repoInfo = repoInfoByKey.get(key);
+    if (!repoInfo) continue;
+    const hostKeyOf = `${group[0].hostId ?? "local"}\0${repoInfo.host}`;
+    const repos = byHost.get(hostKeyOf) ?? [];
+    repos.push({ repoInfo, worktrees: group });
+    byHost.set(hostKeyOf, repos);
   }
 
-  // If no worktrees have repo info, return empty. No host is being
-  // queried this tick, so any remembered failures are stale — clear them
-  // so a host re-arms logging if it comes back.
-  if (resolved.length === 0) {
-    lastCIPollErrorByHost.clear();
-    const results = new Map<string, CIStatus>();
-    for (const ws of worktrees) {
-      results.set(ws.worktreeId, { state: "none" });
-    }
-    return results;
-  }
-
-  // Group by the machine that runs `gh` and the GitHub host (one query per
-  // pair, for correct auth).
-  const byHost = new Map<string, typeof resolved>();
-  for (const entry of resolved) {
-    const key = `${entry.ws.hostId ?? "local"}\0${entry.repoInfo.host}`;
-    const group = byHost.get(key) ?? [];
-    group.push(entry);
-    byHost.set(key, group);
-  }
+  // No host is being queried this tick when nothing resolved, so any
+  // remembered failures are stale; clearing them re-arms logging.
+  if (byHost.size === 0) lastCIPollErrorByHost.clear();
 
   const allResults = new Map<string, CIStatus>();
 
-  // Execute one batched GraphQL query per host
-  for (const [groupKey, group] of byHost) {
-    const host = group[0].repoInfo.host;
-    const inputs = group.map((g) => ({
-      alias: g.alias,
-      branch: g.ws.branch,
-      repoInfo: g.repoInfo,
-    }));
-
-    const query = buildBatchedCIQuery(inputs);
-    // Use any worktree's worktreePath for cwd (gh auth is per-host)
-    const cwd = group[0].ws.worktreePath;
-
-    const ghArgs = ["api", "graphql", "-f", `query=${query}`];
-    if (host !== "github.com") {
-      ghArgs.push("--hostname", host);
+  for (const [groupKey, repos] of byHost) {
+    const count = repos.reduce((n, r) => n + r.worktrees.length, 0);
+    let failure: string | null = null;
+    for (const { repoInfo, worktrees: group } of repos) {
+      const provider = await pluginHost.branchStatusProviderFor(repoInfo);
+      if (!provider) continue;
+      const host = hostOf(group[0]);
+      // Use any worktree's path as cwd (gh auth is per host).
+      const cwd = group[0].worktreePath;
+      const requests = [...new Map(group.map((g) => [g.branch, g])).values()].map((g) => ({
+        branch: g.branch,
+        isDefaultBranch: g.branch === g.defaultBranch,
+      }));
+      try {
+        const statuses = await provider.getBranchStatuses(repoInfo, requests, {
+          cwd,
+          gh: (args) => ghRunner(host)(args, cwd),
+        });
+        for (const g of group) {
+          const status = statuses[g.branch];
+          if (status) {
+            allResults.set(g.worktreeId, {
+              state: status.state,
+              url: status.url,
+              pr: status.review,
+            });
+          }
+        }
+      } catch (err) {
+        failure = err instanceof Error ? err.message : String(err);
+      }
     }
 
-    try {
-      const output = await ghRunner(hostOf(group[0].ws))(ghArgs, cwd);
-      const response = JSON.parse(output) as {
-        data: Record<string, unknown>;
-      };
-      // Build map of alias -> defaultBranch for aliases that are on the default branch
-      const defaultBranches = new Map<string, string>();
-      for (const g of group) {
-        if (g.ws.branch === g.ws.defaultBranch) {
-          defaultBranches.set(g.alias, g.ws.defaultBranch);
-        }
-      }
-
-      const parsed = parseBatchedCIResponse(
-        response.data as Record<string, never>,
-        inputs.map((i) => i.alias),
-        defaultBranches,
-      );
-
-      // Map aliases back to worktree IDs
-      for (const g of group) {
-        const status = parsed.get(g.alias);
-        if (status) {
-          allResults.set(g.ws.worktreeId, status);
-        }
-      }
-
-      // Host recovered — reset the throttle so the next distinct failure
-      // for this host logs again.
+    // Log only when this host's error is new or changed since the last
+    // tick, so a persistent failure doesn't spam the log on every poll. A
+    // host recovers when none of its repos failed, which re-arms logging.
+    if (failure === null) {
       lastCIPollErrorByHost.delete(groupKey);
-    } catch (err) {
-      // Log only when this host's error is new or changed since the last
-      // tick; suppress identical repeats so a persistent failure doesn't
-      // spam the log on every poll. Same message/prefix as before so log
-      // greppers keep matching.
-      const message = err instanceof Error ? err.message : String(err);
-      if (lastCIPollErrorByHost.get(groupKey) !== message) {
-        lastCIPollErrorByHost.set(groupKey, message);
-        console.error(
-          `CI poll: GraphQL query failed for host (${group.length} worktrees):`,
-          message,
-        );
-      }
+    } else if (lastCIPollErrorByHost.get(groupKey) !== failure) {
+      lastCIPollErrorByHost.set(groupKey, failure);
+      console.error(`CI poll: status query failed for host (${count} worktrees):`, failure);
     }
   }
 
   // Drop throttle state for hosts that dropped out of the polled set, so
-  // it doesn't leak as repos/worktrees come and go — and a host that
+  // it doesn't leak as repos/worktrees come and go, and a host that
   // returns re-arms logging.
   for (const key of [...lastCIPollErrorByHost.keys()]) {
     if (!byHost.has(key)) lastCIPollErrorByHost.delete(key);
   }
 
-  // Fill in "none" for worktrees that couldn't resolve repo info
+  // Fill in "none" for worktrees that got no status.
   for (const ws of worktrees) {
     if (!allResults.has(ws.worktreeId)) {
       allResults.set(ws.worktreeId, { state: "none" });
@@ -651,7 +606,7 @@ async function pollTick() {
   // Subscriptions of repos with no webhook are polled on the same cadence.
   // The call is not awaited: a slow `gh` must not hold up the status pass.
   if (queryCI) {
-    void githubPollService
+    void subscriptionPollService
       .poll()
       .catch((err) => log.warn({ err }, "github subscription poll failed"));
   }
@@ -675,7 +630,7 @@ async function pollTick() {
 
   // Fetch CI statuses in batch on CI ticks. Filter to worktrees whose
   // repo has an `origin` remote — by construction, an origin-less
-  // repo has no PR / CI status to report and the GraphQL query would
+  // repo has no PR / CI status to report and the status query would
   // need a `getRepoInfo` probe that's guaranteed to fail (issue #458).
   // `hasOrigin` is maintained by `syncWorktrees`, which runs in the same
   // tick body just above; freshly-discovered origin changes land in the

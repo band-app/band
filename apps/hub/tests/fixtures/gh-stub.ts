@@ -58,7 +58,7 @@ export interface GhStub {
   setReviewQueryError: (repo: RepoCoords, branch: string, stderr: string) => void;
   /**
    * Answer the branch-status poller's batched CI query
-   * (`buildBatchedCIQuery`, one `ws_<n>: repository(...)` alias per
+   * (`buildBranchStatusQuery`, one `ws_<n>: repository(...)` alias per
    * worktree). One registration answers the whole query: each alias of
    * `repo` gets `answer(branch)`, a `repository` object, and `null` when that
    * returns undefined; aliases of any other repository get `null`. Called
@@ -90,6 +90,11 @@ export interface GhStub {
   setAuthUser: (login: string) => void;
   /** Answer `gh pr merge <number>`; `stderr` makes it fail. */
   setPrMerge: (
+    number: number,
+    opts?: { stderr?: string; onRequest?: (r: GhInvocation) => void },
+  ) => void;
+  /** Answer `gh pr ready <number>`; `stderr` makes it fail. */
+  setPrReady: (
     number: number,
     opts?: { stderr?: string; onRequest?: (r: GhInvocation) => void },
   ) => void;
@@ -258,6 +263,21 @@ export const ghStub = {
             opts?.stderr
               ? { stdout: "", stderr: opts.stderr, exitCode: 1 }
               : { stdout: `✓ Merged pull request #${number}\n` },
+          );
+        });
+      },
+      setPrReady(number, opts) {
+        app.post("/pr/ready", (req, res, next) => {
+          const body = req.body as GhInvocation;
+          if (body.positional[2] !== String(number)) {
+            next();
+            return;
+          }
+          opts?.onRequest?.(body);
+          res.json(
+            opts?.stderr
+              ? { stdout: "", stderr: opts.stderr, exitCode: 1 }
+              : { stdout: `✓ Pull request #${number} is marked as "ready for review"\n` },
           );
         });
       },

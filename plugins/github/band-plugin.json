@@ -10,8 +10,6 @@
     "onRepoRemote:github.*",
     "onRepoRemote:*.ghe.com"
   ],
-  "contributes": {
-    "slots": ["worktree.sideTabs"]
-  },
+  "contributes": {},
   "requires": ["gh"]
 }

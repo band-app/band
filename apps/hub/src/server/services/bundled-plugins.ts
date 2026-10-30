@@ -1,6 +1,8 @@
 import type { ServerPlugin } from "@band-app/plugin-api/server";
 import githubManifest from "@band-app/plugin-github/band-plugin.json" with { type: "json" };
 import githubServer from "@band-app/plugin-github/server";
+import simulatorManifest from "@band-app/plugin-simulator/band-plugin.json" with { type: "json" };
+import simulatorServer from "@band-app/plugin-simulator/server";
 
 export interface BundledPlugin {
   /** The raw `band-plugin.json`; `PluginHost` validates it before activating anything. */
@@ -15,4 +17,5 @@ export interface BundledPlugin {
  */
 export const BUNDLED_PLUGINS: BundledPlugin[] = [
   { manifest: githubManifest, server: githubServer },
+  { manifest: simulatorManifest, server: simulatorServer },
 ];

@@ -1,11 +1,13 @@
 import { REVIEW_LABEL, relativeTime } from "@band-app/client/merge";
 import type { ReviewComment, ReviewDiscussion, ReviewThread } from "@band-app/plugin-api";
-import { useClientPluginHost } from "@band-app/plugin-api/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band-app/ui";
 import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useState } from "react";
+import { clientPluginHost as host } from "../../plugins/client-plugin-host";
 import { PanelSection } from "./PanelSection";
 import { Avatar } from "./ReviewersSection";
+import { ReviewMarkdown } from "./ReviewMarkdown";
+import { useReviewProviderInfo } from "./review-query";
 
 export function CommentsSection({
   worktreeId,
@@ -14,6 +16,7 @@ export function CommentsSection({
   worktreeId: string;
   discussion: ReviewDiscussion;
 }) {
+  const provider = useReviewProviderInfo();
   const total = discussion.items.length + discussion.threads.length;
   const unresolved = discussion.threads.filter((t) => !t.isResolved).length;
   const summary =
@@ -45,7 +48,7 @@ export function CommentsSection({
       )}
       {discussion.truncated && (
         <p className="px-3 py-2 text-[11px] text-muted-foreground" data-testid="pr-comments__more">
-          Older comments are on GitHub.
+          Older comments are on {provider.name}.
         </p>
       )}
     </PanelSection>
@@ -69,7 +72,7 @@ function ConversationItem({ item }: { item: ReviewDiscussion["items"][number] })
 }
 
 function Thread({ worktreeId, thread }: { worktreeId: string; thread: ReviewThread }) {
-  const host = useClientPluginHost();
+  const provider = useReviewProviderInfo();
   const label = thread.isResolved ? "Resolved" : thread.isOutdated ? "Outdated" : null;
   const [open, setOpen] = useState(label === null);
   const location = thread.line ? `${thread.path}:${thread.line}` : thread.path;
@@ -121,7 +124,9 @@ function Thread({ worktreeId, thread }: { worktreeId: string; thread: ReviewThre
             ))}
           </ul>
           {thread.truncated && (
-            <p className="px-8 pb-2 text-[11px] text-muted-foreground">More replies on GitHub.</p>
+            <p className="px-8 pb-2 text-[11px] text-muted-foreground">
+              More replies on {provider.name}.
+            </p>
           )}
         </CollapsibleContent>
       </Collapsible>
@@ -130,7 +135,7 @@ function Thread({ worktreeId, thread }: { worktreeId: string; thread: ReviewThre
 }
 
 function MessageHeader({ comment, verb }: { comment: ReviewComment; verb: string | null }) {
-  const host = useClientPluginHost();
+  const provider = useReviewProviderInfo();
   return (
     <div className="mb-1 flex items-center gap-2">
       <Avatar login={comment.author.login} url={comment.author.avatarUrl} />
@@ -148,7 +153,7 @@ function MessageHeader({ comment, verb }: { comment: ReviewComment; verb: string
           href={comment.url}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="Open comment on GitHub"
+          aria-label={`Open comment on ${provider.name}`}
           data-testid="pr-comments__link"
           onClick={(e) => {
             e.preventDefault();
@@ -164,10 +169,9 @@ function MessageHeader({ comment, verb }: { comment: ReviewComment; verb: string
 }
 
 function Body({ comment }: { comment: ReviewComment }) {
-  const { Markdown } = useClientPluginHost();
   return (
     <div className="pl-7" data-testid="pr-comments__body">
-      <Markdown>{comment.body}</Markdown>
+      <ReviewMarkdown>{comment.body}</ReviewMarkdown>
     </div>
   );
 }

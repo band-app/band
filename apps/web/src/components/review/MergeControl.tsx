@@ -1,6 +1,5 @@
-import { MERGE_METHODS, mergeMethodLabel, mergeStatus } from "@band-app/client/merge";
-import type { MergeMethod, ReviewInfo } from "@band-app/plugin-api";
-import { useClientPluginHost } from "@band-app/plugin-api/client";
+import { mergeStatus } from "@band-app/client/merge";
+import type { ReviewAction, ReviewInfo } from "@band-app/plugin-api";
 import {
   cn,
   DropdownMenu,
@@ -11,22 +10,30 @@ import {
 } from "@band-app/ui";
 import { ChevronDown, GitMerge, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { clientPluginHost as host } from "../../plugins/client-plugin-host";
+import { runReviewAction, useReviewProviderInfo } from "./review-query";
 
-/** The merge button, its method menu and the inline confirm step. */
+const MERGE_GROUP = "merge";
+
+/**
+ * The merge button, its method menu and the inline confirm step. The methods are the
+ * review's actions in the `merge` group; the first is the default.
+ */
 export function MergeControl({ worktreeId, review }: { worktreeId: string; review: ReviewInfo }) {
-  const host = useClientPluginHost();
-  const [confirming, setConfirming] = useState<MergeMethod | null>(null);
+  const provider = useReviewProviderInfo();
+  const mergeActions = review.actions.filter((a) => a.group === MERGE_GROUP);
+  const [confirming, setConfirming] = useState<ReviewAction | null>(null);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const status = mergeStatus(review);
   const merged = review.state === "merged";
 
-  const merge = async (method: MergeMethod) => {
+  const merge = async (action: ReviewAction) => {
     setMerging(true);
     setError(null);
     try {
-      await host.mergeReview(worktreeId, method);
+      await runReviewAction(worktreeId, action.id, action.args);
       setConfirming(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -45,6 +52,7 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [confirming, merging]);
 
+  const defaultAction = mergeActions[0];
   const tone = status.canMerge
     ? "bg-success text-success-foreground hover:bg-success/90"
     : "bg-success/50 text-success-foreground/80";
@@ -65,6 +73,8 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
     );
   }
 
+  if (!defaultAction) return null;
+
   return (
     <div className="flex flex-col gap-1.5">
       {confirming ? (
@@ -73,7 +83,7 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
           data-testid="pr-checks__merge-confirm"
         >
           <span className="min-w-0 flex-1 truncate whitespace-nowrap px-2.5 text-xs">
-            {mergeMethodLabel(confirming)} #{review.number}?
+            {confirming.confirm ?? `${confirming.label} #${review.number}?`}
           </span>
           <button
             type="button"
@@ -99,8 +109,8 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
         <div className="flex h-8 overflow-hidden rounded-md" title={status.hint || undefined}>
           <button
             type="button"
-            disabled={!status.canMerge || merging}
-            onClick={() => setConfirming("squash")}
+            disabled={!status.canMerge || !!defaultAction.disabledReason || merging}
+            onClick={() => setConfirming(defaultAction)}
             data-testid="pr-checks__merge"
             data-merge-state={review.mergeState}
             className={cn(
@@ -126,19 +136,19 @@ export function MergeControl({ worktreeId, review }: { worktreeId: string; revie
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {MERGE_METHODS.map(({ method, label }) => (
+              {mergeActions.map((action) => (
                 <DropdownMenuItem
-                  key={method}
-                  disabled={!status.canMerge}
-                  onSelect={() => setConfirming(method)}
-                  data-testid={`pr-checks__merge-method--${method}`}
+                  key={String(action.args?.method ?? action.label)}
+                  disabled={!status.canMerge || !!action.disabledReason}
+                  onSelect={() => setConfirming(action)}
+                  data-testid={`pr-checks__merge-method--${action.args?.method}`}
                 >
-                  {label}
+                  {action.label}
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => host.openUrl(review.url)}>
-                Open on GitHub
+                Open on {provider.name}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -1,16 +1,24 @@
 import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import {
+  type BranchStatusProvider,
   type ChecksProvider,
   matchesRepoRemote,
   type PluginManifest,
   pluginManifestSchema,
   type RepoInfo,
   type ReviewProvider,
+  type SubscriptionSourceProvider,
 } from "@band-app/plugin-api";
-import type { BandServerApi, ServerPlugin } from "@band-app/plugin-api/server";
+import type {
+  BandServerApi,
+  PluginTool,
+  ServerPlugin,
+  WorkerScope,
+} from "@band-app/plugin-api/server";
 import { hostRegistry } from "../infra/host/registry";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled-plugins";
+import { reviewSignalService } from "./review-signal-service";
 import { loadSettings } from "./state";
 
 const log = createLogger("plugin-host");
@@ -46,11 +54,15 @@ export class PluginHost {
   private plugins: LoadedPlugin[] | null = null;
   private reviewProviders: ReviewProvider[] = [];
   private checksProviders: ChecksProvider[] = [];
+  private tools: Array<{ pluginId: string; tool: PluginTool }> = [];
+  private branchStatusProviders: BranchStatusProvider[] = [];
+  private subscriptionSources: SubscriptionSourceProvider[] = [];
 
   constructor(
     private readonly bundled: BundledPlugin[],
     /** The host a plugin's `exec` runs on. Plugin calls carry a path, not a worktree, so it is the local host until plugins are bound to a worktree's host. */
     private readonly host: () => Host = () => hostRegistry.local,
+    private readonly hostById: (hostId: string) => Host = (id) => hostRegistry.hostById(id),
   ) {}
 
   /** Activate the plugins that ask for `onStartup`. Called once at boot. */
@@ -91,6 +103,53 @@ export class PluginHost {
   async checksProviderFor(repo: RepoInfo): Promise<ChecksProvider | null> {
     await this.activateForRemote(repo.host);
     return this.checksProviders.find((p) => this.safeMatches(p, repo)) ?? null;
+  }
+
+  /** The agent tools of the plugins that are active, for the built-in `band` MCP server. */
+  agentTools(): Array<{ pluginId: string; tool: PluginTool }> {
+    return [...this.tools];
+  }
+
+  /**
+   * Calls a worker service of plugin `pluginId` for one worktree. Rejects with an error that names
+   * the worker when it is the hub's own machine, cannot run the plugin or is offline.
+   */
+  async callWorker(
+    pluginId: string,
+    hostId: string,
+    method: string,
+    params: unknown,
+    scope: WorkerScope,
+  ): Promise<unknown> {
+    const host = this.hostById(hostId);
+    if (!host.plugins) {
+      throw new Error(
+        `Worker ${hostId} is the hub's own machine, which runs no worker plugins. Use a worktree on a connected worker.`,
+      );
+    }
+    const info = await host.info();
+    if (!info.capabilities[pluginId]) {
+      throw new Error(
+        `Worker ${hostId} cannot run the ${pluginId} plugin (it needs a worker that reports the ${pluginId} capability).`,
+      );
+    }
+    return host.plugins.call(pluginId, method, params, scope);
+  }
+
+  async branchStatusProviderFor(repo: RepoInfo): Promise<BranchStatusProvider | null> {
+    await this.activateForRemote(repo.host);
+    return this.branchStatusProviders.find((p) => this.safeMatches(p, repo)) ?? null;
+  }
+
+  /**
+   * The subscription source with this id, activating its plugin first. Null when the plugin is
+   * disabled or not bundled, so a disabled plugin produces no events.
+   */
+  async subscriptionSourceFor(id: string): Promise<SubscriptionSourceProvider | null> {
+    const plugin = this.load().find((p) => p.manifest.id === id);
+    if (!plugin) return null;
+    await this.activate(plugin);
+    return this.subscriptionSources.find((p) => p.id === id) ?? null;
   }
 
   private load(): LoadedPlugin[] {
@@ -137,6 +196,13 @@ export class PluginHost {
         plugin.error = err instanceof Error ? err.message : String(err);
         this.reviewProviders = this.reviewProviders.filter((p) => p.id !== plugin.manifest.id);
         this.checksProviders = this.checksProviders.filter((p) => p.id !== plugin.manifest.id);
+        this.tools = this.tools.filter((t) => t.pluginId !== plugin.manifest.id);
+        this.branchStatusProviders = this.branchStatusProviders.filter(
+          (p) => p.id !== plugin.manifest.id,
+        );
+        this.subscriptionSources = this.subscriptionSources.filter(
+          (p) => p.id !== plugin.manifest.id,
+        );
         log.error("Plugin %s failed to activate: %s", plugin.manifest.id, plugin.error);
       }
     })();
@@ -173,6 +239,20 @@ export class PluginHost {
         error: (message, ...args) => pluginLog.error(message, ...(args as never[])),
       },
       exec: (bin, args, options) => this.host().exec(bin, args, options),
+      reviews: { changed: (change) => reviewSignalService.changed(change) },
+      workers: {
+        call: (hostId, method, params, scope) =>
+          this.callWorker(pluginId, hostId, method, params, scope),
+      },
+      tools: {
+        register: (tool) => {
+          if (this.tools.some((t) => t.tool.name === tool.name)) {
+            log.error("Plugin %s registered the tool %s twice", pluginId, tool.name);
+            return;
+          }
+          this.tools.push({ pluginId, tool });
+        },
+      },
       providers: {
         // Stored as given, not copied, so a provider written as a class
         // keeps its prototype methods. Its id must be the plugin's id, which
@@ -182,6 +262,12 @@ export class PluginHost {
         },
         registerChecksProvider: (provider) => {
           if (this.checkProviderId(provider, pluginId)) this.checksProviders.push(provider);
+        },
+        registerBranchStatusProvider: (provider) => {
+          if (this.checkProviderId(provider, pluginId)) this.branchStatusProviders.push(provider);
+        },
+        registerSubscriptionSourceProvider: (provider) => {
+          if (this.checkProviderId(provider, pluginId)) this.subscriptionSources.push(provider);
         },
       },
     };

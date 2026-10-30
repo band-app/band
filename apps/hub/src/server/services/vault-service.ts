@@ -40,7 +40,7 @@ import {
   loadKey,
   stageKeyFile,
 } from "./_utils/vault-crypto";
-import { publicHubUrl } from "./github-webhook-service";
+import { publicHubUrl } from "./subscription-source-service";
 
 const log = createLogger("vault-service");
 

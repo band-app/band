@@ -2789,14 +2789,18 @@ export class WorktreePage {
    *  (`right-sidepanel__explorer` / `right-sidepanel__changes`) is mounted, so
    *  callers that assert on the Changes section MUST select it first — the
    *  panel defaults to Explorer. */
-  /** Navigate to a worktree and wait until the server has listed its
-   *  plugins, after which the right sidepanel's plugin tabs are final. */
+  /** Navigate to a worktree and wait until the server has listed its plugins and
+   *  answered which review provider serves it, after which the right sidepanel's
+   *  tabs are final. */
   async gotoAndWaitForPlugins(worktreeId: string): Promise<void> {
     const listed = this.page.waitForResponse(
       (res) => res.url().includes("plugins.list") && res.ok(),
     );
+    const provider = this.page.waitForResponse(
+      (res) => res.url().includes("reviews.provider") && res.ok(),
+    );
     await this.goto(worktreeId);
-    await listed;
+    await Promise.all([listed, provider]);
   }
 
   rightPanelTab(tab: "explorer" | "changes" | "github-pull-request"): Locator {

@@ -135,7 +135,7 @@
       "project": ["src/**/*.ts"]
     },
     "plugins/github": {
-      "entry": ["src/server/index.ts", "src/client/index.tsx"],
+      "entry": ["src/server/index.ts"],
       "project": ["src/**/*.{ts,tsx}"]
     }
   }

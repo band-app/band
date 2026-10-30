@@ -1,5 +1,11 @@
 import type { ProviderContext, RepoInfo } from "@band-app/plugin-api";
 import { definePlugin } from "@band-app/plugin-api/server";
+import { ghArgsFor } from "./actions";
+import {
+  buildBranchStatusQuery,
+  type GraphQLRepoResponse,
+  parseBranchStatusResponse,
+} from "./branch-query";
 import {
   parseBranchChecks,
   parseReview,
@@ -7,6 +13,7 @@ import {
   type ReviewQueryResponse,
 } from "./checks-query";
 import { ghGraphql, repoArg, runGh } from "./gh";
+import { createSubscriptionSource } from "./subscriptions";
 
 // github.com accepts these as aliases of itself: `www.` over HTTPS and
 // `ssh.github.com` for SSH over port 443.
@@ -53,11 +60,35 @@ export default definePlugin({
       );
     }
 
+    api.providers.registerBranchStatusProvider({
+      id: "github",
+      matches: (repo) => githubHost(repo) !== null,
+      async getBranchStatuses(repo, branches, ctx) {
+        const target = normalize(repo);
+        const args = [
+          "api",
+          "graphql",
+          "-f",
+          `query=${buildBranchStatusQuery(
+            target,
+            branches.map((b) => b.branch),
+          )}`,
+        ];
+        if (target.host !== "github.com") args.push("--hostname", target.host);
+        const output = await runGh(api, args, ctx);
+        const { data } = JSON.parse(output) as {
+          data: Record<string, GraphQLRepoResponse | null>;
+        };
+        return parseBranchStatusResponse(data, branches);
+      },
+    });
+
     const matches = (repo: RepoInfo) => githubHost(repo) !== null;
 
     api.providers.registerReviewProvider({
       id: "github",
       name: "GitHub",
+      fixHint: "for example with `gh run view <run-id> --log-failed`",
       matches,
       async getReviewForBranch(repo, branch, ctx) {
         const target = normalize(repo);
@@ -66,22 +97,13 @@ export default definePlugin({
         if (!review) handoff.set(keyOf(target, branch), { at: Date.now(), data });
         return review;
       },
-      async merge(repo, number, method, ctx) {
-        await runGh(
-          api,
-          ["pr", "merge", String(number), `--${method}`, "--repo", repoArg(normalize(repo))],
-          ctx,
-        );
-      },
-      async rerunChecks(repo, target, ctx) {
-        const args = ["run", "rerun", target.runId];
-        if (target.failedOnly) args.push("--failed");
-        else if (target.jobId) args.push("--job", target.jobId);
-        else throw new Error("Name a job to run again, or ask for the failed jobs.");
-        args.push("--repo", repoArg(normalize(repo)));
-        await runGh(api, args, ctx);
+      async runAction(repo, number, actionId, args, ctx) {
+        const ghArgs = ghArgsFor(number, actionId, args);
+        await runGh(api, [...ghArgs, "--repo", repoArg(normalize(repo))], ctx);
       },
     });
+
+    api.providers.registerSubscriptionSourceProvider(createSubscriptionSource(api));
 
     api.providers.registerChecksProvider({
       id: "github",

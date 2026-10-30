@@ -190,8 +190,7 @@
     },
     {
       "includes": [
-        "apps/hub/src/server/services/github-webhook-service.ts",
-        "apps/hub/src/server/services/github-poll-service.ts",
+        "apps/hub/src/server/services/subscription-source-service.ts",
         "apps/hub/src/server/services/_utils/hub-gh-auth.ts",
         "apps/hub/src/server/services/_utils/worktree-gh.ts"
       ],
@@ -232,6 +231,37 @@
                   "node:child_process": "Run processes through the Host (host.exec, host.git), not node:child_process. Hub-state modules are allowlisted in biome.json.",
                   "node-pty": "Terminals go through the Host's TerminalBackend; node-pty lives in @band-app/host-local."
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["plugins/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@band-app/*",
+                      "@band-app/*/**",
+                      "!@band-app/plugin-api",
+                      "!@band-app/plugin-api/**",
+                      "!@band-app/ui",
+                      "!@band-app/ui/**"
+                    ],
+                    "message": "A plugin imports only @band-app/plugin-api, @band-app/ui and its own dependencies. Anything else of Band's goes through the plugin API."
+                  },
+                  {
+                    "group": ["**/apps/**", "**/packages/**"],
+                    "message": "A plugin must not import Band's apps or packages by path. Use @band-app/plugin-api."
+                  }
+                ]
               }
             }
           }

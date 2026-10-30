@@ -25,6 +25,7 @@ import type {
   HostInfo,
   HostLsp,
   HostMcp,
+  HostPlugins,
   HostRelay,
   HostRepos,
   HostScripts,
@@ -49,8 +50,10 @@ import {
   encodeFrame,
   type LinkSession,
   METHOD_DIRECT_REGISTER,
+  METHOD_PLUGIN_CALL,
   METHOD_RELAY_REGISTER,
   METHOD_RELAY_REVOKE,
+  type PluginCallParams,
   type RelayRegisterReply,
 } from "@band-app/link";
 import { RemoteAgent } from "./agent";
@@ -365,6 +368,13 @@ export class RemoteHost implements Host {
       const reply = await this.rpc.call<DirectRegisterReply>(METHOD_DIRECT_REGISTER, params);
       // The worker's clock decides, and it is the clock of the client that renews the token.
       return { port: reply.port, token, expiresAt: reply.expiresAt };
+    },
+  };
+
+  readonly plugins: HostPlugins = {
+    call: (pluginId, method, params, scope) => {
+      const call: PluginCallParams = { pluginId, method, params, ...scope };
+      return this.rpc.call(METHOD_PLUGIN_CALL, call);
     },
   };
 

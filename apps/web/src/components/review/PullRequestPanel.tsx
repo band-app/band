@@ -1,5 +1,5 @@
-import type { ChecksReport, ReviewInfo, WorktreeReview } from "@band-app/plugin-api";
-import { useClientPluginHost, type WorktreeSideTabProps } from "@band-app/plugin-api/client";
+import type { ChecksReport, ReviewAction, ReviewInfo, WorktreeReview } from "@band-app/plugin-api";
+import type { WorktreeSideTabProps } from "@band-app/plugin-api/client";
 import {
   cn,
   DropdownMenu,
@@ -7,17 +7,31 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@band-app/ui";
-import { Ellipsis, GitBranch, GitPullRequest, Loader, RefreshCw } from "lucide-react";
-import type { ReactNode } from "react";
+import {
+  Ellipsis,
+  GitBranch,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestArrow,
+  Loader,
+  RefreshCw,
+  RotateCw,
+} from "lucide-react";
+import { type ReactNode, useState } from "react";
+import { clientPluginHost as host } from "../../plugins/client-plugin-host";
 import { ChecksSection } from "./ChecksSection";
 import { CommentsSection } from "./CommentsSection";
 import { ReviewStateBadge } from "./check-status";
 import { MergeControl } from "./MergeControl";
 import { ReviewersSection } from "./ReviewersSection";
+import { ReviewProviderContext, runReviewAction, useWorktreeReview } from "./review-query";
 
 // Poll faster while checks are still running, the way you watch CI.
 const POLL_RUNNING_MS = 30_000;
-const POLL_SETTLED_MS = 120_000;
+// The hub pushes `review-changed` when it hears of a change, so a settled panel polls only as a
+// fallback for hubs without a webhook or public URL. Running checks keep the faster interval
+// because their elapsed time and finish are what the user watches.
+const POLL_SETTLED_MS = 180_000;
 
 function pollInterval(data: WorktreeReview | undefined): number {
   if (
@@ -31,11 +45,10 @@ function pollInterval(data: WorktreeReview | undefined): number {
 
 /**
  * The pull request for the worktree's branch with its checks. When the
- * branch has no pull request, the GitHub Actions jobs on the branch head.
+ * branch has no pull request, the CI jobs on the branch head.
  */
 export function PullRequestPanel({ worktreeId, visible }: WorktreeSideTabProps) {
-  const host = useClientPluginHost();
-  const query = host.useWorktreeReview(worktreeId, {
+  const query = useWorktreeReview(worktreeId, {
     enabled: visible,
     refetchInterval: visible ? pollInterval : false,
   });
@@ -79,38 +92,46 @@ export function PullRequestPanel({ worktreeId, visible }: WorktreeSideTabProps) 
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto" data-testid="pr-checks">
-      {data.review ? (
-        <ReviewHeader worktreeId={worktreeId} review={data.review} refresh={refresh} />
-      ) : (
-        <BranchHeader branch={data.branch} checks={data.checks} refresh={refresh} />
-      )}
-      {data.review?.reviewers && <ReviewersSection reviewers={data.review.reviewers} />}
-      <ChecksSection
-        worktreeId={worktreeId}
-        branch={data.branch}
-        review={data.review}
-        checks={data.checks}
-        visible={visible}
-        refetch={query.refetch}
-      />
-      {data.review?.discussion && (
-        <CommentsSection worktreeId={worktreeId} discussion={data.review.discussion} />
-      )}
-    </div>
+    <ReviewProviderContext.Provider value={data.provider}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto" data-testid="pr-checks">
+        {data.review ? (
+          <ReviewHeader
+            worktreeId={worktreeId}
+            review={data.review}
+            providerName={data.provider.name}
+            refresh={refresh}
+          />
+        ) : (
+          <BranchHeader branch={data.branch} checks={data.checks} refresh={refresh} />
+        )}
+        {data.review?.reviewers && <ReviewersSection reviewers={data.review.reviewers} />}
+        <ChecksSection
+          worktreeId={worktreeId}
+          branch={data.branch}
+          review={data.review}
+          checks={data.checks}
+          visible={visible}
+          refetch={query.refetch}
+        />
+        {data.review?.discussion && (
+          <CommentsSection worktreeId={worktreeId} discussion={data.review.discussion} />
+        )}
+      </div>
+    </ReviewProviderContext.Provider>
   );
 }
 
 function ReviewHeader({
   worktreeId,
   review,
+  providerName,
   refresh,
 }: {
   worktreeId: string;
   review: ReviewInfo;
+  providerName: string;
   refresh: ReactNode;
 }) {
-  const host = useClientPluginHost();
   return (
     <div
       className="flex flex-col gap-2 border-b border-border px-3 py-3"
@@ -145,7 +166,7 @@ function ReviewHeader({
                 onSelect={() => host.openUrl(review.url)}
                 data-testid="pr-checks__menu-open"
               >
-                Open on GitHub
+                Open on {providerName}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => void navigator.clipboard?.writeText(review.url)}
@@ -164,6 +185,7 @@ function ReviewHeader({
         PR updated {new Date(review.updatedAt).toLocaleString()}
       </p>
       <MergeControl worktreeId={worktreeId} review={review} />
+      <HeaderActions worktreeId={worktreeId} actions={review.actions} />
     </div>
   );
 }
@@ -191,8 +213,66 @@ function BranchHeader({
       </div>
       <p className="text-[11px] text-muted-foreground" data-testid="pr-checks__no-review">
         No pull request for this branch.
-        {checks.headSha ? ` GitHub Actions jobs on ${checks.headSha.slice(0, 7)}.` : ""}
+        {checks.headSha ? ` CI jobs on ${checks.headSha.slice(0, 7)}.` : ""}
       </p>
+    </div>
+  );
+}
+
+const ACTION_ICONS = { merge: GitMerge, rerun: RotateCw, ready: GitPullRequestArrow } as const;
+
+/**
+ * The review's header actions that have no place of their own: not part of the merge button and
+ * not the re-run actions of the failing banner. Each asks for confirmation first when it has text for it.
+ */
+function HeaderActions({ worktreeId, actions }: { worktreeId: string; actions: ReviewAction[] }) {
+  const shown = actions.filter((a) => a.placement === "header" && !a.group && a.icon !== "rerun");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (shown.length === 0) return null;
+
+  const run = async (action: ReviewAction) => {
+    if (action.confirm && !window.confirm(action.confirm)) return;
+    setBusy(action.id);
+    setError(null);
+    try {
+      await runReviewAction(worktreeId, action.id, action.args);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {shown.map((action) => {
+        const Icon = ACTION_ICONS[action.icon];
+        return (
+          <button
+            key={`${action.id}:${JSON.stringify(action.args ?? {})}`}
+            type="button"
+            disabled={!!action.disabledReason || busy !== null}
+            title={action.disabledReason}
+            onClick={() => void run(action)}
+            data-testid="pr-checks__action"
+            data-action-id={action.id}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-border text-xs font-medium hover:bg-accent disabled:cursor-default disabled:opacity-50"
+          >
+            {busy === action.id ? (
+              <Loader className="size-3.5 animate-spin" aria-hidden />
+            ) : (
+              <Icon className="size-3.5" aria-hidden />
+            )}
+            {action.label}
+          </button>
+        );
+      })}
+      {error && (
+        <p className="text-[11px] text-danger" data-testid="pr-checks__action-error">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

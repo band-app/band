@@ -1424,6 +1424,37 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Second required check for the merge queue. The macOS jobs, the Docker image
+  # and the k8s (kind) job are path-filtered, so they are skipped on PRs that do
+  # not touch what they cover. Unlike `lint-test-build`, a skipped needed job
+  # passes here and only a failed or cancelled one fails the check. `deploy-docs`
+  # is left out: it runs on push to main only. Same fork gate as the jobs it
+  # waits for.
+  all-platforms:
+    name: macOS, Docker & k8s
+    runs-on: ubuntu-latest
+    needs:
+      - macos-changes
+      - docker
+      - k8s
+      - cli-macos
+      - web-macos
+      - mobile-ios
+      - desktop-macos
+      - desktop-packaged-macos
+    if: >
+      always() && (
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
+    steps:
+      - name: Require every platform job to succeed or be skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null
+
   deploy-docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
