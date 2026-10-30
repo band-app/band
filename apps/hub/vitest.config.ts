@@ -1,6 +1,11 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
+import { scrubWorkerEnv } from "../../scripts/test-env.mjs";
+
+// Runs in the parent of every test process, so each server and worker a test
+// starts inherits an environment without the Band worker's identity.
+scrubWorkerEnv();
 
 // Tests that run pnpm under a temp HOME (dev-server, plain-repos) would make
 // corepack look for pnpm in an empty cache and download it. Point it at the

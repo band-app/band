@@ -2,7 +2,7 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 ---
 
-<BaseLayout title="Band — The agent-first IDE for AI coding">
+<BaseLayout title="Band: the agent-first IDE for AI coding">
   <main class="pt-14">
     <!-- Hero Section -->
     <section class="relative overflow-hidden">
@@ -20,10 +20,10 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           </h1>
 
           <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-            A desktop IDE designed from the ground up for AI coding agents.
-            Chat panes, terminals, browsers, and a code editor &mdash; all wired up
-            to dispatch tasks to Claude Code, Codex, or OpenCode and run them in
-            parallel against isolated git worktrees.
+            A desktop app and a server built for AI coding agents.
+            Chats, terminals, browser tabs, and a file viewer sit next to each other.
+            Send tasks to Claude Code, Codex, OpenCode, Gemini CLI, or Cursor CLI and run them
+            in parallel, each in its own git worktree, on your Mac or on Linux workers.
           </p>
 
           <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -37,7 +37,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              Download for macOS
+              Download for macOS (Apple Silicon)
             </a>
             <a
               href="https://github.com/band-app/band"
@@ -56,15 +56,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           <div class="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Designed for agents from day one</div>
-              <div class="text-sm text-muted-foreground">Chat panes, editor, terminal, and browser tabs &mdash; every pane scoped to a worktree and an agent.</div>
+              <div class="text-sm text-muted-foreground">Chats, terminals, browser tabs, and files, each scoped to a worktree and an agent.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Bring your own coding agent</div>
-              <div class="text-sm text-muted-foreground">Claude Code, Codex, OpenCode &mdash; swappable per chat pane, no workflow changes.</div>
+              <div class="text-sm text-muted-foreground">Claude Code, Codex, OpenCode, Gemini CLI, and Cursor CLI. Pick the agent per chat.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Git worktree isolation by default</div>
-              <div class="text-sm text-muted-foreground">Every worktree is its own branch and worktree. Run agents in parallel without stepping on each other.</div>
+              <div class="text-sm text-muted-foreground">Each task gets its own branch and working copy. Run agents in parallel without stepping on each other.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
               <div class="mb-1 text-sm font-medium text-text">Drop into your editor when you need to</div>
@@ -78,10 +78,10 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <!-- Dashboard screenshot (breaks out of the max-w-6xl hero container so it can be wider) -->
       <div class="relative mx-auto mt-16 max-w-[100rem] px-6 pb-20 md:pb-28">
         <img
-          src="/screenshot-dashboard.png"
-          alt="The Band desktop app: worktree sidebar on the far left, chat pane next to it, repo file tree in the middle, and a code editor on the right showing the active worktree."
-          width="1946"
-          height="1187"
+          src="/docs/screenshots/dashboard.png"
+          alt="The Band dashboard: a sidebar of repos, groups and worktrees on the left and an agent chat open in the center."
+          width="1440"
+          height="900"
           loading="eager"
           decoding="async"
           class="block h-auto w-full rounded-xl shadow-2xl shadow-black/40"
@@ -110,7 +110,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             </div>
             <h3 class="text-lg font-semibold text-text">No place built to watch agents</h3>
             <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Agents get crammed into terminal panes that were designed for shells, not for streaming chats, file diffs, and tool-call output side by side.
+              Agents get crammed into terminal panes built for shells, not for chats, file diffs, and tool-call output side by side.
             </p>
           </div>
 
@@ -172,7 +172,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             </div>
             <h3 class="text-lg font-semibold text-text">Register repos</h3>
             <p class="mt-2 text-sm text-muted-foreground">
-              Point Band at your git repos. It discovers branches, worktrees, and configuration automatically.
+              Point Band at a git repo, by folder on a worker or by URL. It reads branches and your .band configuration.
             </p>
           </div>
 
@@ -182,7 +182,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             </div>
             <h3 class="text-lg font-semibold text-text">Create worktrees</h3>
             <p class="mt-2 text-sm text-muted-foreground">
-              Each worktree gets an isolated git worktree with its own branch. No conflicts with your main work.
+              Each worktree is a separate working copy with its own branch, on the machine you pick. No conflicts with your main work.
             </p>
           </div>
 
@@ -192,7 +192,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             </div>
             <h3 class="text-lg font-semibold text-text">Dispatch tasks</h3>
             <p class="mt-2 text-sm text-muted-foreground">
-              Send prompts to coding agents. Watch their output stream in real-time from the dashboard.
+              Send prompts to coding agents. Watch their output stream in a chat, or run the agent's own CLI in a terminal.
             </p>
           </div>
 
@@ -202,7 +202,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             </div>
             <h3 class="text-lg font-semibold text-text">Monitor status</h3>
             <p class="mt-2 text-sm text-muted-foreground">
-              See agent activity, git changes, and CI status at a glance. From desktop or mobile.
+              See agent activity, git changes, and CI status at a glance. From the desktop app, a browser, or the iOS app.
             </p>
           </div>
         </div>
@@ -217,7 +217,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             Everything you need
           </h2>
           <p class="mt-4 text-lg text-muted-foreground">
-            Worktrees, agents, automation, and remote access &mdash; all built into the IDE.
+            Worktrees, agents, workers, automation, and remote access.
           </p>
         </div>
 
@@ -226,27 +226,27 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`,
               title: "Multi-agent support",
-              desc: "Claude Code, Codex, OpenCode. Swap coding agents per chat pane.",
+              desc: "Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI. Swap coding agents per chat.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
               title: "Real-time status",
-              desc: "Live agent status, git dirty/ahead/behind indicators, and CI pass/fail at a glance.",
+              desc: "Agent state (working, question, done, failed), git dirty, ahead and behind marks, and a pull request badge colored by CI.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
-              title: "Task management",
-              desc: "Submit, cancel, re-run, and watch tasks in real-time. Full task history.",
+              title: "Hub and workers",
+              desc: "Run the hub on a server and add Linux or macOS workers. The desktop app, a browser, and the iOS app connect to the hub.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
               title: "Scheduled tasks",
-              desc: "Automate recurring agent work with cron expressions. Code reviews, dependency updates, and more.",
+              desc: "Run a prompt on a cron schedule in an existing worktree, or wait for a pull request review or CI result with a subscription.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>`,
               title: "Remote access",
-              desc: "Built-in Cloudflare tunnel. Access your dashboard from anywhere, including mobile.",
+              desc: "Pair phones and laptops with a link or QR code. Reach the hub through a Cloudflare tunnel, Tailscale, or your own HTTPS address.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
@@ -256,7 +256,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
               title: "Git worktree isolation",
-              desc: "Clean branch-per-task workflow. Every worktree is isolated from the main branch.",
+              desc: "A branch and a working copy per task. Agents never share a checkout.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
@@ -289,7 +289,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             Try the agent-first IDE
           </h2>
           <p class="mt-4 text-lg text-muted-foreground">
-            Download Band and start running coding agents in parallel today.
+            Download Band and run coding agents in parallel.
           </p>
           <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <a
@@ -302,7 +302,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              Download for macOS
+              Download for macOS (Apple Silicon)
             </a>
             <a
               href="/docs/getting-started"

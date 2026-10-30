@@ -315,7 +315,7 @@ export class PlacementService {
     if (runners.some((r) => offers(runnerLevel(r.isolation), wanted))) return;
     const reason =
       wanted === "vm"
-        ? "No runner offers isolation vm. Set isolation to vm on a runner in settings.json. The bundled hooks start no virtual machines yet."
+        ? "No runner offers isolation vm. Add a runner with isolation vm to settings.json, such as the bundled hetzner or contabo hook."
         : "No runner offers isolation container. Add a runner with isolation container to settings.json, such as the bundled docker hook.";
     log.warn(`${worktreeId} asked for isolation ${wanted}, but ${reason}`);
     throw new Error(`Cannot place ${worktreeId}: ${reason}`);

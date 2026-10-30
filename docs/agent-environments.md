@@ -1,8 +1,26 @@
-# Agent environments
+---
+title: Environments (environment.json)
+description: Declare what a repo's worktrees need in .band/environment.json, check the file, and build a cached image from it.
+section: configuration
+order: 20
+---
 
 A repository can say what its worktrees need by committing `.band/environment.json`. Band reads it when it sets up a worktree and shows it in the Environment section of the repo's page in Settings > Repos. It is the repo's answer to "what has to be installed and running before an agent can work here".
 
-This page covers the file format, how it relates to `.devcontainer/devcontainer.json` and `.band/config.json`, and how Band builds and caches an image from it. Choosing a worker for a worktree and booting the image in a container are later steps. Today Band parses the file, validates it, runs its commands, compares `requires` with the tools a worker reports and builds the image.
+This page covers the file format, how it relates to `.devcontainer/devcontainer.json` and [`.band/config.json`](configuration.md), and how Band builds and caches an image from it.
+
+## What is used today
+
+| Key | Used today |
+| --- | --- |
+| `install`, `start`, `teardown` | Yes. They are the worktree's setup and teardown commands. |
+| `terminals` | Yes. Band opens them after a successful setup. |
+| `build` | Yes, to build an environment image. A worktree does not run inside that image by itself. A runner boots it. |
+| `requires` | Shown in Settings > Repos next to each worker. Nothing blocks a worktree on it, and placement does not read it from the file. |
+| `isolation`, `resources` | Checked and stored. Band does not read them from the file when it places a worktree. The `docker` runner hook uses the isolation and resources of the placement request. |
+| `secrets`, `services` | Checked and stored. Band does nothing with them yet. |
+
+An unused key does no harm, so you can write the file you want now.
 
 ## The three layers
 
@@ -31,7 +49,7 @@ This page covers the file format, how it relates to `.devcontainer/devcontainer.
 }
 ```
 
-Every key is optional. An unknown key is an error, and the error names the key.
+Every key is optional. An unknown key is an error, and the error names the key. A `$schema` key is allowed.
 
 ## Keys
 
@@ -54,7 +72,7 @@ When a worktree is created, Band runs `install` and then `start` in a terminal t
 
 On removal, Band runs `teardown` and waits for it, as it does for `teardown` in `config.json`.
 
-The commands run on the worker that owns the worktree, so a worktree on a worker runs them on the worker. Band reads the file from the worktree's worktree first and from the repo checkout second, so an untracked or ignored `environment.json` in the main checkout also works.
+The commands run on the worker that owns the worktree, so a worktree on a worker runs them on the worker. Band reads the file from the worktree first and from the repo checkout second, so an untracked or ignored `environment.json` in the main checkout also works.
 
 ## Relation to `.band/config.json`
 
@@ -70,7 +88,7 @@ Everything else in `config.json`, such as `workspace.copyFiles`, is unchanged. A
 
 Use `.devcontainer/devcontainer.json` for the toolchain when you can. It is a standard that editors and other tools understand, and its `features` install Node, Python and Docker for you. Point `build.devcontainer` at it. Use `dockerfile` or `image` when a devcontainer does not fit.
 
-Band does not build these yet. It checks that the file exists and nothing more.
+An image build uses the file (see [Environment images](#environment-images)). Otherwise Band only checks that the file exists.
 
 ## Requires and worker tools
 
@@ -89,7 +107,7 @@ band env validate ../other   # another repository, or its environment.json
 
 It prints `OK <file>` and exits 0, or prints each problem as `<key path>: <message>` and exits 1.
 
-```
+```text
 /repo/.band/environment.json has 2 problems:
   instal: unknown key
   isolation: must be one of "worktree", "container", "vm" (got "docker")
@@ -151,4 +169,4 @@ Builds run on the builder worker: the hub's own machine, or a worker with Docker
 
 `hostId` defaults to `local`. The repo needs a checkout on that worker. `registry` is optional, and without it the image stays on the builder worker. Every command goes through the worker's `exec` with each credential-like variable (names with TOKEN, SECRET, PASSWORD, KEY and the like) and every `BAND_*` variable of the hub's environment blanked, because a build runs commands from the repository. Do not point `hostId` at a machine whose environment holds secrets you would not run a repository's scripts next to.
 
-The `docker` runner hook boots the current image (`docs/runner-hooks.md`). Not done yet: snapshots, and a settings page for `environmentBuilder`.
+The `docker` runner hook boots the current image. See [Runner hooks](runner-hooks.md). Not supported yet: snapshots, pruning old images and a settings page for `environmentBuilder`.
