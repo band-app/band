@@ -18,6 +18,10 @@ import {
 function hasSimctl(): boolean {
   try {
     execFileSync("xcrun", ["simctl", "help"], { stdio: "ignore" });
+    // Booting a device takes several minutes on a CI runner, and "Web Tests (macOS)" already runs
+    // close to its 45 minute limit (this test pushed it over and the job was cancelled). The hub's
+    // simulator test uses the same gate: it runs on a machine set up for simulators, which has idb.
+    execFileSync("which", ["idb_companion"], { stdio: "ignore" });
     return process.platform === "darwin";
   } catch {
     return false;
