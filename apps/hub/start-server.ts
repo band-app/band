@@ -95,7 +95,6 @@ import { browserService } from "./src/server/services/browser-service.ts";
 import { checkpointService } from "./src/server/services/checkpoint-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
-import { githubWebhookService } from "./src/server/services/github-webhook-service.ts";
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
@@ -112,6 +111,7 @@ import {
   startStatusSourceCleanup,
 } from "./src/server/services/state.ts";
 import { subscriptionService } from "./src/server/services/subscription-service.ts";
+import { subscriptionSourceService } from "./src/server/services/subscription-source-service.ts";
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tokenService } from "./src/server/services/token-service.ts";
@@ -692,8 +692,13 @@ async function handleGithubWebhook(req: IncomingMessage, res: ServerResponse): P
     chunks.push(chunk as Buffer);
   }
   try {
-    const verdict = githubWebhookService.handleDelivery(req.headers, Buffer.concat(chunks));
+    const verdict = await subscriptionSourceService.handleDelivery(
+      req.headers,
+      Buffer.concat(chunks),
+    );
     if (verdict === "unauthorized") return send(401, { error: "Invalid signature" });
+    // The GitHub plugin is disabled, so nothing can verify or read the delivery.
+    if (verdict === "unavailable") return send(404, { error: "GitHub plugin is disabled" });
   } catch (err) {
     // Log the error only: the request carries the signature and the payload.
     console.error("github webhook delivery failed", err);

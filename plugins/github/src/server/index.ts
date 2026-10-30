@@ -13,6 +13,7 @@ import {
   type ReviewQueryResponse,
 } from "./checks-query";
 import { ghGraphql, repoArg, runGh } from "./gh";
+import { createSubscriptionSource } from "./subscriptions";
 
 // github.com accepts these as aliases of itself: `www.` over HTTPS and
 // `ssh.github.com` for SSH over port 443.
@@ -101,6 +102,8 @@ export default definePlugin({
         await runGh(api, [...ghArgs, "--repo", repoArg(normalize(repo))], ctx);
       },
     });
+
+    api.providers.registerSubscriptionSourceProvider(createSubscriptionSource(api));
 
     api.providers.registerChecksProvider({
       id: "github",

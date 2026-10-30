@@ -1,7 +1,7 @@
 /**
  * The GitHub polling fallback (plan step S.5): with no public hub URL the
  * hub reads GitHub itself and turns what it finds into the same events the
- * webhook path produces. `GithubPollService.poll` is what the branch-status
+ * webhook path produces. `SubscriptionPollService.poll` is what the branch-status
  * poller calls on its CI ticks, so this file calls it directly (a real tick
  * is 30 s apart), against a real SQLite database under a temp `BAND_HOME`,
  * the scripted ACP stub agent, and the `gh` Express stub (`BAND_GH_BIN`).
@@ -12,10 +12,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { execGh } from "@band-app/host-local/git/git-client";
+import { initialCursor } from "@band-app/plugin-github/pr-activity";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
-import { initialCursor } from "../src/server/infra/subscriptions/github-poll";
 import {
   MISSING_GH_CREDENTIAL,
   resetHubGhAuthCache,
@@ -23,9 +23,9 @@ import {
 } from "../src/server/services/_utils/hub-gh-auth";
 import { agentSessionService } from "../src/server/services/agent-session-service";
 import { chatService } from "../src/server/services/chat-service";
-import { githubPollService } from "../src/server/services/github-poll-service";
-import { githubWebhookService } from "../src/server/services/github-webhook-service";
+import { subscriptionPollService } from "../src/server/services/subscription-poll-service";
 import { subscriptionService } from "../src/server/services/subscription-service";
+import { subscriptionSourceService } from "../src/server/services/subscription-source-service";
 import { vaultService } from "../src/server/services/vault-service";
 import { type CheckRunStub, type GhStub, ghStub } from "./fixtures/gh-stub";
 import { TEST_TOKEN, writeStubScenario } from "./helpers/acp-chat";
@@ -95,7 +95,7 @@ async function subscribe(
     "pr" in kind
       ? subscriptionService.createGithubPr({ ...input, number: kind.pr })
       : subscriptionService.createGithubCi({ ...input, branch: kind.branch });
-  await githubWebhookService.ensureRegistered(sub);
+  await subscriptionSourceService.ensureRegistered(sub);
   // `ensureRegistered` records the webhook status on the stored row.
   return subscriptionService.list().find((s) => s.id === sub.id) ?? sub;
 }
@@ -206,22 +206,22 @@ describe("github polling fallback", () => {
     const sub = await subscribe({ pr: 7 }, full);
     expect(sub.config.webhook?.status).toBe("waiting-for-url");
 
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     expect(promptsAbout("rename the helper")).toHaveLength(0);
     expect(promptsAbout("written before subscribing")).toHaveLength(0);
 
     comments = [old, fresh];
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     await waitFor(async () => promptsAbout("please rename the helper").length === 1, {
       label: "polled comment delivery",
     });
     expect(subscriptionService.getCursor(sub.id)).toBe(fresh.createdAt);
 
-    await githubPollService.poll();
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
+    await subscriptionPollService.poll();
     // A later comment anchors the check: once it arrives, a repeat would have too.
     comments = [old, fresh, { id: "C_next", body: "and one more thing", createdAt: future(4000) }];
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     await waitFor(async () => promptsAbout("and one more thing").length === 1, {
       label: "anchor delivery",
     });
@@ -239,13 +239,13 @@ describe("github polling fallback", () => {
     stub.setPrActivityQuery(coords, () => prAnswer([comment]));
     await new Promise((resolve) => setTimeout(resolve, 2100));
     const second = await subscribe({ pr: 7 }, full);
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     await waitFor(async () => promptsAbout("between the two subscriptions").length === 1, {
       label: "first subscription delivery",
     });
     expect(subscriptionService.getCursor(first.id)).toBe(comment.createdAt);
     expect(subscriptionService.getCursor(second.id)).toBe(initialCursor(second.createdAt));
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     expect(promptsAbout("between the two subscriptions")).toHaveLength(1);
   });
 
@@ -258,18 +258,18 @@ describe("github polling fallback", () => {
     stub.setCheckRuns(coords, "fix-ci", () => runs);
     await subscribe({ branch: "fix-ci" }, full);
 
-    await githubPollService.poll();
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
+    await subscriptionPollService.poll();
     expect(calls(`repos/${full}/commits/fix-ci/check-runs`).length).toBeGreaterThan(0);
     expect(promptsAbout("fix-ci")).toHaveLength(0);
 
     runs = [check({ name: "build" }), check({ name: "test" })];
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     await waitFor(async () => promptsAbout("All 2 checks passed").length === 1, {
       label: "ci delivery",
     });
-    await githubPollService.poll();
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
+    await subscriptionPollService.poll();
     expect(promptsAbout("All 2 checks passed")).toHaveLength(1);
   });
 
@@ -282,7 +282,7 @@ describe("github polling fallback", () => {
 
     process.env.BAND_PUBLIC_URL = "https://hub.example.test";
     try {
-      await githubPollService.poll();
+      await subscriptionPollService.poll();
     } finally {
       delete process.env.BAND_PUBLIC_URL;
     }
@@ -306,9 +306,9 @@ describe("github polling fallback", () => {
       await subscribe({ branch }, full);
     }
     const mine = () => calls(`repos/${full}/commits/`);
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     expect(mine()).toHaveLength(6);
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     const seen = new Set(mine().map((r) => r.positional[1].split("/commits/")[1].split("/")[0]));
     expect(seen.size).toBe(branches.length);
   });
@@ -319,14 +319,14 @@ describe("github polling fallback", () => {
     await subscribe({ pr: 3 }, full);
     const queries = () =>
       calls("graphql").filter((r) => r.fields.query?.toString().includes(full.split("/")[1]));
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     expect(queries()).toHaveLength(1);
     // One failure skips the next poll, a second one the next four.
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     expect(queries()).toHaveLength(1);
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     expect(queries()).toHaveLength(2);
-    for (let i = 0; i < 3; i++) await githubPollService.poll();
+    for (let i = 0; i < 3; i++) await subscriptionPollService.poll();
     expect(queries()).toHaveLength(2);
   });
 });
@@ -355,7 +355,7 @@ describe("gh credentials on a hub with no gh login", () => {
       prAnswer([{ id: "C_vault", body: "vault token review note", createdAt: future(2000) }]),
     );
     await subscribe({ pr: 7 }, full);
-    await githubPollService.poll();
+    await subscriptionPollService.poll();
     await waitFor(async () => promptsAbout("vault token review note").length === 1, {
       label: "the event delivered",
     });
@@ -386,7 +386,7 @@ describe("gh credentials on a hub with no gh login", () => {
     const { coords, full } = newRepo();
     stub.setPrActivityQuery(coords, () => prAnswer([]));
     await subscribe({ pr: 8 }, full);
-    await expect(githubPollService.poll()).resolves.not.toThrow();
+    await expect(subscriptionPollService.poll()).resolves.not.toThrow();
     const graphql = calls("graphql").filter((r) =>
       r.fields.query?.toString().includes(coords.name),
     );
