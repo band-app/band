@@ -99,6 +99,11 @@ export class RemoteAgent implements AgentStdio {
     this.stderr = this.lane(this.err);
   }
 
+  /** Waiting for its worker: detached, or the link has no socket (it may still resume). */
+  get detached(): boolean {
+    return !this.exited && !this.gone && (this.isDetached || !this.rpc.linkUp);
+  }
+
   get isDetached(): boolean {
     return this.detachedAt !== null && !this.gone;
   }
@@ -260,7 +265,10 @@ export class RemoteAgent implements AgentStdio {
           ? setTimeout(() => {
               // No exit came: the worker stopped (a graceful restart ends the channels cleanly),
               // so wait for it like any lost link. A reattach says whether the agent exited.
+              // Ask now: the worker may be connected already (a link that dropped and resumed
+              // loses the exit notification it sent meanwhile), and no later connect would ask.
               this.detach();
+              void this.reattach();
             }, EXIT_WAIT_MS)
           : null;
         await this.changed();
