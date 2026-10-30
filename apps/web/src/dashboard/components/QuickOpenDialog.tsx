@@ -110,12 +110,16 @@ export function QuickOpenDialog({
       if (initialQuery) {
         setQuery(initialQuery);
       } else if (lastQuery) {
-        setQuery(lastQuery);
+        // Seed only an empty field: a person who started typing before this effect ran
+        // must keep what they typed instead of getting the restored query back.
+        setQuery((current) => (current === "" ? lastQuery : current));
         // Select all text so typing immediately replaces it.
         // Use requestAnimationFrame to ensure the input is rendered and focused.
         requestAnimationFrame(() => {
           const input = document.querySelector<HTMLInputElement>('[data-slot="command-input"]');
-          input?.select();
+          // Typing that began before this frame has replaced the restored query. Selecting
+          // now would make the next keystroke replace the typed text.
+          if (input && input.value === lastQuery) input.select();
         });
       }
     }
