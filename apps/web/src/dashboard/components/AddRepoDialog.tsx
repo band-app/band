@@ -575,7 +575,7 @@ export function AddRepoForm({ onOpenHosts, onAdded, active = true }: AddRepoForm
                         type="button"
                         data-testid="add-repo__picker-up"
                         onClick={() => browse(data.parent ?? undefined)}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-muted-foreground hover:bg-list-highlight focus-visible:bg-list-highlight focus-visible:outline-none"
                       >
                         <Folder className="size-4" aria-hidden /> ..
                       </button>
@@ -594,7 +594,7 @@ export function AddRepoForm({ onOpenHosts, onAdded, active = true }: AddRepoForm
                         data-name={entry.name}
                         data-git={entry.isGit ? "true" : "false"}
                         onClick={() => browse(entry.path)}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-list-highlight focus-visible:bg-list-highlight focus-visible:outline-none"
                       >
                         {entry.isGit ? (
                           <FolderGit2 className="size-4 shrink-0 text-primary" aria-hidden />

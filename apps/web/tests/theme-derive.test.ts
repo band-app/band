@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { contrast, normalizeHex, parseHex } from "../src/lib/theme/color";
-import { type ColorTriple, derivedContrasts, deriveSurfaceVars } from "../src/lib/theme/derive";
+import {
+  type ColorTriple,
+  derivedContrasts,
+  deriveSurfaceVars,
+  LIST_HIGHLIGHT_CONTRAST,
+} from "../src/lib/theme/derive";
 import {
   DEFAULT_APPEARANCE,
   effectiveColors,
@@ -46,6 +51,32 @@ describe("derived surfaces keep text readable", () => {
       expect(vars[key]).toMatch(/^#[0-9a-f]{6}$/);
     }
   });
+});
+
+describe("list highlight", () => {
+  const MORE: [string, ColorTriple][] = [
+    [
+      "dark low-saturation accent",
+      { accent: "#777777", background: "#1e1e1e", foreground: "#d4d4d4" },
+    ],
+    [
+      "light low-saturation accent",
+      { accent: "#888888", background: "#fafafa", foreground: "#222222" },
+    ],
+    ["dark saturated accent", { accent: "#ff0066", background: "#0a0a14", foreground: "#e0e0ff" }],
+    ["light saturated accent", { accent: "#00cc44", background: "#fffff0", foreground: "#202020" }],
+  ];
+  for (const [name, colors] of [...INPUTS, ...MORE]) {
+    it(`${name}: stands out from the popover and page, text stays readable`, () => {
+      const vars = deriveSurfaceVars(colors);
+      const get = (k: string) =>
+        parseHex(vars[k] as string) as NonNullable<ReturnType<typeof parseHex>>;
+      const row = get("--list-highlight");
+      expect(contrast(row, get("--popover"))).toBeGreaterThanOrEqual(LIST_HIGHLIGHT_CONTRAST);
+      expect(contrast(row, get("--background"))).toBeGreaterThanOrEqual(LIST_HIGHLIGHT_CONTRAST);
+      expect(contrast(get("--list-highlight-foreground"), row)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
 });
 
 describe("presets", () => {

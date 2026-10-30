@@ -22,6 +22,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { rowContrast } from "./ListHighlight";
 
 interface Box {
   x: number;
@@ -35,6 +36,14 @@ export class WorktreePicker {
 
   constructor(private readonly page: Page) {
     this.dialog = page.getByTestId("worktree-picker");
+  }
+
+  /** Contrast between the keyboard-highlighted row and another row's background. */
+  async highlightContrast(normalWorktreeId: string): Promise<number> {
+    return await rowContrast(
+      this.dialog.locator('[role="option"][data-selected="true"]'),
+      this.item(normalWorktreeId),
+    );
   }
 
   item(worktreeId: string): Locator {

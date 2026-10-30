@@ -5,6 +5,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { rowContrast } from "./ListHighlight";
 import { SettingsPage } from "./SettingsPage";
 
 export type ColorKey = "accent" | "background" | "foreground";
@@ -64,6 +65,17 @@ export class AppearancePage {
 
   resetButton(): Locator {
     return this.root.getByTestId("appearance__reset");
+  }
+
+  /** Open the theme select and return the contrast of its hovered option against another. */
+  async presetHighlightContrast(): Promise<number> {
+    return await test.step("Open the theme select and hover an option", async () => {
+      await this.presetSelect().click();
+      const options = this.page.getByRole("option");
+      await options.first().hover();
+      await expect(options.first()).toHaveAttribute("data-highlighted", "");
+      return await rowContrast(options.first(), options.last());
+    });
   }
 
   async chooseMode(mode: "system" | "light" | "dark"): Promise<void> {

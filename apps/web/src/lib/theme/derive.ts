@@ -47,6 +47,19 @@ function rgb(hex: string, fallback: string): Rgb {
   return parseHex(hex) ?? (parseHex(fallback) as Rgb);
 }
 
+/** Least contrast the highlighted list row keeps against the popover and page background. */
+export const LIST_HIGHLIGHT_CONTRAST = 1.3;
+
+/** Tints the popover toward the accent until the row stands out from both surfaces. */
+function deriveListHighlight(popover: Rgb, bg: Rgb, accentText: Rgb): Rgb {
+  let row = popover;
+  for (let t = 0.04; t <= 0.8; t += 0.02) {
+    row = mix(popover, accentText, t);
+    if (Math.min(contrast(row, popover), contrast(row, bg)) >= LIST_HIGHLIGHT_CONTRAST) break;
+  }
+  return row;
+}
+
 /** The structural tokens derived from the three chosen colors. */
 export function deriveSurfaceVars(colors: ColorTriple): CssVars {
   const bg = rgb(colors.background, "#1e1e1e");
@@ -72,6 +85,7 @@ export function deriveSurfaceVars(colors: ColorTriple): CssVars {
   }
   const accentText = ensureContrast(accent, [bg, popover], TEXT_CONTRAST);
   const primaryFg = readableOn(accent);
+  const listHighlight = deriveListHighlight(popover, bg, accentText);
 
   return {
     "--background": toHex(bg),
@@ -94,6 +108,8 @@ export function deriveSurfaceVars(colors: ColorTriple): CssVars {
     "--ring": toHex(toward(0.4)),
     "--highlight": toHex(accentText),
     "--link": toHex(accentText),
+    "--list-highlight": toHex(listHighlight),
+    "--list-highlight-foreground": toHex(ensureContrast(fg, listHighlight, TEXT_CONTRAST)),
     "--terminal-background": toHex(bg),
     "--terminal-foreground": toHex(fg),
     "--terminal-selection": toRgba(fg, dark ? 0.2 : 0.15),

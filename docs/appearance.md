@@ -38,7 +38,7 @@ A change does not reload anything. The terminal listens for `band-theme-changed`
 | Group | Tokens |
 | --- | --- |
 | Surfaces | `background`, `foreground`, `card`, `popover`, `primary`, `secondary`, `muted`, `accent`, `sidebar`, `border`, `input`, `ring`, `link` (each surface with a `-foreground`) |
-| Selection and focus | `highlight`, `selection`, `selection-border`, `selection-foreground`, `drop-target`, `focus-ring` |
+| Selection and focus | `list-highlight`, `list-highlight-foreground`, `highlight`, `selection`, `selection-border`, `selection-foreground`, `drop-target`, `focus-ring` |
 | Git and diff | `git-added`, `git-modified`, `git-deleted`, `git-renamed`, `git-untracked`, `git-conflict`, `git-ahead`, `git-behind`, `git-diverged`, `diff-added-bg`, `diff-removed-bg`, `diff-added-marker`, `diff-removed-marker` |
 | Status | `success`, `warning`, `danger`, `info`, `merged`, each with `-foreground` and `-bg`; `status-working`, `status-question`, `status-done`, `status-failed`, `status-foreground` |
 | Find and editor | `search-match`, `search-match-current`, `editor-active-line` |
