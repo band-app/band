@@ -597,7 +597,7 @@ jobs:
   #     equality since #606) and broke four CLI integration tests. That passed
   #     on every Linux PR and only surfaced on the macos-latest release runner
   #     for v0.24.0 (harness fix: #608).
-  #   - `web-macos` runs the web server's vitest suite, the same step as
+  #   - `web-macos` runs the web server's vitest suite in 2 shards, the same step as
   #     release.yml and nightly.yml. Before it existed, macOS-only failures in
   #     those tests first showed up in a release or a nightly run.
   #
@@ -1202,12 +1202,20 @@ jobs:
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
 
   web-macos:
-    name: Web Tests (macOS)
+    name: Web Tests (macOS) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: macos-latest
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
     needs: macos-changes
     if: github.event_name != 'pull_request' && needs.macos-changes.outputs.web == 'true'
+    # Two shards of the hub suite (vitest splits by file) halve the wall time of
+    # the merge queue's longest job. Both shards use the same cache keys. Do not
+    # add a third: macOS allows 5 concurrent jobs.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+        total: [2]
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 
@@ -1298,7 +1306,9 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
         run: |
-          pnpm --filter @band-app/server exec vitest run
+          pnpm --filter @band-app/server exec vitest run --shard=${{ matrix.shard }}/${{ matrix.total }}
+          # The web unit and package suites are small; shard 1 runs them once.
+          if [ "${{ matrix.shard }}" != "1" ]; then exit 0; fi
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
           pnpm --filter @band-app/environment test
