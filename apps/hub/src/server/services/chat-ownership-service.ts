@@ -89,6 +89,7 @@ const log = createLogger("chat-ownership");
 const FORWARD_TIMEOUT_MS = 60_000;
 /** session/load can take up to 180 s on the agent's side. */
 const VIEW_SESSION_TIMEOUT_MS = 200_000;
+const SYNC_WAIT_MS = 5_000;
 /** How long the outbox waits before it tries a host again after a request timed out. */
 const RETRY_MS = 5_000;
 /** Rows per `chat.history` page the hub serves. */
@@ -603,10 +604,31 @@ export class ChatOwnershipService {
    * The user picked another session for the chat: the owner learns of it from the chat's info,
    * sent again. A chat with a turn running keeps its session, and the worker's own record wins.
    */
-  syncActiveSession(chatId: string): void {
+  syncActiveSession(chatId: string): Promise<void> {
     const hostId = this.ownerOf(chatId);
-    if (!hostId || taskService.getTask(chatId)?.status === "running") return;
-    this.enqueue(chatId, hostId, METHOD_CHAT_OWN, { chatId });
+    if (!hostId || taskService.getTask(chatId)?.status === "running") return Promise.resolve();
+    const id = this.enqueue(chatId, hostId, METHOD_CHAT_OWN, { chatId });
+    return this.untilDelivered(chatId, hostId, id);
+  }
+
+  /**
+   * Waits until the owner has taken a request, for a caller whose client reads from the owner
+   * right after (a direct stream opened after picking a session). An offline owner, a retry
+   * or `SYNC_WAIT_MS` ends the wait: the request stays queued and is delivered later.
+   */
+  private async untilDelivered(chatId: string, hostId: string, id: string): Promise<void> {
+    const deadline = Date.now() + SYNC_WAIT_MS;
+    while (
+      this.sessions.get(hostId)?.attached &&
+      this.forwards.pendingForChat(chatId).some((row) => row.id === id)
+    ) {
+      const running = this.delivering.get(hostId);
+      if (!running || Date.now() > deadline) return;
+      await Promise.race([
+        running.catch(() => undefined),
+        new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now()))),
+      ]);
+    }
   }
 
   /**

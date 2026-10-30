@@ -214,8 +214,14 @@ describe("hub update", () => {
   });
 
   it("fails with the log tail when the hub does not come back in time", async () => {
-    await boot(`echo installing; ${RECORD_ENV}`, { BAND_HUB_UPDATE_TIMEOUT_MS: "300" });
+    const record = await boot(`echo installing; ${RECORD_ENV}`, {
+      BAND_HUB_UPDATE_TIMEOUT_MS: "300",
+    });
     await mutate("workers.updateHub");
+    // The 300 ms run from the start of the command, so on a loaded machine it can lapse before
+    // the shell prints. The record is written after the echo, so once it exists the log holds
+    // "installing" whenever the status turns to failed.
+    await waitFor(() => (existsSync(record) ? true : undefined), { label: "the command" });
     const failed = await waitFor(
       async () => {
         const s = await status();
