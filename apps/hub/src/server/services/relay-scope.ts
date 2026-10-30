@@ -751,6 +751,12 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
     }
     named = rest;
   }
+  if (procedure === "statuses.notify") {
+    // `band notify` sends the worker's own id, and the relay writes it again in `pinWorktreeHost`.
+    // Any other id stays in the input and is refused as a target the relay cannot check.
+    const { hostId, ...rest } = (input ?? {}) as Record<string, unknown>;
+    if (hostId === workerId) named = rest;
+  }
   if (procedure === "subscriptions.remove") {
     const { id } = (input ?? {}) as { id?: unknown };
     if (typeof id !== "string") return deny(400, `${procedure} needs an id`);

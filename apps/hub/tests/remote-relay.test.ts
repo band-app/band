@@ -1405,7 +1405,7 @@ describe("hooks through the relay (S3)", () => {
 
       // What `band notify` posts for a Claude Code hook, sent with the shell's own environment.
       socket.type(
-        `curl -s -o /dev/null -w 'hook=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d "{\\"cwd\\":\\"$PWD\\",\\"payload\\":{\\"session_id\\":\\"relay-hook\\",\\"cwd\\":\\"$PWD\\",\\"hook_event_name\\":\\"UserPromptSubmit\\"},\\"agent\\":\\"claude-code\\",\\"dispatch\\":\\"terminal\\"}"\r`,
+        `curl -s -o /dev/null -w 'hook=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d "{\\"cwd\\":\\"$PWD\\",\\"payload\\":{\\"session_id\\":\\"relay-hook\\",\\"cwd\\":\\"$PWD\\",\\"hook_event_name\\":\\"UserPromptSubmit\\"},\\"hostId\\":\\"${a.hostId}\\",\\"agent\\":\\"claude-code\\",\\"dispatch\\":\\"terminal\\"}"\r`,
       );
       await socket.waitForOutput("hook=200");
     } finally {
@@ -1439,7 +1439,7 @@ describe("hooks through the relay (S3)", () => {
     });
     try {
       socket.type(
-        `curl -s -o /dev/null -w 'foreign=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d '{"cwd":"${worktreeOf(a, "relay-a")}","payload":{"session_id":"x"},"agent":"claude-code","dispatch":"terminal"}'\r`,
+        `curl -s -o /dev/null -w 'foreign=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d '{"cwd":"${worktreeOf(a, "relay-a")}","payload":{"session_id":"x"},"hostId":"${a.hostId}","agent":"claude-code","dispatch":"terminal"}'\r`,
       );
       await socket.waitForOutput("foreign=403");
     } finally {
