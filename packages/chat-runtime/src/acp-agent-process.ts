@@ -382,6 +382,11 @@ export class AcpAgentProcess {
     this.child.onReattached?.(listener);
   }
 
+  /** A held agent that lost its link and waits for its worker. */
+  get detached(): boolean {
+    return this.child.detached === true;
+  }
+
   /** The agent process id, while it runs. */
   get pid(): number | undefined {
     return this.child.pid;
