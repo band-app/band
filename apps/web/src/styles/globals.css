@@ -40,6 +40,8 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
   --color-highlight: var(--highlight);
+  --color-list-highlight: var(--list-highlight);
+  --color-list-highlight-foreground: var(--list-highlight-foreground);
   --color-selection: var(--selection);
   --color-selection-border: var(--selection-border);
   --color-selection-foreground: var(--selection-foreground);
@@ -154,6 +156,8 @@
   /* Accent: selection, links, focus. One source for every "this is the
      chosen thing" look, so lists, trees and the sidebar match. */
   --highlight: oklch(0.546 0.245 262.881);
+  --list-highlight: color-mix(in oklab, var(--highlight) 16%, var(--popover));
+  --list-highlight-foreground: var(--popover-foreground);
   --selection: color-mix(in oklab, var(--highlight) 15%, transparent);
   --selection-border: color-mix(in oklab, var(--highlight) 45%, transparent);
   --selection-foreground: var(--foreground);
@@ -296,6 +300,8 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --highlight: oklch(0.707 0.165 254.624);
+  --list-highlight: color-mix(in oklab, var(--highlight) 30%, var(--popover));
+  --list-highlight-foreground: var(--popover-foreground);
   --selection: color-mix(in oklab, var(--highlight) 22%, transparent);
   --selection-border: color-mix(in oklab, var(--highlight) 55%, transparent);
   --drop-target: color-mix(in oklab, var(--highlight) 25%, transparent);

@@ -14,12 +14,29 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { rowContrast } from "./ListHighlight";
 
 export class CommandPalette {
   readonly dialog: Locator;
 
   constructor(private readonly page: Page) {
     this.dialog = page.getByTestId("command-palette");
+  }
+
+  /** Contrast between the keyboard-highlighted row and another command's background. */
+  async highlightContrast(normalCommandId: string): Promise<number> {
+    return await rowContrast(
+      this.dialog.locator('[role="option"][data-selected="true"]'),
+      this.item(normalCommandId),
+    );
+  }
+
+  /** Command ids of the rows, top to bottom. */
+  async rowIds(): Promise<string[]> {
+    const testIds = await this.dialog
+      .locator('[data-testid^="command-palette__item--"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? ""));
+    return testIds.map((t) => t.replace("command-palette__item--", ""));
   }
 
   item(commandId: string): Locator {

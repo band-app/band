@@ -1,6 +1,11 @@
-# Run the hub on a server
+---
+title: Hub on a server
+description: Run the Band hub on a home server or a VPS with Docker Compose, add HTTPS, connect your devices and keep it updated.
+section: workers
+order: 10
+---
 
-This page covers running the Band hub on a home server or a VPS with Docker Compose. The hub keeps its data in one volume. You reach it from a browser, the desktop app or the CLI with a device token.
+This page covers running the Band hub on a home server or a VPS with Docker Compose. The hub keeps its data in one volume. You reach it from a browser, the desktop app or the CLI with a device token. Worktrees run on [workers](adding-workers.md), not in the hub container.
 
 ## Start the hub
 
@@ -10,7 +15,9 @@ docker compose up -d
 docker compose logs band  # find the admin token
 ```
 
-Compose pulls `ghcr.io/band-app/band-hub:latest`. Set `BAND_VERSION` to pin a release. For settings, copy `deploy/compose/.env.example` to `.env` next to `compose.yml`. To build the image from a checkout instead, run `docker compose -f compose.yml -f compose.build.yml up -d --build` in `deploy/compose`. The hub listens on `127.0.0.1:3456` of the worker. Set `BAND_BIND=0.0.0.0` in `.env` to publish it on all interfaces, and only do that on a trusted network.
+Compose pulls `ghcr.io/band-app/band-hub:latest`. Set `BAND_VERSION` to pin a release. For settings, copy `deploy/compose/.env.example` to `.env` next to `compose.yml`. To build the image from a checkout instead, run `docker compose -f compose.yml -f compose.build.yml up -d --build` in `deploy/compose`. The hub listens on port 3456 inside the container. Compose publishes it on `127.0.0.1:3456` of the server. Set `BAND_PORT` in `.env` to change the published port, and `BAND_BIND=0.0.0.0` to publish on all interfaces. Only do that on a trusted network.
+
+`compose.yml` passes only the variables it lists to the container (see the [settings reference](#settings-reference)). Any other `BAND_*` variable, such as `BAND_PUBLIC_URL`, must be added under `environment:` in `compose.yml` before it reaches the hub.
 
 ### The admin token
 
@@ -48,9 +55,11 @@ Proxy `https://your-host/` to `http://127.0.0.1:3456`. The proxy must pass WebSo
 
 ## Connect
 
-- **Browser.** Open `https://band.example.com/` and sign in with the token. A `?token=` query on the first visit also signs in.
-- **Desktop app.** Open `https://band.example.com/#hub=https://band.example.com&token=<token>`, or choose a remote hub in Settings > Hub. A plain `http:` URL works only for loopback.
-- **CLI.**
+Pick one.
+
+- Browser. Open `https://band.example.com/` and sign in with the token. A `?token=` query on the first visit also signs in.
+- Desktop app. Open `https://band.example.com/#hub=https://band.example.com&token=<token>`, or choose a remote hub in Settings > Hub. A plain `http:` URL works only for loopback.
+- CLI. Set the URL and token, then run any command.
   ```sh
   export BAND_SERVER_URL=https://band.example.com
   export BAND_TOKEN=<token>
@@ -59,16 +68,14 @@ Proxy `https://your-host/` to `http://127.0.0.1:3456`. The proxy must pass WebSo
 
 ### Connect a phone
 
-1. Open Band on a machine that already has an admin token. Set `BAND_PUBLIC_URL=https://band.example.com` in `.env` so the hub offers its public address as the default link address.
-2. Go to Settings > Devices and choose Add device. Keep the label `Phone` or change it. Leave Admin device off unless the phone should manage tokens too.
-3. The Connect dialog shows a link and QR code. Pick the address the phone reaches the hub on: the public URL, this page's address, one of the hub machine's network addresses, or a custom address that Add custom address saves in `settings.json`. The link is `<address>/?pair=<code>`. Scan the QR code with the phone, or open the link.
-4. The code works once and expires after 15 minutes. Opening it signs the phone in as that device and replaces the device's previous token. Reopening it a second time shows "already used or has expired".
+1. Add `BAND_PUBLIC_URL: https://band.example.com` under `environment:` in `compose.yml`, so the hub offers its public address as the default link address. Run `docker compose up -d`.
+2. Open Settings > Devices on a device that has an admin token and choose Add device. Keep the label `Phone` or change it. Leave Admin device off unless the phone should manage tokens too.
+3. The Connect dialog shows a link and a QR code. Pick the address the phone reaches the hub on, then scan the code or open the link. The link is `<address>/?pair=<code>`.
+4. The code works once and expires after 15 minutes. Opening it signs the phone in as that device and replaces the device's previous token.
 
-The network addresses come from the hub's own interfaces, ordered Tailscale (100.64.0.0/10), IPv4, global IPv6, then virtual networks such as `docker0`. A hub in a container sees only container addresses, so set `BAND_PUBLIC_URL` there. The picker never preselects a virtual network. The hub does not test whether another device can reach a custom address.
+A hub in a container sees only container network addresses, so set `BAND_PUBLIC_URL` there. Settings > Devices lists each device. Revoke signs a device out at once.
 
-Settings > Devices lists each device with when it was added and last used. Connect details on a device shows its pending code again, or Regenerate replaces it. The hub keeps a pending code sealed with the vault key (`BAND_VAULT_KEY` or `<BAND_HOME>/vault.key`) until it is used or expires. Revoke signs a device out at once and removes it from the list, after a confirmation. Revoking the token you are signed in with signs you out. Links of the older form `<hub URL>/?token=<token>` still sign in.
-
-If you lost the admin token and cannot reach Settings, set `BAND_ADMIN_TOKEN` in `.env` to a new value and run `docker compose up -d`. The hub replaces the stored token with that value. Then sign in with it and add the device.
+If you lose the admin token and cannot reach Settings, set `BAND_ADMIN_TOKEN` in `.env` to a new value and run `docker compose up -d`. The hub replaces the stored token with that value.
 
 ## Serve the UI from somewhere else
 
@@ -81,43 +88,50 @@ The desktop app has its own copy of the UI, so it needs neither setting.
 
 ## Worktrees run on workers
 
-The image sets `BAND_LOCAL_WORKER=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a worker in Settings > Workers or in any worker picker, and `worktrees.create` for the `local` worker is refused.
+The image sets `BAND_LOCAL_WORKER=off`, so the hub does not run worktrees in its own container. Every worktree runs on a worker, and the entrypoint creates no sample repo. The hub is not listed as a worker in Settings > Workers or in any worker picker.
 
-A worktree created with no worker goes to the worker named by `BAND_DEFAULT_WORKER`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, open Settings > Workers and follow the steps there, or see the worker setup in `docker/worker.Dockerfile`. Set `BAND_LOCAL_WORKER=on` to run worktrees in the container again.
+A worktree created with no worker goes to the worker named by `BAND_DEFAULT_WORKER`, or to the only online worker. With no online worker, or several and no default, it fails with an error that names the setting. To add a worker, see [Add a worker](adding-workers.md). Set `BAND_LOCAL_WORKER=on` to run worktrees in the container again. The image has no coding agent installed, so that is only useful with a mounted repo and an agent you add yourself.
 
 ## Add a repo
 
 A repo on the hub is a remote URL and a default branch. The hub holds no checkout of it, and each worker maps the URL to a folder of its own. There are two ways to add one.
 
-**By URL.** The first worktree for the repo on a worker clones it to `~/band/repos/<owner>/<name>` on that worker, and later worktrees reuse the clone.
+By URL. The first worktree for the repo on a worker clones it to `~/band/repos/<owner>/<name>` on that worker, and later worktrees reuse the clone.
 
 ```sh
-docker compose exec band band repos add --url https://github.com/owner/repo.git
+band repos add --url https://github.com/owner/repo.git
 ```
 
-Without `--branch` the hub reads the default branch with `git ls-remote --symref` on an online worker, or from the GitHub API when the vault holds a git credential for github.com. The clone uses the worker's own git credentials, or the vault's git credential on a runner worker (see [Runner hooks](runner-hooks.md)).
+Run it from any machine with the CLI set up as in [Connect](#connect).
 
-**From a worker.** When a worker already has a checkout, pick it on that worker. In the UI, choose Add repo in the sidebar's Repos panel and then From a worker, and browse the worker's home directory. The hub reads the folder's `origin` URL and default branch, and the worker keeps the folder in its own mapping, so it never clones it again. A folder outside the directories the worker serves is added as a root after you confirm. The CLI does the same:
+Without `--branch` the hub reads the default branch with `git ls-remote --symref` on an online worker, or from the GitHub API when the vault holds a git credential for github.com. The clone uses the worker's own git credentials, or the vault's git credential on a runner worker (see [Runners](runner-hooks.md)).
+
+From a worker. When a worker already has a checkout, pick it on that worker. In the UI, choose Add repo in the sidebar's Repos panel and then From a worker, and browse the worker's home directory. The hub reads the folder's `origin` URL and default branch, and the worker keeps the folder in its own mapping, so it never clones it again. A folder outside the directories the worker serves is added as a root after you confirm. The CLI does the same:
 
 ```sh
-band repos add --from <worker id> /home/me/code/myrepo --add-root
+band repos add --from <worker-id> /home/me/code/myrepo --add-root
 ```
 
 A folder with no git remote is added without a URL and stays on that one worker. A worktree for it can only run there.
 
 `band repos list` shows each repo's URL and the folder it is cloned to on each worker.
 
-The image has no coding agent installed. With `BAND_LOCAL_WORKER=on`, the hub's own machine is a worker too, with its own mapping: mount a repository into the container and register its container path with `band repos add /repos/myrepo`.
+With `BAND_LOCAL_WORKER=on`, you can also mount a repository into the container (the commented volume line in `compose.yml`) and register its container path with `band repos add /repos/myrepo`.
 
-## Upgrade
+## Update
+
+The hub shows an "update available" badge in the sidebar footer when a newer release exists. Its panel gives the command for a compose install. To update by hand, run these in the directory that holds `compose.yml`:
 
 ```sh
-git pull
-docker compose build --pull
+docker compose pull
 docker compose up -d
 ```
 
-The volume keeps repos, tokens and settings. The hub applies database migrations when it starts. Back up the volume before a major upgrade.
+To move to a specific release, set `BAND_VERSION` for both commands, for example `BAND_VERSION=1.4.0 docker compose pull`. The volume keeps repos, tokens and settings. The hub applies database migrations when it starts. Back up the volume before a major upgrade.
+
+A hub built from a checkout (`compose.build.yml`) updates with `git pull` and `docker compose -f compose.yml -f compose.build.yml up -d --build`.
+
+A worker within one minor version of the hub is accepted. Update workers as the [updates](updates.md) page describes.
 
 ## Back up and restore
 
@@ -142,6 +156,10 @@ The volume name starts with the Compose repo name, which is the directory name (
 | `BAND_CLI_PATH` | `/opt/band/binaries/band` | The `band` CLI the hub itself uses, for example to install the skills. An npm install finds it in its `@band-app/worker-cli-<platform>-<arch>` optional dependency, so this is only for other layouts. Workers carry their own CLI and never fetch it from the hub. The dashboard's "Install band CLI" banner shows only to admin tokens, and never on a hub with `BAND_LOCAL_WORKER=off`. |
 | `BAND_SERVE_UI` | `true` | `false` serves the API only. |
 | `BAND_ALLOWED_ORIGINS` | empty | Origins of a UI hosted elsewhere. |
-| `BAND_PORT` | `3456` | Worker port. |
-| `BAND_BIND` | `127.0.0.1` | Worker address the port binds to. |
+| `BAND_PORT` | `3456` | Port the server publishes the hub on. The container always listens on 3456. |
+| `BAND_BIND` | `127.0.0.1` | Address on the server that the published port binds to. |
 | `BAND_DOMAIN` | empty | Hostname for the `tls` profile. |
+| `BAND_VERSION` | `latest` | Image tag. |
+| `BAND_IMAGE` | `ghcr.io/band-app/band-hub:<version>` | Replaces the whole image name. |
+
+Compose passes the variables above to the hub, and `BAND_INSTALL_METHOD=compose` is set for you. `BAND_PUBLIC_URL` is read by the hub but not passed by `compose.yml`.

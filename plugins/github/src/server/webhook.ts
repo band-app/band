@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { SourceEvent } from "@band-app/plugin-api";
+import { githubCiKey, githubPrKey } from "@band-app/plugin-api";
 import type { CheckTrigger } from "./check-runs";
-import { ciKey, obj, prKey, snippet, str } from "./json";
+import { obj, snippet, str } from "./json";
 
 /** Events the repo webhook is registered for. */
 export const HOOK_EVENTS = [
@@ -78,7 +79,7 @@ export function parseGithubDelivery(
       const verb = merged ? "merged" : action.replaceAll("_", " ");
       const title = snippet(pr.title);
       return event(
-        prKey(repo, number),
+        githubPrKey(repo, number),
         "pull_request",
         str(pr.html_url),
         `${actor} ${verb} ${repo}#${number}${title ? `: ${title}` : ""}`,
@@ -96,7 +97,7 @@ export function parseGithubDelivery(
       const state = str(review.state).toLowerCase().replaceAll("_", " ");
       const text = snippet(review.body);
       return event(
-        prKey(repo, number),
+        githubPrKey(repo, number),
         "review",
         str(review.html_url) || str(pr.html_url),
         `${actor} reviewed ${repo}#${number} (${state || "commented"})${text ? `: ${text}` : ""}`,
@@ -111,7 +112,7 @@ export function parseGithubDelivery(
       }
       const path = snippet(comment.path);
       return event(
-        prKey(repo, number),
+        githubPrKey(repo, number),
         "review_comment",
         str(comment.html_url) || str(pr.html_url),
         `${actor} commented on ${path || "a file"} in ${repo}#${number}: ${snippet(comment.body)}`,
@@ -126,7 +127,7 @@ export function parseGithubDelivery(
         return { type: "ignored" };
       }
       return event(
-        prKey(repo, number),
+        githubPrKey(repo, number),
         "comment",
         str(comment.html_url) || str(issue.html_url),
         `${actor} commented on ${repo}#${number}: ${snippet(comment.body)}`,
@@ -138,7 +139,7 @@ export function parseGithubDelivery(
       const sha = str(body.after);
       if (!branch || body.deleted === true || /^0+$/.test(sha)) return { type: "ignored" };
       return event(
-        ciKey(repo, branch),
+        githubCiKey(repo, branch),
         "push",
         str(body.compare) || `https://github.com/${repo}/tree/${branch}`,
         `${actor} pushed ${sha.slice(0, 7)} to ${repo}@${branch}`,

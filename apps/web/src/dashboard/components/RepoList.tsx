@@ -312,7 +312,11 @@ function SortableRepo({
   // kept because dnd-kit needs vertical panning to scroll the list mid-drag.
   const headerClassName = isPlain
     ? `group flex items-center justify-between mb-0.5 rounded-md pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2.5 ${
-        plainIsActive ? "bg-primary/15 hover:bg-primary/15" : plainIsFocused ? "bg-accent" : ""
+        plainIsActive
+          ? "bg-primary/15 hover:bg-primary/15"
+          : plainIsFocused
+            ? "bg-list-highlight"
+            : ""
       }`
     : `group flex items-center justify-between mb-0.5 pl-1 pr-0 rounded select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11`;
 

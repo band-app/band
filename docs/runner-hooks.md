@@ -1,12 +1,19 @@
-# Runner hooks
+---
+title: Runners
+description: Start workers on demand with runner hooks for local processes, SSH machines, Docker, Kubernetes, Hetzner and Contabo, and write your own hook.
+section: workers
+order: 30
+---
 
-A runner is a pair of scripts the hub runs to get a machine for a worktree that has none. When `worktrees.create` carries a `placement` that no online worker satisfies, the hub records a worker request. `RunnerService` (`apps/hub/src/server/services/runner-service.ts`) takes that request, runs the runner's `spawn` script, and completes the request once the worker that script started says hello.
+A runner starts a worker on demand. When you create a worktree and ask for a worker that does not exist yet, for example one with certain labels or an isolated container, the hub looks for a runner that fits. The runner runs a script (a hook) that starts a worker, and the hub creates the worktree on it once the worker connects. See [Add a worker](adding-workers.md) for workers you start yourself.
 
-The hub ships six hooks in `runners/`: `local`, `ssh`, `docker`, `k8s`, `hetzner` and `contabo`. `hetzner` and `contabo` start a virtual machine per request (see [VM hooks](#vm-hooks-hetzner-and-contabo)). `docker` and `hetzner` also have snapshot hooks (see [Snapshots](#snapshots)). Any executable can be a hook.
+Band ships six hooks: `local`, `ssh`, `docker`, `k8s`, `hetzner` and `contabo`. `hetzner` and `contabo` start a virtual machine per request. `docker` and `hetzner` also have snapshot hooks (see [Snapshots](#snapshots)). Any executable can be a hook (see [Writing a hook](#writing-a-hook)).
+
+Settings > Runners lists your runners and how many requests each is running, the workers they started with their state and age, and recent activity with the log of each hook. An admin can destroy a started worker there. The same lists are in `band runners list` and `band runners log <request id>`. Runners themselves are set in `~/.band/settings.json`.
 
 ## Configure a runner
 
-Runners live in `~/.band/settings.json` under `runners`. `settings.update` validates them. The hub skips an invalid entry and reports it in `band runners list`.
+Runners live in `~/.band/settings.json` under `runners`. The hub validates them. It skips an invalid entry and reports it in `band runners list` and in Settings > Runners.
 
 ```json
 {
@@ -52,173 +59,17 @@ Runners live in `~/.band/settings.json` under `runners`. `settings.update` valid
 
 ## Isolation levels
 
-A worktree asks for a level with `isolation` in its environment (`placement.environment.isolation`, or `.band/environment.json` once placement reads it). A runner offers a level with its `isolation` setting.
+A worktree asks for a level with `band worktrees create --isolation worktree|container|vm`. A runner offers a level with its `isolation` setting.
 
 | Level | Meaning | Placement |
 | --- | --- | --- |
 | `worktree` | A git worktree on a worker that other worktrees share. The default. | Goes to an online worker whose labels match, or to a runner offering any level. A worker a runner started is ephemeral and belongs to the worktree it was started for, so only a worker registered by hand is shared. A worker started for a `container` or `vm` worktree is never used. |
 | `container` | A worker of its own, in a container. | Never reuses a worker. A runner offering `container` or `vm` starts a new worker for each worktree. |
-| `vm` | A worker of its own in a virtual machine. | Only a runner with `isolation: "vm"` takes it. The bundled hooks start no virtual machines, so you bring your own hook. |
+| `vm` | A worker of its own in a virtual machine. | Only a runner with `isolation: "vm"` takes it. The `hetzner` and `contabo` hooks start virtual machines, and the `k8s` hook can with a VM runtime class. |
 
-A stronger level satisfies a weaker request, so a `vm` runner takes a `container` request. If no configured runner offers the level a `container` or `vm` worktree asks for, `worktrees.create` fails at once with `No runner offers isolation vm` (or `container`) instead of waiting for the placement timeout. A runner outside the hub's settings that leases requests with `hostRequests.lease` should pass `filter.isolation` with the level it offers.
+A stronger level satisfies a weaker request, so a `vm` runner takes a `container` request. If no configured runner offers the level a `container` or `vm` worktree asks for, creating the worktree fails at once with `No runner offers isolation vm` (or `container`) instead of waiting for the placement timeout.
 
 The hub labels each worker it starts for a `container` or `vm` worktree with `band.isolation=<level>`, and placement skips workers with that label.
-
-## The contract
-
-For each attempt the hub issues a one-time bootstrap token for a new worker, then runs `spawn` with this environment and nothing else from the hub's own environment except `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `USER`, `SHELL` and `SSH_AUTH_SOCK`:
-
-| Variable | Value |
-| --- | --- |
-| `BAND_HUB_URL` | The URL the worker dials. `env.BAND_HUB_URL` of the runner, else `BAND_RUNNER_HUB_URL`, else `BAND_PUBLIC_URL`, else `http://127.0.0.1:<hub port>`. A worker accepts plain `http` only for a loopback hub, so a remote machine needs an `https` URL. |
-| `BAND_WORKER_ID` | The id of the worker the hub created. The worker must run with this id. |
-| `BAND_BOOTSTRAP_TOKEN` | Trade for a session token once. Valid for the attempt's timeout plus a minute. |
-| `BAND_REPO_URLS` | The clone URL of the request's repository: the URL the hub stores for the repo, without credentials, so the hub needs no checkout to answer. The hub's local path when the repo has no remote; only a hook on the hub's machine can use that. |
-| `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, parsed and checked with the `.band/environment.json` parser (`docs/agent-environments.md`), so it has the same shape. `{}` when there is none. A request whose environment does not parse fails at once, with the problems and their key paths, and no hook runs. |
-| `BAND_CLONE_BY_HUB` | `1` when the vault holds a git credential for the repository URL. The hook must skip its own clone and still print `BAND_WORKER_REPO_PATH`. The hub clones into that path through the worker once it says hello, so the clone can use the credential (see [Git credentials](#git-credentials-for-private-repositories)). Unset otherwise, and always unset for `restore`. The `local`, `ssh`, `docker` and `k8s` hooks honor it. The VM hooks clone in cloud-init and ignore it, so a private repository needs a hook of your own there. |
-| `BAND_REPO_IMAGE` | The repo's current environment image (`band env build`, `docs/agent-environments.md`), empty before its first ready build. |
-| `BAND_DESKTOP` | `1` when the runner has `desktop: true`, else unset. |
-| `BAND_ISOLATION` | The environment's `isolation` (`worktree`, `container` or `vm`) when it sets one, else the runner's `isolation`. |
-| `BAND_LABELS` | The request's labels as `k=v,k=v`. Pass them to the worker (`BAND_WORKER_LABELS`) so the worker carries them. |
-| `BAND_REQUIRES` | The request's `placement.requires` as JSON. |
-| `BAND_REPO` | The repo name. |
-| `BAND_RUNNER_ID`, `BAND_REQUEST_ID` | The runner and the worker request. |
-| `BAND_MACHINE_HANDLE` | Only for `destroy`. The handle `spawn` printed, when it printed one. |
-| `BAND_RUNNER_DIR` | A directory for the runner under `BAND_HOME`. Mode 0700, created by the hub. The hook runs with it as its working directory. |
-| `BAND_NODE` | The Node binary the hub runs on. |
-
-A hook must:
-
-- Start `band-worker` for `BAND_WORKER_ID` with the token, and return. The worker keeps running after the hook exits, so detach it and redirect its output. The hub treats a hook as finished when it exits, even if a child holds its pipes.
-- Exit 0 once the worker is started. Any other exit code fails the attempt. The hub does not wait for the worker inside `spawn`.
-- Read the token from the environment, not from a command line. `band-worker` reads `BAND_HUB_URL`, `BAND_WORKER_ID` and `BAND_BOOTSTRAP_TOKEN` itself.
-- Optionally print `BAND_MACHINE_HANDLE=<id>` on its own line: a name for the machine that `destroy` and `status` can find again, such as a container id, a pid or a VM id. No spaces. The hub stores it in `runner_machines` and passes it to `destroy` as `BAND_MACHINE_HANDLE`.
-- Optionally print `BAND_WORKER_REPO_PATH=<path>` on its own line: where the repository is on the worker. The hub passes it as `hostRepoPath` when it fulfils the request. The path must be inside one of the worker's roots. The hub still reads the older `BAND_HOST_REPO_PATH=` line, and the new one wins when both are printed (see [renamed names](glossary.md#renamed-names-and-their-aliases)).
-
-`destroy` gets the same environment without `BAND_BOOTSTRAP_TOKEN`, plus `BAND_MACHINE_HANDLE`. It should stop the worker and remove what `spawn` made, and it should succeed when there is nothing to undo. For a machine the hub has no record of (an orphan), the hub sets `BAND_MACHINE_HANDLE` and `BAND_RUNNER_ID` and leaves `BAND_WORKER_ID` and the request variables unset, so a `destroy` must be able to work from the handle alone. It must check that the handle is one of its own machines before it kills anything.
-
-`status` runs with the runner's `env`, `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL` and `BAND_NODE`, and no request or worker variables. It prints the handle of every machine of this runner that still exists, one per line (the first word of a line counts, with or without a `BAND_MACHINE_HANDLE=` prefix; the VM hooks print `BAND_MACHINE_HANDLE=<id> worker=... state=...`), and exits 0. It must list only this runner's machines.
-
-## Git credentials for private repositories
-
-A hook has only the bootstrap token, so it cannot clone a private repository. Workers get git credentials from the hub instead:
-
-1. Create a fine-grained personal access token on GitHub (Settings > Developer settings > Personal access tokens > Fine-grained tokens). Give it the repositories the workers need and the repository permissions Contents (read and write) and Pull requests (read and write).
-2. Store it on the hub with a pattern over the repository path. The pattern is matched against `owner/repo` (no `.git`), `*` stays inside one segment and `**` crosses segments:
-
-   ```sh
-   printf '%s' "$TOKEN" | band vault put github-band --kind git --host github.com --path 'band-app/*'
-   ```
-
-   Settings > Credentials has the same form. `--scope repo:<name>` limits an item to one repo, and a repo-scoped item wins over a global one, then the pattern with more literal characters wins. `--username` defaults to `x-access-token`, which GitHub accepts for a token.
-3. Nothing else is configured. When a worker starts, it adds a git credential helper to the environment of every git command, agent and terminal it runs (`GIT_CONFIG_*` and `GIT_TERMINAL_PROMPT=0`). The helper (`band-worker git-credential`) asks the worker over a Unix socket in a private temp directory, and the worker asks the hub with the `git.credential` call on its link. The hub answers only for a remote of a repository placed on that worker: a repo with a checkout or a worktree there, or the repository it is about to clone there. Any other repository is refused, and a remote with no matching vault item gets no credential.
-
-The git token is never written to the worker's disk, never put in an environment variable and never logged (the hub logs the worker, the git host and the path of each request, not the credential). Git's `store` and `erase` do nothing, and the helper replaces the machine's own credential helpers, so no keychain keeps it. A process on the worker that runs `git credential fill` for a placed repository can read the token. This is accepted, because an agent must be able to push. Three things limit the exposure:
-
-- Use a fine-grained PAT limited to the repositories the workers need and to the permissions above, so a leaked token reaches nothing else.
-- The hub logs every request (worker, git host and path, never the credential), so each use is traceable to a worker.
-- The git token is never on the worker's disk, in its environment or in any log, so it is gone when the process that asked for it exits. (`GH_TOKEN` for `gh` is the exception, see [Git and GitHub auth](#git-and-github-auth).)
-
-The credential source sits behind the `GitTokenSource` interface (`services/_utils/git-token-source.ts`), so a GitHub App that mints installation tokens can replace the vault lookup later.
-
-## Git and GitHub auth
-
-The hub and workers use `git` for clones and pushes and `gh` for pull requests, checks and the GitHub subscription poller. Both images (`band-hub`, `band-worker`) contain `gh`, pinned by the `GH_VERSION` build argument. Each kind of machine authenticates differently.
-
-| Machine | git | gh |
-| --- | --- | --- |
-| Attached worker (`band-worker --token ...` that you started) | Its own ssh keys or credential helper, tried first. The worker adds the hub's git helper after them, which answers only when the vault has a matching item. `--hub-git-credentials-only` drops the machine's helpers. | Its own `gh auth login`. The hub sends nothing, unless the worker sets `BAND_WORKER_GH_TOKEN=hub`. |
-| Runner-started worker | The vault `git` item, through the helper described above. | `GH_TOKEN` from the same vault item, in the environment of agents and terminals only. |
-| Hub | The vault `git` item, for clones the hub makes through a worker. | The machine's own `gh auth login`. With none, `GH_TOKEN` from the vault `git` item for `github.com`. |
-
-For `gh`, the hub uses the `git` item for `github.com` whose path pattern is broadest (a repo-scoped item wins over a global one). A dedicated `github` item kind does not exist yet. A worker asks with the `gh.token` call on its link every time it starts an agent or a terminal. The token goes into that child's environment only. It is not written to the worker's disk, not kept in the worker's memory between spawns, and not logged on either side. A worker whose own environment has `GH_TOKEN` or `GITHUB_TOKEN` keeps it, and the hub answers only workers it started through a runner or workers that opted in.
-
-A static worker keeps the machine's git credential helpers (the macOS keychain, `gh auth setup-git`, a `store` file) and adds the hub's helper after them, so git asks the machine first and the vault second. Because git calls `store` on every helper after a successful use, a token the hub hands out can end up in the machine's own helper. To keep the machine's helpers out entirely, start the worker with `--hub-git-credentials-only` (`BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1`, also accepted by `install-service`). An ephemeral worker (`--ephemeral`, which every runner hook sets) always resets the helper list and asks only the hub.
-
-Any process of an agent on the worker can read its own environment, so use a fine-grained PAT limited to the repositories the workers need.
-
-Token scopes for one PAT that serves git, `gh` and the hub's poller:
-
-- Repository permissions: Contents (read and write), Pull requests (read and write), Metadata (read), Commit statuses (read) and Checks (read), so `gh pr create`, `gh pr checks` and the subscription poller work.
-- Repository permission Webhooks (read and write), only if the hub registers GitHub webhooks (it needs a public URL, see [Run the hub on a server](run-the-hub-on-a-server.md)). Without it the hub polls.
-- A classic token needs `repo`, and `admin:repo_hook` for webhooks.
-
-With no `gh` login and no vault item, the hub's GitHub calls fail with "No GitHub credential for gh on this hub" and the command to store one. The poller logs it once and keeps running.
-
-## Snapshots
-
-A runner with `snapshot` and `restore` hooks keeps the disk of a sleeping worktree. Without them a wake builds the worktree again from the git state and agent session files the hub stored when it went to sleep (see [Ephemeral workers](ephemeral-workers.md)), so ignored files such as `node_modules` and build output are lost. With them, the wake starts a machine from the disk image that was taken at sleep, so installed dependencies, build output and untracked files are there at once.
-
-The git and session state is still stored first, on every sleep. The snapshot comes on top of it, and the wake falls back to the stored state when anything about the snapshot goes wrong. A snapshot can make a wake faster and fuller, and it can fail without losing work.
-
-| Hook | Environment | Output |
-| --- | --- | --- |
-| `snapshot` | `BAND_WORKER_ID`, `BAND_MACHINE_HANDLE` (what `spawn` printed, empty when it printed none), `BAND_WORKTREE_IDS` (comma-separated ids of the worktrees on the worker), `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL`, `BAND_ISOLATION`, `BAND_NODE` and the runner's `env`. | `BAND_SNAPSHOT_ID=<id>` on its own line, required. `BAND_SNAPSHOT_SIZE=<bytes>` optional. Exit 0. |
-| `restore` | The `spawn` environment, with a new `BAND_BOOTSTRAP_TOKEN`, and `BAND_SNAPSHOT_ID`. | Optional `BAND_MACHINE_HANDLE=<id>`. It starts the worker with `BAND_WORKER_ID` and the token, as `spawn` does, and exits 0. |
-| `snapshot-delete` | `BAND_SNAPSHOT_ID`, `BAND_WORKER_ID`, `BAND_MACHINE_HANDLE` and the common variables. | Exit 0, also when the snapshot is gone already. |
-
-`spawn` and `restore` print `BAND_MACHINE_HANDLE=<id>` for the machine they made, and the hub passes it to `snapshot`, `destroy` and `snapshot-delete` of that machine. A hook that finds its machine by the worker id needs no handle.
-
-A `restore` hook must not reuse the session token the snapshot holds. The hub revoked it when the worker went to sleep, and a worker that finds a saved session token uses it instead of the bootstrap token, so it would never connect. Delete the worker's saved `session-token` file from the restored disk (in `BAND_WORKER_STATE_DIR`) before the worker starts. The bundled hooks do. The restored worker has the same `BAND_WORKER_ID` as before.
-
-### Sleep
-
-1. The worker is idle and asks to exit. The hub stores the git state and the agent sessions, as without snapshots.
-2. The hub runs `snapshot` while the worker still runs. It runs for at most `snapshotTimeoutSec`, because the worker waits 15 minutes for the hub's answer. A failing or timed out hook is logged, and the sleep goes on without a snapshot.
-3. The hub records the snapshot in `runner_snapshots` (`runners.snapshots` lists them) and deletes the worker's older ones.
-4. The worker exits. The hub then runs `destroy` for its machine, so the machine does not outlive the snapshot.
-
-### Wake
-
-A wake is a worker request like any other, and any runner whose labels fit may lease it. The runner that took the snapshot runs `restore` with it. Another runner, or one whose snapshot was removed or has expired, runs `spawn` and the hub restores from the stored git state.
-
-1. `restore` starts a new machine from the snapshot, with a new bootstrap token. A `restore` that fails, or whose worker does not say hello within `timeoutSec`, runs `destroy` and then `spawn` in the same attempt, and the git restore takes over.
-2. When the worker says hello after a restore, the hub checks that each worktree's checkout is on the machine at the commit it had. If it is, the hub only writes the agent session files again. If it is not, it restores from git.
-3. The used snapshot is deleted with `snapshot-delete`.
-
-### Retention and cost
-
-A snapshot is storage you pay for until it is deleted. The hub deletes a snapshot when a wake has used it, when a newer one of the same worker replaces it, and in a sweep every minute (`BAND_SNAPSHOT_SWEEP_MS`) that removes anything past `snapshotTtlSec` and everything beyond the newest `snapshotKeep` of a runner. A worktree whose snapshot is deleted before its wake still wakes, from the stored git state, only without its ignored files. Leave `snapshotKeep` at least as large as the number of ephemeral workers you expect to sleep at once, or the oldest sleepers lose their snapshots to newer ones.
-
-A `snapshot-delete` that fails leaves the snapshot recorded, and the sweep tries again after 10 minutes, so a flaky provider API does not leak it. A snapshot whose runner has no `snapshotDelete` hook, or was removed from the settings, is forgotten with a warning in the hub log, and you remove it by hand. The log of each snapshot, restore and delete is `BAND_HOME/runners/logs/<worker id>.log` (`band runners log <worker id>`).
-
-### Limits
-
-- A snapshot holds disk state only. Running processes, memory, open terminals and dev servers do not survive. The environment's `start` and `terminals` run again after a wake, as on any new worker.
-- The disk is copied while the worker runs, so it is crash-consistent. The hub has stored the work before it takes the snapshot and nothing writes after that, since the worker is idle and its agents and terminals have stopped.
-- A snapshot belongs to the runner and the machine that made it. It is not portable to another runner, region, architecture or docker daemon.
-- A worker with several worktrees has one snapshot for the machine. Waking one worktree restores all of them.
-
-## What the hub does
-
-1. A runner with a free slot leases the oldest request its labels fit. A lease is one guarded SQL update, so two runners never take the same request. The hub renews the lease every 10 s while it works.
-2. It runs `spawn`. A script still running after `timeoutSec` is killed.
-3. After `spawn` exits 0 it waits for the worker to come online. When it does, the hub fulfils the request and creates the worktree on that worker.
-4. An attempt fails when `spawn` exits non-zero, runs past the timeout, or the worker does not say hello in time. The hub then runs `destroy` and deletes the worker it made. It tries once more with a new worker and token. After the second failure the request fails, and its error holds the reason and the last 20 log lines.
-5. Cancelling the request stops the run and runs `destroy`.
-
-When the worker later exits because it was idle, the hub stores its worktrees and starts a new worker with the same id on the next message, terminal or file access. That wake is another request, and `spawn` runs again with the same `BAND_WORKER_ID`, so the hook must start that id on a clean machine. See [Ephemeral workers](ephemeral-workers.md).
-
-## The reaper
-
-`RunnerReaperService` (`apps/hub/src/server/services/runner-reaper-service.ts`) makes sure no machine a runner started leaks. The hub records each machine in the `runner_machines` table (`spawning`, `running`, `stopping`, `destroyed` or `lost`, with the handle, the worker id, the request and the times). Every `BAND_REAPER_INTERVAL_MS` (default 30 s) it destroys, through the runner's `destroy` hook:
-
-- **A machine that never said hello.** A machine still `spawning` that no attempt in flight owns (for example after a hub restart) is destroyed once `timeoutSec` plus `BAND_REAPER_HELLO_GRACE_MS` (default 60 s) have passed since the spawn. The worker row it made is removed.
-- **A lost machine.** A running machine whose worker row is gone is destroyed at once. One whose worker has been `offline` or `lost` for `BAND_REAPER_OFFLINE_MS` (default 2 minutes) is destroyed too, which also cleans up after an ephemeral worker that went to sleep and exited. The time counts from the hub's boot at the earliest, so a hub restart does not destroy workers that are about to redial.
-- **An orphan.** For a runner with `status` and `destroy`, a handle that `status` lists and no live `runner_machines` row has is destroyed. The sweep skips a runner while one of its spawns is in flight.
-- **A machine past `maxLifetimeSec`.** The machine becomes `stopping`. The reaper sends `lifecycle.sleep` to the worker, which then goes through the same hand-off as an idle one (docs/ephemeral-workers.md): the hub refuses while an agent turn, queued message or terminal runs, and otherwise stores each worktree's snapshot and agent sessions before the worker exits. The reaper asks again every sweep and shows the reason in the machine's note. It runs `destroy` only after the worker has exited with every worktree stored. A machine with no worktrees is destroyed at once.
-
-A machine whose worktrees are not stored is never destroyed early. It waits until the hard deadline (`maxLifetimeSec` plus `lifetimeGraceSec` after the spawn, or the offline threshold plus `lifetimeGraceSec`). If that passes, the machine is destroyed anyway and the hub logs an error naming the worktrees that were lost. A worker that is not ephemeral cannot hand its worktrees over, so a machine like that waits for the deadline.
-
-When `destroy` fails, the reaper runs it again on the next sweeps. After the third failure the machine is `lost` and stays listed. If a later `status` still lists its handle, the orphan sweep tries again.
-
-A worker id that wakes up gets a new machine row, and the row of its earlier machine ends as `destroyed` (replaced), because the hook wipes the old machine when it starts the new one.
-
-Settings > Runners lists the workers started with their state, age and cloud handle. An admin can destroy one there (`runners.destroyMachine`). The hub refuses while the machine holds worktrees that are not stored, and the UI then offers "Destroy anyway". Only admin tokens can list machines or destroy them, and the MCP endpoint and the worker relay leave `runners.*` out.
-
-## Logs
-
-The hub keeps everything a hook prints in `BAND_HOME/runners/logs/<request id>.log`, one line per output line, tagged `spawn stdout`, `spawn stderr`, `destroy stdout` and so on. Before a line is stored the hub replaces the attempt's bootstrap token and anything shaped like a Band token (`bwb_`, `bws_`, `bdt_`, `brt_`, `bwd_`) with `[redacted]`. Read a log with `band runners log <request id>` or from Settings > Runners.
 
 ## Bundled hooks
 
@@ -247,7 +98,7 @@ The target must reach `BAND_HUB_URL`, and `ssh` must log in without a prompt (th
 
 ### `docker`
 
-Starts the worker image in a hardened container with `docker run --detach --rm`. The flags follow Bunny's docker runtime (`packages/runner/src/runtime/dockerRuntimeAdapter.ts`, `docker/client.ts`).
+Starts the worker image in a hardened container with `docker run --detach --rm`.
 
 | Setting | Why |
 | --- | --- |
@@ -317,7 +168,7 @@ A `worktrees.create` call picks this runner with `placement: { labels: { pool: "
 
 ### `k8s`
 
-Starts the worker as a Pod in a Kubernetes namespace with `kubectl`. The hook renders the manifests in `runners/k8s/render.mjs` and pipes them to `kubectl create`. The security settings match the docker hook, written as a Pod `securityContext`:
+Starts the worker as a Pod in a Kubernetes namespace with `kubectl`. The hook renders the manifests and pipes them to `kubectl create`. The security settings match the docker hook, written as a Pod `securityContext`:
 
 | Setting | Why |
 | --- | --- |
@@ -350,7 +201,7 @@ Settings (`env`):
 | `KUBECONFIG` | Hooks run with `HOME` only, so `~/.kube/config` is read by default. |
 | `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
 
-`destroy` deletes the Pod (or Job, or Sandbox) with `--ignore-not-found` (the Secret goes with it, because the runner never reads or deletes Secrets: `kubectl delete` reads the object first), so a missing object is success and an unreachable cluster is an error. `status.sh` prints `BAND_MACHINE_HANDLE=<namespace>/<pod> worker=<id> request=<id> state=<phase>` (the VM hooks' format) for the pods with the worker's label (or the runner's, or every worker pod). The hub does not call `status` yet (plan step 3.7).
+`destroy` deletes the Pod (or Job, or Sandbox) with `--ignore-not-found` (the Secret goes with it, because the runner never reads or deletes Secrets: `kubectl delete` reads the object first), so a missing object is success and an unreachable cluster is an error. `status.sh` prints `BAND_MACHINE_HANDLE=<namespace>/<pod> worker=<id> request=<id> state=<phase>` (the VM hooks' format) for the pods with the worker's label (or the runner's, or every worker pod). The reaper calls it to find orphans.
 
 `BAND_K8S_KIND=sandbox` creates a `Sandbox` (`agents.x-k8s.io/v1alpha1`, from kubernetes-sigs/agent-sandbox) whose `spec.podTemplate` is the Pod above. It needs that repo's CRDs and controller. It has not been run against a cluster yet, and `deploy/k8s/agent-sandbox.yaml` shows the shape. It creates a `Sandbox` and not a `SandboxClaim` because a claim refers to a shared `SandboxTemplate`, which cannot carry one worker's id and token.
 
@@ -385,17 +236,15 @@ How the worker reaches the hub: a worker takes plain `http` only for a loopback 
 
 The two `KUBERNETES_SERVICE_*` entries are for a hub that runs in the cluster: hooks run with a minimal environment, and `kubectl` finds the service account token only when it sees them. A hub outside the cluster uses a kubeconfig instead and drops them. For a VM-isolated runner add `"isolation": "vm"` and `"BAND_K8S_RUNTIME_CLASS": "kata"`.
 
-Tests: `apps/hub/tests/runner-k8s.test.ts` runs the scripts against a stub `kubectl` and checks the manifests (securityContext, resources, labels, the owned Secret, the CA ConfigMap, the RuntimeClass, the token in no argument). The CI job `k8s (kind)` creates a kind cluster, applies `deploy/k8s`, runs `deploy/k8s/check-rbac.sh`, and runs `apps/hub/tests/runner-k8s-kind.test.ts`. That test starts a hub behind a self-signed TLS terminator, runs the hook as the `band-hub` service account, waits for the Pod's worker to say hello, inspects the live Pod, and destroys it. To run it on your own cluster, set `BAND_K8S_TEST_IMAGE` (an image the cluster has) and `BAND_K8S_TEST_KUBECONFIG` (an admin kubeconfig), and `BAND_K8S_TEST_HUB_HOST` when the pods cannot reach this machine at the gateway of docker's `kind` network.
-
 ## VM hooks: hetzner and contabo
 
 Both hooks create a machine whose cloud-init installs the worker, starts it as `band-worker --ephemeral` under systemd and powers the machine off when the worker exits. Set `"isolation": "vm"` on the runner, so a request that asks for `vm` isolation can use it (see [Isolation levels](#isolation-levels)). The hooks print `BAND_MACHINE_HANDLE=<id>` (the provider's id for the machine) and, when the repo has a clone URL, `BAND_WORKER_REPO_PATH`.
 
-Each hook has `spawn`, `destroy` and `status` (`runners/<name>/{spawn,destroy,status}.sh`). `status` prints one line per machine the runner knows: `BAND_MACHINE_HANDLE=<id> worker=<worker id> request=<request id> state=<provider state>`. `destroy` finds its machine by the worker id, so it works without the handle, and it succeeds when the machine is gone already.
+Each hook has `spawn`, `destroy` and `status` (spawn.sh, destroy.sh and status.sh). `status` prints one line per machine the runner knows: `BAND_MACHINE_HANDLE=<id> worker=<worker id> request=<request id> state=<provider state>`. `destroy` finds its machine by the worker id, so it works without the handle, and it succeeds when the machine is gone already.
 
 ### The cloud-init
 
-`runners/_shared/cloud-init.mjs` renders the same user data for both providers. It writes `/etc/band-worker.env` (mode 0600, the contract's variables), a `band-worker.service` unit and a bootstrap script, then runs the script. The unit has `Restart=no`, `RuntimeMaxSec` (12 hours, set it with `BAND_VM_MAX_HOURS`) and `ExecStopPost=+/usr/sbin/poweroff`. A bootstrap step that fails also powers the machine off, because a machine with no worker only costs money. The image must be Debian or Ubuntu (the script uses `apt`).
+One shared cloud-init template renders the same user data for both providers. It writes `/etc/band-worker.env` (mode 0600, the contract's variables), a `band-worker.service` unit and a bootstrap script, then runs the script. The unit has `Restart=no`, `RuntimeMaxSec` (12 hours, set it with `BAND_VM_MAX_HOURS`) and `ExecStopPost=+/usr/sbin/poweroff`. A bootstrap step that fails also powers the machine off, because a machine with no worker only costs money. The image must be Debian or Ubuntu (the script uses `apt`).
 
 Settings (`env`, for both hooks):
 
@@ -419,7 +268,7 @@ Creates a Hetzner Cloud server per request with the labels `band.runner`, `band.
 
 | Variable | Meaning |
 | --- | --- |
-| `HCLOUD_TOKEN` | A repo API token with read and write access. Required. |
+| `HCLOUD_TOKEN` | A project API token with read and write access. Required. |
 | `HCLOUD_SERVER_TYPE` | Default `cx22`. |
 | `HCLOUD_IMAGE` | Default `ubuntu-24.04`. |
 | `HCLOUD_LOCATION` | Default `fsn1`. |
@@ -462,15 +311,165 @@ Contabo instances are billed monthly, so deleting one does not stop the charge. 
 
 Contabo has no per-instance labels in this hook, so `status` identifies a machine by its display name and does not report the request id. A reinstall takes a few minutes, so allow the same `timeoutSec` as for Hetzner or more.
 
-### Tests
+## What the hub does
 
-`apps/hub/tests/runner-vm-hooks.test.ts` runs each hook as the hub would, against Express stubs of the Hetzner and Contabo APIs (`fixtures/hetzner-stub.ts`, `fixtures/contabo-stub.ts`, reached through `HCLOUD_API_URL`, `CONTABO_AUTH_URL` and `CONTABO_API_URL`), and checks the cloud-config it sends. It runs `cloud-init schema` on the user data when `cloud-init` is installed, and otherwise checks the document's shape. CI calls no real cloud. A live test creates and deletes one Hetzner server when `BAND_LIVE_HCLOUD_TOKEN` is set, and is skipped without it:
+1. A runner with a free slot leases the oldest request its labels fit. Two runners never take the same request. The hub renews the lease every 10 s while it works.
+2. It runs `spawn`. A script still running after `timeoutSec` is killed.
+3. After `spawn` exits 0 it waits for the worker to come online. When it does, the hub fulfils the request and creates the worktree on that worker.
+4. An attempt fails when `spawn` exits non-zero, runs past the timeout, or the worker does not say hello in time. The hub then runs `destroy` and deletes the worker it made. It tries once more with a new worker and token. After the second failure the request fails, and its error holds the reason and the last 20 log lines.
+5. Cancelling the request stops the run and runs `destroy`.
 
-```sh
-BAND_LIVE_HCLOUD_TOKEN=... pnpm --filter @band-app/server exec vitest run tests/runner-vm-hooks.test.ts
-```
+When the worker later exits because it was idle, the hub stores its worktrees and starts a new worker with the same id on the next message, terminal or file access. That wake is another request, and `spawn` runs again with the same `BAND_WORKER_ID`, so the hook must start that id on a clean machine. See [Ephemeral workers](ephemeral-workers.md).
+
+## The reaper
+
+The hub makes sure no machine a runner started leaks. It records each machine with a state (`spawning`, `running`, `stopping`, `destroyed` or `lost`), its handle, the worker id and the request. Every `BAND_REAPER_INTERVAL_MS` (default 30 s) it destroys, through the runner's `destroy` hook:
+
+- A machine that never said hello. A machine still `spawning` that no attempt in flight owns (for example after a hub restart) is destroyed once `timeoutSec` plus `BAND_REAPER_HELLO_GRACE_MS` (default 60 s) have passed since the spawn. The worker row it made is removed.
+- A lost machine. A running machine whose worker row is gone is destroyed at once. One whose worker has been `offline` or `lost` for `BAND_REAPER_OFFLINE_MS` (default 2 minutes) is destroyed too, which also cleans up after an ephemeral worker that went to sleep and exited. The time counts from the hub's boot at the earliest, so a hub restart does not destroy workers that are about to redial.
+- An orphan. For a runner with `status` and `destroy`, a handle that `status` lists and no live machine record has is destroyed. The sweep skips a runner while one of its spawns is in flight.
+- A machine past `maxLifetimeSec`. The machine becomes `stopping`. The reaper sends `lifecycle.sleep` to the worker, which then goes through the same hand-off as an idle one ([Ephemeral workers](ephemeral-workers.md)): the hub refuses while an agent turn, queued message or terminal runs, and otherwise stores each worktree's snapshot and agent sessions before the worker exits. The reaper asks again every sweep and shows the reason in the machine's note. It runs `destroy` only after the worker has exited with every worktree stored. A machine with no worktrees is destroyed at once.
+
+A machine whose worktrees are not stored is never destroyed early. It waits until the hard deadline (`maxLifetimeSec` plus `lifetimeGraceSec` after the spawn, or the offline threshold plus `lifetimeGraceSec`). If that passes, the machine is destroyed anyway and the hub logs an error naming the worktrees that were lost. A worker that is not ephemeral cannot hand its worktrees over, so a machine like that waits for the deadline.
+
+When `destroy` fails, the reaper runs it again on the next sweeps. After the third failure the machine is `lost` and stays listed. If a later `status` still lists its handle, the orphan sweep tries again.
+
+A worker id that wakes up gets a new machine row, and the row of its earlier machine ends as `destroyed` (replaced), because the hook wipes the old machine when it starts the new one.
+
+Settings > Runners lists the workers started with their state, age and cloud handle. An admin can destroy one there. The hub refuses while the machine holds worktrees that are not stored, and the UI then offers "Destroy anyway". Only admin tokens can list machines or destroy them, and agents cannot.
+
+## Logs
+
+The hub keeps everything a hook prints in `BAND_HOME/runners/logs/<request id>.log`, one line per output line, tagged `spawn stdout`, `spawn stderr`, `destroy stdout` and so on. Before a line is stored the hub replaces the attempt's bootstrap token and anything shaped like a Band token  with `[redacted]`. Read a log with `band runners log <request id>` or from Settings > Runners.
+
+## Git credentials for private repositories
+
+A hook has only the bootstrap token, so it cannot clone a private repository. Workers get git credentials from the hub instead:
+
+1. Create a fine-grained personal access token on GitHub (Settings > Developer settings > Personal access tokens > Fine-grained tokens). Give it the repositories the workers need and the repository permissions Contents (read and write) and Pull requests (read and write).
+2. Store it on the hub with a pattern over the repository path. The pattern is matched against `owner/repo` (no `.git`), `*` stays inside one segment and `**` crosses segments:
+
+   ```sh
+   band vault put github-band --kind git --host github.com --path 'band-app/*' < token.txt
+   ```
+
+   Settings > Credentials has the same form (see [Credentials](credentials.md)). `--scope repo:<name>` limits an item to one repo, and a repo-scoped item wins over a global one, then the pattern with more literal characters wins. `--username` defaults to `x-access-token`, which GitHub accepts for a token.
+3. Nothing else is configured. When a worker starts, it adds a git credential helper to the environment of every git command, agent and terminal it runs (`GIT_CONFIG_*` and `GIT_TERMINAL_PROMPT=0`). The helper (`band-worker git-credential`) asks the worker over a Unix socket in a private temp directory, and the worker asks the hub with the `git.credential` call on its link. The hub answers only for a remote of a repository placed on that worker: a repo with a checkout or a worktree there, or the repository it is about to clone there. Any other repository is refused, and a remote with no matching vault item gets no credential.
+
+The git token is never written to the worker's disk, never put in an environment variable and never logged (the hub logs the worker, the git host and the path of each request, not the credential). Git's `store` and `erase` do nothing, and the helper replaces the machine's own credential helpers, so no keychain keeps it. A process on the worker that runs `git credential fill` for a placed repository can read the token. This is accepted, because an agent must be able to push. Three things limit the exposure:
+
+- Use a fine-grained PAT limited to the repositories the workers need and to the permissions above, so a leaked token reaches nothing else.
+- The hub logs every request (worker, git host and path, never the credential), so each use is traceable to a worker.
+- The git token is never on the worker's disk, in its environment or in any log, so it is gone when the process that asked for it exits. (`GH_TOKEN` for `gh` is the exception, see [Git and GitHub auth](#git-and-github-auth).)
+
+## Git and GitHub auth
+
+The hub and workers use `git` for clones and pushes and `gh` for pull requests, checks and the GitHub subscription poller. Both images (`band-hub`, `band-worker`) contain `gh`. Each kind of machine authenticates differently.
+
+| Machine | git | gh |
+| --- | --- | --- |
+| Attached worker (`band-worker --token ...` that you started) | Its own ssh keys or credential helper, tried first. The worker adds the hub's git helper after them, which answers only when the vault has a matching item. `--hub-git-credentials-only` drops the machine's helpers. | Its own `gh auth login`. The hub sends nothing, unless the worker sets `BAND_WORKER_GH_TOKEN=hub`. |
+| Runner-started worker | The vault `git` item, through the helper described above. | `GH_TOKEN` from the same vault item, in the environment of agents and terminals only. |
+| Hub | The vault `git` item, for clones the hub makes through a worker. | The machine's own `gh auth login`. With none, `GH_TOKEN` from the vault `git` item for `github.com`. |
+
+For `gh`, the hub uses the `git` item for `github.com` whose path pattern is broadest (a repo-scoped item wins over a global one). A dedicated `github` item kind does not exist yet. A worker asks with the `gh.token` call on its link every time it starts an agent or a terminal. The token goes into that child's environment only. It is not written to the worker's disk, not kept in the worker's memory between spawns, and not logged on either side. A worker whose own environment has `GH_TOKEN` or `GITHUB_TOKEN` keeps it, and the hub answers only workers it started through a runner or workers that opted in.
+
+A static worker keeps the machine's git credential helpers (the macOS keychain, `gh auth setup-git`, a `store` file) and adds the hub's helper after them, so git asks the machine first and the vault second. Because git calls `store` on every helper after a successful use, a token the hub hands out can end up in the machine's own helper. To keep the machine's helpers out entirely, start the worker with `--hub-git-credentials-only` (`BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1`, also accepted by `install-service`). An ephemeral worker (`--ephemeral`, which every runner hook sets) always resets the helper list and asks only the hub.
+
+Any process of an agent on the worker can read its own environment, so use a fine-grained PAT limited to the repositories the workers need.
+
+Token scopes for one PAT that serves git, `gh` and the hub's poller:
+
+- Repository permissions: Contents (read and write), Pull requests (read and write), Metadata (read), Commit statuses (read) and Checks (read), so `gh pr create`, `gh pr checks` and the subscription poller work.
+- Repository permission Webhooks (read and write), only if the hub registers GitHub webhooks (it needs a public URL, see [Run the hub on a server](run-the-hub-on-a-server.md)). Without it the hub polls.
+- A classic token needs `repo`, and `admin:repo_hook` for webhooks.
+
+With no `gh` login and no vault item, the hub's GitHub calls fail with "No GitHub credential for gh on this hub" and the command to store one. The poller logs it once and keeps running.
+
+## Snapshots
+
+A runner with `snapshot` and `restore` hooks keeps the disk of a sleeping worktree. Without them a wake builds the worktree again from the git state and agent session files the hub stored when it went to sleep (see [Ephemeral workers](ephemeral-workers.md)), so ignored files such as `node_modules` and build output are lost. With them, the wake starts a machine from the disk image that was taken at sleep, so installed dependencies, build output and untracked files are there at once.
+
+The git and session state is still stored first, on every sleep. The snapshot comes on top of it, and the wake falls back to the stored state when anything about the snapshot goes wrong. A snapshot can make a wake faster and fuller, and it can fail without losing work.
+
+| Hook | Environment | Output |
+| --- | --- | --- |
+| `snapshot` | `BAND_WORKER_ID`, `BAND_MACHINE_HANDLE` (what `spawn` printed, empty when it printed none), `BAND_WORKTREE_IDS` (comma-separated ids of the worktrees on the worker), `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL`, `BAND_ISOLATION`, `BAND_NODE` and the runner's `env`. | `BAND_SNAPSHOT_ID=<id>` on its own line, required. `BAND_SNAPSHOT_SIZE=<bytes>` optional. Exit 0. |
+| `restore` | The `spawn` environment, with a new `BAND_BOOTSTRAP_TOKEN`, and `BAND_SNAPSHOT_ID`. | Optional `BAND_MACHINE_HANDLE=<id>`. It starts the worker with `BAND_WORKER_ID` and the token, as `spawn` does, and exits 0. |
+| `snapshot-delete` | `BAND_SNAPSHOT_ID`, `BAND_WORKER_ID`, `BAND_MACHINE_HANDLE` and the common variables. | Exit 0, also when the snapshot is gone already. |
+
+`spawn` and `restore` print `BAND_MACHINE_HANDLE=<id>` for the machine they made, and the hub passes it to `snapshot`, `destroy` and `snapshot-delete` of that machine. A hook that finds its machine by the worker id needs no handle.
+
+A `restore` hook must not reuse the session token the snapshot holds. The hub revoked it when the worker went to sleep, and a worker that finds a saved session token uses it instead of the bootstrap token, so it would never connect. Delete the worker's saved `session-token` file from the restored disk (in `BAND_WORKER_STATE_DIR`) before the worker starts. The bundled hooks do. The restored worker has the same `BAND_WORKER_ID` as before.
+
+### Sleep
+
+1. The worker is idle and asks to exit. The hub stores the git state and the agent sessions, as without snapshots.
+2. The hub runs `snapshot` while the worker still runs. It runs for at most `snapshotTimeoutSec`, because the worker waits 15 minutes for the hub's answer. A failing or timed out hook is logged, and the sleep goes on without a snapshot.
+3. The hub records the snapshot and deletes the worker's older ones.
+4. The worker exits. The hub then runs `destroy` for its machine, so the machine does not outlive the snapshot.
+
+### Wake
+
+A wake is a worker request like any other, and any runner whose labels fit may lease it. The runner that took the snapshot runs `restore` with it. Another runner, or one whose snapshot was removed or has expired, runs `spawn` and the hub restores from the stored git state.
+
+1. `restore` starts a new machine from the snapshot, with a new bootstrap token. A `restore` that fails, or whose worker does not say hello within `timeoutSec`, runs `destroy` and then `spawn` in the same attempt, and the git restore takes over.
+2. When the worker says hello after a restore, the hub checks that each worktree's checkout is on the machine at the commit it had. If it is, the hub only writes the agent session files again. If it is not, it restores from git.
+3. The used snapshot is deleted with `snapshot-delete`.
+
+### Retention and cost
+
+A snapshot is storage you pay for until it is deleted. The hub deletes a snapshot when a wake has used it, when a newer one of the same worker replaces it, and in a sweep every minute (`BAND_SNAPSHOT_SWEEP_MS`) that removes anything past `snapshotTtlSec` and everything beyond the newest `snapshotKeep` of a runner. A worktree whose snapshot is deleted before its wake still wakes, from the stored git state, only without its ignored files. Leave `snapshotKeep` at least as large as the number of ephemeral workers you expect to sleep at once, or the oldest sleepers lose their snapshots to newer ones.
+
+A `snapshot-delete` that fails leaves the snapshot recorded, and the sweep tries again after 10 minutes, so a flaky provider API does not leak it. A snapshot whose runner has no `snapshotDelete` hook, or was removed from the settings, is forgotten with a warning in the hub log, and you remove it by hand. The log of each snapshot, restore and delete is `BAND_HOME/runners/logs/<worker id>.log` (`band runners log <worker id>`).
+
+### Limits
+
+- A snapshot holds disk state only. Running processes, memory, open terminals and dev servers do not survive. The environment's `start` and `terminals` run again after a wake, as on any new worker.
+- The disk is copied while the worker runs, so it is crash-consistent. The hub has stored the work before it takes the snapshot and nothing writes after that, since the worker is idle and its agents and terminals have stopped.
+- A snapshot belongs to the runner and the machine that made it. It is not portable to another runner, region, architecture or docker daemon.
+- A worker with several worktrees has one snapshot for the machine. Waking one worktree restores all of them.
 
 ## Writing a hook
+
+A hook is any executable. The hub runs `spawn` for each attempt and `destroy` to undo it. Use the contract below, and look at the bundled hooks for examples.
+
+### The contract
+
+For each attempt the hub issues a one-time bootstrap token for a new worker, then runs `spawn` with this environment and nothing else from the hub's own environment except `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `USER`, `SHELL` and `SSH_AUTH_SOCK`:
+
+| Variable | Value |
+| --- | --- |
+| `BAND_HUB_URL` | The URL the worker dials. `env.BAND_HUB_URL` of the runner, else `BAND_RUNNER_HUB_URL`, else `BAND_PUBLIC_URL`, else `http://127.0.0.1:<hub port>`. A worker accepts plain `http` only for a loopback hub, so a remote machine needs an `https` URL. |
+| `BAND_WORKER_ID` | The id of the worker the hub created. The worker must run with this id. |
+| `BAND_BOOTSTRAP_TOKEN` | Trade for a session token once. Valid for the attempt's timeout plus a minute. |
+| `BAND_REPO_URLS` | The clone URL of the request's repository: the URL the hub stores for the repo, without credentials, so the hub needs no checkout to answer. The hub's local path when the repo has no remote; only a hook on the hub's machine can use that. |
+| `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, parsed and checked with the `.band/environment.json` parser ([Agent environments](agent-environments.md)), so it has the same shape. `{}` when there is none. A request whose environment does not parse fails at once, with the problems and their key paths, and no hook runs. |
+| `BAND_CLONE_BY_HUB` | `1` when the vault holds a git credential for the repository URL. The hook must skip its own clone and still print `BAND_WORKER_REPO_PATH`. The hub clones into that path through the worker once it says hello, so the clone can use the credential (see [Git credentials](#git-credentials-for-private-repositories)). Unset otherwise, and always unset for `restore`. The `local`, `ssh`, `docker` and `k8s` hooks honor it. The VM hooks clone in cloud-init and ignore it, so a private repository needs a hook of your own there. |
+| `BAND_REPO_IMAGE` | The repo's current environment image (`band env build`, see [Agent environments](agent-environments.md)), empty before its first ready build. |
+| `BAND_DESKTOP` | `1` when the runner has `desktop: true`, else unset. |
+| `BAND_ISOLATION` | The environment's `isolation` (`worktree`, `container` or `vm`) when it sets one, else the runner's `isolation`. |
+| `BAND_LABELS` | The request's labels as `k=v,k=v`. Pass them to the worker (`BAND_WORKER_LABELS`) so the worker carries them. |
+| `BAND_REQUIRES` | The request's `placement.requires` as JSON. |
+| `BAND_REPO` | The repo name. |
+| `BAND_RUNNER_ID`, `BAND_REQUEST_ID` | The runner and the worker request. |
+| `BAND_MACHINE_HANDLE` | Only for `destroy`. The handle `spawn` printed, when it printed one. |
+| `BAND_RUNNER_DIR` | A directory for the runner under `BAND_HOME`. Mode 0700, created by the hub. The hook runs with it as its working directory. |
+| `BAND_NODE` | The Node binary the hub runs on. |
+
+A hook must:
+
+- Start `band-worker` for `BAND_WORKER_ID` with the token, and return. The worker keeps running after the hook exits, so detach it and redirect its output. The hub treats a hook as finished when it exits, even if a child holds its pipes.
+- Exit 0 once the worker is started. Any other exit code fails the attempt. The hub does not wait for the worker inside `spawn`.
+- Read the token from the environment, not from a command line. `band-worker` reads `BAND_HUB_URL`, `BAND_WORKER_ID` and `BAND_BOOTSTRAP_TOKEN` itself.
+- Optionally print `BAND_MACHINE_HANDLE=<id>` on its own line: a name for the machine that `destroy` and `status` can find again, such as a container id, a pid or a VM id. No spaces. The hub stores it and passes it to `destroy` as `BAND_MACHINE_HANDLE`.
+- Optionally print `BAND_WORKER_REPO_PATH=<path>` on its own line: where the repository is on the worker. The hub passes it as `hostRepoPath` when it fulfils the request. The path must be inside one of the worker's roots. The hub still reads the older `BAND_HOST_REPO_PATH=` line, and the new one wins when both are printed .
+
+`destroy` gets the same environment without `BAND_BOOTSTRAP_TOKEN`, plus `BAND_MACHINE_HANDLE`. It should stop the worker and remove what `spawn` made, and it should succeed when there is nothing to undo. For a machine the hub has no record of (an orphan), the hub sets `BAND_MACHINE_HANDLE` and `BAND_RUNNER_ID` and leaves `BAND_WORKER_ID` and the request variables unset, so a `destroy` must be able to work from the handle alone. It must check that the handle is one of its own machines before it kills anything.
+
+`status` runs with the runner's `env`, `BAND_RUNNER_ID`, `BAND_RUNNER_DIR`, `BAND_HUB_URL` and `BAND_NODE`, and no request or worker variables. It prints the handle of every machine of this runner that still exists, one per line (the first word of a line counts, with or without a `BAND_MACHINE_HANDLE=` prefix; the VM hooks print `BAND_MACHINE_HANDLE=<id> worker=... state=...`), and exits 0. It must list only this runner's machines.
+
+### A minimal hook
 
 A minimal hook that starts a worker in a container:
 

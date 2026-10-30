@@ -242,7 +242,7 @@ const CommitRow = memo(function CommitRow({
       title={`${commit.subject}\n${commit.sha.slice(0, 7)} · ${commit.author}`}
       data-testid={`commits-panel__row--${commit.sha}`}
       data-head={row.isHead ? "true" : undefined}
-      className="grid h-6 w-full min-w-0 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-1.5 pr-3 pl-1 text-left text-xs hover:bg-accent/50"
+      className="grid h-6 w-full min-w-0 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-1.5 pr-3 pl-1 text-left text-xs hover:bg-list-highlight"
     >
       <CommitGraphSlice row={row} />
       <span className="flex min-w-0 items-center gap-1">
@@ -357,7 +357,7 @@ function CommitFiles({
               onDoubleClick={() => onOpenFile(commit.sha, file.path, true)}
               data-testid={`commits-panel__file--${file.path}`}
               style={indent}
-              className="flex h-6 w-full min-w-0 items-center gap-1.5 pr-3 text-left text-xs hover:bg-accent/50"
+              className="flex h-6 w-full min-w-0 items-center gap-1.5 pr-3 text-left text-xs hover:bg-list-highlight"
             >
               <FileIcon className="size-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate">

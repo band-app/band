@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
+import { githubCiKey, githubCiKeyPrefix, githubPrKey } from "@band-app/plugin-api";
 import { Cron, type CronOptions } from "croner";
 import { z } from "zod";
 import {
@@ -10,7 +11,6 @@ import {
 } from "../infra/db/queries/subscriptions";
 import { subscribe as subscribeStatusBus } from "../infra/events/status-event-bus";
 import { type SubscriptionEvent, subscriptionEventSchema } from "../infra/subscriptions/event";
-import { githubCiKey, githubPrKey } from "../infra/subscriptions/keys";
 import { buildSubscriptionMessage, SUMMARY_LIMIT } from "../infra/subscriptions/message";
 import {
   hashWebhookToken,
@@ -366,7 +366,9 @@ export class SubscriptionService {
       coalesceSeconds: parsed.coalesceSeconds,
       maxWakeups:
         parsed.maxWakeups ??
-        (source.filterKey.startsWith("github:ci:") ? DEFAULT_CI_MAX_WAKEUPS : DEFAULT_MAX_WAKEUPS),
+        (source.filterKey.startsWith(githubCiKeyPrefix(source.config.repo ?? ""))
+          ? DEFAULT_CI_MAX_WAKEUPS
+          : DEFAULT_MAX_WAKEUPS),
       wakeups: 0,
       expiresAt: Math.min(parsed.expiresAt ?? latest, latest),
       createdBy: parsed.createdBy as SubscriptionCreator,

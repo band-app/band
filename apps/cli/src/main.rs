@@ -1,4 +1,6 @@
 mod api;
+#[cfg(test)]
+mod docs_examples;
 mod skills;
 mod state;
 mod validate;

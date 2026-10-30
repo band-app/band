@@ -100,7 +100,7 @@ function ContextMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px] leading-5 outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 dark:data-[variant=destructive]:focus:text-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-popover-foreground/75 data-[variant=destructive]:*:[svg]:text-destructive!",
+        "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px] leading-5 outline-hidden select-none focus:bg-list-highlight focus:text-list-highlight-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 dark:data-[variant=destructive]:focus:text-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-popover-foreground/75 data-[variant=destructive]:*:[svg]:text-destructive!",
         className,
       )}
       {...props}
@@ -142,7 +142,7 @@ function ContextMenuSubTrigger({
       data-slot="context-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px] leading-5 outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[inset]:pl-8 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-popover-foreground/75",
+        "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px] leading-5 outline-hidden select-none focus:bg-list-highlight focus:text-list-highlight-foreground data-[inset]:pl-8 data-[state=open]:bg-list-highlight data-[state=open]:text-list-highlight-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-popover-foreground/75",
         className,
       )}
       {...props}

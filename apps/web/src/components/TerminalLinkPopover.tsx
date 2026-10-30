@@ -14,7 +14,7 @@ const COPIED_MS = 1500;
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
 const ROW_CLASS =
-  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-hidden";
+  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-list-highlight focus-visible:bg-list-highlight focus-visible:outline-hidden";
 
 /**
  * The menu a plain click on a terminal URL opens: the URL, a copy button and

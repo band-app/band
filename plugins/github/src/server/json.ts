@@ -15,6 +15,3 @@ export function snippet(text: unknown): string {
   const flat = str(text).replace(/\s+/g, " ").trim();
   return flat.length > SNIPPET_LIMIT ? `${flat.slice(0, SNIPPET_LIMIT)}...` : flat;
 }
-
-export const prKey = (repo: string, number: number) => `github:pr:${repo}#${number}`;
-export const ciKey = (repo: string, branch: string) => `github:ci:${repo}@${branch}`;

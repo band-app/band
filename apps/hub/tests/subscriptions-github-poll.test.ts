@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { execGh } from "@band-app/host-local/git/git-client";
 import { initialCursor } from "@band-app/plugin-github/pr-activity";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import {
   MISSING_GH_CREDENTIAL,
@@ -311,6 +311,25 @@ describe("github polling fallback", () => {
     await subscriptionPollService.poll();
     const seen = new Set(mine().map((r) => r.positional[1].split("/commits/")[1].split("/")[0]));
     expect(seen.size).toBe(branches.length);
+  });
+
+  it("S2: a poll reads the cursors of the subscriptions it polls, not of every subscription", async () => {
+    const { coords, full } = newRepo();
+    const branches = Array.from({ length: 6 + 4 }, (_, i) => `branch-${i}`);
+    for (const branch of branches) {
+      stub.setCheckRuns(coords, branch, [
+        check({ name: "build", status: "in_progress", conclusion: null }),
+      ]);
+      await subscribe({ branch }, full);
+    }
+    const spy = vi.spyOn(subscriptionService, "getCursor");
+    try {
+      await subscriptionPollService.poll();
+      // Ten subscriptions are waiting, but the tick polls six units of one subscription each.
+      expect(spy).toHaveBeenCalledTimes(6);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("S4: a failing repo is backed off, not retried on every poll", async () => {
