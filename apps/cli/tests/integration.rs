@@ -4655,6 +4655,12 @@ fn chats_list_renders_labels_column() {
         .iter()
         .find(|c| c["id"].as_str() == Some(&labeled_id))
         .unwrap_or_else(|| panic!("labeled chat missing from JSON output: {parsed}"));
+    // The hub's turn-activity fields come through: an idle chat is not stalled and has no activity.
+    assert_eq!(labeled_row["stalled"], serde_json::json!(false));
+    assert!(
+        labeled_row.get("lastActivityAt").is_some(),
+        "expected lastActivityAt in JSON output: {labeled_row}"
+    );
     assert_eq!(
         labeled_row["labels"],
         serde_json::json!({ "phase": "plan", "priority": "high" }),
