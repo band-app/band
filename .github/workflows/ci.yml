@@ -535,7 +535,9 @@ jobs:
   # costlier, so each runs only the suite with a macOS-specific failure mode
   # (no lint, no e2e), and `macos-changes` below skips each one on PRs that
   # don't touch its code. A skipped job counts as passed for a required check,
-  # so both job names can be required. Pushes to main always run both.
+  # so both job names can be required. Pull requests run none of the macOS jobs
+  # (every one has `github.event_name != 'pull_request'`); the merge queue and
+  # pushes to main run them all.
   # ---------------------------------------------------------------------------
   macos-changes:
     name: Detect macOS-relevant changes
@@ -1032,7 +1034,7 @@ jobs:
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
     needs: macos-changes
-    if: needs.macos-changes.outputs.cli == 'true'
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.cli == 'true'
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 
@@ -1135,7 +1137,7 @@ jobs:
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
     needs: macos-changes
-    if: needs.macos-changes.outputs.web == 'true'
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.web == 'true'
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 
@@ -1219,9 +1221,14 @@ jobs:
       - name: Build web (needed by tests)
         run: pnpm build:web
 
+      # `pnpm build:web` above already built the web app and the hub bundle, so the hub
+      # suite runs through vitest directly: `pnpm --filter @band-app/server test` would
+      # rebuild both in its `pretest`.
       - name: Test (web)
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
         run: |
-          pnpm --filter @band-app/server test
+          pnpm --filter @band-app/server exec vitest run
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
           pnpm --filter @band-app/environment test
@@ -1266,7 +1273,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     needs: macos-changes
-    if: needs.macos-changes.outputs.mobile == 'true'
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.mobile == 'true'
 
     steps:
       - name: Checkout
@@ -1303,7 +1310,7 @@ jobs:
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
     needs: macos-changes
-    if: needs.macos-changes.outputs.desktop == 'true'
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.desktop == 'true'
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 
@@ -1359,7 +1366,7 @@ jobs:
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
     needs: macos-changes
-    if: needs.macos-changes.outputs.desktop == 'true'
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.desktop == 'true'
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 

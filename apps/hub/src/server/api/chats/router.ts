@@ -215,7 +215,7 @@ export const chatsRouter = t.router({
         summary: z.string().max(1000).optional(),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       // Lazily ensure the server-side chat record exists. The client
       // generates chatIds locally, so setActiveSession may be called
       // before the first message is sent (which normally creates the record).
@@ -238,7 +238,8 @@ export const chatsRouter = t.router({
         summary,
         lastModified,
       });
-      chatOwnershipService.syncActiveSession(input.chatId);
+      // The owner has the pick before this answers, so a stream opened on the owner next sees it.
+      await chatOwnershipService.syncActiveSession(input.chatId);
       return { ok: true };
     }),
 
