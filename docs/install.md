@@ -172,11 +172,46 @@ ExecStart=%h/band-hub/update.sh
 ```sh
 #!/bin/sh
 set -e
+PORT="${BAND_PORT:-3456}"
+TOKEN=$(jq -r .tokenSecret ~/.band/settings.json)
+MAX_TASK_AGE_MIN="${BAND_HUB_UPDATE_MAX_TASK_AGE_MIN:-180}"
+MAX_DEFER_H="${BAND_HUB_UPDATE_MAX_DEFER_H:-6}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/band-hub-update-deferred"
+
+# Restarting the hub ends every agent turn it runs. Ask the hub which turns run.
+# If it does not answer, update at once, because it is not serving turns anyway.
+running=$(curl -fsS -m 10 -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:$PORT/trpc/tasks.list?input=$(printf %s '{"status":"running"}' | jq -sRr @uri)" \
+  | jq -r --argjson now "$(date +%s)" --argjson age "$MAX_TASK_AGE_MIN" \
+      '[.result.data.tasks[] | select(.status == "running" and (($now * 1000 - .startedAt) / 60000) < $age)] | length') \
+  || running=0
+running="${running:-0}"
+
+if [ "$running" -gt 0 ]; then
+  mkdir -p "$(dirname "$STATE")"
+  [ -f "$STATE" ] || date +%s > "$STATE"
+  waited_h=$(( ($(date +%s) - $(cat "$STATE")) / 3600 ))
+  if [ "$waited_h" -lt "$MAX_DEFER_H" ]; then
+    echo "$running agent turn(s) running, deferring the update"
+    exit 0
+  fi
+fi
+rm -f "$STATE"
+
 npm i -g @band-app/server@"${BAND_HUB_TARGET_VERSION:-latest}"
 systemctl --user restart band-hub
 ```
 
-Set `hubUpdate.command` to `systemctl --user start --no-block band-hub-update.service`. `BAND_HUB_TARGET_VERSION` does not reach the unit through `systemctl`, so the example installs `latest`. A timer on the same unit gives you scheduled updates as well.
+The script reads the running turns from `tasks.list`. `workers.hubInterruptions` (admin token) is the same question the Update hub button asks, and lists every live agent with a `busy` flag, but `tasks.list` filters by turn age, which the script needs, so the example uses it.
+
+Two settings, read from the environment of the unit, control the wait:
+
+- `BAND_HUB_UPDATE_MAX_TASK_AGE_MIN` (default 180). Only turns that started within this many minutes count as running. An older turn is treated as stuck and does not hold the update.
+- `BAND_HUB_UPDATE_MAX_DEFER_H` (default 6). Once the first deferral is this many hours old, the script updates even if turns run.
+
+Set `hubUpdate.command` to `systemctl --user start --no-block band-hub-update.service`. `BAND_HUB_TARGET_VERSION` does not reach the unit through `systemctl`, so the example installs `latest`. A timer on the same unit gives you scheduled updates as well, and the deferral makes an hourly timer safe: each run skips while turns run and updates once they finish.
+
+The Update hub button in the update panel does not defer. It lists the running turns and asks you to confirm, and `workers.updateHub` refuses with a message naming them until called with `confirmInterruptions: true`. With no turn running it starts at once.
 
 A hub run from source reports the unreleased version `0.1.0` and accepts every worker (it logs that it skipped the check). A worker whose version differs from a released hub's by more than one minor version (`0.47.0` against `0.50.0`) is refused with a message that says what to do. The worker logs it, waits five minutes (`BAND_WORKER_VERSION_RETRY_MS`) and exits instead of redialing, and its worker shows "update required". A worker from before version reporting is accepted and shown with an unknown version. `band workers list` has a VERSION column with the same marks.
 

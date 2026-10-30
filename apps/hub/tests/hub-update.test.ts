@@ -6,6 +6,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type ReleasesStub, startReleasesStub } from "./fixtures/github-releases-stub";
+import { seedAcpHome, sendMessage, startAcpServer, TEST_TOKEN } from "./helpers/acp-chat";
 import { seedSettings } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -70,6 +71,121 @@ afterEach(async () => {
 });
 
 const RECORD_ENV = 'printf "%s %s" "$1" "$BAND_HUB_TARGET_VERSION" > "$1"';
+
+describe("hub update with a running turn", () => {
+  async function bootBusy(): Promise<string> {
+    stub = await startReleasesStub("v9.0.0");
+    home = seedAcpHome("band-hub-update-busy-");
+    const record = join(home, "ran.json");
+    const script = join(home, "update.sh");
+    writeFileSync(script, RECORD_ENV, { mode: 0o755 });
+    seedSettings(home, {
+      tokenSecret: TEST_TOKEN,
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
+      defaultCodingAgent: "claude-code",
+      hubUpdate: { command: `sh ${script} ${record}` },
+    });
+    server = await startAcpServer({
+      home,
+      turns: [{ steps: [{ say: "working " }, { waitForCancel: true }] }],
+      env: { BAND_GITHUB_API_URL: stub.url, BAND_HUB_VERSION: "0.50.0" },
+    });
+    await waitFor(
+      async () => {
+        const res = await trpcQuery(
+          server?.url ?? "",
+          "workers.updateStatus",
+          undefined,
+          TEST_TOKEN,
+        );
+        return (await trpcData<Status>(res)).updateAvailable ? true : undefined;
+      },
+      { label: "the release check" },
+    );
+    return record;
+  }
+
+  it("refuses without confirmInterruptions, names the turn, and starts once confirmed", async () => {
+    const record = await bootBusy();
+    const url = server?.url ?? "";
+    const sent = sendMessage(url, "hub-update-busy", "long task");
+    const listed = await waitFor(
+      async () => {
+        const res = await trpcQuery(url, "workers.hubInterruptions", undefined, TEST_TOKEN);
+        const data = await trpcData<{ agents: { chatId: string; busy: boolean }[] }>(res);
+        return data.agents.some((a) => a.busy) ? data : undefined;
+      },
+      { label: "the running turn" },
+    );
+    await sent;
+    expect(listed.agents).toMatchObject([{ chatId: "hub-update-busy", busy: true }]);
+
+    const refused = await trpcMutate(url, "workers.updateHub", {}, TEST_TOKEN);
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain("testrepo");
+    expect(existsSync(record)).toBe(false);
+
+    const ok = await trpcMutate(
+      url,
+      "workers.updateHub",
+      { confirmInterruptions: true },
+      TEST_TOKEN,
+    );
+    expect(ok.status).toBe(200);
+    await waitFor(() => (existsSync(record) ? true : undefined), { label: "the command" });
+  });
+
+  it("update all passes its confirmation on to the hub while a turn runs", async () => {
+    const record = await bootBusy();
+    const url = server?.url ?? "";
+    const sent = sendMessage(url, "hub-update-busy-all", "long task");
+    await waitFor(
+      async () => {
+        const res = await trpcQuery(url, "workers.hubInterruptions", undefined, TEST_TOKEN);
+        const data = await trpcData<{ agents: { busy: boolean }[] }>(res);
+        return data.agents.some((a) => a.busy) ? true : undefined;
+      },
+      { label: "the running turn" },
+    );
+    await sent;
+
+    await trpcMutate(url, "workers.updateAll", { includeHub: true }, TEST_TOKEN);
+    const refused = await waitFor(
+      async () => {
+        const res = await trpcQuery(url, "workers.updateStatus", undefined, TEST_TOKEN);
+        const st = await trpcData<{
+          updateAll: { running: boolean; results: { state: string }[] };
+        }>(res);
+        return st.updateAll.running ? undefined : st.updateAll;
+      },
+      { label: "update all without confirmation" },
+    );
+    expect(refused.results).toMatchObject([{ state: "failed" }]);
+    expect(existsSync(record)).toBe(false);
+
+    await trpcMutate(
+      url,
+      "workers.updateAll",
+      { includeHub: true, confirmInterruptions: true },
+      TEST_TOKEN,
+    );
+    await waitFor(() => (existsSync(record) ? true : undefined), { label: "the command" });
+  });
+
+  it("hubInterruptions is admin only", async () => {
+    await boot(RECORD_ENV);
+    const device = await trpcData<{ token: string }>(
+      await mutate("tokens.createDevice", { label: "viewer", admin: false }),
+    );
+    const res = await trpcQuery(
+      server?.url ?? "",
+      "workers.hubInterruptions",
+      undefined,
+      device.token,
+    );
+    expect(res.status).toBe(403);
+  });
+});
 
 describe("hub update", () => {
   it("runs the command detached, with the target in its env, and answers at once", async () => {

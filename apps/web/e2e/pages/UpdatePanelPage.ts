@@ -150,6 +150,18 @@ export class UpdatePanelPage {
     await this.hubUpdateButton().click();
   }
 
+  hubUpdateDialog(): Locator {
+    return this.page.getByTestId("hub-update__dialog");
+  }
+
+  hubUpdateAgents(): Locator {
+    return this.page.getByTestId("hub-update__agent");
+  }
+
+  async confirmHubUpdate(): Promise<void> {
+    await this.page.getByTestId("hub-update__confirm").click();
+  }
+
   updateAllButton(): Locator {
     return this.panel.getByTestId("update-all__button");
   }

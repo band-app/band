@@ -25,6 +25,7 @@ import { createLogger } from "@band-app/logger";
 import { compareVersions } from "@band-app/shared/versions";
 import { bandHome } from "../infra/db/queries/settings";
 import { HUB_VERSION } from "./_utils/hub-version";
+import { agentSessionService } from "./agent-session-service";
 import { releaseCheckService } from "./release-check-service";
 import { settingsService } from "./settings-service";
 
@@ -37,7 +38,7 @@ const BOOT_AT = Date.now();
 
 export class HubUpdateError extends Error {
   constructor(
-    readonly reason: "not-configured" | "up-to-date" | "busy",
+    readonly reason: "not-configured" | "up-to-date" | "busy" | "interruptions",
     message: string,
   ) {
     super(message);
@@ -129,8 +130,16 @@ export class HubUpdateService {
     return { configured, state: "updating", target: run.target, error: null };
   }
 
+  /**
+   * The agents a hub restart ends, on every worker. A hub restart stops every agent it runs,
+   * including those a worker's agent daemon holds, because only the hub has their ACP state.
+   */
+  interruptions(): { chatId: string; worktreeId: string; busy: boolean }[] {
+    return agentSessionService.liveAgents({ includeHeld: true });
+  }
+
   /** Starts the configured command detached and returns at once. */
-  start(): { target: string } {
+  start(confirmInterruptions = false): { target: string } {
     const command = this.command();
     if (!command) throw new HubUpdateError("not-configured", "No hub update command is set");
     const target = releaseCheckService.status().latest;
@@ -139,6 +148,13 @@ export class HubUpdateService {
     }
     if (this.status().state === "updating") {
       throw new HubUpdateError("busy", "A hub update is already running");
+    }
+    const running = this.interruptions().filter((a) => a.busy);
+    if (running.length > 0 && !confirmInterruptions) {
+      throw new HubUpdateError(
+        "interruptions",
+        `The update would end ${running.length} running agent turn${running.length === 1 ? "" : "s"}: ${running.map((a) => a.worktreeId).join(", ")}. Confirm to update anyway.`,
+      );
     }
     mkdirSync(bandHome(), { recursive: true });
     const run: RunFile = { target, startedAt: Date.now() };

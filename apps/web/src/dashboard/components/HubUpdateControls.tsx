@@ -1,4 +1,13 @@
-import { Button, Input } from "@band-app/ui";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+} from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../lib/trpc-client";
@@ -24,6 +33,8 @@ export function HubUpdateControls() {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [turns, setTurns] = useState<{ chatId: string; worktreeId: string }[]>([]);
   const hubUpdate = status.data?.hubUpdate;
   const updating = hubUpdate?.state === "updating";
 
@@ -66,7 +77,18 @@ export function HubUpdateControls() {
             size="sm"
             data-testid="hub-update__button"
             disabled={busy || updating}
-            onClick={() => void run(() => trpc.workers.updateHub.mutate())}
+            onClick={() =>
+              void run(async () => {
+                const { agents } = await trpc.workers.hubInterruptions.query();
+                const running = agents.filter((a) => a.busy);
+                if (running.length === 0) {
+                  await trpc.workers.updateHub.mutate();
+                  return;
+                }
+                setTurns(running);
+                setConfirmOpen(true);
+              })
+            }
           >
             {updating ? "Updating the hub…" : "Update hub"}
           </Button>
@@ -77,6 +99,46 @@ export function HubUpdateControls() {
           ) : null}
         </div>
       ) : null}
+      <Dialog open={confirmOpen} onOpenChange={(next) => !busy && setConfirmOpen(next)}>
+        <DialogContent className="sm:max-w-[460px]" data-testid="hub-update__dialog">
+          <DialogHeader>
+            <DialogTitle>Update the hub?</DialogTitle>
+            <DialogDescription>
+              The hub restarts. Every agent it runs stops, and a turn in progress is lost.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="text-sm" data-testid="hub-update__agents">
+            <div className="mb-1 font-medium">
+              {turns.length === 1 ? "1 running turn" : `${turns.length} running turns`} will end:
+            </div>
+            <ul className="list-disc pl-5">
+              {turns.map((a) => (
+                <li key={a.chatId} data-testid="hub-update__agent">
+                  {a.worktreeId} (chat {a.chatId})
+                </li>
+              ))}
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="hub-update__confirm"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  await trpc.workers.updateHub.mutate({ confirmInterruptions: true });
+                  setConfirmOpen(false);
+                })
+              }
+            >
+              Update and restart
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {hubUpdate?.state === "failed" ? (
         <div className="flex items-start justify-between gap-2 text-xs text-destructive">
           <pre
