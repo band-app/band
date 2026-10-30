@@ -5,6 +5,38 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+/// Variables a Band worker sets for the agents and terminals it starts. A test
+/// process that inherits them talks to the worker's real hub (`BAND_SERVER_URL`,
+/// `BAND_TOKEN`) or acts as one of its chats, so every process a test starts drops them.
+fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    for (key, _) in std::env::vars() {
+        if key.starts_with("BAND_WORKER_")
+            || matches!(
+                key.as_str(),
+                "BAND_DISPATCH"
+                    | "BAND_SERVER_URL"
+                    | "BAND_TOKEN"
+                    | "BAND_HUB_URL"
+                    | "BAND_WORKTREE_ID"
+                    | "BAND_CHAT_ID"
+                    | "BAND_TERMINAL_ID"
+                    | "BAND_CDP_PORT_FILE"
+                    | "BAND_GIT_CREDENTIAL_SOCK"
+                    | "GIT_CONFIG_COUNT"
+                    | "GIT_CONFIG_PARAMETERS"
+                    | "GIT_ASKPASS"
+                    | "SSH_ASKPASS"
+                    | "GH_TOKEN"
+            )
+            || (key.starts_with("GIT_CONFIG_KEY_") || key.starts_with("GIT_CONFIG_VALUE_"))
+        {
+            cmd.env_remove(key);
+        }
+    }
+    cmd
+}
+
 /// The CLI now delegates all state operations to the web server.
 /// These tests start a real web server (from apps/hub/dist), seed it
 /// with a temp HOME, then run CLI commands against it.
@@ -86,7 +118,7 @@ impl TestEnv {
             "Web server not built. Run: pnpm build:web"
         );
 
-        let mut child = Command::new("node")
+        let mut child = command("node")
             .arg(&web_dist)
             .env("HOME", &home_dir)
             .env("PORT", port.to_string())
@@ -172,7 +204,7 @@ impl TestEnv {
 
     /// Run the `band` binary with `BAND_HOME` set to the test environment.
     fn band(&self, args: &[&str]) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_band"))
+        command(env!("CARGO_BIN_EXE_band"))
             .args(args)
             .env("BAND_HOME", &self.band_dir)
             .output()
@@ -181,7 +213,7 @@ impl TestEnv {
 
     /// Run the `band` binary with a specific working directory.
     fn band_in(&self, dir: &Path, args: &[&str]) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_band"))
+        command(env!("CARGO_BIN_EXE_band"))
             .args(args)
             .env("BAND_HOME", &self.band_dir)
             .current_dir(dir)
@@ -191,7 +223,7 @@ impl TestEnv {
 
     /// Run the `band` binary with extra env vars.
     fn band_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_band"));
+        let mut cmd = command(env!("CARGO_BIN_EXE_band"));
         cmd.args(args).env("BAND_HOME", &self.band_dir);
         for (k, v) in env {
             cmd.env(k, v);
@@ -217,7 +249,7 @@ impl Drop for TestEnv {
 /// insert seed data.
 fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-db.mjs");
-    let output = Command::new("node")
+    let output = command("node")
         .arg(&seed_script)
         .arg(band_dir)
         .arg("my-repo")
@@ -241,7 +273,7 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
 /// all chat/terminal/browser/layout rows associated with it).
 fn list_panel_states(band_dir: &Path, worktree_id: &str) -> Vec<serde_json::Value> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/list-panel-states.mjs");
-    let output = Command::new("node")
+    let output = command("node")
         .arg(&script)
         .arg(band_dir)
         .arg(worktree_id)
@@ -265,7 +297,7 @@ fn list_panel_states(band_dir: &Path, worktree_id: &str) -> Vec<serde_json::Valu
 /// `Value::Null` if no layout has been persisted.
 fn read_layout(band_dir: &Path, worktree_id: &str, panel_type: &str) -> serde_json::Value {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/read-layout.mjs");
-    let output = Command::new("node")
+    let output = command("node")
         .arg(&script)
         .arg(band_dir)
         .arg(worktree_id)
@@ -288,7 +320,7 @@ fn read_layout(band_dir: &Path, worktree_id: &str, panel_type: &str) -> serde_js
 /// without going through the dashboard UI to drive the layout.
 fn seed_chat_layout(band_dir: &Path, worktree_id: &str, layout: &serde_json::Value) {
     let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-chat-layout.mjs");
-    let output = Command::new("node")
+    let output = command("node")
         .arg(&seed_script)
         .arg(band_dir)
         .arg(worktree_id)
@@ -307,7 +339,7 @@ fn seed_chat_layout(band_dir: &Path, worktree_id: &str, layout: &serde_json::Val
 /// Used by tests that don't need a full `TestEnv` but need a valid settings row.
 fn seed_settings_only(band_dir: &Path, settings: &serde_json::Value) {
     let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-settings.mjs");
-    let output = Command::new("node")
+    let output = command("node")
         .arg(&seed_script)
         .arg(band_dir)
         .arg(settings.to_string())
@@ -343,7 +375,7 @@ fn query_state(band_dir: &Path) -> serde_json::Value {
         db = db_path.to_string_lossy().replace('\\', "/"),
     );
 
-    let output = Command::new("node")
+    let output = command("node")
         .args(["--input-type=module", "-e", &script])
         .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .output()
@@ -359,7 +391,7 @@ fn query_state(band_dir: &Path) -> serde_json::Value {
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = command("git")
         .args(args)
         .current_dir(dir)
         .env("GIT_AUTHOR_NAME", "Test")
@@ -376,7 +408,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = command("git")
         .args(args)
         .current_dir(dir)
         .output()
@@ -1804,7 +1836,7 @@ fn worktrees_create_repo_config_default_via_overrides_user_settings() {
 
     // Run from inside the repo so `read_repo_default_via` picks it up
     // (it walks `git rev-parse --show-toplevel` from cwd).
-    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+    let output = command(env!("CARGO_BIN_EXE_band"))
         .args([
             "--output",
             "json",
@@ -1850,7 +1882,7 @@ fn worktrees_create_band_dispatch_env_beats_repo_config_default_via() {
     // `BAND_DISPATCH=terminal` must override the repo config. Run from
     // inside the repo so `read_repo_default_via` would otherwise pick up
     // the per-repo value if the env var weren't winning.
-    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+    let output = command(env!("CARGO_BIN_EXE_band"))
         .args([
             "--output",
             "json",
@@ -1955,7 +1987,7 @@ fn notify_silently_succeeds_when_server_unreachable() {
     });
     seed_settings_only(&band_home, &settings);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+    let output = command(env!("CARGO_BIN_EXE_band"))
         .args(["notify"])
         .env("BAND_HOME", &band_home)
         .stdin(Stdio::piped())
@@ -1990,7 +2022,7 @@ fn band_notify_with_env(
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
     use std::io::Write;
-    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+    let mut child = command(env!("CARGO_BIN_EXE_band"))
         .arg("notify")
         .args(args)
         .env("BAND_HOME", &env.band_dir)
@@ -2031,7 +2063,7 @@ fn query_agent_status(band_dir: &Path, worktree_id: &str) -> Option<String> {
         db = db_path.to_string_lossy().replace('\\', "/"),
         ws = worktree_id,
     );
-    let output = Command::new("node")
+    let output = command("node")
         .args(["--input-type=module", "-e", &script])
         .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .output()
@@ -2107,7 +2139,7 @@ fn query_source_terminal(band_dir: &Path, source_id: &str) -> Option<String> {
         db = db_path.to_string_lossy().replace('\\', "/"),
         source = source_id,
     );
-    let output = Command::new("node")
+    let output = command("node")
         .args(["--input-type=module", "-e", &script])
         .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .output()
@@ -2202,7 +2234,7 @@ fn run_notify_silently(
     use std::io::Write;
     let home = tempfile::tempdir().expect("tempdir");
     let started = std::time::Instant::now();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+    let mut child = command(env!("CARGO_BIN_EXE_band"))
         .args(["notify", "--agent", "claude-code"])
         .env("HOME", home.path())
         .env("BAND_HOME", home.path().join(".band"))
@@ -2292,7 +2324,7 @@ fn notify_is_silent_when_the_hub_hangs() {
 fn notify_is_silent_when_stdin_never_closes() {
     let home = tempfile::tempdir().expect("tempdir");
     let started = std::time::Instant::now();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+    let mut child = command(env!("CARGO_BIN_EXE_band"))
         .args(["notify", "--agent", "claude-code"])
         .env("HOME", home.path())
         .env("BAND_HOME", home.path().join(".band"))
@@ -2357,7 +2389,7 @@ fn version_prints_cli_and_hub_versions() {
 fn version_labels_an_unreachable_hub() {
     // Port 1 refuses connections.
     let tmp = tempfile::tempdir().unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_band"))
+    let out = command(env!("CARGO_BIN_EXE_band"))
         .args(["version"])
         .env("BAND_HOME", tmp.path())
         .env("BAND_SERVER_URL", "http://127.0.0.1:1")
@@ -3293,7 +3325,7 @@ fn vault_put_list_delete() {
     let secret = "sk-cli-vault-VALUE-9876543210";
 
     // `put` reads the value from stdin and never prints it.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+    let mut child = command(env!("CARGO_BIN_EXE_band"))
         .args(["vault", "put", "OPENAI_API_KEY", "--output", "json"])
         .env("BAND_HOME", &env.band_dir)
         .env_remove("BAND_SERVER_URL")
@@ -3473,7 +3505,7 @@ fn tasks_command_is_gone() {
     // Multi-repo task folders were removed, and `band tasks` with them. Parsing fails before any
     // call to a server, so no hub is needed.
     let home = tempfile::TempDir::new().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+    let output = command(env!("CARGO_BIN_EXE_band"))
         .args(["tasks", "list"])
         .env("BAND_HOME", home.path().join(".band"))
         .env("HOME", home.path())
@@ -5235,7 +5267,7 @@ fn band_against_mock(
     fs::create_dir_all(&band_dir).ok();
     seed_settings_only(&band_dir, &serde_json::json!({"tokenSecret": "mock-token"}));
 
-    Command::new(env!("CARGO_BIN_EXE_band"))
+    command(env!("CARGO_BIN_EXE_band"))
         .args(args)
         .env("BAND_HOME", &band_dir)
         .env("BAND_SERVER_URL", format!("http://127.0.0.1:{}", mock.port))
@@ -5330,7 +5362,7 @@ fn chats_watch_url_encodes_chat_id_path_segment() {
 /// pure commands (like `skills install` and `schema`) that don't talk to the
 /// web server.
 fn band_offline(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_band"))
+    command(env!("CARGO_BIN_EXE_band"))
         .args(args)
         .output()
         .expect("failed to execute band")
@@ -5367,7 +5399,7 @@ fn skills_sandbox(agent_dirs: &[&str]) -> tempfile::TempDir {
 /// actual shell. Tests that *want* to exercise the env override can use
 /// `run_install_json_with_env` below.
 fn run_install_json(home: &Path) -> serde_json::Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+    let output = command(env!("CARGO_BIN_EXE_band"))
         .env_remove("CODEX_HOME")
         .args([
             "--output",
@@ -5789,7 +5821,7 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
 fn set_active_worktree(band_dir: &Path, worktree_id: Option<&str>) {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/set-active-worktree.mjs");
     let value = worktree_id.unwrap_or("null");
-    let output = Command::new("node")
+    let output = command("node")
         .arg(&script)
         .arg(band_dir)
         .arg(value)
@@ -6529,7 +6561,7 @@ fn agents_launch_rejects_an_unknown_mode() {
     // The mode is checked before the CLI reads settings or calls the
     // server, so this needs no server.
     let tmp = tempfile::tempdir().expect("create tempdir");
-    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+    let output = command(env!("CARGO_BIN_EXE_band"))
         .args(["agents", "launch", "my-repo-main", "--mode", "web"])
         .env("BAND_HOME", tmp.path())
         .output()
