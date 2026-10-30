@@ -63,9 +63,9 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 
 ### Where tests run
 
-Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite with the web unit and package suites (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
+Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite in 2 shards, with the web unit and package suites in shard 1 (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
 
-The `web-macos` job runs the hub suite with `vitest run` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+Each `web-macos` shard runs its half of the hub suite with `vitest run --shard=N/2` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
 
 ### Exceptions
 
