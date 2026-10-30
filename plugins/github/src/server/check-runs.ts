@@ -1,5 +1,6 @@
 import type { SourceEvent, SubscriptionContext } from "@band-app/plugin-api";
-import { ciKey, obj, str } from "./json";
+import { githubCiKey } from "@band-app/plugin-api";
+import { obj, str } from "./json";
 
 /** What a completed check payload says about the commit to look at. */
 export interface CheckTrigger {
@@ -62,7 +63,7 @@ export function aggregateChecks(
   return {
     id: `ci:${trigger.sha}:${state}`,
     kind: "ci",
-    key: ciKey(trigger.repo, trigger.branch),
+    key: githubCiKey(trigger.repo, trigger.branch),
     url: culprit?.url || `https://github.com/${trigger.repo}/commit/${trigger.sha}`,
     actor: "github-checks",
     summary,

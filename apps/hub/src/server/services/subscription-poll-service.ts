@@ -158,14 +158,19 @@ export class SubscriptionPollService {
         id: s.id,
         key: s.filterKey,
         createdAt: s.createdAt,
-        cursor: subscriptionService.getCursor(s.id) ?? null,
+        cursor: null,
       }));
       for (const unit of provider.pollUnits(repo, polled)) {
         work.push({
           id: unit.id,
           repo,
           run: async () => {
-            const results = await provider.poll(repo, unit, this.context());
+            // Cursors are read here, for the units this tick polls, not for every subscription.
+            const subscriptions = unit.subscriptions.map((s) => ({
+              ...s,
+              cursor: subscriptionService.getCursor(s.id) ?? null,
+            }));
+            const results = await provider.poll(repo, { ...unit, subscriptions }, this.context());
             for (const result of results) this.apply(repo, result);
           },
         });

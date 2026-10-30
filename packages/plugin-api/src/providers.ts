@@ -105,6 +105,14 @@ export interface ReviewAction {
 /** The overall state of a set of checks. `none` means there are no checks. */
 export type ChecksState = "success" | "failure" | "running" | "pending" | "cancelled" | "none";
 
+/** The event keys a GitHub subscription matches on. The hub and the GitHub plugin both build them here. */
+export const githubPrKey = (repo: string, number: number | string) => `github:pr:${repo}#${number}`;
+export const githubCiKey = (repo: string, branch: string) => `github:ci:${repo}@${branch}`;
+/** What every PR key of `repo` starts with. */
+export const githubPrKeyPrefix = (repo: string) => githubPrKey(repo, "");
+/** What every CI key of `repo` starts with. */
+export const githubCiKeyPrefix = (repo: string) => githubCiKey(repo, "");
+
 /** Which of several check states wins when they are folded into one; a higher number wins. */
 export function statePriority(state: string): number {
   switch (state) {
@@ -365,7 +373,7 @@ export interface PollSubscription {
   id: string;
   key: string;
   createdAt: number;
-  /** The cursor the provider returned last time, or null before the first poll. */
+  /** The cursor the provider returned last time, or null before the first poll. `pollUnits` always sees null; `poll` sees the stored value. */
   cursor: string | null;
 }
 
@@ -392,6 +400,11 @@ export interface PollResult {
  */
 export interface SubscriptionSourceProvider {
   id: string;
+  /**
+   * Whether the headers carry a signature at all. The core asks first, so a request with none
+   * is refused before its body is copied and encoded.
+   */
+  hasSignature(headers: Record<string, string>): boolean;
   /**
    * Checks the delivery's signature against `secret` in constant time. The signature scheme
    * belongs to the forge, the secret's storage to the core. Nothing else is read before this.
