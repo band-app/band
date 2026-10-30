@@ -34,7 +34,7 @@ export interface SubscriptionConfig {
   cron?: string;
   /** GitHub source: the `owner/name` repository the subscription watches. */
   repo?: string;
-  /** GitHub source: whether the repo's webhook exists (see `GithubWebhookService`). */
+  /** GitHub source: whether the repo's webhook exists (see `SubscriptionSourceService`). */
   webhook?: { status: "registered" | "waiting-for-url" | "failed"; error?: string };
   /**
    * GitHub source: logins whose comments and reviews are delivered (compared
