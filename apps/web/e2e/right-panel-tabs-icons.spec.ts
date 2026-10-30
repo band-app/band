@@ -4,10 +4,11 @@
  * strip is too narrow. The test drags the panel's separator.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
+import { git, gitCommit } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -32,6 +33,11 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const repoPath = join(tmpHome, REPO);
   mkdirSync(repoPath, { recursive: true });
+  // A github.com origin gives the worktree a review provider, so it has the Checks tab too.
+  git(repoPath, ["init", "-b", "main"]);
+  writeFileSync(join(repoPath, "README.md"), "hello\n");
+  gitCommit(repoPath, "init");
+  git(repoPath, ["remote", "add", "origin", "https://github.com/acme/widgets.git"]);
   seedState(tmpHome, {
     repos: [
       {

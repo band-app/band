@@ -93,6 +93,11 @@ export interface GhStub {
     number: number,
     opts?: { stderr?: string; onRequest?: (r: GhInvocation) => void },
   ) => void;
+  /** Answer `gh pr ready <number>`; `stderr` makes it fail. */
+  setPrReady: (
+    number: number,
+    opts?: { stderr?: string; onRequest?: (r: GhInvocation) => void },
+  ) => void;
   /**
    * Answer `gh run rerun <runId>` (any flags). `stderr` makes it fail. Each
    * call is in `requests`, so a test reads the flags from `flags`.
@@ -258,6 +263,21 @@ export const ghStub = {
             opts?.stderr
               ? { stdout: "", stderr: opts.stderr, exitCode: 1 }
               : { stdout: `✓ Merged pull request #${number}\n` },
+          );
+        });
+      },
+      setPrReady(number, opts) {
+        app.post("/pr/ready", (req, res, next) => {
+          const body = req.body as GhInvocation;
+          if (body.positional[2] !== String(number)) {
+            next();
+            return;
+          }
+          opts?.onRequest?.(body);
+          res.json(
+            opts?.stderr
+              ? { stdout: "", stderr: opts.stderr, exitCode: 1 }
+              : { stdout: `✓ Pull request #${number} is marked as "ready for review"\n` },
           );
         });
       },

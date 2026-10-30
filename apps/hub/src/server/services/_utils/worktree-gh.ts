@@ -12,11 +12,12 @@ import { type Host, HostOfflineError } from "@band-app/host-api";
 import { execGh } from "@band-app/host-local/git/git-client";
 import { hubGhEnv, withHubGhCredential } from "./hub-gh-auth";
 
-/** The `gh` subcommands a review provider needs: GraphQL reads, a PR merge and a run re-run. */
+/** The `gh` subcommands a review provider needs: GraphQL reads, a PR merge, a PR marked ready and a run re-run. */
 function allowed(args: string[]): boolean {
   return (
     (args[0] === "api" && args[1] === "graphql") ||
     (args[0] === "pr" && args[1] === "merge") ||
+    (args[0] === "pr" && args[1] === "ready") ||
     (args[0] === "run" && args[1] === "rerun")
   );
 }
