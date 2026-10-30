@@ -10,7 +10,7 @@ import {
 } from "../infra/db/queries/subscriptions";
 import { subscribe as subscribeStatusBus } from "../infra/events/status-event-bus";
 import { type SubscriptionEvent, subscriptionEventSchema } from "../infra/subscriptions/event";
-import { githubCiKey, githubPrKey } from "../infra/subscriptions/github";
+import { githubCiKey, githubPrKey } from "../infra/subscriptions/keys";
 import { buildSubscriptionMessage, SUMMARY_LIMIT } from "../infra/subscriptions/message";
 import {
   hashWebhookToken,
@@ -269,7 +269,7 @@ export class SubscriptionService {
     return subscription;
   }
 
-  /** Subscribes a chat to one PR. Webhook registration is the caller's job (`GithubWebhookService`). */
+  /** Subscribes a chat to one PR. Webhook registration is the caller's job (`SubscriptionSourceService`). */
   createGithubPr(input: GithubPrCreateInput): Subscription {
     const parsed = githubPrCreateInput.parse(input);
     const { repo, number, allowedSenders, ...common } = parsed;
@@ -311,7 +311,7 @@ export class SubscriptionService {
     return this.queries.list().filter((s) => s.source === "github" && s.config.repo === repo);
   }
 
-  /** The polling cursor of a subscription (see `GithubPollService`). */
+  /** The polling cursor of a subscription (see `SubscriptionPollService`). */
   getCursor(id: string): string | undefined {
     return this.queries.cursor(id);
   }
