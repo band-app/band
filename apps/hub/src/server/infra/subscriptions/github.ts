@@ -218,6 +218,62 @@ export function parseGithubDelivery(
   }
 }
 
+/** The pull request or branch a delivery is about, for telling open Checks panels to refetch. */
+export interface ReviewTarget {
+  /** `owner/name`, lowercased. */
+  repo: string;
+  branch?: string;
+  number?: number;
+}
+
+const REVIEW_EVENTS = new Set([
+  "pull_request",
+  "pull_request_review",
+  "pull_request_review_comment",
+  "issue_comment",
+  "check_run",
+  "check_suite",
+  "workflow_run",
+]);
+
+/**
+ * The review a delivery touched. Unlike `parseGithubDelivery` it ignores which actions Band
+ * wakes agents for: any change to a pull request or its checks refreshes a panel. An
+ * `issue_comment` names no branch, so it reaches every worktree of the repo.
+ */
+export function reviewTargetOf(eventType: string, payload: unknown): ReviewTarget | null {
+  if (!REVIEW_EVENTS.has(eventType)) return null;
+  const body = obj(payload);
+  const repo = str(obj(body?.repository)?.full_name).toLowerCase();
+  if (!body || !repo) return null;
+  const target = (branch: string, number: unknown): ReviewTarget => {
+    const n = Number(number);
+    return {
+      repo,
+      ...(branch && { branch }),
+      ...(Number.isInteger(n) && n > 0 && { number: n }),
+    };
+  };
+  switch (eventType) {
+    case "pull_request":
+    case "pull_request_review":
+    case "pull_request_review_comment": {
+      const pr = obj(body.pull_request);
+      return pr ? target(str(obj(pr.head)?.ref), pr.number) : null;
+    }
+    case "issue_comment": {
+      const issue = obj(body.issue);
+      return issue?.pull_request ? target("", issue.number) : null;
+    }
+    default: {
+      const run = obj(body[eventType]);
+      const suite = obj(run?.check_suite);
+      const branch = str(run?.head_branch) || str(suite?.head_branch);
+      return branch ? target(branch, undefined) : { repo };
+    }
+  }
+}
+
 /** One check on a commit, as the check-runs REST endpoint reports it. */
 export interface CheckRun {
   name: string;

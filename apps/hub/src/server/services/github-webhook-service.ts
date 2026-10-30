@@ -12,9 +12,11 @@ import {
   parseCheckRuns,
   parseGithubDelivery,
   readWebhookSecret,
+  reviewTargetOf,
   verifyGithubSignature,
 } from "../infra/subscriptions/github";
 import { requestCIRefresh } from "./_utils/ci-refresh-request";
+import { signalGithubReview } from "./_utils/github-review-signal";
 import { withHubGhCredential } from "./_utils/hub-gh-auth";
 import { isBandPushed } from "./pushed-sha-service";
 import { type Subscription, subscriptionService } from "./subscription-service";
@@ -104,6 +106,10 @@ export class GithubWebhookService {
     } catch {
       return "accepted";
     }
+    // Only after the signature passed. Any change to a PR or its checks refreshes open panels,
+    // whether or not a subscription listens.
+    const target = reviewTargetOf(eventType, payload);
+    if (target) signalGithubReview(target);
     const parsed = parseGithubDelivery(eventType, delivery, payload);
     if (parsed.type === "events") {
       for (const event of parsed.events) {

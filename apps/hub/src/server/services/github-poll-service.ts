@@ -13,6 +13,7 @@ import {
   initialCursor,
   parsePrActivity,
 } from "../infra/subscriptions/github-poll";
+import { signalGithubReview } from "./_utils/github-review-signal";
 import { withHubGhCredential } from "./_utils/hub-gh-auth";
 import { githubWebhookService, publicHubUrl } from "./github-webhook-service";
 import { pluginHost } from "./plugin-host-service";
@@ -58,6 +59,8 @@ interface PollState {
  * any subscription of a repo is `registered`, the repo is no longer polled.
  */
 export class GithubPollService {
+  /** The last CI event id seen per `repo@branch`, so a finished commit signals once. */
+  private readonly lastCiEvent = new Map<string, string>();
   private readonly state: PollState = {
     polls: 0,
     offset: 0,
@@ -194,6 +197,7 @@ export class GithubPollService {
       if (!items) continue;
       const cursor = subscriptionService.getCursor(sub.id) ?? initialCursor(sub.createdAt);
       let newest = cursor;
+      let fresh = false;
       for (const item of items) {
         // `>=` because GitHub stamps to the second; the event id dedupes the overlap.
         if (item.createdAt < cursor) continue;
@@ -207,7 +211,9 @@ export class GithubPollService {
           );
         }
         if (item.createdAt > newest) newest = item.createdAt;
+        if (item.createdAt > cursor) fresh = true;
       }
+      if (fresh) signalGithubReview({ repo, number: numberOf(sub) });
       if (newest !== cursor || subscriptionService.getCursor(sub.id) === undefined) {
         subscriptionService.setCursor(sub.id, newest);
       }
@@ -234,7 +240,14 @@ export class GithubPollService {
     if (!sha) return;
     const event = aggregateChecks(checks, { repo, branch, sha }, Date.now(), isBandPushed(sha));
     // The event id is the commit and verdict, so repeated polls of a finished commit deliver once.
-    if (event) subscriptionService.ingest(event);
+    if (event) {
+      subscriptionService.ingest(event);
+      const seen = `${repo}@${branch}`;
+      if (this.lastCiEvent.get(seen) !== event.id) {
+        this.lastCiEvent.set(seen, event.id);
+        signalGithubReview({ repo, branch });
+      }
+    }
   }
 }
 

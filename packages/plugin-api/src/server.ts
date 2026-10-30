@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { BranchStatusProvider, ChecksProvider, ReviewProvider } from "./providers";
+import type { BranchStatusProvider, ChecksProvider, RepoInfo, ReviewProvider } from "./providers";
 
 export interface ExecOptions {
   cwd: string;
@@ -51,6 +51,15 @@ export interface BandServerApi {
     registerReviewProvider(provider: ReviewProvider): void;
     registerChecksProvider(provider: ChecksProvider): void;
     registerBranchStatusProvider(provider: BranchStatusProvider): void;
+  };
+  reviews: {
+    /**
+     * Tell the core a review on the forge changed (a comment, a finished check, a merge). The
+     * core maps it to the worktrees on that repo and branch (every worktree of the repo when
+     * `branch` is not given) and tells open Checks panels to refetch. Call it only for a change
+     * the plugin learned from the forge itself, such as a verified webhook delivery.
+     */
+    changed(change: { repo: RepoInfo; branch?: string; number?: number }): void;
   };
 }
 
