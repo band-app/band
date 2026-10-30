@@ -105,10 +105,13 @@ export interface StatusEvent {
     | "subscription-delivered"
     | "subscription-removed"
     | "worktree-origin-changed"
+    | "review-changed"
     | "open-file";
   status?: WorktreeStatusSnapshot;
   statuses?: WorktreeStatusSnapshot[];
   worktreeId?: string;
+  /** For `kind: "review-changed"`: the worktrees whose review or checks changed on the forge. */
+  worktreeIds?: string[];
   git?: GitStatus;
   ci?: CIStatus;
   url?: string;

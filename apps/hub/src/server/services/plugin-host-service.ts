@@ -11,6 +11,7 @@ import {
 import type { BandServerApi, ServerPlugin } from "@band-app/plugin-api/server";
 import { hostRegistry } from "../infra/host/registry";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled-plugins";
+import { reviewSignalService } from "./review-signal-service";
 import { loadSettings } from "./state";
 
 const log = createLogger("plugin-host");
@@ -173,6 +174,7 @@ export class PluginHost {
         error: (message, ...args) => pluginLog.error(message, ...(args as never[])),
       },
       exec: (bin, args, options) => this.host().exec(bin, args, options),
+      reviews: { changed: (change) => reviewSignalService.changed(change) },
       providers: {
         // Stored as given, not copied, so a provider written as a class
         // keeps its prototype methods. Its id must be the plugin's id, which
