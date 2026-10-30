@@ -14,7 +14,7 @@ A provider returns data, and the core draws it. A plugin never imports Band inte
 ## Phases
 
 1. Import boundary. A Biome `noRestrictedImports` override for `plugins/**` allows only `@band-app/plugin-api`, `@band-app/ui` and the plugin's own dependencies. Done: `pnpm lint` fails on an import of `apps/*` or any other `@band-app/*` package.
-2. Data-only providers. The core owns the screens and the plugin supplies facts. Done: the Checks tab (`apps/web/src/components/review`) is drawn by the core for any `ReviewProvider`, and review actions are data. Next: a change signal (`reviews.changed`) so a provider can tell the core to refetch, the PR badge moved into a branch status provider, and subscription sources moved into the plugin.
+2. Data-only providers. The core owns the screens and the plugin supplies facts. Done: the Checks tab (`apps/web/src/components/review`) is drawn by the core for any `ReviewProvider`, and review actions are data. Next: a change signal (`reviews.changed`) so a provider can tell the core to refetch, and subscription sources moved into the plugin. Also done: the PR badge and CI icon come from a `BranchStatusProvider`, and the batched GraphQL query lives in `plugins/github`.
 3. Worker half and panels. A plugin gets a part that runs on a worker, a stream channel to the hub, and a `worktree.panels` slot for views such as a simulator. The panel is the core's, the stream is the plugin's.
 4. Extensions. Out-of-process plugins with an iframe runner and a permission model. Needs its own design before any code.
 

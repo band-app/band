@@ -1,4 +1,4 @@
-import type { ChecksProvider, ReviewProvider } from "./providers";
+import type { BranchStatusProvider, ChecksProvider, ReviewProvider } from "./providers";
 
 export interface ExecOptions {
   cwd: string;
@@ -37,6 +37,7 @@ export interface BandServerApi {
   providers: {
     registerReviewProvider(provider: ReviewProvider): void;
     registerChecksProvider(provider: ChecksProvider): void;
+    registerBranchStatusProvider(provider: BranchStatusProvider): void;
   };
 }
 
