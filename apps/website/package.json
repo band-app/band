@@ -5,9 +5,11 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "node scripts/check-docs.mjs source && astro build && node scripts/check-docs.mjs dist",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "check": "node scripts/check-docs.mjs all",
+    "gen:cli-schema": "sh scripts/gen-cli-schema.sh"
   },
   "dependencies": {
     "astro": "^5.7.10",

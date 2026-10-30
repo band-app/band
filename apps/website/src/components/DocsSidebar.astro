@@ -1,4 +1,6 @@
 ---
+import { navSections } from "../lib/nav";
+
 interface Props {
   currentPath: string;
 }
@@ -6,65 +8,9 @@ interface Props {
 const { currentPath } = Astro.props;
 
 const sections = [
+  ...(await navSections()),
   {
-    title: "Getting Started",
-    links: [
-      { href: "/docs/getting-started", label: "Introduction" },
-      { href: "/docs/installation", label: "Installation" },
-      { href: "/docs/first-repo", label: "First Repo" },
-      { href: "/docs/first-worktree", label: "First Worktree" },
-      { href: "/docs/first-task", label: "First Task" },
-    ],
-  },
-  {
-    title: "Desktop App",
-    links: [
-      { href: "/docs/flexible-layout", label: "Flexible Layout" },
-      { href: "/docs/repos", label: "Repo Management" },
-      { href: "/docs/worktrees", label: "Worktree Management" },
-      { href: "/docs/changes-view", label: "Changes View" },
-      { href: "/docs/agent-status", label: "Agent Status" },
-      { href: "/docs/remote-access", label: "Remote Access" },
-      { href: "/docs/settings", label: "Settings" },
-    ],
-  },
-  {
-    title: "CLI Reference",
-    links: [
-      { href: "/docs/cli-reference", label: "Overview" },
-      { href: "/docs/cli-repos", label: "band repos" },
-      { href: "/docs/cli-worktrees", label: "band worktrees" },
-      { href: "/docs/cli-chats", label: "band chats" },
-      { href: "/docs/cli-terminals", label: "band terminals" },
-      { href: "/docs/cli-browsers", label: "band browsers" },
-      { href: "/docs/cli-cronjobs", label: "band cronjobs" },
-      { href: "/docs/cli-tunnel", label: "band tunnel" },
-      { href: "/docs/cli-settings", label: "band settings" },
-    ],
-  },
-  {
-    title: "Configuration",
-    links: [{ href: "/docs/configuration", label: "Repo Config" }],
-  },
-  {
-    title: "Coding Agents",
-    links: [
-      { href: "/docs/coding-agents", label: "Overview" },
-      { href: "/docs/claude-code", label: "Claude Code" },
-      { href: "/docs/codex", label: "Codex" },
-      { href: "/docs/opencode", label: "OpenCode" },
-    ],
-  },
-  {
-    title: "Guides",
-    links: [
-      { href: "/docs/cronjobs", label: "Cronjobs & Automation" },
-      { href: "/docs/recipes", label: "Recipes & Workflows" },
-      { href: "/docs/architecture", label: "Architecture" },
-    ],
-  },
-  {
-    title: "More",
+    title: "Also",
     links: [
       { href: "https://github.com/band-app/band/releases", label: "Changelog" },
       { href: "/faq", label: "FAQ" },
