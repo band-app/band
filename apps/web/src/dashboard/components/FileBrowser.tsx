@@ -500,7 +500,7 @@ function TreeNode({
       onDragOver={(e) => dnd.onDragOver(dropFolder, e)}
       onDrop={(e) => dnd.onDrop(dropFolder, e)}
       data-drop-target={isDropTarget ? "true" : undefined}
-      className={`flex w-full items-center text-left select-none hover:bg-accent/50 [-webkit-touch-callout:none] ${
+      className={`flex w-full items-center text-left select-none hover:bg-list-highlight [-webkit-touch-callout:none] ${
         compact ? "h-[28px] gap-1 pr-3 text-[13px]" : "h-[32px] gap-1.5 pr-4 text-[15px]"
       } ${
         isSelected

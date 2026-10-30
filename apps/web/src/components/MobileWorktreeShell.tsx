@@ -281,7 +281,7 @@ function MobileMenuItem({ item, onSelect }: { item: PanelItem; onSelect: () => v
       onClick={onSelect}
       aria-label={badge ? `${label}, ${badge}` : label}
       data-testid={testid}
-      className="flex h-12 w-full items-center gap-3 px-4 text-left text-sm transition-colors hover:bg-accent active:bg-accent"
+      className="flex h-12 w-full items-center gap-3 px-4 text-left text-sm transition-colors hover:bg-list-highlight active:bg-list-highlight"
     >
       <Icon className="size-[18px] shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate">{label}</span>

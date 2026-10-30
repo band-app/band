@@ -57,7 +57,9 @@ export function AddressBarAutocomplete({ state, onSelect }: AddressBarAutocomple
                 }}
                 onMouseEnter={() => state.setSelectedIndex(index)}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors ${
-                  selected ? "bg-accent text-foreground" : "text-foreground hover:bg-accent/60"
+                  selected
+                    ? "bg-list-highlight text-list-highlight-foreground"
+                    : "text-foreground hover:bg-list-highlight"
                 }`}
               >
                 {/* Favicon. Fallback to the lucide Globe glyph when the
