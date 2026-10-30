@@ -184,7 +184,10 @@ async function addWorker(name: string, scenario: object, issued?: IssuedWorker):
       const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
       return hosts.find((h) => h.id === issued.hostId)?.status === "online" ? true : undefined;
     },
-    { label: `${name} online`, timeoutMs: 20_000 },
+    // A worker started from source compiles its whole module graph with tsx before it says
+    // anything. On a loaded macOS runner that took over 20 s with the worker alive and silent
+    // (CI run 41036105270), so this waits for that one condition up to 60 s.
+    { label: `${name} online`, timeoutMs: 60_000 },
   ).catch((err: Error) => {
     throw new Error(`${err.message}\n${output}`);
   });
