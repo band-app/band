@@ -105,6 +105,24 @@ export interface ReviewAction {
 /** The overall state of a set of checks. `none` means there are no checks. */
 export type ChecksState = "success" | "failure" | "running" | "pending" | "cancelled" | "none";
 
+/** Which of several check states wins when they are folded into one; a higher number wins. */
+export function statePriority(state: string): number {
+  switch (state) {
+    case "failure":
+      return 4;
+    case "running":
+      return 3;
+    case "pending":
+      return 2;
+    case "cancelled":
+      return 1;
+    case "success":
+      return 0;
+    default:
+      return -1;
+  }
+}
+
 export interface ChecksReport {
   state: ChecksState;
   /** The commit the checks ran on. */
@@ -250,6 +268,49 @@ export interface ChecksProvider {
   id: string;
   matches(repo: RepoInfo): boolean;
   getChecksForRef(repo: RepoInfo, ref: string, ctx: ProviderContext): Promise<ChecksReport>;
+}
+
+/** The review a branch's badge shows. A branch has at most one. */
+export interface BranchReview {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+}
+
+/** What the worktree card shows for one branch: the CI icon and the review badge. */
+export interface BranchStatus {
+  /** `merged` when the branch's review merged; otherwise the overall state of its CI. */
+  state: ChecksState | "merged";
+  /** The page the CI icon opens: the open review, else the check that decides `state`. */
+  url: string | null;
+  review: BranchReview | null;
+}
+
+/** One branch of a repo whose status the core asks for. */
+export interface BranchStatusRequest {
+  branch: string;
+  /** Whether the branch is the repo's default branch. Only an open review counts there. */
+  isDefaultBranch: boolean;
+}
+
+/**
+ * The sidebar's per-branch badge data, for many branches of one repo in one call.
+ * The core polls it on its CI ticks and stores the answer.
+ */
+export interface BranchStatusProvider {
+  id: string;
+  matches(repo: RepoInfo): boolean;
+  /**
+   * Returns a status for each requested branch, keyed by branch name; a branch left out
+   * counts as having no checks and no review. Rejects when the forge cannot be reached.
+   */
+  getBranchStatuses(
+    repo: RepoInfo,
+    branches: BranchStatusRequest[],
+    ctx: Pick<ProviderContext, "cwd" | "gh">,
+  ): Promise<Record<string, BranchStatus>>;
 }
 
 /**

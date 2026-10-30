@@ -108,7 +108,7 @@ apps/hub/src/server/
       mime-types.ts
       port-utils.ts
       upload-utils.ts
-      github-graphql.ts
+      ci-status.ts
       sse-writer.ts
       jsonl-message-to-events.ts
       queued-message-store.ts

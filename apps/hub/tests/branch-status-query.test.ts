@@ -1,10 +1,29 @@
 import { parseGitRemoteUrl } from "@band-app/host-local/git/git-client";
-import { describe, expect, it } from "vitest";
+import { statePriority } from "@band-app/plugin-api";
 import {
-  buildBatchedCIQuery,
-  parseBatchedCIResponse,
-  statePriority,
-} from "../src/server/services/_utils/github-graphql";
+  buildBranchStatusQuery,
+  type GraphQLRepoResponse,
+  parseBranchStatusResponse,
+} from "@band-app/plugin-github/branch-query";
+import { describe, expect, it } from "vitest";
+
+/** Runs `parseBranchStatusResponse` with each alias as a branch name, so the cases below read as `ws_N` is branch `ws_N`. */
+function parseAliases(
+  data: Record<string, GraphQLRepoResponse | null>,
+  aliases: string[],
+  defaultBranches = new Map<string, string>(),
+) {
+  const statuses = parseBranchStatusResponse(
+    data,
+    aliases.map((alias) => ({ branch: alias, isDefaultBranch: defaultBranches.has(alias) })),
+  );
+  return new Map(
+    Object.entries(statuses).map(([alias, s]) => [
+      alias,
+      { state: s.state, url: s.url, pr: s.review },
+    ]),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // parseGitRemoteUrl
@@ -91,18 +110,14 @@ describe("parseGitRemoteUrl", () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildBatchedCIQuery
+// buildBranchStatusQuery
 // ---------------------------------------------------------------------------
 
-describe("buildBatchedCIQuery", () => {
-  it("builds a query for a single worktree", () => {
-    const query = buildBatchedCIQuery([
-      {
-        alias: "ws_0",
-        branch: "feature-branch",
-        repoInfo: { host: "github.com", owner: "acme", repo: "app" },
-      },
-    ]);
+describe("buildBranchStatusQuery", () => {
+  const repo = { host: "github.com", owner: "acme", repo: "app" };
+
+  it("builds a query for a single branch", () => {
+    const query = buildBranchStatusQuery(repo, ["feature-branch"]);
 
     expect(query).toContain("query {");
     expect(query).toContain('ws_0: repository(owner: "acme", name: "app")');
@@ -117,33 +132,18 @@ describe("buildBatchedCIQuery", () => {
     expect(query).toContain("workflowRun {");
   });
 
-  it("builds a query for multiple worktrees", () => {
-    const query = buildBatchedCIQuery([
-      {
-        alias: "ws_0",
-        branch: "feature-a",
-        repoInfo: { host: "github.com", owner: "acme", repo: "app" },
-      },
-      {
-        alias: "ws_1",
-        branch: "feature-b",
-        repoInfo: { host: "github.com", owner: "acme", repo: "lib" },
-      },
-    ]);
+  it("builds one aliased lookup per branch", () => {
+    const query = buildBranchStatusQuery(repo, ["feature-a", "feature-b"]);
 
     expect(query).toContain('ws_0: repository(owner: "acme", name: "app")');
-    expect(query).toContain('ws_1: repository(owner: "acme", name: "lib")');
+    expect(query).toContain('ws_1: repository(owner: "acme", name: "app")');
     expect(query).toContain('headRefName: "feature-a"');
     expect(query).toContain('headRefName: "feature-b"');
   });
 
   it("escapes special characters in branch names", () => {
-    const query = buildBatchedCIQuery([
-      {
-        alias: "ws_0",
-        branch: 'feat/"quoted"',
-        repoInfo: { host: "github.com", owner: "o", repo: "r" },
-      },
+    const query = buildBranchStatusQuery({ host: "github.com", owner: "o", repo: "r" }, [
+      'feat/"quoted"',
     ]);
 
     expect(query).toContain('headRefName: "feat/\\"quoted\\""');
@@ -178,10 +178,10 @@ describe("statePriority", () => {
 });
 
 // ---------------------------------------------------------------------------
-// parseBatchedCIResponse
+// parseBranchStatusResponse
 // ---------------------------------------------------------------------------
 
-describe("parseBatchedCIResponse", () => {
+describe("parseBranchStatusResponse", () => {
   it("returns merged status when PR is merged on a feature branch", () => {
     const data = {
       ws_0: {
@@ -202,7 +202,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")).toEqual({
       state: "merged",
       url: "https://github.com/o/r/pull/1",
@@ -250,7 +250,7 @@ describe("parseBatchedCIResponse", () => {
     };
 
     const defaultBranches = new Map([["ws_0", "main"]]);
-    const result = parseBatchedCIResponse(data, ["ws_0"], defaultBranches);
+    const result = parseAliases(data, ["ws_0"], defaultBranches);
     expect(result.get("ws_0")?.state).toBe("success");
   });
 
@@ -266,7 +266,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")).toEqual({ state: "none", url: null, pr: null });
   });
 
@@ -304,7 +304,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")).toEqual({
       state: "none",
       url: "https://github.com/o/r/pull/1",
@@ -351,7 +351,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     const ci = result.get("ws_0");
     expect(ci?.state).toBe("success");
   });
@@ -389,7 +389,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     const ci = result.get("ws_0");
     expect(ci?.state).toBe("failure");
     expect(ci?.url).toBe("https://github.com/o/r/actions/runs/2");
@@ -428,7 +428,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")?.state).toBe("running");
   });
 
@@ -456,7 +456,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")?.state).toBe("pending");
   });
 
@@ -496,7 +496,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")?.url).toBe("https://github.com/o/r/pull/42");
   });
 
@@ -534,7 +534,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     const ci = result.get("ws_0");
     expect(ci?.state).toBe("failure");
     expect(ci?.url).toBe("https://github.com/o/r/actions/runs/2");
@@ -597,7 +597,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0", "ws_1", "ws_2"]);
+    const result = parseAliases(data, ["ws_0", "ws_1", "ws_2"]);
     expect(result.get("ws_0")?.state).toBe("success");
     expect(result.get("ws_1")?.state).toBe("merged");
     expect(result.get("ws_2")?.state).toBe("failure");
@@ -605,8 +605,8 @@ describe("parseBatchedCIResponse", () => {
 
   it("returns none for missing aliases in the response", () => {
     const data = {};
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
-    expect(result.get("ws_0")).toEqual({ state: "none" });
+    const result = parseAliases(data, ["ws_0"]);
+    expect(result.get("ws_0")).toEqual({ state: "none", url: null, pr: null });
   });
 
   it("handles null ref (branch not on remote)", () => {
@@ -617,7 +617,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")).toEqual({ state: "none", url: null, pr: null });
   });
 
@@ -645,7 +645,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")?.state).toBe("cancelled");
   });
 
@@ -682,7 +682,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, ["ws_0"]);
+    const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")?.state).toBe("failure");
   });
 });
