@@ -79,7 +79,8 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
     cleanup(w.root, w.stateDir);
   });
 
-  it("shuts the worktree's device down when the lease runs out and refuses calls until the hub renews", { // A CI runner boots a cold device in a minute or more, longer than the package's 90 s default.
+  it("shuts the worktree's device down when the lease runs out and refuses calls until the hub renews", {
+    // A CI runner boots a cold device in a minute or more, longer than the package's 90 s default.
     timeout: 8 * 60_000,
   }, async () => {
     await renew(120_000);
