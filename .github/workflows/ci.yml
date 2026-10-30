@@ -1219,9 +1219,28 @@ jobs:
       - name: Build web (needed by tests)
         run: pnpm build:web
 
-      - name: Test (web)
+      # `pnpm build:web` above already built the web app and the hub bundle, so the hub
+      # suite runs through vitest directly: `pnpm --filter @band-app/server test` would
+      # rebuild both in its `pretest`.
+      #
+      # A pull request runs only the tests listed under `subset` in scripts/macos-tests.json
+      # (behaviour that depends on the OS). The merge queue and pushes to main run everything,
+      # so a macOS-only break cannot reach main. The Linux jobs run every test either way.
+      - name: Test (macOS subset)
+        if: github.event_name == 'pull_request'
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
         run: |
-          pnpm --filter @band-app/server test
+          pnpm --filter @band-app/server exec vitest run $(node scripts/macos-tests.mjs hub)
+          (cd apps/worker && node --import tsx --test --test-concurrency=1 --test-timeout=90000 --test-force-exit $(node ../../scripts/macos-tests.mjs worker))
+          (cd packages/host-local && node --import tsx --test --test-concurrency=1 $(node ../../scripts/macos-tests.mjs host-local))
+
+      - name: Test (web)
+        if: github.event_name != 'pull_request'
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
+        run: |
+          pnpm --filter @band-app/server exec vitest run
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
           pnpm --filter @band-app/environment test

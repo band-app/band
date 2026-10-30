@@ -61,6 +61,14 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 - Network: after the install and the CLI build, the suite needs none. `runner-docker`, `runner-k8s-kind` and `environment-build-docker` skip without Docker or a cluster.
 - Teardown: start servers with `startServer` from `tests/helpers/server.ts`, which waits for the server's process group before the test deletes its temp home, and delete the home with `removeTmpHome` (`tests/helpers/tmp-home.ts`), which lists leftover files when the delete fails with ENOTEMPTY.
 
+### The macOS subset
+
+On a pull request, the `Web Tests (macOS)` job runs only the hub, worker and host-local tests listed under `subset` in `scripts/macos-tests.json`, which are the tests whose behaviour depends on the OS (PTYs, the terminal daemon, launchd, `pmset`, `xcrun`). The merge queue and pushes to main run the full set, and the Linux jobs always run everything. The same file has a `notPlatformSpecific` list for files that match the rule below but behave the same everywhere. Every entry has a reason.
+
+`scripts/check-macos-tests.mjs` runs in `pnpm lint`. It fails when a `*.test.ts` file under `apps/hub/tests`, `apps/worker/tests` or `packages/host-local/tests` mentions `process.platform`, `darwin`, `launchd`, `launchctl`, `pmset`, `xcrun`, `node-pty`, `terminal-daemon`, `DaemonTerminalBackend` or `TerminalPool` and is in neither list. To add a test to the subset, add it under `subset` with a one-line reason. To say it is not platform specific, add it under `notPlatformSpecific`. A platform-dependent test that never names these words (a new kind of fixture, say) must be added to `subset` by hand.
+
+The macOS job runs the hub suite with `vitest run` after `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+
 ### Exceptions
 
 - `apps/web/tests/theme-derive.test.ts` calls the pure functions in `apps/web/src/lib/theme/` (color math, surface derivation, contrast) with colors in and CSS variables out. There is no state to fake, and the 4.5:1 contrast guarantee for arbitrary user colors can only be checked across many inputs at this level. The e2e suite `apps/web/e2e/appearance.spec.ts` covers what the user sees.
