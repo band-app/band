@@ -55,6 +55,8 @@
     "@band-app/host-remote": "workspace:^",
     "@band-app/link": "workspace:^",
     "@band-app/logger": "workspace:^",
+    "@band-app/plugin-api": "workspace:^",
+    "@band-app/plugin-simulator": "workspace:^",
     "@band-app/shared": "workspace:^",
     "@band-app/worktree-ops": "workspace:^",
     "@types/node": "^22.19.13",

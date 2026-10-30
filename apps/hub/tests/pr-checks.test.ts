@@ -94,6 +94,11 @@ const MERGE_FAIL_BRANCH = "feat/merge-blocked";
 const RERUN_BRANCH = "feat/rerun";
 const DRAFT_BRANCH = "feat/draft";
 
+/** The `plugins.list` entries for the GitHub plugin; other bundled plugins (the simulator) are not under test here. */
+async function githubPlugins(res: Response): Promise<unknown[]> {
+  return ((await trpcData(res)) as Array<{ id: string }>).filter((p) => p.id === "github");
+}
+
 describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
   let tmpHome: string;
   let server: ServerHandle;
@@ -888,7 +893,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
 
     const res = await trpcQuery(server.url, "plugins.list", undefined, TOKEN);
     expect(res.status).toBe(200);
-    expect(await trpcData(res)).toEqual([
+    expect(await githubPlugins(res)).toEqual([
       {
         id: "github",
         name: "GitHub",
@@ -944,7 +949,7 @@ describe("a disabled GitHub plugin", () => {
     });
 
     const res = await trpcQuery(server.url, "plugins.list", undefined, TOKEN);
-    expect(await trpcData(res)).toEqual([
+    expect(await githubPlugins(res)).toEqual([
       {
         id: "github",
         name: "GitHub",

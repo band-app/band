@@ -38,6 +38,8 @@ const SLOW_CALLS: Record<string, number> = {
   "agentEnv.installSkills": 2 * 60_000,
   "agentEnv.installHooks": 60_000,
   "agentEnv.removeHooks": 60_000,
+  // A plugin service may boot a device or build on a call.
+  "plugin.call": 5 * 60_000,
   exec: 10 * 60_000,
 };
 

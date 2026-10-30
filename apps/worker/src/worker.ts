@@ -42,6 +42,7 @@ import { registerBasicMethods } from "./methods-basic.ts";
 import { registerLifecycleMethods } from "./methods-lifecycle.ts";
 import { registerStreamMethods } from "./methods-streams.ts";
 import { PathPolicy } from "./path-policy.ts";
+import { registerPluginMethods, WorkerPlugins } from "./plugins.ts";
 import { registerRelayMethods } from "./relay.ts";
 import {
   ensureStateDir,
@@ -208,6 +209,7 @@ export class Worker {
     // The hello carries the capability report, so the first probe finishes before it.
     await host.awaitReport();
     const info = await host.info();
+    const plugins = await WorkerPlugins.start({ stateDir: config.stateDir, log });
 
     const serviceManager =
       options.serviceManager !== undefined
@@ -237,6 +239,7 @@ export class Worker {
           // The loopback listener for the desktop app on this machine (`direct.ts`).
           CAPABILITY_DIRECT,
           ...(config.ownChats ? [CAPABILITY_CHAT_OWNERSHIP] : []),
+          ...plugins.capabilities(),
         ],
         labels: config.labels,
         roots: policy.rootPaths,
@@ -270,6 +273,7 @@ export class Worker {
       reposDir: config.reposDir,
       cli: (await WorkerCli.start(config.stateDir, log)) ?? undefined,
       ownsChats: config.ownChats,
+      plugins,
       ...(agentHolder ? { agentHolder } : {}),
     };
     const registrar = new Registrar(ctx);
@@ -286,6 +290,7 @@ export class Worker {
       );
     });
     worker.disposers.push(() => ctx.lease.close());
+    worker.disposers.push(registerPluginMethods(registrar, ctx));
     worker.disposers.push(registerBasicMethods(registrar, ctx));
     worker.disposers.push(registerStreamMethods(registrar, ctx));
     const agentControl = registerAgentMethods(registrar, ctx);
