@@ -2,7 +2,12 @@ name: Set up Playwright browsers
 description: >
   Restores the Playwright browsers cache, installs Chromium and WebKit with
   their system packages, and saves the cache on trusted events. Needs
-  dependencies installed first.
+  dependencies installed first. `browsers` limits the install to what a job
+  runs (the web e2e shards are the only ones that need WebKit).
+inputs:
+  browsers:
+    description: Space-separated Playwright browsers to install.
+    default: chromium webkit
 runs:
   using: composite
   steps:
@@ -18,13 +23,13 @@ runs:
       uses: actions/cache/restore@v5
       with:
         path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
+        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ inputs.browsers }}
 
     # `--with-deps` still installs the apt packages on a cache hit. WebKit runs
     # the iPhone-profile specs (`e2e/mobile-document-scroll.spec.ts`).
-    - name: Install Playwright Chromium and WebKit
+    - name: Install Playwright browsers
       shell: bash
-      run: pnpm --filter @band-app/web exec playwright install --with-deps chromium webkit
+      run: pnpm --filter @band-app/web exec playwright install --with-deps ${{ inputs.browsers }}
 
     # Same trust gate as the cache saves in ci.yml.
     - name: Save Playwright browsers cache
@@ -37,4 +42,4 @@ runs:
       uses: actions/cache/save@v5
       with:
         path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
+        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ inputs.browsers }}

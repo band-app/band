@@ -36,6 +36,99 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether a pull request changed anything the test jobs cover. A
+  # change only to docs, the website or root Markdown skips them; the two
+  # required checks still report (see `lint-test-build`). Pushes and the merge
+  # queue always run everything, and any git error fails open.
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect code changes
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$PR_BASE" 2>/dev/null || true
+          if ! CHANGED=$(git diff --name-only "$PR_BASE...$PR_HEAD" 2>/dev/null) || [ -z "$CHANGED" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Anything outside these paths is code. No test reads them, and the
+          # workflow files are not listed, so editing CI always runs it.
+          CODE=$(grep -vE '^(docs/|apps/website/|\.am/|[^/]+\.md$|LICENSE$)' <<< "$CHANGED" || true)
+          if [ -n "$CODE" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "Only docs changed, so the test jobs are skipped:"
+            echo "$CHANGED"
+          fi
+
+  # Builds the web client, the hub bundle, the worker bundle and the release
+  # CLI once. The hub, remote-loopback, e2e and package shards unpack this
+  # instead of each building it again (tar keeps file modes, which
+  # upload-artifact drops). `check` keeps its own build and owns the cache
+  # saves.
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: changes
+    if: >
+      needs.changes.outputs.code == 'true' && (
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-node-rust
+
+      - name: Build web and hub
+        run: pnpm build:web
+
+      - name: Build worker
+        run: pnpm --filter @band-app/worker build
+
+      - name: Pack the build
+        run: |
+          tar -czf "$RUNNER_TEMP/build.tar.gz" \
+            apps/web/dist apps/hub/dist apps/worker/dist apps/cli/target/release/band
+          ls -lh "$RUNNER_TEMP/build.tar.gz"
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v7
+        with:
+          name: build
+          path: ${{ runner.temp }}/build.tar.gz
+          compression-level: 0
+          retention-days: 1
+
   check:
     name: Lint & Build
     runs-on: ubuntu-latest
@@ -53,11 +146,13 @@ jobs:
     # can simply remove the `if:` and burn minutes. Stricter cost controls
     # (e.g. paused-by-default workflows, billing limits) belong at the
     # GitHub Actions account/org level, not in YAML the fork can edit.
+    needs: changes
     if: >
+      needs.changes.outputs.code == 'true' && (
       github.event_name == 'push' ||
       github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
 
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
@@ -270,19 +365,20 @@ jobs:
 
       - name: Test (mobile)
         run: pnpm --filter @band-app/mobile test
-  # The test jobs run beside `check` and rebuild what they need (the CLI comes
-  # from the restored cargo cache, the web and hub bundles from the pretest
-  # hook or an explicit build), which costs less than waiting on an artifact
-  # hand-off from a serial build job. `check` owns the cache saves.
+  # The test jobs unpack the `build` job's artifact (web client, hub and worker
+  # bundles, release CLI) instead of building it again, so they install
+  # dependencies but skip Rust. `check` owns the cache saves.
   test-hub:
     name: Test (hub) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: [changes, build]
     if: >
+      needs.changes.outputs.code == 'true' && (
       github.event_name == 'push' ||
       github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     strategy:
       fail-fast: false
       matrix:
@@ -297,9 +393,15 @@ jobs:
         uses: actions/checkout@v6
 
       - uses: ./.github/actions/setup-node-rust
+        with:
+          rust: "false"
+
+      - uses: ./.github/actions/use-build
 
       # The remote browser suites skip when no Chromium is found.
       - uses: ./.github/actions/setup-playwright
+        with:
+          browsers: chromium
 
       - name: Test (hub)
         env:
@@ -311,11 +413,13 @@ jobs:
     name: Test (web unit & packages)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: [changes, build]
     if: >
+      needs.changes.outputs.code == 'true' && (
       github.event_name == 'push' ||
       github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
     steps:
@@ -323,14 +427,15 @@ jobs:
         uses: actions/checkout@v6
 
       - uses: ./.github/actions/setup-node-rust
-
-      - uses: ./.github/actions/setup-playwright
+        with:
+          rust: "false"
 
       # The hub build the worker and host-local suites read from dist.
-      - name: Build web and hub
-        run: |
-          pnpm --filter @band-app/web build
-          pnpm --filter @band-app/server build
+      - uses: ./.github/actions/use-build
+
+      - uses: ./.github/actions/setup-playwright
+        with:
+          browsers: chromium
 
       - name: Test (web unit & packages)
         env:
@@ -348,11 +453,13 @@ jobs:
     name: Test e2e (web) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: [changes, build]
     if: >
+      needs.changes.outputs.code == 'true' && (
       github.event_name == 'push' ||
       github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     strategy:
       fail-fast: false
       matrix:
@@ -365,17 +472,16 @@ jobs:
         uses: actions/checkout@v6
 
       - uses: ./.github/actions/setup-node-rust
+        with:
+          rust: "false"
+
+      - uses: ./.github/actions/use-build
 
       - uses: ./.github/actions/setup-playwright
 
       # A real Xvfb and x11vnc for `e2e/desktop-viewer-x11vnc.spec.ts`, which fails on Linux CI without them.
       - name: Install Xvfb and x11vnc
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11vnc x11-utils
-
-      - name: Build web and hub
-        run: |
-          pnpm --filter @band-app/web build
-          pnpm --filter @band-app/server build
 
       - name: Test e2e (web)
         run: pnpm --filter @band-app/web test:e2e --shard=${{ matrix.shard }}/${{ matrix.total }}
@@ -405,11 +511,13 @@ jobs:
       matrix:
         shard: [1, 2, 3]
         total: [3]
+    needs: [changes, build]
     if: >
+      needs.changes.outputs.code == 'true' && (
       github.event_name == 'push' ||
       github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
       BAND_TEST_HOST: remote-loopback
@@ -419,70 +527,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      # Restore only. The `check` job saves these caches.
-      - name: Restore Cargo registry cache
-        uses: actions/cache/restore@v5
+      - uses: ./.github/actions/setup-node-rust
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-${{ runner.os }}-
+          rust: "false"
 
-      - name: Restore CLI target cache
-        uses: actions/cache/restore@v5
-        with:
-          path: apps/cli/target
-          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
-          restore-keys: cargo-cli-${{ runner.os }}-
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Resolve pnpm store path
-        id: pnpm-store
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore pnpm store cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-
-      # Some hub tests shell out to a `band` on PATH.
-      - name: Build CLI
-        run: cargo build --release --manifest-path apps/cli/Cargo.toml
-
-      - name: Install node-gyp
-        run: npm install -g node-gyp
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build web and hub (needed by tests)
-        run: pnpm build:web
-
-      - name: Build worker
-        run: pnpm --filter @band-app/worker build
+      # Includes the CLI some hub tests shell out to, and the worker bundle.
+      - uses: ./.github/actions/use-build
 
       # Installs the packed tarball into an empty directory, runs
       # `band-worker --help` and starts a PTY from that install.
       - name: Worker package smoke
         run: pnpm --filter @band-app/worker pack:smoke
 
-      - name: Install Playwright Chromium (remote browser suite)
-        run: pnpm --filter @band-app/web exec playwright install --with-deps chromium
+      # The remote browser suite skips when no Chromium is found.
+      - uses: ./.github/actions/setup-playwright
+        with:
+          browsers: chromium
 
       - name: Test hub (remote-loopback)
         run: pnpm --filter @band-app/server exec vitest run --shard=${{ matrix.shard }}/${{ matrix.total }}
@@ -494,11 +554,12 @@ jobs:
   # "Lint, Test & Build", the name of the job this split replaced. This job
   # keeps that name and passes only when every split job succeeded. It carries
   # the same fork gate as they do, so it is skipped when they are. A skipped
-  # needed job counts as a failure: none of them is path-filtered.
+  # needed job counts as a failure, except when `changes` found only docs: the
+  # split jobs are skipped then and `changes` itself must have succeeded.
   lint-test-build:
     name: Lint, Test & Build
     runs-on: ubuntu-latest
-    needs: [check, test-hub, test-packages, test-e2e, test-remote-loopback]
+    needs: [changes, build, check, test-hub, test-packages, test-e2e, test-remote-loopback]
     if: >
       always() && (
       github.event_name == 'push' ||
@@ -509,9 +570,15 @@ jobs:
       - name: Require every split job to succeed
         env:
           RESULTS: ${{ toJSON(needs) }}
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null
+          if [ "$CODE_CHANGED" = "false" ]; then
+            echo "Only docs changed: the test jobs are skipped."
+            echo "$RESULTS" | jq -e '.changes.result == "success" and ([to_entries[] | select(.key != "changes") | .value.result] | all(. == "skipped"))' > /dev/null
+          else
+            echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null
+          fi
 
   # ---------------------------------------------------------------------------
   # macOS jobs.

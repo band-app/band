@@ -3,12 +3,20 @@ description: >
   Installs the Rust toolchain, pnpm and Node, restores the cargo and pnpm
   caches, builds the release CLI and runs pnpm install. Restore only: the
   `check` job in ci.yml owns the cache saves. Run actions/checkout first.
+  With `rust: "false"` it skips the toolchain, the cargo caches and the CLI
+  build, for jobs that unpack the CLI from the `build` job's artifact.
+inputs:
+  rust:
+    description: Set to "false" to skip the Rust toolchain, cargo caches and CLI build.
+    default: "true"
 runs:
   using: composite
   steps:
     - uses: dtolnay/rust-toolchain@stable
+      if: inputs.rust != 'false'
 
     - name: Restore Cargo registry cache
+      if: inputs.rust != 'false'
       uses: actions/cache/restore@v5
       with:
         path: |
@@ -18,6 +26,7 @@ runs:
         restore-keys: cargo-registry-${{ runner.os }}-
 
     - name: Restore CLI target cache
+      if: inputs.rust != 'false'
       uses: actions/cache/restore@v5
       with:
         path: apps/cli/target
@@ -45,6 +54,7 @@ runs:
         restore-keys: pnpm-store-${{ runner.os }}-
 
     - name: Build CLI
+      if: inputs.rust != 'false'
       shell: bash
       run: cargo build --release --manifest-path apps/cli/Cargo.toml
 
@@ -55,4 +65,4 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pnpm install --frozen-lockfile
+      run: pnpm install --frozen-lockfile --prefer-offline
