@@ -105,7 +105,7 @@ async function foreground(udid: string): Promise<string> {
 }
 
 test.beforeAll(async () => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
   tmpHome = createTmpHome();
   const hubRepo = join(tmpDir("band-e2e-sim-hubrepo-"), REPO);
   mkdirSync(hubRepo, { recursive: true });
@@ -260,7 +260,7 @@ test.describe("with a Mac worker", () => {
   test("S3, S6: the tab opens from the + menu, shows the screen and survives switching tabs, a reload and closing", async ({
     page,
   }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const sim = new SimulatorPage(page, server.url, TOKEN);
     await sim.open(simWorktree);
     await sim.openFromMenu();
@@ -298,7 +298,7 @@ test.describe("with a Mac worker", () => {
   test("S4: a click does nothing until Take control, then taps at the matching point", async ({
     page,
   }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const sim = new SimulatorPage(page, server.url, TOKEN);
     await sim.open(simWorktree);
     await sim.openFromMenu();
@@ -332,7 +332,7 @@ test.describe("with a Mac worker", () => {
   test("the header controls: the screenshot downloads, Home needs control, Reveal is absent in a browser", async ({
     page,
   }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const sim = new SimulatorPage(page, server.url, TOKEN);
     await sim.open(simWorktree);
     await sim.openFromMenu();
@@ -349,7 +349,7 @@ test.describe("with a Mac worker", () => {
   });
 
   test("the Open simulator button on a simulator tool call opens the tab", async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const sim = new SimulatorPage(page, server.url, TOKEN);
     await sim.open(simWorktree);
     await expect(sim.tab).toHaveCount(0);
@@ -360,7 +360,7 @@ test.describe("with a Mac worker", () => {
   });
 
   test("S9: band simulators open opens the tab for the connected client", async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const sim = new SimulatorPage(page, server.url, TOKEN);
     await sim.open(simWorktree);
     await expect(sim.tab).toHaveCount(0);

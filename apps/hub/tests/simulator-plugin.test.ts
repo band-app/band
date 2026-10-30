@@ -440,9 +440,11 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
 
   it("S3, S4, S5: the stream carries frames through the hub, view-only until control is taken", async () => {
     const screen = await openScreen(a);
+    // The stream boots the device first: a cold boot, with the base device made before it, takes
+    // minutes on a CI runner.
     await waitFor(async () => (screen.frames.length > 2 ? true : undefined), {
       label: "frames",
-      timeoutMs: 60_000,
+      timeoutMs: 360_000,
     });
     // A frame is a JPEG, and the first text message describes the device.
     expect(screen.frames[0]?.subarray(0, 2).toString("hex")).toBe("ffd8");
@@ -506,7 +508,7 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     // locked device shows none of them.
     expect(await labels()).toContain("Maps");
     screen.ws.close();
-  }, 400_000);
+  }, 700_000);
 
   it("S5: an agent's relay token cannot open the stream", async () => {
     await expect(openScreen(a, "brt_not-a-device-token")).rejects.toThrow();

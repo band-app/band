@@ -101,7 +101,7 @@ export class SimulatorPage {
 
   async waitLive(): Promise<void> {
     await test.step("Wait for the live screen", async () => {
-      await expect(this.screen).toHaveAttribute("data-phase", "live", { timeout: 120_000 });
+      await expect(this.screen).toHaveAttribute("data-phase", "live", { timeout: 360_000 });
     });
   }
 
