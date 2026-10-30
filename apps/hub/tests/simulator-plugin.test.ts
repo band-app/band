@@ -427,37 +427,30 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     };
     expect(info.name).toBe(`${PREFIX} \u2013 ${a}`);
 
-    const shot = async () =>
-      imageOf(
-        (await turn(sim, a, `a-shot-${chatCount}`, [call("shot", "simulator_screenshot")]))
-          .shot as ToolReply,
-      )?.data;
-    // A screen that is still animating (an app launching, a spinner) is not a baseline: wait until
-    // two screenshots in a row are the same.
-    const settled = async () => {
-      let last = await shot();
-      for (let i = 0; i < 20; i++) {
-        const next = await shot();
-        if (next === last) return next;
-        last = next;
-      }
-      throw new Error("the screen never settled");
+    // The accessibility labels of the screen are compared, not pixels: an app that has just
+    // launched or a home screen after Home keeps animating, but a different app, the home screen
+    // or a lock screen has different labels.
+    const labels = async () => {
+      const r = await turn(sim, a, `a-labels-${chatCount}`, [call("tree", "simulator_describe")]);
+      const tree = textOf(r.tree as ToolReply) as { elements: Array<{ label?: string }> };
+      return tree.elements.map((e) => e.label ?? "").join("|");
     };
     await turn(sim, a, "a-open-settings", [
       call("open", "simulator_launch", { bundleId: "com.apple.Preferences" }),
       { sleep: 2500 },
     ]);
-    const before = await settled();
+    const before = await labels();
+    expect(before).toContain("Settings");
 
     // View-only: a Home press from the viewer does not reach the device.
     screen.ws.send(JSON.stringify({ type: "button", name: "HOME" }));
     await new Promise((r) => setTimeout(r, 2500));
-    expect(await settled()).toBe(before);
+    expect(await labels()).toBe(before);
 
     // After the control request the same press does.
     screen.ws.send(JSON.stringify({ type: "control", enabled: true }));
     screen.ws.send(JSON.stringify({ type: "button", name: "HOME" }));
-    await waitFor(async () => ((await shot()) !== before ? true : undefined), {
+    await waitFor(async () => ((await labels()) !== before ? true : undefined), {
       label: "Home reached the device",
       timeoutMs: 30_000,
       intervalMs: 1500,
@@ -465,10 +458,11 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
 
     // Releasing stops it again.
     screen.ws.send(JSON.stringify({ type: "control", enabled: false }));
-    const home = await shot();
+    const homeLabels = await labels();
+    expect(homeLabels).toContain("Maps");
     screen.ws.send(JSON.stringify({ type: "button", name: "LOCK" }));
     await new Promise((r) => setTimeout(r, 2500));
-    expect(await shot()).toBe(home);
+    expect(await labels()).toBe(homeLabels);
     screen.ws.close();
   }, 400_000);
 
