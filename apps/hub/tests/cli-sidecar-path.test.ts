@@ -43,14 +43,20 @@ import { findCliBinaryAt, noBinaryError } from "../src/server/services/cli-servi
 
 describe("findCliBinaryAt in packaged Electron layout", () => {
   let tmp: string;
+  // CI sets BAND_CLI_PATH to the CLI it built, and that override wins over the
+  // sidecar lookup these tests exercise.
+  const savedCliPath = process.env.BAND_CLI_PATH;
 
   beforeEach(() => {
+    delete process.env.BAND_CLI_PATH;
     // realpathSync to dodge macOS' /var -> /private/var symlink so the
     // returned path matches the expected sidecar path verbatim.
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-cli-sidecar-")));
   });
 
   afterEach(() => {
+    if (savedCliPath === undefined) delete process.env.BAND_CLI_PATH;
+    else process.env.BAND_CLI_PATH = savedCliPath;
     if (tmp) rmSync(tmp, { recursive: true, force: true });
   });
 
