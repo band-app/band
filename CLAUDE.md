@@ -171,6 +171,8 @@ This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting,
 
 **Always run `/review-and-apply` before pushing code.** This invokes the `review-and-apply` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
 
+PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a path-filtered skip counts as a pass) on that branch before it squash-merges. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
+
 ## Issue tracking
 
 All issues are created in the `band-app/band` GitHub repo.
