@@ -72,6 +72,12 @@ An agent session runs in a Band worker, so its environment carries the worker's 
 - macOS has no `timeout`. Bound a command with `node scripts/with-timeout.mjs <seconds> <command> [args...]`. It stops the whole process group after the limit and exits 124.
 - `pnpm install --ignore-scripts` leaves node-pty's `spawn-helper` non-executable, so terminal tests fail until you run `chmod +x node_modules/node-pty/prebuilds/*/spawn-helper`.
 
+### Where tests run
+
+Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite with the web unit and package suites (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
+
+The `web-macos` job runs the hub suite with `vitest run` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+
 ### Exceptions
 
 - `apps/web/tests/theme-derive.test.ts` calls the pure functions in `apps/web/src/lib/theme/` (color math, surface derivation, contrast) with colors in and CSS variables out. There is no state to fake, and the 4.5:1 contrast guarantee for arbitrary user colors can only be checked across many inputs at this level. The e2e suite `apps/web/e2e/appearance.spec.ts` covers what the user sees.
@@ -182,7 +188,7 @@ This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting,
 
 **Always run `/review-and-apply` before pushing code.** This invokes the `review-and-apply` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
 
-PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a path-filtered skip counts as a pass) on that branch before it squash-merges. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
+PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a skip counts as a pass) on that branch before it squash-merges. Pull requests run Linux jobs, Docker and k8s (kind) only: every macOS job has `github.event_name != 'pull_request'`, so the macOS jobs first run in the merge queue, and a macOS-only failure surfaces there. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
 
 ## Issue tracking
 
