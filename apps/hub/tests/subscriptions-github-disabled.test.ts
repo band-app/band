@@ -72,15 +72,30 @@ describe("github subscriptions with the plugin disabled", () => {
     expect(stubRequests(home, "session/prompt")).toEqual([]);
   });
 
-  it("registers no webhook for a new subscription (S7)", async () => {
-    // The plugin cannot register one, so the subscription records a failure and waits for polling.
-    await trpc(server.url, "subscriptions.create", {
-      source: "github",
-      repo: FULL,
-      branch: "main",
-      chatId: "disabled-chat",
-      worktreeId: WORKTREE_ID,
-    }).catch(() => undefined);
+  it("refuses a PR subscription and records a failed webhook for a CI one (S7)", async () => {
+    // A PR subscription needs the provider's default senders, so it is refused up front.
+    await expect(
+      trpc(server.url, "subscriptions.create", {
+        source: "github",
+        repo: FULL,
+        pr: 7,
+        chatId: "disabled-chat",
+        worktreeId: WORKTREE_ID,
+      }),
+    ).rejects.toThrow(/github plugin is not available/);
+    // A CI subscription is stored, but the plugin can't register a webhook for it.
+    const created = await trpc<{ webhook?: { status: string; error?: string } }>(
+      server.url,
+      "subscriptions.create",
+      {
+        source: "github",
+        repo: FULL,
+        branch: "main",
+        chatId: "disabled-chat",
+        worktreeId: WORKTREE_ID,
+      },
+    );
+    expect(created.webhook?.status).toBe("failed");
     expect(stub.requests.filter((r) => r.positional[1] === `repos/${FULL}/hooks`)).toEqual([]);
   });
 });

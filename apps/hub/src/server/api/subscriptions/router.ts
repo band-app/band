@@ -7,7 +7,10 @@ import {
   SubscriptionChatNotFoundError,
   subscriptionService,
 } from "../../services/subscription-service";
-import { subscriptionSourceService } from "../../services/subscription-source-service";
+import {
+  SubscriptionSourceUnavailableError,
+  subscriptionSourceService,
+} from "../../services/subscription-source-service";
 import { publicProcedure, t } from "../trpc";
 
 /** A subscription as the API shows it: no webhook secret hash. */
@@ -154,6 +157,9 @@ export const subscriptionsRouter = t.router({
           code: "BAD_REQUEST",
           message: err.issues.map((i) => i.message).join("; "),
         });
+      }
+      if (err instanceof SubscriptionSourceUnavailableError) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
       }
       if (err instanceof InvalidTimerError) {
         throw new TRPCError({ code: "BAD_REQUEST", message: err.message });

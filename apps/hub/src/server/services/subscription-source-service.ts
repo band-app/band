@@ -21,6 +21,14 @@ const MAX_SEEN_DELIVERIES = 2000;
 /** The source whose webhook route is `POST /api/hooks/github`. */
 const GITHUB = "github";
 
+/** The plugin behind a subscription source is disabled or failed to load. */
+export class SubscriptionSourceUnavailableError extends Error {
+  constructor(source: string) {
+    super(`The ${source} plugin is not available`);
+    this.name = "SubscriptionSourceUnavailableError";
+  }
+}
+
 export type DeliveryResult = "accepted" | "unauthorized" | "unavailable";
 
 /**
@@ -177,7 +185,7 @@ export class SubscriptionSourceService {
    */
   async defaultSenders(repo: string, source: string = GITHUB): Promise<string[]> {
     const provider = await pluginHost.subscriptionSourceFor(source);
-    if (!provider) throw new Error(`The ${source} plugin is not available`);
+    if (!provider) throw new SubscriptionSourceUnavailableError(source);
     return provider.defaultSenders(repo, subscriptionContext());
   }
 
@@ -219,15 +227,18 @@ export class SubscriptionSourceService {
     const base = publicHubUrl();
     if (!base) return set("waiting-for-url");
     const provider = await pluginHost.subscriptionSourceFor(source);
-    if (!provider) return set("failed", `The ${source} plugin is not available`);
-    const result = await (async () =>
-      provider.registerWebhook(
-        { repo, url: `${base}/api/hooks/${source}`, secret: ensureWebhookSecret() },
-        subscriptionContext(),
-      ))().catch((err) => ({
-      status: "failed" as const,
-      error: err instanceof Error ? err.message.split("\n")[0] : "webhook registration failed",
-    }));
+    if (!provider) return set("failed", new SubscriptionSourceUnavailableError(source).message);
+    const result = await Promise.resolve()
+      .then(() =>
+        provider.registerWebhook(
+          { repo, url: `${base}/api/hooks/${source}`, secret: ensureWebhookSecret() },
+          subscriptionContext(),
+        ),
+      )
+      .catch((err) => ({
+        status: "failed" as const,
+        error: err instanceof Error ? err.message.split("\n")[0] : "webhook registration failed",
+      }));
     if (result.status === "failed") log.warn({ repo }, "could not register webhook");
     set(result.status, result.error);
   }
