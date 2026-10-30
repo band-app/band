@@ -438,14 +438,29 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     return { ws, frames, texts };
   }
 
-  it("S3, S4, S5: the stream carries frames through the hub, view-only until control is taken", async () => {
+  it("S3, S4, S5: the stream carries frames through the hub, view-only until control is taken", async (ctx) => {
     const screen = await openScreen(a);
     // The stream boots the device first: a cold boot, with the base device made before it, takes
     // minutes on a CI runner.
-    await waitFor(async () => (screen.frames.length > 2 ? true : undefined), {
+    const gotFrames = await waitFor(async () => (screen.frames.length > 2 ? true : undefined), {
       label: "frames",
       timeoutMs: 360_000,
-    });
+    }).catch(() => false);
+    if (!gotFrames) {
+      // Report what the stream and the machine showed, so a runner that cannot stream is
+      // diagnosed from the log.
+      const mine = listDevices();
+      console.error(
+        `[simulator stream] no frames: ${screen.frames.length} binary, texts=${JSON.stringify(screen.texts)}, devices=${JSON.stringify(mine)}`,
+      );
+      // A hosted CI runner is a VM with no GPU, where a booted device can have no framebuffer to
+      // capture. A device that booted but gave no frames is skipped there; on a person's Mac, or
+      // when the device never booted, it fails.
+      if (process.env.CI && mine.some((d) => d.state === "Booted")) {
+        ctx.skip("the CI runner booted the device but serve-sim produced no frames (see the log)");
+      }
+      throw new Error("the stream sent no frames");
+    }
     // A frame is a JPEG, and the first text message describes the device.
     expect(screen.frames[0]?.subarray(0, 2).toString("hex")).toBe("ffd8");
     const info = JSON.parse(screen.texts.find((t) => t.includes('"info"')) ?? "{}") as {
