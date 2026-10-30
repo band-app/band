@@ -1,11 +1,10 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { bandHome } from "../db/queries/settings";
-import type { SubscriptionEvent } from "./event";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import type { SourceEvent } from "@band-app/plugin-api";
+import type { CheckTrigger } from "./check-runs";
+import { ciKey, obj, prKey, snippet, str } from "./json";
 
 /** Events the repo webhook is registered for. */
-export const GITHUB_HOOK_EVENTS = [
+export const HOOK_EVENTS = [
   "pull_request",
   "pull_request_review",
   "pull_request_review_comment",
@@ -15,40 +14,6 @@ export const GITHUB_HOOK_EVENTS = [
   "workflow_run",
   "push",
 ] as const;
-
-const SNIPPET_LIMIT = 200;
-
-export const githubPrKey = (repo: string, number: number) => `github:pr:${repo}#${number}`;
-export const githubCiKey = (repo: string, branch: string) => `github:ci:${repo}@${branch}`;
-
-/** Path of the secret GitHub signs deliveries with, when `BAND_GITHUB_WEBHOOK_SECRET` is unset. */
-function secretPath(): string {
-  return join(bandHome(), "github-webhook-secret");
-}
-
-/** The configured secret, or undefined when no webhook was ever registered. Never creates one. */
-export function readWebhookSecret(): string | undefined {
-  const fromEnv = process.env.BAND_GITHUB_WEBHOOK_SECRET;
-  if (fromEnv) return fromEnv;
-  try {
-    const value = readFileSync(secretPath(), "utf8").trim();
-    return value || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The configured secret; generates and stores one (mode 0600) on first use. */
-export function ensureWebhookSecret(): string {
-  const existing = readWebhookSecret();
-  if (existing) return existing;
-  const path = secretPath();
-  if (!existsSync(dirname(path))) mkdirSync(dirname(path), { recursive: true });
-  const secret = randomBytes(32).toString("hex");
-  writeFileSync(path, `${secret}\n`, { mode: 0o600 });
-  chmodSync(path, 0o600);
-  return secret;
-}
 
 /** Constant-time check of an `X-Hub-Signature-256` header (`sha256=<hex>`) against the raw body. */
 export function verifyGithubSignature(
@@ -62,30 +27,8 @@ export function verifyGithubSignature(
   return timingSafeEqual(expected, Buffer.from(match[1], "hex"));
 }
 
-type Json = Record<string, unknown>;
-
-function obj(value: unknown): Json | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : undefined;
-}
-
-function str(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function snippet(text: unknown): string {
-  const flat = str(text).replace(/\s+/g, " ").trim();
-  return flat.length > SNIPPET_LIMIT ? `${flat.slice(0, SNIPPET_LIMIT)}...` : flat;
-}
-
-/** What a completed check payload says about the commit to look at. */
-export interface CheckTrigger {
-  repo: string;
-  branch: string;
-  sha: string;
-}
-
-export type GithubParse =
-  | { type: "events"; events: SubscriptionEvent[] }
+export type WebhookParse =
+  | { type: "events"; events: SourceEvent[] }
   | { type: "check"; trigger: CheckTrigger }
   | { type: "ignored" };
 
@@ -109,7 +52,7 @@ export function parseGithubDelivery(
   delivery: string,
   payload: unknown,
   now = Date.now(),
-): GithubParse {
+): WebhookParse {
   const body = obj(payload);
   const repo = str(obj(body?.repository)?.full_name).toLowerCase();
   if (!body || !repo) return { type: "ignored" };
@@ -121,9 +64,9 @@ export function parseGithubDelivery(
     url: string,
     summary: string,
     sha?: string,
-  ): GithubParse => ({
+  ): WebhookParse => ({
     type: "events",
-    events: [{ id: delivery, source: "github", kind, key, url, actor, summary, at: now, sha }],
+    events: [{ id: delivery, kind, key, url, actor, summary, at: now, sha }],
   });
 
   switch (eventType) {
@@ -135,7 +78,7 @@ export function parseGithubDelivery(
       const verb = merged ? "merged" : action.replaceAll("_", " ");
       const title = snippet(pr.title);
       return event(
-        githubPrKey(repo, number),
+        prKey(repo, number),
         "pull_request",
         str(pr.html_url),
         `${actor} ${verb} ${repo}#${number}${title ? `: ${title}` : ""}`,
@@ -153,7 +96,7 @@ export function parseGithubDelivery(
       const state = str(review.state).toLowerCase().replaceAll("_", " ");
       const text = snippet(review.body);
       return event(
-        githubPrKey(repo, number),
+        prKey(repo, number),
         "review",
         str(review.html_url) || str(pr.html_url),
         `${actor} reviewed ${repo}#${number} (${state || "commented"})${text ? `: ${text}` : ""}`,
@@ -168,7 +111,7 @@ export function parseGithubDelivery(
       }
       const path = snippet(comment.path);
       return event(
-        githubPrKey(repo, number),
+        prKey(repo, number),
         "review_comment",
         str(comment.html_url) || str(pr.html_url),
         `${actor} commented on ${path || "a file"} in ${repo}#${number}: ${snippet(comment.body)}`,
@@ -183,7 +126,7 @@ export function parseGithubDelivery(
         return { type: "ignored" };
       }
       return event(
-        githubPrKey(repo, number),
+        prKey(repo, number),
         "comment",
         str(comment.html_url) || str(issue.html_url),
         `${actor} commented on ${repo}#${number}: ${snippet(comment.body)}`,
@@ -195,7 +138,7 @@ export function parseGithubDelivery(
       const sha = str(body.after);
       if (!branch || body.deleted === true || /^0+$/.test(sha)) return { type: "ignored" };
       return event(
-        githubCiKey(repo, branch),
+        ciKey(repo, branch),
         "push",
         str(body.compare) || `https://github.com/${repo}/tree/${branch}`,
         `${actor} pushed ${sha.slice(0, 7)} to ${repo}@${branch}`,
@@ -272,86 +215,4 @@ export function reviewTargetOf(eventType: string, payload: unknown): ReviewTarge
       return branch ? target(branch, undefined) : { repo };
     }
   }
-}
-
-/** One check on a commit, as the check-runs REST endpoint reports it. */
-export interface CheckRun {
-  name: string;
-  status: string;
-  conclusion: string | null;
-  url?: string;
-  /** The commit the check ran on. */
-  headSha?: string;
-}
-
-const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "action_required", "startup_failure"]);
-
-/** How many check runs one page of the check-runs endpoint holds, and the most it returns. */
-export const CHECK_RUNS_PER_PAGE = 100;
-
-/**
- * Cursor's CI semantics: nothing while any check is still running (the
- * caller waits for the next completion), then one verdict for the commit.
- * `bandPushed` says whether Band pushed the commit; a failure on one it
- * didn't is marked `fix: false`, so the agent only reports it.
- */
-export function aggregateChecks(
-  checks: CheckRun[],
-  trigger: CheckTrigger,
-  now = Date.now(),
-  bandPushed = false,
-): SubscriptionEvent | undefined {
-  if (checks.length === 0 || checks.some((c) => c.status !== "completed")) return undefined;
-  const failed = checks.filter((c) => c.conclusion && FAILED_CONCLUSIONS.has(c.conclusion));
-  const cancelled = checks.filter((c) => c.conclusion === "cancelled");
-  const short = trigger.sha.slice(0, 7);
-  const where = `${short} (${trigger.repo}@${trigger.branch})`;
-  const names = (list: CheckRun[]) => list.map((c) => c.name).join(", ");
-  // A failure outranks a cancellation: the commit needs a fix, not a re-run.
-  let state: "failure" | "cancelled" | "success";
-  let summary: string;
-  let culprit: CheckRun | undefined;
-  if (failed.length > 0) {
-    state = "failure";
-    culprit = failed[0];
-    summary = `${failed.length} of ${checks.length} checks failed on ${where}: ${names(failed)}`;
-  } else if (cancelled.length > 0) {
-    state = "cancelled";
-    culprit = cancelled[0];
-    summary = `${cancelled.length} of ${checks.length} checks were cancelled on ${where}: ${names(cancelled)}`;
-  } else {
-    state = "success";
-    summary = `All ${checks.length} checks passed on ${where}`;
-  }
-  return {
-    id: `ci:${trigger.sha}:${state}`,
-    source: "github",
-    kind: "ci",
-    key: githubCiKey(trigger.repo, trigger.branch),
-    url: culprit?.url || `https://github.com/${trigger.repo}/commit/${trigger.sha}`,
-    actor: "github-checks",
-    summary,
-    at: now,
-    ...(state === "failure" && { fix: bandPushed }),
-  };
-}
-
-/** Parses the check-runs REST response; throws on an unexpected shape. */
-export function parseCheckRuns(output: string): CheckRun[] {
-  const parsed = obj(JSON.parse(output));
-  const runs = parsed?.check_runs;
-  if (!Array.isArray(runs)) throw new Error("Unexpected check-runs response");
-  return runs.flatMap((r) => {
-    const run = obj(r);
-    if (!run) return [];
-    return [
-      {
-        name: str(run.name) || "unnamed check",
-        status: str(run.status),
-        conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
-        url: str(run.html_url) || undefined,
-        headSha: str(run.head_sha) || undefined,
-      },
-    ];
-  });
 }

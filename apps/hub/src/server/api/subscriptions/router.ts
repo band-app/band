@@ -1,13 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { chatService } from "../../services/chat-service";
-import { githubWebhookService } from "../../services/github-webhook-service";
 import {
   InvalidTimerError,
   type Subscription,
   SubscriptionChatNotFoundError,
   subscriptionService,
 } from "../../services/subscription-service";
+import { subscriptionSourceService } from "../../services/subscription-source-service";
 import { publicProcedure, t } from "../trpc";
 
 /** A subscription as the API shows it: no webhook secret hash. */
@@ -115,11 +115,12 @@ export const subscriptionsRouter = t.router({
             ? subscriptionService.createGithubPr({
                 ...base,
                 number: pr,
-                allowedSenders: allowedSenders ?? (await githubWebhookService.defaultSenders(repo)),
+                allowedSenders:
+                  allowedSenders ?? (await subscriptionSourceService.defaultSenders(repo)),
               })
             : subscriptionService.createGithubCi({ ...base, branch: branch as string });
         // Registers the repo webhook (or records that it waits for a public URL).
-        await githubWebhookService.ensureRegistered(subscription);
+        await subscriptionSourceService.ensureRegistered(subscription);
         return present(
           subscriptionService.list({ chatId }).find((s) => s.id === subscription.id) ??
             subscription,
