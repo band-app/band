@@ -6,7 +6,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type ReleasesStub, startReleasesStub } from "./fixtures/github-releases-stub";
-import { seedAcpHome, sendMessage, startAcpServer, TEST_TOKEN } from "./helpers/acp-chat";
+import { seedAcpHome, startAcpServer, TEST_TOKEN } from "./helpers/acp-chat";
 import { seedSettings } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -16,6 +16,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "hub-update-token";
@@ -72,6 +73,16 @@ afterEach(async () => {
 
 const RECORD_ENV = 'printf "%s %s" "$1" "$BAND_HUB_TARGET_VERSION" > "$1"';
 
+/** Posts a chat message the way the browser does, to the hub's own (non-loopback) worktree. */
+async function sendLocalMessage(url: string, chatId: string, text: string): Promise<void> {
+  const res = await fetch(`${url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
+    body: JSON.stringify({ worktreeId: testWorktreeId("testrepo", "main", false), text }),
+  });
+  if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
+}
+
 describe("hub update with a running turn", () => {
   async function bootBusy(): Promise<string> {
     stub = await startReleasesStub("v9.0.0");
@@ -89,6 +100,8 @@ describe("hub update with a running turn", () => {
       home,
       turns: [{ steps: [{ say: "working " }, { waitForCancel: true }] }],
       env: { BAND_GITHUB_API_URL: stub.url, BAND_HUB_VERSION: "0.50.0" },
+      // The loopback worker runs this checkout's version, which a hub reporting 0.50.0 refuses.
+      remoteHost: false,
     });
     await waitFor(
       async () => {
@@ -108,7 +121,7 @@ describe("hub update with a running turn", () => {
   it("refuses without confirmInterruptions, names the turn, and starts once confirmed", async () => {
     const record = await bootBusy();
     const url = server?.url ?? "";
-    const sent = sendMessage(url, "hub-update-busy", "long task");
+    const sent = sendLocalMessage(url, "hub-update-busy", "long task");
     const listed = await waitFor(
       async () => {
         const res = await trpcQuery(url, "workers.hubInterruptions", undefined, TEST_TOKEN);
@@ -138,7 +151,7 @@ describe("hub update with a running turn", () => {
   it("update all passes its confirmation on to the hub while a turn runs", async () => {
     const record = await bootBusy();
     const url = server?.url ?? "";
-    const sent = sendMessage(url, "hub-update-busy-all", "long task");
+    const sent = sendLocalMessage(url, "hub-update-busy-all", "long task");
     await waitFor(
       async () => {
         const res = await trpcQuery(url, "workers.hubInterruptions", undefined, TEST_TOKEN);
