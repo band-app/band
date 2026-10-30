@@ -310,7 +310,7 @@ afterAll(async () => {
   await new Promise((r) => setTimeout(r, 3000));
   sim?.child.kill("SIGKILL");
   bare?.child.kill("SIGKILL");
-  cleanupDevices();
+  if (CAN_RUN) cleanupDevices();
   await server?.close();
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
 }, 120_000);

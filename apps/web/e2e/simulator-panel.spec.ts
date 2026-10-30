@@ -216,7 +216,8 @@ test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
   await worker?.kill();
-  for (const d of myDevices()) {
+  // Without Xcode (the Linux e2e job) no device was created and there is no xcrun to ask.
+  for (const d of CAN_RUN ? myDevices() : []) {
     try {
       execFileSync("xcrun", ["simctl", "shutdown", d.udid], { stdio: "ignore" });
     } catch {}
