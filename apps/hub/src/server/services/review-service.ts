@@ -2,14 +2,18 @@ import { tmpdir } from "node:os";
 import { gitRunner } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX, getRepoInfo } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
-import type {
-  MergeMethod,
-  ProviderContext,
-  RepoInfo,
-  RerunTarget,
-  ReviewInfo,
-  ReviewProvider,
-  WorktreeReview,
+import {
+  type MergeMethod,
+  type ProviderContext,
+  REVIEW_ACTION_MERGE,
+  REVIEW_ACTION_RERUN_FAILED,
+  REVIEW_ACTION_RERUN_JOB,
+  type RepoInfo,
+  type RerunTarget,
+  type ReviewActionArgs,
+  type ReviewInfo,
+  type ReviewProvider,
+  type WorktreeReview,
 } from "@band-app/plugin-api";
 import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
@@ -37,6 +41,8 @@ export class ReviewProviderError extends Error {
     this.name = "ReviewProviderError";
   }
 }
+
+const RERUN_ACTIONS = new Set([REVIEW_ACTION_RERUN_JOB, REVIEW_ACTION_RERUN_FAILED]);
 
 type Target =
   | { ok: true; repo: RepoInfo; branch: string; ctx: ProviderContext; provider: ReviewProvider }
@@ -72,7 +78,7 @@ export class ReviewService {
       if (applyCIStatus(worktreeId, ciSummaryFromChecks(checks, review))) requestCIRefresh();
       return {
         status: "ok",
-        provider: { id: provider.id, name: provider.name },
+        provider: { id: provider.id, name: provider.name, fixHint: provider.fixHint },
         repo,
         branch,
         review,
@@ -86,40 +92,65 @@ export class ReviewService {
     }
   }
 
-  async merge(worktreeId: string, method: MergeMethod): Promise<void> {
+  /** The provider that serves the worktree's repo. Runs no forge command. */
+  async providerFor(
+    worktreeId: string,
+  ): Promise<{ id: string; name: string; fixHint: string } | null> {
+    const target = await this.resolve(worktreeId);
+    if (!target.ok) return null;
+    const { id, name, fixHint } = target.provider;
+    return { id, name, fixHint };
+  }
+
+  /**
+   * Run one of the actions the provider offered on the worktree's open review. Rejects with
+   * `NoOpenReviewError` when there is no open review, `ReviewProviderError` with the forge's message
+   * when the provider refuses.
+   */
+  async runAction(worktreeId: string, actionId: string, args: ReviewActionArgs): Promise<void> {
     const target = await this.resolve(worktreeId);
     if (!target.ok) throw new NoOpenReviewError(worktreeId);
     const { repo, branch, ctx, provider } = target;
-    if (!provider.merge) throw new NoOpenReviewError(worktreeId);
 
-    let review: ReviewInfo | null;
-    try {
-      review = await provider.getReviewForBranch(repo, branch, ctx);
-    } catch (err) {
-      throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
+    // Re-running CI jobs needs no review: a branch with no pull request has jobs too. The re-run
+    // actions do not read the review number.
+    let number = 0;
+    if (!RERUN_ACTIONS.has(actionId)) {
+      let review: ReviewInfo | null;
+      try {
+        review = await provider.getReviewForBranch(repo, branch, ctx);
+      } catch (err) {
+        throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
+      }
+      if (!review || (review.state !== "open" && review.state !== "draft")) {
+        throw new NoOpenReviewError(worktreeId);
+      }
+      number = review.number;
     }
-    if (!review || (review.state !== "open" && review.state !== "draft")) {
-      throw new NoOpenReviewError(worktreeId);
-    }
     try {
-      await provider.merge(repo, review.number, method, ctx);
+      await provider.runAction(repo, number, actionId, args, ctx);
     } catch (err) {
       throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
     }
   }
 
+  /** `reviews.merge`, kept for the mobile app: the `merge` action with the chosen method. */
+  merge(worktreeId: string, method: MergeMethod): Promise<void> {
+    return this.runAction(worktreeId, REVIEW_ACTION_MERGE, { method });
+  }
+
+  /** `reviews.rerunChecks`, kept for the mobile app: one action per target, stopping at the first refusal. */
   async rerunChecks(worktreeId: string, targets: RerunTarget[]): Promise<void> {
-    const target = await this.resolve(worktreeId);
-    if (!target.ok) throw new NoOpenReviewError(worktreeId);
-    const { repo, ctx, provider } = target;
-    if (!provider.rerunChecks) {
-      throw new ReviewProviderError(`${provider.name} cannot run checks again.`);
-    }
     for (const item of targets) {
-      try {
-        await provider.rerunChecks(repo, item, ctx);
-      } catch (err) {
-        throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
+      if (item.failedOnly) {
+        await this.runAction(worktreeId, REVIEW_ACTION_RERUN_FAILED, { runId: item.runId });
+      } else if (item.jobId) {
+        await this.runAction(worktreeId, REVIEW_ACTION_RERUN_JOB, {
+          runId: item.runId,
+          jobId: item.jobId,
+        });
+      } else {
+        throw new ReviewProviderError("Name a job to run again, or ask for the failed jobs.");
       }
     }
   }

@@ -24,7 +24,6 @@
     "@band-app/client": "workspace:^",
     "@band-app/server": "workspace:^",
     "@band-app/plugin-api": "workspace:^",
-    "@band-app/plugin-github": "workspace:^",
     "@band-app/shared": "workspace:^",
     "@band-app/ui": "workspace:^",
     "@codemirror/autocomplete": "^6.20.1",

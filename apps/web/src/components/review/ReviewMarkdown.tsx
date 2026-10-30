@@ -1,7 +1,7 @@
 import { cn } from "@band-app/ui";
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from "react";
 import { Streamdown } from "streamdown";
-import { streamdownComponents, streamdownPlugins } from "../components/streamdown-components";
+import { streamdownComponents, streamdownPlugins } from "../streamdown-components";
 
 const SharedLink = streamdownComponents.a;
 
@@ -26,10 +26,10 @@ function AltOnlyImage({ alt }: ImgHTMLAttributes<HTMLImageElement> & { node?: un
   return alt ? <span>{alt}</span> : null;
 }
 
-const pluginComponents = { ...streamdownComponents, a: SafeLink, img: AltOnlyImage };
+const reviewComponents = { ...streamdownComponents, a: SafeLink, img: AltOnlyImage };
 
-/** Markdown for plugin UI. Streamdown sanitises the tree, links are limited to http(s) and images are not loaded. */
-export function PluginMarkdown({ children, className }: { children: string; className?: string }) {
+/** Markdown for the review panel. Streamdown sanitises the tree, links are limited to http(s) and images are not loaded. */
+export function ReviewMarkdown({ children, className }: { children: string; className?: string }) {
   return (
     <Streamdown
       className={cn(
@@ -37,7 +37,7 @@ export function PluginMarkdown({ children, className }: { children: string; clas
         className,
       )}
       plugins={streamdownPlugins}
-      components={pluginComponents}
+      components={reviewComponents}
     >
       {children}
     </Streamdown>

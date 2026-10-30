@@ -5,21 +5,13 @@
   "type": "module",
   "exports": {
     "./band-plugin.json": "./band-plugin.json",
-    "./server": "./src/server/index.ts",
-    "./client": "./src/client/index.tsx"
+    "./server": "./src/server/index.ts"
   },
   "dependencies": {
-    "@band-app/client": "workspace:^",
-    "@band-app/plugin-api": "workspace:^",
-    "@band-app/ui": "workspace:^",
-    "lucide-react": "^0.576.0"
+    "@band-app/plugin-api": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.19.13",
-    "@types/react": "^19.0.0",
     "typescript": "^5.7.0"
-  },
-  "peerDependencies": {
-    "react": "^19.0.0"
   }
 }

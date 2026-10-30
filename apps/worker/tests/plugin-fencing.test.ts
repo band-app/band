@@ -79,41 +79,38 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
     cleanup(w.root, w.stateDir);
   });
 
-  it(
-    "shuts the worktree's device down when the lease runs out and refuses calls until the hub renews",
-    async () => {
-      await renew(120_000);
-      await status();
-      assert.equal(devices().filter((d) => d.state === "Booted").length, 1);
+  it("shuts the worktree's device down when the lease runs out and refuses calls until the hub renews", { // A CI runner boots a cold device in a minute or more, longer than the package's 90 s default.
+    timeout: 8 * 60_000,
+  }, async () => {
+    await renew(120_000);
+    await status();
+    assert.equal(devices().filter((d) => d.state === "Booted").length, 1);
 
-      // Stop renewing and let the lease run out: a short renewal makes it quick.
-      await renew(1000);
-      await waitFor(
-        async () => devices().every((d) => d.state !== "Booted"),
-        60_000,
-        "the fence shuts the device down",
-      );
-      assert.equal(devices().length, 2, "the device and the base device are kept");
-      // A slow runner can drop the link while the fence snapshots. The session resumes, and the
-      // fence holds across the redial, so a call that met the drop is made again.
-      let refusal = "";
-      for (let attempt = 0; attempt < 20 && !refusal; attempt++) {
-        try {
-          await status();
-          assert.fail("a fenced worker answered a plugin call");
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          if (/link dropped|link closed/i.test(message))
-            await new Promise((r) => setTimeout(r, 1000));
-          else refusal = message;
-        }
+    // Stop renewing and let the lease run out: a short renewal makes it quick.
+    await renew(1000);
+    await waitFor(
+      async () => devices().every((d) => d.state !== "Booted"),
+      60_000,
+      "the fence shuts the device down",
+    );
+    assert.equal(devices().length, 2, "the device and the base device are kept");
+    // A slow runner can drop the link while the fence snapshots. The session resumes, and the
+    // fence holds across the redial, so a call that met the drop is made again.
+    let refusal = "";
+    for (let attempt = 0; attempt < 20 && !refusal; attempt++) {
+      try {
+        await status();
+        assert.fail("a fenced worker answered a plugin call");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/link dropped|link closed/i.test(message))
+          await new Promise((r) => setTimeout(r, 1000));
+        else refusal = message;
       }
-      assert.match(refusal, /lost the hub's lease/);
+    }
+    assert.match(refusal, /lost the hub's lease/);
 
-      const reply = await renew(60_000);
-      assert.equal(reply.fenced, true);
-      // A CI runner boots a cold device in a minute or more, longer than the package's 90 s default.
-    },
-    { timeout: 8 * 60_000 },
-  );
+    const reply = await renew(60_000);
+    assert.equal(reply.fenced, true);
+  });
 });

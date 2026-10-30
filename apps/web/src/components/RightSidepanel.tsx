@@ -342,7 +342,7 @@ function RightSidepanelInner({
   headerActions?: React.ReactNode;
 }) {
   const [activeTab, setActiveTab] = useState<RightTab>(() => loadActiveTab());
-  const pluginTabs = useWorktreeSideTabs();
+  const pluginTabs = useWorktreeSideTabs(worktreeId);
   const activePluginTab = pluginTabs.find((t) => `plugin:${t.key}` === activeTab);
   // A saved tab this view does not have (a disabled plugin's) shows Explorer.
   const shownTab = activeTab.startsWith("plugin:") && !activePluginTab ? "explorer" : activeTab;

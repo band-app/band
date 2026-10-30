@@ -350,9 +350,6 @@ importers:
       '@band-app/plugin-api':
         specifier: workspace:^
         version: link:../../packages/plugin-api
-      '@band-app/plugin-github':
-        specifier: workspace:^
-        version: link:../../plugins/github
       '@band-app/server':
         specifier: workspace:^
         version: link:../hub
@@ -958,28 +955,13 @@ importers:
 
   plugins/github:
     dependencies:
-      '@band-app/client':
-        specifier: workspace:^
-        version: link:../../packages/client
       '@band-app/plugin-api':
         specifier: workspace:^
         version: link:../../packages/plugin-api
-      '@band-app/ui':
-        specifier: workspace:^
-        version: link:../../packages/ui
-      lucide-react:
-        specifier: ^0.576.0
-        version: 0.576.0(react@19.2.4)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
     devDependencies:
       '@types/node':
         specifier: ^22.19.13
         version: 22.19.13
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.14
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
