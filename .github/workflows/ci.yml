@@ -183,6 +183,9 @@ jobs:
       - name: Test (CLI)
         run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 
+      - name: Build docs site (link and phrase checks)
+        run: pnpm --filter @band-app/docs build
+
       # Cache writes (defence-in-depth). Even though our CI trigger is now
       # `pull_request` (PR-scoped cache writes can't poison main), gating the
       # save explicitly on a trusted event ensures a future workflow change
@@ -1436,7 +1439,7 @@ jobs:
       - name: Check for docs changes
         id: changes
         run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD -- apps/website/ || true)
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- apps/website/ docs/ || true)
           if [ -z "$CHANGED" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else

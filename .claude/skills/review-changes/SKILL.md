@@ -21,7 +21,7 @@ You never modify files yourself. You never paraphrase findings. You never compos
 
 | Specialist | Criteria | Scope |
 |---|---|---|
-| `coding-reviewer`      | `.claude/coding-criteria.md`      (`CODE-1`…`CODE-19`) | production source code |
+| `coding-reviewer`      | `.claude/coding-criteria.md`      (`CODE-1`…`CODE-20`) | production source code |
 | `testing-reviewer`     | `.claude/testing-criteria.md`     (`TEST-1`…`TEST-35`) | tests, fixtures, page objects |
 | `security-reviewer`    | `.claude/security-criteria.md`    (`SEC-1`…`SEC-15`)   | source, tests, config, scripts |
 | `performance-reviewer` | `.claude/performance-criteria.md` (`PERF-1`…`PERF-10`) | production source, hot paths |

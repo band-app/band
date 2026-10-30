@@ -4,48 +4,65 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 const faqs = [
   {
     q: "How is Band different from Cursor or VS Code with AI built in?",
-    a: "Cursor and VS Code are general-purpose editors that bolt agent features onto an interface designed for human keystrokes. Band flips that — it's an IDE designed for agent-driven work first, with hands-on editing as a secondary mode. You can run multiple agents in parallel (each in its own git worktree), schedule recurring agent tasks via cron, swap between Claude Code, Codex, and OpenCode per worktree, and check on long-running tasks from your phone. When you do want to edit by hand, one click opens the active worktree in Cursor, VS Code, JetBrains, Zed, or Xcode — pick whichever you prefer.",
+    a: "Cursor and VS Code are editors with agent features added to an interface built for typing. Band is built around agents first, with hand editing as a secondary mode. You run several agents in parallel, each in its own git worktree, schedule recurring prompts with cronjobs, pick Claude Code, Codex, OpenCode, Gemini CLI, or Cursor CLI per chat, and check on long tasks from your phone. When you want to edit by hand, one click opens the active worktree in Cursor, VS Code, JetBrains, Zed, or Xcode.",
   },
   {
     q: "What coding agents work with Band?",
-    a: "Band currently supports three coding agents: Claude Code, Codex (via the standalone CLI), and OpenCode. They are auto-detected on first launch from the binaries on your PATH (claude, codex, opencode). The agent adapter pattern makes it straightforward to add new ones. You can configure which agents are available and pick a default in Settings, then override per chat pane.",
+    a: "Five: Claude Code, Codex, OpenCode, Gemini CLI, and Cursor CLI. Band talks to each over the Agent Client Protocol (ACP), so a chat shows the same messages, tool calls, and permission prompts whichever agent runs it. Each agent also runs in a terminal tab with its own CLI. You configure the agents in Settings > Coding Agents and choose one per chat. The agent CLI must be installed and logged in on the machine that runs the worktree, or you give the hub an API key or token under Settings > Agent logins.",
   },
   {
     q: "Is Band open source?",
-    a: "Yes. Band is open source and available on GitHub under the MIT license. You can inspect the code, contribute, and build on top of it.",
+    a: "Yes. Band is open source on GitHub under the MIT license.",
   },
   {
     q: "Does Band work on Linux or Windows?",
-    a: "The desktop app is macOS-only for now. However, the web interface works on any platform with a browser. If you're running the Band server on a Mac, you can access the dashboard from a Linux or Windows machine via the built-in Cloudflare tunnel or by pointing your browser to the server URL.",
+    a: "The desktop app is macOS only, and the download is built for Apple Silicon. The hub (the server) and the workers (the machines that run worktrees and agents) run on Linux x64 and arm64 and on macOS, from npm or Docker images. Windows is not supported yet. You can open the dashboard from any browser, including on Windows, once a hub is running.",
+  },
+  {
+    q: "What are the hub and the workers?",
+    a: "The hub stores your repos, chats, and settings, and serves the UI. A worker is a computer that runs worktrees, agents, and terminals. The hub's own machine is a worker called local. You can add more workers, such as a Linux server or a cloud VM. Each one dials the hub, so a worker needs no open inbound port. See the architecture page for the full picture.",
+  },
+  {
+    q: "Can I run Band on a server?",
+    a: "Yes. The hub ships as an npm package and as Docker images, with a Docker Compose file and a Caddy profile for HTTPS. You then connect the desktop app, a browser, or the iOS app to it, and add workers with a one-line install command. The docs have a guide for the hub on a server and one for adding workers.",
   },
   {
     q: "How does Band relate to Claude Code, Codex, or OpenCode?",
-    a: "Those are coding agents — they write the code. Band is the IDE you watch them in. Band doesn't ship a model or an agent of its own; it dispatches your prompts to whichever agent CLI you have installed (claude, codex, opencode) and shows you the chat, the file changes, and the worktree state in one window. You can mix and match: Claude Code in one worktree, Codex in another, OpenCode in a third.",
+    a: "Those are coding agents. They write the code. Band is where you run and watch them. Band ships no model and no agent of its own. It starts the agent you pick, passes your prompt, and shows the chat, the file changes, and the state of each worktree. You can use Claude Code in one worktree and Codex in another.",
   },
   {
     q: "Can I use Band without a coding agent?",
-    a: "Yes. Even without a coding agent, Band is useful for managing git worktrees across repos. You can create isolated worktrees, organize repos, and use the window management features to quickly switch between different branches and IDE setups.",
+    a: "Yes. Band also manages git worktrees across repos, with terminals, a file explorer, a diff view, and browser tabs for each worktree.",
   },
   {
     q: "How does Band create worktrees?",
-    a: "Band uses git worktrees under the hood. Each worktree gets its own directory with a separate working tree and branch, all sharing the same git repository. This means you can have multiple branches checked out simultaneously without conflicts.",
+    a: "Band uses git worktrees. Each worktree has its own folder and branch and shares the repository's git data, so you can have several branches checked out at once. A plain folder that is not a git repo also works as a repo, with one worktree.",
   },
   {
     q: "What is a cronjob in Band?",
-    a: "Cronjobs are scheduled agent tasks. You define a cron expression (like \"every day at 9am\") and a prompt, and Band will automatically create a worktree and dispatch the task to a coding agent on schedule. Great for automated code reviews, dependency updates, and daily reports.",
+    a: "A cronjob sends a prompt to a coding agent on a cron schedule. A job belongs to one existing worktree and can pin an agent and a session. If the chat is busy when the job fires, the prompt joins the chat's queue. A cronjob does not create a worktree.",
+  },
+  {
+    q: "Is there a mobile app?",
+    a: "Yes. The iOS app connects to your hub and shows your worktrees, chats, files, and checks. You pair it with a link or QR code from Settings > Devices. The hub must be reachable from the phone, for example over Tailscale, a Cloudflare tunnel, or an HTTPS address of your own.",
   },
   {
     q: "How does remote access work?",
-    a: "Band has a built-in Cloudflare tunnel integration. When enabled, it creates a secure tunnel from your machine to a public URL, letting you access the dashboard from your phone or another computer. Authentication is handled via tokens, and you can scan a QR code for quick mobile access.",
+    a: "Every browser, phone, and desktop app signs in to the hub with a device token. In Settings > Devices you create a device and get a sign-in link, a QR code, or a one-time pairing code. To reach the hub from outside your network, you can start the built-in Cloudflare tunnel, use Tailscale, or put the hub behind your own HTTPS address.",
+  },
+  {
+    q: "Where are my tokens and credentials stored?",
+    a: "On the hub. The hub stores only a SHA-256 hash of each device and worker token. API keys and other credentials go in the hub's vault, encrypted with AES-256-GCM, and no API returns a stored secret. The hub hands a worker a git token only when git asks for it, and it adds MCP server credentials itself, so an agent does not hold them.",
   },
   {
     q: "How much does Band cost?",
-    a: "Band is free and open source. You'll need your own API keys or subscriptions for the coding agents you use (Claude Code, Codex, OpenCode), but Band itself has no cost.",
+    a: "Band is free and open source. You need your own subscriptions or API keys for the coding agents you use.",
   },
 ];
+
 ---
 
-<BaseLayout title="FAQ — Band" description="Frequently asked questions about Band, the agent-first IDE for AI coding.">
+<BaseLayout title="FAQ | Band" description="Frequently asked questions about Band, the agent-first IDE for AI coding.">
   <main class="pt-16">
     <section class="py-20 md:py-28">
       <div class="mx-auto max-w-3xl px-6">
@@ -53,7 +70,7 @@ const faqs = [
           Frequently Asked Questions
         </h1>
         <p class="mt-4 text-lg text-muted-foreground">
-          Common questions about Band, the agents and editors it works with, and how it differs from a traditional IDE.
+          Common questions about Band, the agents it runs, hubs and workers, and how it differs from an editor with AI built in.
         </p>
 
         <div class="mt-12 space-y-8">

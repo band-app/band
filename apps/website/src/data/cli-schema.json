@@ -1,0 +1,1637 @@
+{
+  "commands": [
+    {
+      "description": "List registered repos",
+      "name": "repos list",
+      "notes": "Text output: `name\\tpath\\tN worktree(s)` (tab-separated).\nJSON output: `{\"repos\": [{\"name\": \"...\", \"path\": \"...\", \"worktreeCount\": N}]}`",
+      "parameters": []
+    },
+    {
+      "description": "Register an existing repository as a repo",
+      "name": "repos add",
+      "notes": "Registers an existing git repository. Detects the default branch automatically. Returns the repo name.",
+      "parameters": [
+        {
+          "description": "Path to the git repository",
+          "name": "path",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Change a repo's settings",
+      "name": "repos set",
+      "notes": "`--workers` is a hard rule: creating a worktree, cloning or placing the repo on any other worker fails with `<repo> is only available on <workers>`. Needs an admin token. A branch exists as a worktree on one worker only, and the repo lists its default-branch worktree from its primary worker.",
+      "parameters": [
+        {
+          "description": "Repo name",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Workers the repo may run on (ids or names, comma separated), or `all`",
+          "name": "--workers",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Worker that lists the repo's default-branch worktree (id or name), or `auto`",
+          "name": "--primary",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Whether the hub keeps checkpoints of the repo's worktrees: on, off or default",
+          "name": "--checkpoints",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Whether a worktree on an offline worker continues on another worker without asking: on or off",
+          "name": "--auto-continue",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Unregister a repo",
+      "name": "repos remove",
+      "notes": "Removes the repo from Band's registry (does not delete the repository).",
+      "parameters": [
+        {
+          "description": "Repo name",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List worktrees, optionally filtered by repo",
+      "name": "worktrees list",
+      "notes": "Text output is a table whose last column, ORIGIN, is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone).\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"worktreeId\": \"...\", \"path\": \"...\", \"origin\": {\"worktreeId\": \"...\", \"chatId\": \"...\", \"removed\": false} | null, \"children\": [\"<worktree id>\"]}]}`",
+      "parameters": [
+        {
+          "description": "Repo name (optional filter)",
+          "name": "repo",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Create a new worktree (git worktree + state registration)",
+      "name": "worktrees create",
+      "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the worktree's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a worktree and implement X\" or \"start working on X\"\nband worktrees create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a worktree for issue #99 and start implementing\"\nband worktrees create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband worktrees create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a worktree, I'll work on it myself\"\nband worktrees create my-app feat/experiment\n```\n\n**Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.",
+      "parameters": [
+        {
+          "description": "Repo name",
+          "name": "repo",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Branch name",
+          "name": "branch",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Base branch to create from (defaults to repo's default branch)",
+          "name": "--base",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Prompt to pass to the coding agent",
+          "name": "--prompt",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Agent mode (e.g. 'plan', 'edit')",
+          "name": "--mode",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')",
+          "name": "--model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Coding agent ID to use (overrides worktree default)",
+          "name": "--agent",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Where to dispatch --prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a PTY). Defaults to 'terminal' from the CLI.",
+          "name": "--via",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Worktree id to record as the origin (where this work was started from). Defaults to the current worktree ($BAND_WORKTREE_ID).",
+          "name": "--origin",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Record no origin, even inside a Band chat or terminal",
+          "name": "--no-origin",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "Group id or name for the new worktree (default: the origin's group)",
+          "name": "--group",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Move a worktree into a group, or out of its group",
+      "name": "worktrees set-group",
+      "notes": "Prints each worktree that moved. Agents may use this command, but cannot create, rename or delete groups.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "worktree",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Group id or name (omit with --none)",
+          "name": "group",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Take the worktree out of its group",
+          "name": "--none",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "Also move every worktree started from this one",
+          "name": "--with-children",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Mark a worktree unread so every device shows its unread dot",
+      "name": "worktrees mark-unread",
+      "notes": "The dot stays until someone opens the worktree or runs `worktrees mark-read`.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "worktree",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Mark a worktree read, clearing the unread dot and a done/failed dot",
+      "name": "worktrees mark-read",
+      "notes": "Also clears a `done` or `failed` agent status dot.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "worktree",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Give a worktree a title shown in place of its name, or clear it",
+      "name": "worktrees rename",
+      "notes": "Changes only what the sidebar shows. The worktree id, folder and git branch stay the same. Agents may use this command for worktrees on their own worker.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "worktree",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "New title, at most 100 characters (omit with --clear)",
+          "name": "title",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Clear the title, so the name shows again",
+          "name": "--clear",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "List groups in sidebar order",
+      "name": "groups list",
+      "notes": "JSON output: `{\"groups\": [{\"id\": \"...\", \"name\": \"...\", \"color\": \"...\"}]}`",
+      "parameters": []
+    },
+    {
+      "description": "Create a group",
+      "name": "groups create",
+      "notes": "Prints the new group's id. Not available to an agent on a worker.",
+      "parameters": [
+        {
+          "description": "Group name",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Group color",
+          "name": "--color",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Rename a group",
+      "name": "groups rename",
+      "notes": "Not available to an agent on a worker.",
+      "parameters": [
+        {
+          "description": "Group id or name",
+          "name": "group",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "New name",
+          "name": "new-name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Delete a group. Its worktrees become ungrouped",
+      "name": "groups remove",
+      "notes": "Not available to an agent on a worker.",
+      "parameters": [
+        {
+          "description": "Group id or name",
+          "name": "group",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Remove a worktree (git worktree + state cleanup)",
+      "name": "worktrees remove",
+      "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the worktree first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files.",
+      "parameters": [
+        {
+          "description": "Repo name",
+          "name": "repo",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Worktree name (the branch it was created on — its stable identity)",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Worker the worktree lives on (see `band workers`). Needed when the same repo and name exist on more than one worker.",
+          "name": "--worker",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Move a worktree to another worker while its worker is online",
+      "name": "worktrees move",
+      "notes": "Takes a fresh checkpoint, restores it on the target (branch, uncommitted and untracked files, agent session, chats), and removes the source worktree only after the target has the same files. Running processes and ignored files are not carried.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Target worker (id or name)",
+          "name": "--to",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Add the target worker to the repo's allowed workers if missing (admin token)",
+          "name": "--add-worker",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Restore a worktree on another worker from a checkpoint",
+      "name": "worktrees restore",
+      "notes": "Works when the old worker is offline. The old copy is never touched: it is listed as superseded and a person removes it with `band worktrees remove`.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Target worker (id or name)",
+          "name": "--to",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Checkpoint ID (default: the newest)",
+          "name": "--checkpoint",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Add the target worker to the repo's allowed workers if missing (admin token)",
+          "name": "--add-worker",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Continue a worktree on another worker when its worker is offline",
+      "name": "worktrees continue",
+      "notes": "Restores the worktree from the hub's latest checkpoint on an online worker the repo may run on: the branch, uncommitted and untracked files, the agent sessions and the chats. Runs the repo's setup on the new copy and records the move on it. The old copy is never deleted: when its worker comes back it is listed as superseded, flagged diverged when it holds changes the checkpoint lacks. Ignored files and running processes are not carried. Refused with a reason when the worker is online (use `worktrees move`), the repo is limited to the offline worker, checkpoints are off, no allowed worker is online or the agent is not available on another worker.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Target worker (id or name). Default: the worker the hub recommends",
+          "name": "--to",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Set or remove a worktree's parent (the worktree it was started from)",
+      "name": "worktrees set-origin",
+      "notes": "Rejects the worktree itself and any of its descendants as the parent. A manual parent records no chat or terminal.",
+      "parameters": [
+        {
+          "description": "Repo name",
+          "name": "repo",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Worktree name",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Worker the worktree is on (default: local)",
+          "name": "--worker",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Parent worktree ID. Required unless --none",
+          "name": "--origin",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Remove the parent",
+          "name": "--none",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "List the hub's checkpoints of a worktree",
+      "name": "worktrees checkpoints",
+      "notes": "Text output: `ID  TAKEN  TRIGGER  SIZE  TREE  BRANCH`, plus a warning when a checkpoint was skipped for size.\nJSON output: `{\"checkpoints\": [...], \"warning\": null, \"taken\": null}`.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Take a checkpoint first",
+          "name": "--take",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Move every worktree on a worker to another worker, one after the other",
+      "name": "workers evacuate",
+      "notes": "Needs an admin token. An online worker moves its worktrees; an offline worker restores them from their last checkpoints. Prints one line per worktree and exits non-zero if any failed.",
+      "parameters": [
+        {
+          "description": "Source worker (id or name)",
+          "name": "worker",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Target worker (id or name)",
+          "name": "--to",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Add the target worker to the allowed workers of repos that lack it",
+          "name": "--add-worker",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Show current settings",
+      "name": "settings",
+      "notes": "Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON.",
+      "parameters": []
+    },
+    {
+      "description": "Print the CLI version and the hub version",
+      "name": "version",
+      "notes": "Prints `CLI: <version>` and `Hub: <version>`, or `Hub: unreachable` when the hub does not answer. `band --version` prints only the CLI version and needs no hub. With `--output json`, prints `{\"cli\": ..., \"hub\": ... | null}`.",
+      "parameters": []
+    },
+    {
+      "description": "Show tunnel status",
+      "name": "tunnel status",
+      "notes": "Shows whether the tunnel is running and its URL.",
+      "parameters": []
+    },
+    {
+      "description": "Start the remote tunnel",
+      "name": "tunnel start",
+      "notes": "Starts the remote tunnel. Returns the tunnel URL.",
+      "parameters": []
+    },
+    {
+      "description": "Stop the remote tunnel",
+      "name": "tunnel stop",
+      "notes": "Stops the remote tunnel.",
+      "parameters": []
+    },
+    {
+      "description": "List cronjobs, optionally filtered by worktree",
+      "name": "cronjobs list",
+      "parameters": [
+        {
+          "description": "Filter by worktree ID",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Create a new scheduled cronjob in a worktree",
+      "name": "cronjobs create",
+      "parameters": [
+        {
+          "description": "Worktree ID the job fires into (the default-branch worktree or any other)",
+          "name": "--worktree",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Coding agent ID the job's chat runs (default agent when omitted)",
+          "name": "--agent",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Agent session ID. Each fire goes to the chat whose active session is this ID, or opens a new chat on that session. Chat dispatch only.",
+          "name": "--session-id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Human-readable name for the job",
+          "name": "--name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Prompt text to send to the coding agent",
+          "name": "--prompt",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Cron expression (e.g. \"0 */6 * * *\")",
+          "name": "--cron",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Where each fire dispatches the prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a fresh self-closing PTY). Defaults via the same precedence as 'worktrees create' (--via > BAND_DISPATCH > config > settings > terminal).",
+          "name": "--via",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Create the job in disabled state",
+          "name": "--disabled",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Update an existing cronjob",
+      "name": "cronjobs update",
+      "parameters": [
+        {
+          "description": "Worktree ID the job belongs to",
+          "name": "key",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Cronjob ID (e.g. cj_1234567890)",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Move the job to another worktree",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Coding agent ID the job's chat runs",
+          "name": "--agent",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Agent session ID the job pins to (chat dispatch only)",
+          "name": "--session-id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Stop pinning the job to a session",
+          "name": "--clear-session",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "New name",
+          "name": "--name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "New prompt",
+          "name": "--prompt",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "New cron expression",
+          "name": "--cron",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Enable the job",
+          "name": "--enable",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "Disable the job",
+          "name": "--disable",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Delete a cronjob",
+      "name": "cronjobs delete",
+      "parameters": [
+        {
+          "description": "Worktree ID the job belongs to",
+          "name": "key",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Cronjob ID (e.g. cj_1234567890)",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Manually trigger a cronjob now",
+      "name": "cronjobs trigger",
+      "parameters": [
+        {
+          "description": "Worktree ID the job belongs to",
+          "name": "key",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Cronjob ID (e.g. cj_1234567890)",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List what a chat listens for",
+      "name": "subscriptions list",
+      "notes": "Text output: `ID  SOURCE  WATCHES  WAKEUPS  EXPIRES` (space-padded table).\nJSON output: `{\"subscriptions\": [{\"id\": \"...\", \"source\": \"github|timer|webhook\", \"filterKey\": \"...\", \"wakeups\": 0, \"maxWakeups\": 10, \"expiresAt\": 0}]}`.",
+      "parameters": [
+        {
+          "description": "Chat ID (defaults to $BAND_CHAT_ID)",
+          "name": "--chat",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "List every subscription in this worktree instead of one chat's",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Subscribe a chat to events; the chat is woken with a short message when one arrives",
+      "name": "subscriptions create",
+      "notes": "Exactly one of --pr, --branch, --webhook, --cron, --at. PR activity (reviews and comments) is one subscription; --ci adds a second one on the PR's head branch. Subscriptions last at most 180 days.\nJSON output: `{\"subscriptions\": [...]}`.",
+      "parameters": [
+        {
+          "description": "Chat ID (defaults to $BAND_CHAT_ID)",
+          "name": "--chat",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Worktree ID (defaults to $BAND_WORKTREE_ID, then the chat's worktree)",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Watch a pull request, as owner/repo#N",
+          "name": "--pr",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Watch a branch's CI, as owner/repo@branch",
+          "name": "--branch",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "With --pr: deliver reviews",
+          "name": "--reviews",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "With --pr: deliver comments",
+          "name": "--comments",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "With --pr: also watch CI on the PR's head branch (looked up with gh)",
+          "name": "--ci",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "Create a webhook; prints its path and token once",
+          "name": "--webhook",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "Recurring timer, as a cron expression",
+          "name": "--cron",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "One-off timer: epoch milliseconds or a delay such as 90s, 10m, 2h, 1d",
+          "name": "--at",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Stop after this many wakeups (default 10 for CI, 50 otherwise; a one-off timer always 1)",
+          "name": "--max-wakeups",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "description": "Seconds to hold events before waking the chat (default 30)",
+          "name": "--coalesce",
+          "required": false,
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "description": "Remove a subscription",
+      "name": "subscriptions remove",
+      "parameters": [
+        {
+          "description": "Subscription ID",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Validate .band/environment.json, printing OK or each problem with its path",
+      "name": "env validate",
+      "notes": "The hub reads the file, so the path must exist on the hub's machine. Exits 0 when the file is valid and 1 when it has problems or does not exist. Text output: `OK <file>`, or `<file> has N problems:` followed by `  <key path>: <message>` lines on stderr.\nJSON output: `{\"ok\": false, \"source\": \"/repo/.band/environment.json\", \"issues\": [{\"path\": \"isolation\", \"message\": \"...\"}]}`.",
+      "parameters": [
+        {
+          "description": "Repository directory, or the environment.json file (default: the current directory)",
+          "name": "path",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Build the repo's environment image at its default branch, or report a cache hit",
+      "name": "env build",
+      "notes": "Admin only. The hub builds on its builder worker (settings `environmentBuilder.hostId`, default the hub's machine), from the default branch's `.band/environment.json`. An image for the same key (environment file, what it references, lockfiles, worker base) is reused. Text output follows the build log, then `ready <image>` or `failed: <reason>`. Exits 0 for a ready image or a cache hit, 1 for a failed build.\nJSON output: `{\"cacheHit\": false, \"build\": {\"id\": \"...\", \"status\": \"ready\", \"image\": \"band-env/api:0123456789abcdef\", \"key\": \"...\"}}`.",
+      "parameters": [
+        {
+          "description": "Repo name (from `band repos list`)",
+          "name": "repo",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Build again even when an image for the same key exists",
+          "name": "force",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "Return once the build has started instead of waiting for it to finish",
+          "name": "no-wait",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Show a repo's current environment image and its latest build, with the log",
+      "name": "env status",
+      "notes": "The current image is the newest ready build. A failed build never replaces it.\nJSON output: `{\"builder\": {...}, \"current\": {...} | null, \"latest\": {..., \"log\": \"...\"} | null, \"builds\": [...]}`.",
+      "parameters": [
+        {
+          "description": "Repo name (from `band repos list`)",
+          "name": "repo",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List the workers worktrees can run on",
+      "name": "workers list",
+      "notes": "Text output: `ID  NAME  STATUS  VERSION  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. VERSION is the Band version the worker runs (the hub's for the local worker), followed by `(behind)` when it is lower than the hub's, `(update)` when the worker never reported one, or `(update required)` when the hub refused its link for being too far from the hub's version. AGENTS are the coding agents the worker can start, ROOTS the directories it serves worktrees from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null, \"workerVersion\": \"0.50.0\", \"versionState\": \"current\", \"updateTarget\": null}]}`. `versionState` is current, behind, ahead, unknown or refused.",
+      "parameters": []
+    },
+    {
+      "description": "Remove an offline worker that has no worktrees, and revoke its tokens",
+      "name": "workers remove",
+      "notes": "Needs an admin token. Refused for the local worker, a worker that is online or lost, and a worker that still has worktrees.",
+      "parameters": [
+        {
+          "description": "Worker ID (from `band workers list`)",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List the credentials the hub stores encrypted (never their values)",
+      "name": "vault list",
+      "notes": "Needs an admin token. Text output: `ID  NAME  KIND  SCOPE  LAST USED`.\nJSON output: `{\"items\": [{\"id\": \"v-...\", \"name\": \"...\", \"kind\": \"api_key|env|oauth|git\", \"scope\": \"global\", \"metadata\": {}, \"createdAt\": 0, \"updatedAt\": 0, \"lastUsedAt\": null}]}`.",
+      "parameters": []
+    },
+    {
+      "description": "Store an API key, environment value or git access token encrypted on the hub",
+      "name": "vault put",
+      "notes": "Needs an admin token. Replaces a value stored under the same name and scope. The value is never printed or returned.",
+      "parameters": [
+        {
+          "description": "Credential name (an env item's name is the variable name)",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "api_key (default), env or git",
+          "name": "kind",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "global (default) or repo:<name>",
+          "name": "scope",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Short note shown in the list",
+          "name": "description",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "For --kind git: the remote's host, such as github.com",
+          "name": "host",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "For --kind git: a pattern over the repository path, such as 'owner/*'",
+          "name": "path",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "For --kind git: the username git sends with the token (default x-access-token)",
+          "name": "username",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "The value. Without it the value is read from stdin.",
+          "name": "value",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Delete a stored credential (an OAuth connection is revoked at its server first)",
+      "name": "vault delete",
+      "notes": "Needs an admin token.",
+      "parameters": [
+        {
+          "description": "Credential ID (from `band vault list`)",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Re-encrypt every stored credential under a new key",
+      "name": "vault rotate-key",
+      "notes": "Needs an admin token. Only for a key file in BAND_HOME; a key from BAND_VAULT_KEY is changed in the environment.",
+      "parameters": []
+    },
+    {
+      "description": "List the HTTP MCP servers the hub proxies for agents",
+      "name": "mcp list",
+      "notes": "Needs an admin token. Text output: `NAME  URL  CREDENTIAL  TOOLS  MODE`.\nJSON output: `{\"servers\": [{\"id\": \"m-...\", \"name\": \"...\", \"url\": \"...\", \"vaultItemId\": null, \"allowTools\": null, \"readOnly\": false, \"readOnlyTools\": [], \"enabled\": true}]}`.",
+      "parameters": []
+    },
+    {
+      "description": "Add an HTTP MCP server the hub proxies at /mcp-proxy/<name>, injecting a vault credential",
+      "name": "mcp add",
+      "notes": "Needs an admin token. Agents get a per-session token for the server and never see the credential.",
+      "parameters": [
+        {
+          "description": "Server name: lowercase letters, digits, hyphens and underscores",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "The server's streamable HTTP endpoint (https, or http on loopback)",
+          "name": "url",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Credential ID from `band vault list` (API key or OAuth connection)",
+          "name": "vault-item",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Header that carries an API key (default Authorization)",
+          "name": "header",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Text before an API key in the header (default `Bearer `)",
+          "name": "prefix",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Comma-separated tools agents may see and call (default: all)",
+          "name": "allow-tools",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Keep only read-only tools",
+          "name": "read-only",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "description": "Comma-separated tools to treat as read-only",
+          "name": "read-only-tools",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Add the server switched off",
+          "name": "disabled",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Remove a proxied MCP server",
+      "name": "mcp remove",
+      "notes": "Needs an admin token.",
+      "parameters": [
+        {
+          "description": "Server name (from `band mcp list`)",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List the runners that start workers for worktrees waiting on a worker",
+      "name": "runners list",
+      "notes": "Text output: `ID  SPAWN  LABELS  RUNNING  TIMEOUT` (space-padded table), then one `Invalid runner: ...` line per entry of `runners` in settings.json that the hub skips. RUNNING is `<in flight>/<maxConcurrent>`.\nJSON output: `{\"runners\": [{\"id\": \"local\", \"spawn\": \"bundled:local\", \"labels\": {}, \"maxConcurrent\": 1, \"timeoutSec\": 120, \"running\": 0}], \"runs\": [...], \"errors\": []}`.",
+      "parameters": []
+    },
+    {
+      "description": "Show what a runner's hooks printed for a worker request",
+      "name": "runners log",
+      "notes": "Prints the hub's log of the request's spawn and destroy hooks, with tokens replaced by `[redacted]`. Fails when there is no log for the request.",
+      "parameters": [
+        {
+          "description": "Worker request ID",
+          "name": "request_id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List the hub's tokens (never their secrets)",
+      "name": "tokens list",
+      "notes": "Text output: `ID  KIND  LABEL  STATE  LAST USED` (space-padded table). KIND is device, worker_bootstrap or worker_session; STATE is active, revoked, expired or used.\nJSON output: `{\"tokens\": [{\"id\": \"...\", \"kind\": \"device\", \"label\": \"...\", \"admin\": true, \"state\": \"active\", \"lastUsedAt\": null}]}`. Needs an admin token.",
+      "parameters": []
+    },
+    {
+      "description": "Create a device token for a UI or script",
+      "name": "tokens create-device",
+      "notes": "The token is printed once; the hub keeps only a hash. Only an admin token can run `band tokens`; the shared token in settings.json is one.\nJSON output: `{\"id\": \"...\", \"label\": \"...\", \"admin\": false, \"token\": \"...\"}`.",
+      "parameters": [
+        {
+          "description": "What the token is for (default \"CLI device\")",
+          "name": "--label",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Let the token manage tokens; without it every `band tokens` command gets 403",
+          "name": "--admin",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Revoke a token; whatever uses it stops authenticating",
+      "name": "tokens revoke",
+      "notes": "The shared token in settings.json cannot be revoked.",
+      "parameters": [
+        {
+          "description": "Token ID (from `band tokens list`)",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List chat panes for a worktree",
+      "name": "chats list",
+      "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable.",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Create a new chat pane in a worktree",
+      "name": "chats create",
+      "notes": "Creates a new independent chat pane with its own agent process. Returns the chat ID.\nJSON output: `{\"chat\": {\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"idle\", \"labels\": {\"k\": \"v\"}}}`",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Display name for the chat pane",
+          "name": "--name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Coding agent ID (e.g. 'claude-code')",
+          "name": "--agent",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Model override",
+          "name": "--model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Mode (e.g. 'plan', 'edit')",
+          "name": "--mode",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Label in the form `key=value` (repeatable). Keys with the reserved `band:` prefix are rejected.",
+          "name": "--label",
+          "repeatable": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Send a message to a worktree chat (defaults to the worktree's active chat panel)",
+      "name": "chats send",
+      "notes": "Sends a message to a worktree chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the worktree's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the worktree has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID. When the chat is busy (a turn is running, or earlier messages are still queued), the message is queued instead and runs in order once the turns ahead of it finish; the command then prints `queued <queue entry id>`. Queued messages show in the chat pane, where they can be edited, reordered or cancelled.\nJSON output: `{\"id\": \"tsk_...\", \"queued\": false, \"worktreeId\": \"...\", \"chatId\": \"chat_...\"}`, or `{\"id\": null, \"queued\": true, \"queuedMessageId\": \"...\", \"worktreeId\": \"...\", \"chatId\": \"chat_...\"}` when queued.\n\nReplaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`).",
+      "parameters": [
+        {
+          "description": "Chat pane ID (defaults to the worktree's active chat panel)",
+          "name": "chat_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Message text to send",
+          "name": "--message",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Agent mode (e.g. 'plan', 'edit')",
+          "name": "--mode",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')",
+          "name": "--model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Coding agent ID to use (overrides worktree default)",
+          "name": "--agent",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Stream a chat pane's running task as raw NDJSON",
+      "name": "chats watch",
+      "notes": "Connects to the chat's task SSE stream and dumps each event as one JSON object per line on stdout. Output is always raw JSON regardless of `--output`. Exits 0 immediately when the chat has no running task.",
+      "parameters": [
+        {
+          "description": "Chat pane ID (defaults to the cwd worktree's first chat pane)",
+          "name": "chat_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Stop a running chat pane",
+      "name": "chats stop",
+      "notes": "Aborts the running task and sets chat status to stopped.",
+      "parameters": [
+        {
+          "description": "Chat pane ID (defaults to the cwd worktree's first chat pane)",
+          "name": "chat_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Remove a chat pane (kills agent, cleans up state)",
+      "name": "chats remove",
+      "notes": "Removes the chat pane, kills the associated agent process, and cleans up state.",
+      "parameters": [
+        {
+          "description": "Chat pane ID (defaults to the cwd worktree's first chat pane)",
+          "name": "chat_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Add or overwrite labels on a chat pane (additive merge)",
+      "name": "chats label",
+      "notes": "Reads the chat's current labels, merges the new pairs in (later wins for duplicate keys, other labels untouched), and persists via `chats.update`. Keys with the reserved `band:` prefix are rejected by the server. Two callers labeling the same chat concurrently can race; intended for single-user workflows.\n\nText output: the chat's final labels rendered as `k=v,k=v` with sorted keys.\nJSON output: `{\"chat\": {...}}` — the full chat record after the update.",
+      "parameters": [
+        {
+          "description": "Chat pane ID",
+          "name": "chat_id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "One or more `key=value` pairs",
+          "name": "labels",
+          "positional": true,
+          "repeatable": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Remove labels from a chat pane by key",
+      "name": "chats unlabel",
+      "notes": "Reads the chat's current labels, drops the listed keys (unknown keys are ignored), and persists via `chats.update`. Other labels are preserved.\n\nText output: the chat's final labels rendered as `k=v,k=v` with sorted keys.\nJSON output: `{\"chat\": {...}}` — the full chat record after the update.",
+      "parameters": [
+        {
+          "description": "Chat pane ID",
+          "name": "chat_id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "One or more label keys to remove",
+          "name": "keys",
+          "positional": true,
+          "repeatable": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List browser tabs for a worktree",
+      "name": "browsers list",
+      "notes": "Text output: `ID\\tNAME\\tURL\\tSTATUS` (tab-separated table).\nJSON output: `{\"browsers\": [{\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}]}`",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Create a new browser tab in a worktree",
+      "name": "browsers create",
+      "notes": "Text output: the new browser tab ID.\nJSON output: `{\"browser\": {\"id\": \"...\", ...}}`",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Initial URL to navigate to",
+          "name": "--url",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Display name for the browser tab",
+          "name": "--name",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Navigate a browser tab to a URL",
+      "name": "browsers navigate",
+      "notes": "Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the worktree from cwd and targets that worktree's first browser tab. Mirrors the shape of `chats send [chat_id] --message ...` and `terminals send [terminal_id] --data ...` — panel ID is positional, data is a flag.",
+      "parameters": [
+        {
+          "description": "Browser tab ID (defaults to the cwd worktree's first browser tab)",
+          "name": "browser_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "URL to navigate to",
+          "name": "--url",
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Get a browser tab's current state",
+      "name": "browsers get",
+      "notes": "Text output: formatted key-value pairs.\nJSON output: `{\"browser\": {\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}}`",
+      "parameters": [
+        {
+          "description": "Browser tab ID (defaults to the cwd worktree's first browser tab)",
+          "name": "browser_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Remove a browser tab",
+      "name": "browsers remove",
+      "notes": "Removes the browser tab and cleans up state.",
+      "parameters": [
+        {
+          "description": "Browser tab ID (defaults to the cwd worktree's first browser tab)",
+          "name": "browser_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List the running agent sessions of a worktree",
+      "name": "agents list",
+      "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"worktreeId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Start a coding agent as a chat (gui) or as its CLI in a terminal (tui)",
+      "name": "agents launch",
+      "notes": "`gui` opens a chat pane and submits the prompt to the agent. `tui` opens a terminal running the agent's CLI (`claude \"<prompt>\"`, `codex \"<prompt>\"`, ...). Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting. An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.\nText output: `<mode>\\t<chat or terminal ID>`, plus a `note:` line after a fallback.\nJSON output: `{\"agentSession\": {...}, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\", \"terminalId\": \"...\", \"notice\": \"...\"}` (chatId for gui, terminalId for tui, notice only after a fallback).\nExample: band agents launch --agent codex --mode tui --prompt \"Fix the failing test\"",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Coding agent ID from settings (default agent if omitted)",
+          "name": "--agent",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "gui (chat) or tui (terminal); chat / terminal also accepted. Falls back to BAND_DISPATCH, then .band/config.json workspace.defaultVia, then the server's agents.defaultMode",
+          "name": "--mode",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "First prompt for the agent",
+          "name": "--prompt",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "List terminal sessions for a worktree",
+      "name": "terminals list",
+      "notes": "Text output: `TERMINAL ID\\tTITLE\\tPID\\tSCROLLBACK` (tab-separated table).\nJSON output: `{\"terminals\": [{\"terminalId\": \"...\", \"worktreeId\": \"...\", \"pid\": N, \"scrollbackLength\": N, \"title\": \"...\"}]}`",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Create a new terminal session in a worktree",
+      "name": "terminals create",
+      "notes": "Creates a new terminal session with its own PTY process. Returns the terminal ID.\nJSON output: `{\"terminalId\": \"...\", \"worktreeId\": \"...\", \"pid\": N}`",
+      "parameters": [
+        {
+          "description": "Worktree ID (auto-detected from cwd if omitted)",
+          "name": "worktree_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Shell command to auto-run after spawn",
+          "name": "--command",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Working directory (relative to worktree root)",
+          "name": "--cwd",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Send input to a terminal session",
+      "name": "terminals send",
+      "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminals send <id> --data \"ls -la\\n\"",
+      "parameters": [
+        {
+          "description": "Terminal ID (defaults to the cwd worktree's first terminal)",
+          "name": "terminal_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Text to send (supports \\n for newline, \\t for tab)",
+          "name": "--data",
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Get terminal output (scrollback buffer)",
+      "name": "terminals output",
+      "notes": "Without --follow: fetches the current scrollback buffer (up to 100KB).\nWith --follow: streams live terminal output via SSE. Press Ctrl+C to stop.",
+      "parameters": [
+        {
+          "description": "Terminal ID (defaults to the cwd worktree's first terminal)",
+          "name": "terminal_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Number of lines to show (from end of buffer)",
+          "name": "--lines",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "description": "Stream live output (like tail -f)",
+          "name": "--follow",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Kill a terminal session",
+      "name": "terminals kill",
+      "notes": "Kills the terminal's PTY process and cleans up the session.",
+      "parameters": [
+        {
+          "description": "Terminal ID (defaults to the cwd worktree's first terminal)",
+          "name": "terminal_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Attach to a terminal (stream output + send input interactively)",
+      "name": "terminals attach",
+      "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that).",
+      "parameters": [
+        {
+          "description": "Terminal ID (defaults to the cwd worktree's first terminal)",
+          "name": "terminal_id",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Restart the terminal daemon, ending every terminal it hosts",
+      "name": "terminals restart-daemon",
+      "notes": "Ends every terminal hosted by the current-build terminal daemon; panes show the process exited and can be reopened, with their scrollback and working directory restored. Sessions from a previous version of Band, on a retired daemon, are left running.",
+      "parameters": []
+    },
+    {
+      "description": "Open a file in the active Band worktree's editor pane",
+      "name": "open",
+      "notes": "Opens the file in the dashboard's currently focused worktree. When `--worktree` is omitted, the server uses the worktree most recently focused in the Band dashboard — exits non-zero if no worktree is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever worktree the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the active-worktree fallback\nband open src/main.rs --worktree my-app/feat/auth\n\n# An out-of-worktree file opens as an external tab (worktree-relative\n# routing is bypassed; the FileViewer reads via the server's\n# readExternalFile capability).\nband open ~/Downloads/v3.js\n```",
+      "parameters": [
+        {
+          "description": "Path to the file (absolute, or relative to cwd). Optionally suffixed with ':line', ':line:col', or ':line-lineEnd'.",
+          "name": "file_path",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Worktree ID (overrides the dashboard's active worktree)",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Don't raise the dashboard window to the foreground after opening",
+          "name": "--no-focus",
+          "required": false,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Receive coding-agent hook notifications (reads JSON from stdin)",
+      "name": "notify",
+      "notes": "Not called directly — registered as a coding-agent hook when the user installs hooks from the banner or Settings (`band notify --agent claude-code`). Always exits 0 and prints nothing, within about a second, whatever happens. Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status.",
+      "parameters": [
+        {
+          "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the worktree.",
+          "name": "--agent",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Show command schemas as JSON",
+      "name": "schema",
+      "parameters": [
+        {
+          "description": "Command name (omit to list all commands)",
+          "name": "command",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Install (or refresh) skills into ~/.agents/skills and symlink each detected coding agent's skills/ folder",
+      "name": "skills install",
+      "notes": "Idempotent: leaves a correct existing symlink alone; surfaces a clear conflict (without overwriting) when a different symlink or a real directory occupies the target path. Supported agents: claude-code, codex, gemini-cli, opencode. cursor-cli is excluded (no skills dir).",
+      "parameters": [
+        {
+          "description": "Override the destination home dir (advanced; mostly for tests). Defaults to $HOME.",
+          "name": "--home",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Filter which skills to install by name (substring match)",
+          "name": "--filter",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    }
+  ]
+}
