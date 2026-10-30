@@ -138,6 +138,8 @@ interface Runtime {
   buffered: acp.SessionNotification[];
   lastUpdateKind: string | null;
   inTurn: boolean;
+  /** When the agent last sent an update, or the turn started. The stall watchdog reads it. */
+  lastUpdateAt: number;
   /** Bumped per prompt turn, so a late cancel timer can't hit a newer turn. */
   turnSeq: number;
   live: LiveState;
@@ -294,6 +296,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       buffered: [],
       lastUpdateKind: null,
       inTurn: false,
+      lastUpdateAt: Date.now(),
       turnSeq: 0,
       live: emptyLive(),
       pending: new Map(),
@@ -398,6 +401,18 @@ async function restartIfLaunchChanged(
   rt.process = null;
   rt.sessionId = null;
   runtimes.delete(chat.id);
+}
+
+/**
+ * How long a turn may go without an update from an agent whose process is gone or cut off from its
+ * worker before the hub ends the turn as failed (`BAND_TURN_STALL_MS`, read on every turn). The
+ * default is 5 minutes: longer than the 2 minutes a lost link waits for its worker
+ * (`BAND_AGENT_REATTACH_TIMEOUT_MS`), so the watchdog only fires for a turn that path failed to end.
+ * A live agent is never cut off by it, however quiet a long tool call keeps it.
+ */
+function turnStallMs(): number {
+  const value = Number(process.env.BAND_TURN_STALL_MS);
+  return Number.isFinite(value) && value > 0 ? value : 5 * 60_000;
 }
 
 /** The opt-in idle stop, from `BAND_AGENT_IDLE_TIMEOUT_MS`. Unset (the
@@ -612,6 +627,7 @@ function applyLive(rt: Runtime, update: acp.SessionUpdate): void {
 }
 
 function routeUpdate(rt: Runtime, notification: acp.SessionNotification): void {
+  rt.lastUpdateAt = Date.now();
   if (rt.routing === "buffer") {
     rt.buffered.push(notification);
     return;
@@ -724,6 +740,7 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
     onUpdate: (n) => routeUpdate(rt, n),
     onAsyncTask: (n) => {
       if (n.sessionId !== rt.sessionId || rt.attaching) return;
+      rt.lastUpdateAt = Date.now();
       rt.work.observeAsyncTask(n.update);
       agentActive(rt);
       activityObserver?.(rt.chatId, rt.worktreeId, "work");
@@ -1376,9 +1393,27 @@ export class AgentSessionService {
     if (rt.idleTimer) clearTimeout(rt.idleTimer);
     rt.inTurn = true;
     rt.turnSeq++;
+    rt.lastUpdateAt = Date.now();
+    const stallMs = turnStallMs();
+    let watchdog: ReturnType<typeof setInterval> | undefined;
+    const stalled = new Promise<never>((_, reject) => {
+      watchdog = setInterval(
+        () => {
+          const cutOff = !proc.alive || proc.detached || rt.process !== proc;
+          if (!cutOff || Date.now() - rt.lastUpdateAt < stallMs) return;
+          log.warn({ chatId, stallMs }, "turn stalled with its agent gone; ending it");
+          // A detached agent still runs in its worker; nothing else will stop it now.
+          proc.close();
+          reject(new Error("The agent stopped responding. Send the message again to restart it."));
+        },
+        Math.min(Math.max(stallMs / 4, 250), 30_000),
+      );
+      watchdog.unref();
+    });
     try {
-      return await proc.prompt(rt.sessionId, blocks);
+      return await Promise.race([proc.prompt(rt.sessionId, blocks), stalled]);
     } finally {
+      clearInterval(watchdog);
       rt.inTurn = false;
       if (rt.process) scheduleIdle(rt);
       // Never let a failed push replace the turn's result.

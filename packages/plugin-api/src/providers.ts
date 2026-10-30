@@ -313,6 +313,110 @@ export interface BranchStatusProvider {
   ): Promise<Record<string, BranchStatus>>;
 }
 
+/** A normalized event a subscription source produces. The core adds `source` (the provider id). */
+export interface SourceEvent {
+  /** The forge's own id for the event, so a redelivery or a repeated poll is dropped. */
+  id: string;
+  kind: string;
+  /** What the event is about, e.g. `github:pr:owner/repo#7`. Subscriptions match on it. */
+  key: string;
+  url: string;
+  actor: string;
+  summary: string;
+  /** Epoch milliseconds. */
+  at: number;
+  /** The commit a push put on a branch. The core checks it against the commits Band pushed. */
+  sha?: string;
+  /** Set on a CI failure: true when Band pushed the commit, so the agent may fix it. */
+  fix?: boolean;
+}
+
+/** What the core lends a subscription source for one call. */
+export interface SubscriptionContext {
+  /** Runs `gh ARGS` the way the core does for the hub (its login or vault credential). */
+  gh(args: string[]): Promise<string>;
+  /** `gh ARGS` with `input` on stdin, for a body that must stay out of argv. */
+  ghWithInput(args: string[], input: string): Promise<string>;
+  /** Whether Band pushed this commit. */
+  isBandPushed(sha: string): boolean;
+  /** `gh` calls the current poll may still make. Only meaningful while polling. */
+  callsLeft(): number;
+}
+
+/** A webhook delivery as the core received it. */
+export interface DeliveryInput {
+  /** Header names lowercased, first value only. */
+  headers: Record<string, string>;
+  /** The raw body, base64 encoded, so a signature can be checked byte for byte. */
+  bodyBase64: string;
+}
+
+export type DeliveryVerdict = { ok: false } | { ok: true; deliveryId: string | null };
+
+/** What a verified delivery means for subscriptions. */
+export type DeliveryParse =
+  | { type: "events"; events: SourceEvent[] }
+  /** A completed check: the core calls `aggregateChecks` once, shared per `flight`. */
+  | { type: "check"; key: string; flight: string; trigger: unknown }
+  | { type: "ignored" };
+
+/** One subscription of a repo, as the core hands it to a provider for polling. */
+export interface PollSubscription {
+  id: string;
+  key: string;
+  createdAt: number;
+  /** The cursor the provider returned last time, or null before the first poll. */
+  cursor: string | null;
+}
+
+/** Subscriptions polled together by one call. */
+export interface PollUnit {
+  /** Identifies the work across polls, for backoff and round robin. */
+  id: string;
+  subscriptions: PollSubscription[];
+}
+
+/** New events for one subscription, or for everyone on a key when `subscriptionId` is absent. */
+export interface PollResult {
+  subscriptionId?: string;
+  events: SourceEvent[];
+  cursor?: string;
+}
+
+/**
+ * A forge as a source of subscription events: verifies and reads webhook deliveries, polls
+ * when no webhook is registered, and registers the webhook. The core keeps the store, the
+ * delivery to chats and the guards (wakeup limits, expiry, own pushes, allowed senders,
+ * delivery-id dedup); it works on the normalized events only. The provider id is the
+ * subscription `source`.
+ */
+export interface SubscriptionSourceProvider {
+  id: string;
+  /**
+   * Checks the delivery's signature against `secret` in constant time. The signature scheme
+   * belongs to the forge, the secret's storage to the core. Nothing else is read before this.
+   */
+  verifyDelivery(input: DeliveryInput & { secret: string }): Promise<DeliveryVerdict>;
+  /**
+   * Reads a verified, first-seen delivery. The provider tells the core a review changed
+   * (`api.reviews.changed`) from here, whether or not a subscription listens.
+   */
+  parseDelivery(input: DeliveryInput): Promise<DeliveryParse>;
+  /** Fetches the checks of a `check` trigger. One verdict event, or null while any is pending. */
+  aggregateChecks(trigger: unknown, ctx: SubscriptionContext): Promise<SourceEvent | null>;
+  /** The webhook events and the URL are the provider's; the secret and public URL come from the core. */
+  registerWebhook(
+    input: { repo: string; url: string; secret: string },
+    ctx: SubscriptionContext,
+  ): Promise<{ status: "registered" | "failed"; error?: string }>;
+  /** Who may wake a pull request subscription when the caller names nobody. */
+  defaultSenders(repo: string, ctx: SubscriptionContext): Promise<string[]>;
+  /** Splits the subscriptions of one repo into the units a poll reads together. */
+  pollUnits(repo: string, subscriptions: PollSubscription[]): PollUnit[];
+  /** Reads one unit from each subscription's cursor. Throws when the forge call fails. */
+  poll(repo: string, unit: PollUnit, ctx: SubscriptionContext): Promise<PollResult[]>;
+}
+
 /**
  * What the core returns for a worktree's review panel: the review for the
  * worktree's branch, or when there is none, the checks on the branch.

@@ -503,6 +503,8 @@ export interface AgentStdio {
    * A host that cannot lose its agents never calls it.
    */
   onReattached?(listener: () => void): void;
+  /** True while a held agent has no link to its worker, waiting for a reattach. */
+  readonly detached?: boolean;
 }
 
 export interface HostAcp {
