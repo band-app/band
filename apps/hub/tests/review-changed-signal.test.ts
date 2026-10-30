@@ -8,13 +8,13 @@ import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { type GhStub, ghStub } from "./fixtures/gh-stub";
 import { FAKE_REPO, pullRequestNode, reviewQueryData } from "./fixtures/github-review-data";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "review-signal-token";
@@ -31,9 +31,9 @@ const gitEnv = {
 const git = (cwd: string, args: string[]) =>
   execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 
-const WORKTREE_A = toWorktreeId("widgets", "feat/a", "local");
-const WORKTREE_B = toWorktreeId("widgets", "feat/b", "local");
-const OTHER_REPO_WORKTREE = toWorktreeId("gadgets", "feat/a", "local");
+const WORKTREE_A = testWorktreeId("widgets", "feat/a");
+const WORKTREE_B = testWorktreeId("widgets", "feat/b");
+const OTHER_REPO_WORKTREE = testWorktreeId("gadgets", "feat/a");
 
 describe("review-changed status event", () => {
   let tmpHome: string;
