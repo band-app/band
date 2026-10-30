@@ -336,10 +336,10 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     expect(listDevices().map((d) => d.udid)).toEqual(expect.arrayContaining([ua, ub]));
   }, 300_000);
 
-  it("S1, S2: with no idb, the agent describes, opens a URL, presses Home and taps the screen", async () => {
+  it("S1, S2: with no idb, the agent describes, launches an app, presses Home and taps the screen", async () => {
     const r = await turn(sim, a, "a-drive", [
       call("shot1", "simulator_screenshot"),
-      call("open", "simulator_open_url", { url: "data:text/html,<h1>band</h1>" }),
+      call("open", "simulator_launch", { bundleId: "com.apple.Preferences" }),
       { sleep: 3000 },
       call("shot2", "simulator_screenshot"),
       call("home", "simulator_button", { button: "HOME" }),
@@ -433,7 +433,7 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
           .shot as ToolReply,
       )?.data;
     await turn(sim, a, "a-open-safari", [
-      call("open", "simulator_open_url", { url: "data:text/html,<h1>band</h1>" }),
+      call("open", "simulator_launch", { bundleId: "com.apple.Preferences" }),
       { sleep: 2500 },
     ]);
     const before = await shot();
