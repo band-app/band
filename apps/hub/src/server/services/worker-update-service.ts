@@ -98,7 +98,7 @@ export class WorkerUpdateService {
     try {
       for (const entry of this.all.results) {
         if (entry.hostId === "hub") {
-          this.updateHubEntry(entry);
+          this.updateHubEntry(entry, confirmInterruptions);
           continue;
         }
         const agents = this.interruptions(entry.hostId);
@@ -128,14 +128,14 @@ export class WorkerUpdateService {
     }
   }
 
-  private updateHubEntry(entry: UpdateAllEntry): void {
+  private updateHubEntry(entry: UpdateAllEntry, confirmInterruptions: boolean): void {
     if (this.all.results.some((r) => r.hostId !== "hub" && r.state === "failed")) {
       entry.state = "skipped";
       entry.message = "a worker update failed";
       return;
     }
     try {
-      hubUpdateService.start();
+      hubUpdateService.start(confirmInterruptions);
       entry.state = "updating";
     } catch (err) {
       entry.state = "failed";

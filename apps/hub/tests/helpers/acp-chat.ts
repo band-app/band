@@ -60,6 +60,8 @@ export interface AcpServerOptions {
   turns?: StubTurn[];
   caps?: { loadSession?: boolean; list?: boolean; resume?: boolean; image?: boolean };
   env?: Record<string, string>;
+  /** Pass false to boot with no loopback worker (see `startServer`). */
+  remoteHost?: boolean;
 }
 
 /** Seeds a git-less repo with one worktree and a claude-code agent. */
@@ -111,7 +113,7 @@ export async function startAcpServer(opts: AcpServerOptions = {}): Promise<Serve
   };
   if (opts.turns) env.BAND_TEST_ACP_SCENARIO = writeStubScenario(home, opts.turns);
   if (opts.caps) env.BAND_TEST_ACP_CAPS = JSON.stringify(opts.caps);
-  const server = await startServer({ tmpHome: home, env });
+  const server = await startServer({ tmpHome: home, env, remoteHost: opts.remoteHost });
   if (!ownsHome) return server;
   return {
     ...server,

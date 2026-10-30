@@ -1638,9 +1638,16 @@ export class AgentSessionService {
    * restart would end. An agent held in the worker's agent daemon is left out: it survives the
    * restart and the hub reattaches it.
    */
-  liveAgents(): { chatId: string; worktreeId: string; busy: boolean }[] {
+  liveAgents(opts: { includeHeld?: boolean } = {}): {
+    chatId: string;
+    worktreeId: string;
+    busy: boolean;
+  }[] {
     return [...runtimes.values()]
-      .filter((rt) => (rt.process !== null && !rt.process.held) || rt.starting !== null)
+      .filter(
+        (rt) =>
+          (rt.process !== null && (opts.includeHeld || !rt.process.held)) || rt.starting !== null,
+      )
       .map((rt) => ({
         chatId: rt.chatId,
         worktreeId: rt.worktreeId,

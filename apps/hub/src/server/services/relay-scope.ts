@@ -128,6 +128,8 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure === "workers.setTrust" ||
   procedure === "workers.audit" ||
   procedure === "workers.updateHub" ||
+  procedure === "workers.hubInterruptions" ||
+  procedure === "hosts.hubInterruptions" ||
   procedure === "workers.dismissHubUpdate" ||
   procedure === "workers.updateAll" ||
   procedure === "hosts.updateHub" ||
