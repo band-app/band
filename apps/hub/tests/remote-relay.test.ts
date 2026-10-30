@@ -167,14 +167,27 @@ async function addWorker(name: string, scenario: object, issued?: IssuedWorker):
     httpLog: join(home, "http-log.jsonl"),
     stubLog: join(home, "stub-log.jsonl"),
   };
-  const worker = startWorkerProcess(base, issued.token);
+  let output = "";
+  const worker = startWorkerProcess(base, issued.token, {
+    onOutput: (chunk) => {
+      output += chunk;
+    },
+  });
+  // A worker that never gets online says why: its exit code and what it printed.
   await waitFor(
     async () => {
+      if (worker.child.exitCode !== null) {
+        throw new Error(
+          `${name} exited with ${worker.child.exitCode} before it was online\n${output}`,
+        );
+      }
       const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
       return hosts.find((h) => h.id === issued.hostId)?.status === "online" ? true : undefined;
     },
     { label: `${name} online`, timeoutMs: 20_000 },
-  );
+  ).catch((err: Error) => {
+    throw new Error(`${err.message}\n${output}`);
+  });
   return worker;
 }
 
