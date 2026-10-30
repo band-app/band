@@ -92,7 +92,21 @@ describe("simulator plugin and the lease fence", { skip: !hasSimctl() }, () => {
       "the fence shuts the device down",
     );
     assert.equal(devices().length, 2, "the device and the base device are kept");
-    await assert.rejects(status(), /lost the hub's lease/);
+    // A slow runner can drop the link while the fence snapshots. The session resumes, and the
+    // fence holds across the redial, so a call that met the drop is made again.
+    let refusal = "";
+    for (let attempt = 0; attempt < 20 && !refusal; attempt++) {
+      try {
+        await status();
+        assert.fail("a fenced worker answered a plugin call");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/link dropped|link closed/i.test(message))
+          await new Promise((r) => setTimeout(r, 1000));
+        else refusal = message;
+      }
+    }
+    assert.match(refusal, /lost the hub's lease/);
 
     const reply = await renew(60_000);
     assert.equal(reply.fenced, true);
