@@ -88,6 +88,11 @@ export class RemoteRpc {
     return session;
   }
 
+  /** Whether the worker's link has a socket right now. */
+  get linkUp(): boolean {
+    return this.sessionOf()?.attached === true;
+  }
+
   timeoutFor(method: string): number {
     return SLOW_CALLS[method] ?? this.timeouts.defaultMs ?? DEFAULT_CALL_TIMEOUT_MS;
   }
