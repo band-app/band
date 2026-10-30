@@ -1,6 +1,7 @@
 import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import {
+  type BranchStatusProvider,
   type ChecksProvider,
   matchesRepoRemote,
   type PluginManifest,
@@ -47,6 +48,7 @@ export class PluginHost {
   private plugins: LoadedPlugin[] | null = null;
   private reviewProviders: ReviewProvider[] = [];
   private checksProviders: ChecksProvider[] = [];
+  private branchStatusProviders: BranchStatusProvider[] = [];
 
   constructor(
     private readonly bundled: BundledPlugin[],
@@ -94,6 +96,11 @@ export class PluginHost {
     return this.checksProviders.find((p) => this.safeMatches(p, repo)) ?? null;
   }
 
+  async branchStatusProviderFor(repo: RepoInfo): Promise<BranchStatusProvider | null> {
+    await this.activateForRemote(repo.host);
+    return this.branchStatusProviders.find((p) => this.safeMatches(p, repo)) ?? null;
+  }
+
   private load(): LoadedPlugin[] {
     if (this.plugins) return this.plugins;
     const disabled = new Set(loadSettings().plugins?.disabled ?? []);
@@ -138,6 +145,9 @@ export class PluginHost {
         plugin.error = err instanceof Error ? err.message : String(err);
         this.reviewProviders = this.reviewProviders.filter((p) => p.id !== plugin.manifest.id);
         this.checksProviders = this.checksProviders.filter((p) => p.id !== plugin.manifest.id);
+        this.branchStatusProviders = this.branchStatusProviders.filter(
+          (p) => p.id !== plugin.manifest.id,
+        );
         log.error("Plugin %s failed to activate: %s", plugin.manifest.id, plugin.error);
       }
     })();
@@ -184,6 +194,9 @@ export class PluginHost {
         },
         registerChecksProvider: (provider) => {
           if (this.checkProviderId(provider, pluginId)) this.checksProviders.push(provider);
+        },
+        registerBranchStatusProvider: (provider) => {
+          if (this.checkProviderId(provider, pluginId)) this.branchStatusProviders.push(provider);
         },
       },
     };

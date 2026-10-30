@@ -2,6 +2,11 @@ import type { ProviderContext, RepoInfo } from "@band-app/plugin-api";
 import { definePlugin } from "@band-app/plugin-api/server";
 import { ghArgsFor } from "./actions";
 import {
+  buildBranchStatusQuery,
+  type GraphQLRepoResponse,
+  parseBranchStatusResponse,
+} from "./branch-query";
+import {
   parseBranchChecks,
   parseReview,
   REVIEW_QUERY,
@@ -53,6 +58,29 @@ export default definePlugin({
         ctx,
       );
     }
+
+    api.providers.registerBranchStatusProvider({
+      id: "github",
+      matches: (repo) => githubHost(repo) !== null,
+      async getBranchStatuses(repo, branches, ctx) {
+        const target = normalize(repo);
+        const args = [
+          "api",
+          "graphql",
+          "-f",
+          `query=${buildBranchStatusQuery(
+            target,
+            branches.map((b) => b.branch),
+          )}`,
+        ];
+        if (target.host !== "github.com") args.push("--hostname", target.host);
+        const output = await runGh(api, args, ctx);
+        const { data } = JSON.parse(output) as {
+          data: Record<string, GraphQLRepoResponse | null>;
+        };
+        return parseBranchStatusResponse(data, branches);
+      },
+    });
 
     const matches = (repo: RepoInfo) => githubHost(repo) !== null;
 

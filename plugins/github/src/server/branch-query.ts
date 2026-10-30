@@ -1,16 +1,10 @@
-import type { PullRequestSummary, RepoInfo } from "@band-app/host-local/git/git-client";
-
-export interface CIStatus {
-  state: string;
-  url?: string | null;
-  pr?: PullRequestSummary | null;
-}
-
-export interface BatchCIInput {
-  alias: string;
-  branch: string;
-  repoInfo: RepoInfo;
-}
+import type {
+  BranchReview,
+  BranchStatus,
+  BranchStatusRequest,
+  RepoInfo,
+} from "@band-app/plugin-api";
+import { statePriority } from "@band-app/plugin-api";
 
 interface CheckSuiteNode {
   status: string;
@@ -32,7 +26,7 @@ interface PullRequestNode {
   headRepositoryOwner: { login: string } | null;
 }
 
-interface GraphQLRepoResponse {
+export interface GraphQLRepoResponse {
   owner?: { login: string };
   pullRequests: {
     nodes: PullRequestNode[];
@@ -46,20 +40,22 @@ interface GraphQLRepoResponse {
   } | null;
 }
 
-/**
- * Build a single GraphQL query that fetches PR status and CI check suites
- * for multiple branches/repos in one request.
- *
- * Each worktree gets a unique alias (e.g. ws_0, ws_1) so results can be
- * mapped back to the originating worktree.
- */
-export function buildBatchedCIQuery(inputs: BatchCIInput[]): string {
-  const fragments = inputs.map((input) => {
-    const owner = escapeGraphQL(input.repoInfo.owner);
-    const repo = escapeGraphQL(input.repoInfo.repo);
-    const branch = escapeGraphQL(input.branch);
+/** The alias of the branch at `index` in a query, so results map back to the branch. */
+export function branchAlias(index: number): string {
+  return `ws_${index}`;
+}
 
-    return `${input.alias}: repository(owner: "${owner}", name: "${repo}") {
+/**
+ * Build a single GraphQL query that fetches the review and CI check suites
+ * for several branches of one repo in one request.
+ */
+export function buildBranchStatusQuery(repoInfo: RepoInfo, branches: string[]): string {
+  const owner = escapeGraphQL(repoInfo.owner);
+  const repo = escapeGraphQL(repoInfo.repo);
+  const fragments = branches.map((name, index) => {
+    const branch = escapeGraphQL(name);
+
+    return `${branchAlias(index)}: repository(owner: "${owner}", name: "${repo}") {
     owner { login }
     pullRequests(headRefName: "${branch}", first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes { number title state url isDraft headRepositoryOwner { login } }
@@ -100,7 +96,7 @@ function pickPullRequest(
   allNodes: PullRequestNode[],
   repoOwner: string | undefined,
   isDefaultBranch: boolean,
-): PullRequestSummary | null {
+): BranchReview | null {
   const nodes = allNodes.filter(
     (n) =>
       repoOwner !== undefined &&
@@ -135,76 +131,52 @@ function escapeGraphQL(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-export function statePriority(state: string): number {
-  switch (state) {
-    case "failure":
-      return 4;
-    case "running":
-      return 3;
-    case "pending":
-      return 2;
-    case "cancelled":
-      return 1;
-    case "success":
-      return 0;
-    default:
-      return -1;
-  }
-}
-
 /**
- * Parse the batched GraphQL response into a map of alias -> CIStatus.
+ * Parse the batched response into a status per requested branch, keyed by branch name.
  *
- * Applies the same aggregation logic as the original per-worktree code:
- * - Dedup check suites by workflow name (keep latest)
- * - Priority: failure > running > pending > cancelled > success
+ * - Keeps the latest check suite per workflow
+ * - Aggregates with the priority failure > running > pending > cancelled > success
  */
-export function parseBatchedCIResponse(
+export function parseBranchStatusResponse(
   data: Record<string, GraphQLRepoResponse | null>,
-  aliases: string[],
-  defaultBranches?: Map<string, string>,
-): Map<string, CIStatus> {
-  const results = new Map<string, CIStatus>();
+  branches: BranchStatusRequest[],
+): Record<string, BranchStatus> {
+  const results: Record<string, BranchStatus> = {};
 
-  for (const alias of aliases) {
-    const repo = data[alias];
+  for (const [index, { branch, isDefaultBranch }] of branches.entries()) {
+    const repo = data[branchAlias(index)];
     if (!repo) {
-      results.set(alias, { state: "none" });
+      results[branch] = { state: "none", url: null, review: null };
       continue;
     }
 
-    // Check PR status
-    const isDefaultBranch = defaultBranches?.get(alias) !== undefined;
-    const pr = pickPullRequest(repo.pullRequests?.nodes ?? [], repo.owner?.login, isDefaultBranch);
-    if (pr?.state === "merged") {
-      results.set(alias, { state: "merged", url: pr.url, pr });
+    const review = pickPullRequest(
+      repo.pullRequests?.nodes ?? [],
+      repo.owner?.login,
+      isDefaultBranch,
+    );
+    if (review?.state === "merged") {
+      results[branch] = { state: "merged", url: review.url, review };
       continue;
     }
-    const prUrl = pr?.state === "open" ? pr.url : null;
+    const reviewUrl = review?.state === "open" ? review.url : null;
 
-    // Check CI status from check suites
     const checkSuiteNodes = repo.ref?.target?.checkSuites?.nodes ?? [];
 
-    // Filter to only GitHub Actions workflow runs (matches original gh run list behavior)
+    // Only GitHub Actions workflow runs count (the same as `gh run list`).
     const workflowRuns = checkSuiteNodes.filter(
       (cs): cs is CheckSuiteNode & { workflowRun: NonNullable<CheckSuiteNode["workflowRun"]> } =>
         cs.workflowRun != null,
     );
 
     if (workflowRuns.length === 0) {
-      results.set(alias, { state: "none", url: prUrl, pr });
+      results[branch] = { state: "none", url: reviewUrl, review };
       continue;
     }
 
-    // Deduplicate: keep only the latest run per workflow
     const latestByWorkflow = new Map<
       string,
-      {
-        status: string;
-        conclusion: string | null;
-        url: string;
-        updatedAt: string;
-      }
+      { status: string; conclusion: string | null; url: string; updatedAt: string }
     >();
     for (const cs of workflowRuns) {
       const workflowName = cs.workflowRun.workflow.name;
@@ -219,13 +191,12 @@ export function parseBatchedCIResponse(
       }
     }
 
-    // Aggregate status with priority: failure > running > pending > cancelled > success
-    // GraphQL returns UPPER_CASE values (IN_PROGRESS, QUEUED, FAILURE, etc.)
-    let aggregatedState = "success";
+    // GraphQL returns UPPER_CASE values (IN_PROGRESS, QUEUED, FAILURE, ...).
+    let aggregatedState: BranchStatus["state"] = "success";
     let aggregatedUrl: string | null = null;
 
     for (const run of latestByWorkflow.values()) {
-      let runState: string;
+      let runState: BranchStatus["state"];
       if (run.status === "IN_PROGRESS" || run.status === "QUEUED") {
         runState = run.status === "QUEUED" ? "pending" : "running";
       } else if (run.conclusion === "FAILURE") {
@@ -236,18 +207,13 @@ export function parseBatchedCIResponse(
         runState = "success";
       }
 
-      const priority = statePriority(runState);
-      if (priority >= statePriority(aggregatedState)) {
+      if (statePriority(runState) >= statePriority(aggregatedState)) {
         aggregatedState = runState;
         aggregatedUrl = run.url;
       }
     }
 
-    results.set(alias, {
-      state: aggregatedState,
-      url: prUrl ?? aggregatedUrl,
-      pr,
-    });
+    results[branch] = { state: aggregatedState, url: reviewUrl ?? aggregatedUrl, review };
   }
 
   return results;

@@ -12,7 +12,7 @@ import { getBatchedCIStatuses } from "../src/server/services/branch-status-polle
 // The real `gh` subprocess then fails offline and deterministically with
 // `spawn gh ENOENT`, which is exactly the persistent-failure shape the
 // throttle exists to de-noise (a long-running server was writing thousands
-// of identical `CI poll: GraphQL query failed ...` lines/hour).
+// of identical `CI poll: status query failed ...` lines/hour).
 //
 // This drives the exported batching function directly rather than booting
 // the full server: a hermetic `gh` *success* would need network + auth, and
@@ -31,7 +31,7 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "test@test.com",
 };
 
-const CI_POLL_PREFIX = "CI poll: GraphQL query failed for host";
+const CI_POLL_PREFIX = "CI poll: status query failed for host";
 
 const cleanups: (() => void)[] = [];
 
@@ -83,7 +83,7 @@ function ciPollCalls(spy: ReturnType<typeof vi.spyOn>): unknown[][] {
 describe("getBatchedCIStatuses CI-poll failure throttle", () => {
   it("logs a persistent identical failure once, not once per tick", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const ws = makeFailingWorktree("git@once.example:fake/repo.git", "once");
+    const ws = makeFailingWorktree("git@github.once.example:fake/repo.git", "once");
 
     // Three consecutive ticks, all failing with the same error.
     await getBatchedCIStatuses([ws]);
@@ -105,9 +105,9 @@ describe("getBatchedCIStatuses CI-poll failure throttle", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     // Host A has one worktree, host B two, so their log lines are
     // distinguishable by the `(N worktrees)` count in the prefix.
-    const a = makeFailingWorktree("git@host-a.example:fake/repo.git", "a1");
-    const b1 = makeFailingWorktree("git@host-b.example:fake/repo.git", "b1");
-    const b2 = makeFailingWorktree("git@host-b.example:fake/other.git", "b2");
+    const a = makeFailingWorktree("git@github.host-a.example:fake/repo.git", "a1");
+    const b1 = makeFailingWorktree("git@github.host-b.example:fake/repo.git", "b1");
+    const b2 = makeFailingWorktree("git@github.host-b.example:fake/other.git", "b2");
     const countFor = (n: number) =>
       ciPollCalls(errorSpy).filter((c) => c[0] === `${CI_POLL_PREFIX} (${n} worktrees):`).length;
 
@@ -130,8 +130,8 @@ describe("getBatchedCIStatuses CI-poll failure throttle", () => {
 
   it("throttles each host independently", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const github = makeFailingWorktree("git@indep-a.example:fake/repo.git", "ia");
-    const enterprise = makeFailingWorktree("git@indep-b.example:fake/repo.git", "ib");
+    const github = makeFailingWorktree("git@github.indep-a.example:fake/repo.git", "ia");
+    const enterprise = makeFailingWorktree("git@github.indep-b.example:fake/repo.git", "ib");
 
     // First tick with both hosts failing → one log per host.
     await getBatchedCIStatuses([github, enterprise]);
@@ -140,5 +140,27 @@ describe("getBatchedCIStatuses CI-poll failure throttle", () => {
     // Second tick, same failures on both hosts → both suppressed.
     await getBatchedCIStatuses([github, enterprise]);
     expect(ciPollCalls(errorSpy)).toHaveLength(2);
+  });
+
+  it("logs nothing for a host with no branch-status provider", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ws = makeFailingWorktree("git@host-a.example:fake/repo.git", "nongithub");
+
+    const result = await getBatchedCIStatuses([ws]);
+
+    expect(result.get("nongithub")).toEqual({ state: "none" });
+    expect(ciPollCalls(errorSpy)).toHaveLength(0);
+  });
+
+  it("counts every worktree of two repos on one host in a single log line", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const one = makeFailingWorktree("git@github.shared.example:fake/one.git", "s1");
+    const two = makeFailingWorktree("git@github.shared.example:fake/two.git", "s2");
+
+    await getBatchedCIStatuses([one, two]);
+
+    const calls = ciPollCalls(errorSpy);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe(`${CI_POLL_PREFIX} (2 worktrees):`);
   });
 });

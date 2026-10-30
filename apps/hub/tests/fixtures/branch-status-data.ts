@@ -1,5 +1,5 @@
 // Factories for the `repository` objects the branch-status poller's batched
-// CI query returns (`apps/hub/src/server/services/_utils/github-graphql.ts`),
+// CI query returns (`plugins/github/src/server/branch-query.ts`),
 // served by `ghStub.setBranchStatusQuery`. Defaults are obviously fake.
 
 import { FAKE_REPO } from "./github-review-data";
