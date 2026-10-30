@@ -12,6 +12,7 @@ import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { hostRegistry } from "../infra/host/registry";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import {
+  getQueuedMessages,
   hasQueuedMessages,
   peekQueuedMessage,
   pushQueuedMessage,
@@ -265,6 +266,8 @@ export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResu
     return { queued: false, task: submitTask(options) };
   }
 
+  // A message sent with no turn running resumes the queue a Stop paused, behind the older messages.
+  if (!running) pausedQueues.delete(chatId);
   const queued = pushQueuedMessage(chatId, {
     text: options.prompt,
     files: options.attachments,
@@ -450,7 +453,10 @@ function finishTask(
   if (tasks.get(task.chatId) === task) tasks.delete(task.chatId);
   emitTurnEnded(task.worktreeId);
 
-  if (status === "completed" && drainQueue(task.worktreeId, task.chatId)) return;
+  // A stopped or failed turn drains too: a message queued while the turn was still ending (a Stop
+  // takes a moment to reach the agent) would otherwise wait for a second send. Messages queued
+  // before the Stop stay paused.
+  if (drainQueue(task.worktreeId, task.chatId)) return;
 
   chatService.updateStatus(task.chatId, status === "completed" ? "idle" : "error");
   const stopped = outcome === "cancelled" || task.cancelRequested === true;
@@ -462,8 +468,11 @@ function finishTask(
 /** Starts the chat's next queued message, if any. */
 function drainQueue(worktreeId: string, chatId: string): boolean {
   // Removed only once its turn has started, so a failed start leaves it
-  // at the head of the queue for the next attempt.
-  const queued = peekQueuedMessage(chatId);
+  // at the head of the queue for the next attempt. Messages paused by a Stop are skipped.
+  const paused = pausedQueues.get(chatId);
+  const queued = paused
+    ? getQueuedMessages(chatId).find((m) => !paused.has(m.id))
+    : peekQueuedMessage(chatId);
   if (!queued) return false;
   try {
     // Queued payloads already carry the saved file's absolute path (every
@@ -488,15 +497,25 @@ function drainQueue(worktreeId: string, chatId: string): boolean {
   }
 }
 
+/** Messages queued when Stop was pressed, per chat. Stop pauses them: only messages queued after
+ *  it start on their own, until a message arrives while no turn runs, which resumes the queue in order. */
+const pausedQueues = new Map<string, Set<string>>();
+
+function pauseQueue(chatId: string): void {
+  pausedQueues.set(chatId, new Set(getQueuedMessages(chatId).map((m) => m.id)));
+}
+
 /**
  * Stops the chat's running turn. The turn ends asynchronously, when the
  * agent answers `session/cancel` (or is killed for ignoring it); the
  * `turn-ended` event and the task status follow from that.
  */
+
 export function abortTask(chatId: string): boolean {
   if (chatOwnershipService.isOwned(chatId)) return chatOwnershipService.stop(chatId);
   const task = tasks.get(chatId);
   if (!task || task.status !== "running") return false;
+  pauseQueue(task.chatId);
   task.cancelRequested = true;
   void agentSessionService.cancel(chatId);
   log.info({ chatId }, "task abort requested");
@@ -506,6 +525,7 @@ export function abortTask(chatId: string): boolean {
 export function cancelTask(taskId: string): { cancelled: boolean; worktreeId?: string } {
   for (const [chatId, task] of tasks) {
     if (task.id === taskId && task.status === "running") {
+      pauseQueue(task.chatId);
       task.cancelRequested = true;
       void agentSessionService.cancel(chatId);
       log.info({ chatId, taskId }, "task cancel requested");
