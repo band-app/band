@@ -61,13 +61,11 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 - Network: after the install and the CLI build, the suite needs none. `runner-docker`, `runner-k8s-kind` and `environment-build-docker` skip without Docker or a cluster.
 - Teardown: start servers with `startServer` from `tests/helpers/server.ts`, which waits for the server's process group before the test deletes its temp home, and delete the home with `removeTmpHome` (`tests/helpers/tmp-home.ts`), which lists leftover files when the delete fails with ENOTEMPTY.
 
-### The macOS subset
+### Where tests run
 
-On a pull request, the `Web Tests (macOS)` job runs only the hub, worker and host-local tests listed under `subset` in `scripts/macos-tests.json`, which are the tests whose behaviour depends on the OS (PTYs, the terminal daemon, launchd, `pmset`, `xcrun`). The merge queue and pushes to main run the full set, and the Linux jobs always run everything. The same file has a `notPlatformSpecific` list for files that match the rule below but behave the same everywhere. Every entry has a reason.
+Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite with the web unit and package suites (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
 
-`scripts/check-macos-tests.mjs` runs in `pnpm lint`. It fails when a `*.test.ts` file under `apps/hub/tests`, `apps/worker/tests` or `packages/host-local/tests` mentions `process.platform`, `darwin`, `launchd`, `launchctl`, `pmset`, `xcrun`, `node-pty`, `terminal-daemon`, `DaemonTerminalBackend` or `TerminalPool` and is in neither list. To add a test to the subset, add it under `subset` with a one-line reason. To say it is not platform specific, add it under `notPlatformSpecific`. A platform-dependent test that never names these words (a new kind of fixture, say) must be added to `subset` by hand.
-
-The macOS job runs the hub suite with `vitest run` after `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+The `web-macos` job runs the hub suite with `vitest run` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
 
 ### Exceptions
 
@@ -179,7 +177,7 @@ This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting,
 
 **Always run `/review-and-apply` before pushing code.** This invokes the `review-and-apply` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
 
-PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a path-filtered skip counts as a pass) on that branch before it squash-merges. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
+PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a skip counts as a pass) on that branch before it squash-merges. Pull requests run Linux jobs, Docker and k8s (kind) only: every macOS job has `github.event_name != 'pull_request'`, so the macOS jobs first run in the merge queue, and a macOS-only failure surfaces there. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
 
 ## Issue tracking
 
