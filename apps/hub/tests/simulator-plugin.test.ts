@@ -458,19 +458,34 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     const labels = async () => {
       const r = await turn(sim, a, `a-labels-${chatCount}`, [call("tree", "simulator_describe")]);
       const tree = textOf(r.tree as ToolReply) as { elements: Array<{ label?: string }> };
-      return tree.elements.map((e) => e.label ?? "").join("|");
+      // The status bar clock changes every minute, so it is not part of the comparison.
+      return tree.elements
+        .map((e) => e.label ?? "")
+        .filter((label) => !/^\d{1,2}:\d{2}(\s?[AP]M)?$/i.test(label))
+        .join("|");
+    };
+    // Rows of a freshly launched app load a moment after it appears, so a baseline is taken once
+    // two reads in a row agree.
+    const settledLabels = async () => {
+      let last = await labels();
+      for (let i = 0; i < 10; i++) {
+        const next = await labels();
+        if (next === last) return next;
+        last = next;
+      }
+      throw new Error("the screen never settled");
     };
     await turn(sim, a, "a-open-settings", [
       call("open", "simulator_launch", { bundleId: "com.apple.Preferences" }),
       { sleep: 2500 },
     ]);
-    const before = await labels();
+    const before = await settledLabels();
     expect(before).toContain("Settings");
 
     // View-only: a Home press from the viewer does not reach the device.
     screen.ws.send(JSON.stringify({ type: "button", name: "HOME" }));
     await new Promise((r) => setTimeout(r, 2500));
-    expect(await labels()).toBe(before);
+    expect(await settledLabels()).toBe(before);
 
     // After the control request the same press does.
     screen.ws.send(JSON.stringify({ type: "control", enabled: true }));
