@@ -28,7 +28,10 @@ import { ReviewProviderContext, runReviewAction, useWorktreeReview } from "./rev
 
 // Poll faster while checks are still running, the way you watch CI.
 const POLL_RUNNING_MS = 30_000;
-const POLL_SETTLED_MS = 120_000;
+// The hub pushes `review-changed` when it hears of a change, so a settled panel polls only as a
+// fallback for hubs without a webhook or public URL. Running checks keep the faster interval
+// because their elapsed time and finish are what the user watches.
+const POLL_SETTLED_MS = 180_000;
 
 function pollInterval(data: WorktreeReview | undefined): number {
   if (

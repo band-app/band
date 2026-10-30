@@ -22,6 +22,7 @@ import { ciSummaryFromChecks } from "./_utils/ci-summary";
 import { worktreeGh } from "./_utils/worktree-gh";
 import { applyCIStatus } from "./branch-status-poller";
 import { type PluginHost, pluginHost } from "./plugin-host-service";
+import { reviewSignalService } from "./review-signal-service";
 import { type WorktreeService, worktreeService } from "./worktree-service";
 
 const log = createLogger("review-service");
@@ -132,6 +133,8 @@ export class ReviewService {
     } catch (err) {
       throw new ReviewProviderError(err instanceof Error ? err.message : String(err));
     }
+    // Every device with the panel open refetches, not only the one that ran the action.
+    reviewSignalService.changed({ repo, branch, ...(number > 0 && { number }) });
   }
 
   /** `reviews.merge`, kept for the mobile app: the `merge` action with the chosen method. */

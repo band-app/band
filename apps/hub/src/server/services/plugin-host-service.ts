@@ -17,6 +17,7 @@ import type {
 } from "@band-app/plugin-api/server";
 import { hostRegistry } from "../infra/host/registry";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled-plugins";
+import { reviewSignalService } from "./review-signal-service";
 import { loadSettings } from "./state";
 
 const log = createLogger("plugin-host");
@@ -222,6 +223,7 @@ export class PluginHost {
         error: (message, ...args) => pluginLog.error(message, ...(args as never[])),
       },
       exec: (bin, args, options) => this.host().exec(bin, args, options),
+      reviews: { changed: (change) => reviewSignalService.changed(change) },
       workers: {
         call: (hostId, method, params, scope) =>
           this.callWorker(pluginId, hostId, method, params, scope),

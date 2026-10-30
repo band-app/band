@@ -1,6 +1,7 @@
 import type { ReviewActionArgs, WorktreeReview } from "@band-app/plugin-api";
 import { useQuery } from "@tanstack/react-query";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect } from "react";
+import { useAdapter } from "@/dashboard/context";
 import { queryClient } from "@/dashboard/query-client";
 import { trpc } from "../../lib/trpc-client";
 
@@ -43,6 +44,19 @@ export function useWorktreeReview(
     refetchInterval: number | false | ((data: WorktreeReview | undefined) => number | false);
   },
 ) {
+  const adapter = useAdapter();
+  // The hub heard of a change on the forge (webhook, poll, or an action from another device).
+  useEffect(() => {
+    if (!enabled) return;
+    return adapter.subscribeStatusEvents((event) => {
+      if (event.kind !== "review-changed") return;
+      const ids = event.worktreeIds;
+      if (Array.isArray(ids) && ids.includes(worktreeId)) {
+        void queryClient.invalidateQueries({ queryKey: reviewQueryKey(worktreeId) });
+      }
+    });
+  }, [adapter, enabled, worktreeId]);
+
   const query = useQuery({
     queryKey: reviewQueryKey(worktreeId),
     queryFn: () => trpc.reviews.forWorktree.query({ worktreeId }),
