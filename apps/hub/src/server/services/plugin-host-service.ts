@@ -9,7 +9,12 @@ import {
   type RepoInfo,
   type ReviewProvider,
 } from "@band-app/plugin-api";
-import type { BandServerApi, ServerPlugin } from "@band-app/plugin-api/server";
+import type {
+  BandServerApi,
+  PluginTool,
+  ServerPlugin,
+  WorkerScope,
+} from "@band-app/plugin-api/server";
 import { hostRegistry } from "../infra/host/registry";
 import { BUNDLED_PLUGINS, type BundledPlugin } from "./bundled-plugins";
 import { loadSettings } from "./state";
@@ -47,12 +52,14 @@ export class PluginHost {
   private plugins: LoadedPlugin[] | null = null;
   private reviewProviders: ReviewProvider[] = [];
   private checksProviders: ChecksProvider[] = [];
+  private tools: Array<{ pluginId: string; tool: PluginTool }> = [];
   private branchStatusProviders: BranchStatusProvider[] = [];
 
   constructor(
     private readonly bundled: BundledPlugin[],
     /** The host a plugin's `exec` runs on. Plugin calls carry a path, not a worktree, so it is the local host until plugins are bound to a worktree's host. */
     private readonly host: () => Host = () => hostRegistry.local,
+    private readonly hostById: (hostId: string) => Host = (id) => hostRegistry.hostById(id),
   ) {}
 
   /** Activate the plugins that ask for `onStartup`. Called once at boot. */
@@ -93,6 +100,37 @@ export class PluginHost {
   async checksProviderFor(repo: RepoInfo): Promise<ChecksProvider | null> {
     await this.activateForRemote(repo.host);
     return this.checksProviders.find((p) => this.safeMatches(p, repo)) ?? null;
+  }
+
+  /** The agent tools of the plugins that are active, for the built-in `band` MCP server. */
+  agentTools(): Array<{ pluginId: string; tool: PluginTool }> {
+    return [...this.tools];
+  }
+
+  /**
+   * Calls a worker service of plugin `pluginId` for one worktree. Rejects with an error that names
+   * the worker when it is the hub's own machine, cannot run the plugin or is offline.
+   */
+  async callWorker(
+    pluginId: string,
+    hostId: string,
+    method: string,
+    params: unknown,
+    scope: WorkerScope,
+  ): Promise<unknown> {
+    const host = this.hostById(hostId);
+    if (!host.plugins) {
+      throw new Error(
+        `Worker ${hostId} is the hub's own machine, which runs no worker plugins. Use a worktree on a connected worker.`,
+      );
+    }
+    const info = await host.info();
+    if (!info.capabilities[pluginId]) {
+      throw new Error(
+        `Worker ${hostId} cannot run the ${pluginId} plugin (it needs a worker that reports the ${pluginId} capability).`,
+      );
+    }
+    return host.plugins.call(pluginId, method, params, scope);
   }
 
   async branchStatusProviderFor(repo: RepoInfo): Promise<BranchStatusProvider | null> {
@@ -144,6 +182,7 @@ export class PluginHost {
         plugin.error = err instanceof Error ? err.message : String(err);
         this.reviewProviders = this.reviewProviders.filter((p) => p.id !== plugin.manifest.id);
         this.checksProviders = this.checksProviders.filter((p) => p.id !== plugin.manifest.id);
+        this.tools = this.tools.filter((t) => t.pluginId !== plugin.manifest.id);
         this.branchStatusProviders = this.branchStatusProviders.filter(
           (p) => p.id !== plugin.manifest.id,
         );
@@ -183,6 +222,19 @@ export class PluginHost {
         error: (message, ...args) => pluginLog.error(message, ...(args as never[])),
       },
       exec: (bin, args, options) => this.host().exec(bin, args, options),
+      workers: {
+        call: (hostId, method, params, scope) =>
+          this.callWorker(pluginId, hostId, method, params, scope),
+      },
+      tools: {
+        register: (tool) => {
+          if (this.tools.some((t) => t.tool.name === tool.name)) {
+            log.error("Plugin %s registered the tool %s twice", pluginId, tool.name);
+            return;
+          }
+          this.tools.push({ pluginId, tool });
+        },
+      },
       providers: {
         // Stored as given, not copied, so a provider written as a class
         // keeps its prototype methods. Its id must be the plugin's id, which

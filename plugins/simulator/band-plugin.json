@@ -1,0 +1,21 @@
+{
+  "id": "simulator",
+  "name": "iOS Simulator",
+  "version": "0.1.0",
+  "pluginApi": 1,
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "workerServices": ["simulator"],
+    "tools": [
+      "simulator_status",
+      "simulator_screenshot",
+      "simulator_tap",
+      "simulator_type",
+      "simulator_button",
+      "simulator_open_url",
+      "simulator_install",
+      "simulator_launch"
+    ]
+  },
+  "requires": ["os=darwin", "xcrun"]
+}

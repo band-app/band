@@ -33,9 +33,16 @@ export const pluginManifestSchema = z.object({
   contributes: z
     .object({
       slots: z.array(z.enum(CLIENT_SLOT_IDS)).default([]),
+      /** Worker services the plugin runs. A worker that can run one reports its id as a capability. */
+      workerServices: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)).default([]),
+      /** Names of the agent tools the plugin registers on the hub. */
+      tools: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).default([]),
     })
     .default({}),
-  /** External binaries the plugin shells out to. */
+  /**
+   * What the plugin needs. An entry with `=` is a worker fact (`os=darwin`, `arch=arm64`), any
+   * other entry is a binary that must be on the PATH (`gh`, `xcrun`).
+   */
   requires: z.array(z.string()).default([]),
 });
 
@@ -53,4 +60,19 @@ export function matchesRepoRemote(manifest: PluginManifest, host: string): boole
 function globToRegExp(glob: string): RegExp {
   const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   return new RegExp(`^${escaped}$`);
+}
+
+/** The `requires` entries split into worker facts (`os=darwin`) and binaries (`xcrun`). */
+export function parseRequires(requires: string[]): {
+  facts: Record<string, string>;
+  binaries: string[];
+} {
+  const facts: Record<string, string> = {};
+  const binaries: string[] = [];
+  for (const entry of requires) {
+    const at = entry.indexOf("=");
+    if (at > 0) facts[entry.slice(0, at)] = entry.slice(at + 1);
+    else binaries.push(entry);
+  }
+  return { facts, binaries };
 }
