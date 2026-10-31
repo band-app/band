@@ -17,7 +17,7 @@ const activationEventSchema = z.union([
 ]);
 
 /** Client slot ids a plugin may fill. The core renders each one. */
-export const CLIENT_SLOT_IDS = ["worktree.sideTabs"] as const;
+export const CLIENT_SLOT_IDS = ["worktree.sideTabs", "worktree.panels"] as const;
 export type ClientSlotId = (typeof CLIENT_SLOT_IDS)[number];
 
 /**

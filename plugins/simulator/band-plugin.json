@@ -5,10 +5,12 @@
   "pluginApi": 1,
   "activationEvents": ["onStartup"],
   "contributes": {
+    "slots": ["worktree.panels"],
     "workerServices": ["simulator"],
     "tools": [
       "simulator_status",
       "simulator_screenshot",
+      "simulator_describe",
       "simulator_tap",
       "simulator_type",
       "simulator_button",

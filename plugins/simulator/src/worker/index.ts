@@ -1,11 +1,10 @@
-import { readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { defineWorkerPlugin } from "@band-app/plugin-api/worker";
 import { DeviceSet, maxBooted } from "./devices.ts";
-import { Input } from "./input.ts";
+import { ServeSimHelpers } from "./servesim.ts";
+import { openScreenStream, serveSimButton } from "./stream.ts";
 import { run } from "./tools.ts";
-
-const BUTTONS = ["HOME", "LOCK", "SIDE_BUTTON", "APPLE_PAY", "SIRI"] as const;
 
 function obj(params: unknown): Record<string, unknown> {
   return typeof params === "object" && params !== null ? (params as Record<string, unknown>) : {};
@@ -29,16 +28,19 @@ function pngSize(png: Buffer): { width: number; height: number } {
 }
 
 /**
- * The worker half of the simulator plugin. Every worktree gets one device in a Band-owned device
- * set (`<state dir>/simulator/devices`), so the user's own simulators are never touched.
+ * The worker half of the simulator plugin. Every worktree gets one device named
+ * "Band – <worktree id>" in the machine's default device set, where serve-sim can see it.
+ * Only devices with that name prefix are ever touched.
  */
 export default defineWorkerPlugin({
   id: "simulator",
   create(api) {
     const root = join(api.stateDir, "simulator");
     const devices = new DeviceSet(join(root, "devices"));
-    const input = new Input(devices.dir);
-    devices.onShutdown = (udid) => input.stop(udid);
+    const helpers = new ServeSimHelpers();
+    devices.onShutdown = (udid) => {
+      void helpers.stop(udid);
+    };
 
     return {
       async unavailable() {
@@ -56,65 +58,61 @@ export default defineWorkerPlugin({
         switch (method) {
           case "status": {
             const device = await devices.exclusive(() => devices.ensureDevice(worktreeKey));
-            const screen = device.state === "Booted" ? await input.screen(device.udid) : null;
+            const screen = device.state === "Booted" ? await helpers.screen(device.udid) : null;
             return {
               udid: device.udid,
               name: device.name,
               state: device.state,
               screen,
               maxBooted: maxBooted(),
-              input: input.available(),
             };
+          }
+          case "boot": {
+            const device = await boot();
+            return { udid: device.udid, name: device.name, state: device.state };
           }
           case "screenshot": {
             const device = await boot();
+            await mkdir(root, { recursive: true });
             const file = join(root, `shot-${device.udid}-${Date.now()}.png`);
             try {
-              await run("xcrun", [
-                "simctl",
-                "--set",
-                devices.dir,
-                "io",
-                device.udid,
-                "screenshot",
-                "--type=png",
-                file,
-              ]);
+              await run("xcrun", ["simctl", "io", device.udid, "screenshot", "--type=png", file]);
               const png = await readFile(file);
-              return { pngBase64: png.toString("base64"), ...pngSize(png) };
+              const screen = await helpers.screen(device.udid);
+              const { width, height } = pngSize(png);
+              return {
+                pngBase64: png.toString("base64"),
+                width,
+                height,
+                scale: screen ? Math.round((width / screen.width) * 100) / 100 : null,
+              };
             } finally {
               await rm(file, { force: true });
             }
           }
+          case "describe": {
+            const device = await boot();
+            return helpers.describe(device.udid);
+          }
           case "tap": {
             const device = await boot();
-            await input.tap(device.udid, num(params, "x"), num(params, "y"));
+            await helpers.tap(device.udid, num(params, "x"), num(params, "y"));
             return { ok: true };
           }
           case "type": {
             const device = await boot();
-            await input.type(device.udid, str(params, "text"));
+            await helpers.type(device.udid, str(params, "text"));
             return { ok: true };
           }
           case "button": {
-            const name = str(params, "button");
-            if (!(BUTTONS as readonly string[]).includes(name)) {
-              throw new Error(`button must be one of ${BUTTONS.join(", ")}`);
-            }
+            const name = serveSimButton(str(params, "button"));
             const device = await boot();
-            await input.button(device.udid, name);
+            await helpers.button(device.udid, name);
             return { ok: true };
           }
           case "openUrl": {
             const device = await boot();
-            await run("xcrun", [
-              "simctl",
-              "--set",
-              devices.dir,
-              "openurl",
-              device.udid,
-              str(params, "url"),
-            ]);
+            await run("xcrun", ["simctl", "openurl", device.udid, str(params, "url")]);
             return { ok: true };
           }
           case "install": {
@@ -126,7 +124,7 @@ export default defineWorkerPlugin({
               throw new Error("path must be an .app folder inside this worktree");
             }
             const device = await boot();
-            await run("xcrun", ["simctl", "--set", devices.dir, "install", device.udid, app], {
+            await run("xcrun", ["simctl", "install", device.udid, app], {
               timeoutMs: 5 * 60_000,
             });
             return { ok: true };
@@ -135,8 +133,6 @@ export default defineWorkerPlugin({
             const device = await boot();
             const { stdout } = await run("xcrun", [
               "simctl",
-              "--set",
-              devices.dir,
               "launch",
               device.udid,
               str(params, "bundleId"),
@@ -146,6 +142,18 @@ export default defineWorkerPlugin({
           default:
             throw new Error(`unknown simulator method ${method}`);
         }
+      },
+
+      async stream(name, _params, { worktreeKey }) {
+        if (name !== "screen") throw new Error(`unknown simulator stream ${name}`);
+        const device = await devices.exclusive(() => devices.ensureBooted(worktreeKey));
+        const helper = await helpers.helper(device.udid);
+        const screen = (await helpers.screen(device.udid)) ?? { width: 0, height: 0 };
+        return openScreenStream(helper, helpers, {
+          ...screen,
+          udid: device.udid,
+          name: device.name,
+        });
       },
 
       async release(worktreeKey, reason) {
@@ -158,7 +166,7 @@ export default defineWorkerPlugin({
 
       async stop() {
         await devices.exclusive(() => devices.shutdownAll());
-        input.stopAll();
+        await helpers.stopAll();
       },
     };
   },

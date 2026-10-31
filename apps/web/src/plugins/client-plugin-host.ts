@@ -1,13 +1,23 @@
 import type { ClientPluginHost } from "@band-app/plugin-api/client";
 import { readAgentMode } from "@/dashboard/lib/agent-mode";
+import { RemoteScreen } from "../components/remote-screen/RemoteScreen";
 import { DELETE_WORKTREE_EVENT } from "../dashboard/lib/worktree-delete";
 import { AGENT_LAUNCHING_EVENT, OPEN_PANE_EVENT } from "../lib/agent-pane-events";
+import { invoke } from "../lib/desktop-ipc";
+import { localWorkerId } from "../lib/direct-worker";
+import { isDesktop } from "../lib/is-desktop";
 import { markChatFresh, newChatId, newTerminalId } from "../lib/leaf-instance-ids";
 import { openExternalUrl } from "../lib/open-external-url";
 import { trpc } from "../lib/trpc-client";
 
 /** The core's side of the plugin client API, backed by tRPC and TanStack Query. */
 export const clientPluginHost: ClientPluginHost = {
+  RemoteScreen,
+
+  // Only in the desktop app, and only for a worktree on this Mac's own worker.
+  revealSimulator: isDesktop ? revealSimulatorInDesktop : undefined,
+  canRevealSimulator: isDesktop ? canRevealSimulator : undefined,
+
   async startAgent(worktreeId, prompt) {
     // The dock activates the tab of every id announced here, whether the
     // server's `chat-created` / `terminal-created` event or this call's
@@ -66,3 +76,14 @@ export const clientPluginHost: ClientPluginHost = {
     );
   },
 };
+
+async function canRevealSimulator(worktreeId: string): Promise<boolean> {
+  const mine = await localWorkerId();
+  if (!mine) return false;
+  const status = await trpc.simulators.status.query({ worktreeId });
+  return status.hostId === mine;
+}
+
+async function revealSimulatorInDesktop(_worktreeId: string, udid: string): Promise<void> {
+  await invoke("reveal_simulator", { udid });
+}

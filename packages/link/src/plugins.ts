@@ -14,3 +14,16 @@ export interface PluginCallParams {
   worktreeKey: string;
   worktreePath: string;
 }
+
+/**
+ * Hub to worker: opens a live stream of a plugin's worker half. The reply is `{ chan }`. The
+ * channel carries `encodeMessageFrame` messages in both directions, and the hub resetting it
+ * closes the stream.
+ */
+export const METHOD_PLUGIN_STREAM = "plugin.stream";
+
+export interface PluginStreamParams extends Omit<PluginCallParams, "method" | "params"> {
+  /** The stream's name within the plugin. */
+  stream: string;
+  params?: unknown;
+}

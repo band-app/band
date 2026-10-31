@@ -1,6 +1,6 @@
 # Plugins
 
-Status: phase 1, phase 2 and the first half of phase 3 (the worker half and agent tools) are built. The stream channel and the `worktree.panels` slot, then phase 4, are planned.
+Status: phase 1, phase 2 and phase 3 (the worker half, agent tools, the stream channel and the `worktree.panels` slot, with the iOS simulator as the first user) are built. Phase 4 is planned.
 
 ## Decision
 
@@ -15,7 +15,7 @@ A provider returns data, and the core draws it. A plugin never imports Band inte
 
 1. Import boundary. A Biome `noRestrictedImports` override for `plugins/**` allows only `@band-app/plugin-api`, `@band-app/ui` and the plugin's own dependencies. Done: `pnpm lint` fails on an import of `apps/*` or any other `@band-app/*` package.
 2. Data-only providers. The core owns the screens and the plugin supplies facts. Done: the Checks tab (`apps/web/src/components/review`) is drawn by the core for any `ReviewProvider`, and review actions are data. The PR badge and CI icon come from a `BranchStatusProvider`, and the batched GraphQL query lives in `plugins/github`. The change signal is built: a plugin calls `api.reviews.changed({ repo, branch?, number? })` and the core sends a `review-changed` status event so open Checks panels refetch (the GitHub plugin fires it for each verified webhook delivery and each poll that finds something new, and `reviews.runAction` fires it after an action). Subscription sources are moved: a `SubscriptionSourceProvider` (`packages/plugin-api/src/providers.ts`) verifies and reads webhook deliveries, aggregates a commit's checks, registers the webhook, polls, and names the default allowed senders. The signature scheme belongs to the provider because it is forge specific. The secret's storage (`BAND_GITHUB_WEBHOOK_SECRET` or the 0600 file), the route's place before auth, delivery-id dedup, the pushed-sha and sender guards, wakeup limits and expiry, the `gh` budget, round robin and backoff stay in the core, which works on normalized events and lends the provider a `gh` that uses the hub's login. With the plugin disabled the route answers 404 and nothing polls.
-3. Worker half and panels. A plugin gets a part that runs on a worker, a stream channel to the hub, and a `worktree.panels` slot for views such as a simulator. The panel is the core's, the stream is the plugin's. Done: the worker half, `plugin.call` and agent tools (see below), used by the simulator plugin. Next: the stream and the panel slot.
+3. Worker half and panels. A plugin gets a part that runs on a worker, a stream channel to the hub, and a `worktree.panels` slot for views such as a simulator. The panel is the core's, the stream is the plugin's. Done: the worker half, `plugin.call`, agent tools, the stream channel and the `worktree.panels` slot (see below), used by the simulator plugin.
 4. Extensions. Out-of-process plugins with an iframe runner and a permission model. Needs its own design before any code.
 
 ## Data-only providers
@@ -74,9 +74,17 @@ The hub's own machine (`local`) has no `plugins` on its `Host`, so a plugin tool
 
 A tool handler gets a `ToolContext` made from the session token's chat: its worktree, that worktree's worker, and `call(method, params)` which reaches the plugin's worker half for exactly that worktree. A tool takes no worktree argument, and an extra argument is dropped by the schema, so an agent cannot act on another worktree. `PluginHost.callWorker` checks the worker's `host.info` capabilities first and answers `Worker <id> cannot run the <plugin> plugin` when it lacks one.
 
+## Streams and panels
+
+A worker half may open a live stream: `WorkerPluginInstance.stream(name, params, call)` returns a `PluginStream` (`output` of text or bytes, `write`, `close`). The hub reaches it with the link method `plugin.stream` (`HostPlugins.stream`, `RemoteHost`), which opens one channel carrying `encodeMessageFrame` messages (a length, a kind byte for text or bytes, the payload) in both directions. The hub resetting the channel closes the stream. The call gets the same five minutes as `plugin.call`, because opening may boot a device.
+
+`GET /api/plugins/<plugin id>/worktrees/<worktree id>/stream` (`api/plugins/stream-handler.ts`) bridges a browser WebSocket to it, built like the desktop route. It needs a device token, and the worker relay lists no such route, so an agent gets 403. The viewer is view-only until it sends `{"type":"control","enabled":true}`: the hub drops every other message and all binary ones before that.
+
+A client half contributes `worktree.panels` entries (`WorktreePanel`: id, label, icon, the worker `capability` that makes it available, and a component). The center "+" menu lists the entries whose capability the worktree's worker reports. A panel is a center tab of kind `plugin` with the id `plugin:<plugin id>:<panel id>` in the shared tab list, so it reopens on reload and on other devices. The core hands panels a generic `RemoteScreen` through `ClientPluginHost` (frames in, pointer and key messages out, view-only and control modes), so a plugin does not import the dashboard. The simulator's panel and its use of the stream are in `docs/simulator.md`.
+
 ## Tests
 
-`apps/hub/tests/simulator-plugin.test.ts` runs a real hub and real `band-worker` processes with the ACP stub calling the tools. `apps/worker/tests/plugin-fencing.test.ts` checks the lease fence.
+`apps/hub/tests/simulator-plugin.test.ts` runs a real hub and real `band-worker` processes with the ACP stub calling the tools, then opens the stream and checks view-only and control on a device. `apps/worker/tests/plugin-fencing.test.ts` checks the lease fence. `apps/web/e2e/simulator-panel.spec.ts` drives the tab in a browser, the chat image and `band simulators open`. CI skips the tests that boot a device unless `BAND_TEST_SIMULATOR=1`; the macOS web job turns it on for the stream test and the Simulator tab e2e.
 
 ## Comparison with VS Code's SCM API
 

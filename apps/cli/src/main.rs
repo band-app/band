@@ -73,6 +73,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: GroupsCmd,
     },
+    /// Open a worktree's iOS simulator as a tab in the Band UI (Mac workers with Xcode)
+    Simulators {
+        #[command(subcommand)]
+        cmd: SimulatorsCmd,
+    },
     /// List the workers worktrees can run on
     #[command(name = "workers", alias = "hosts")]
     Workers {
@@ -752,6 +757,15 @@ enum SubscriptionsCmd {
 }
 
 #[derive(Subcommand)]
+enum SimulatorsCmd {
+    /// Boot the worktree's simulator and open its Simulator tab for every connected client
+    Open {
+        /// Worktree ID (defaults to the worktree of the current directory)
+        worktree: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum GroupsCmd {
     /// List groups in sidebar order
     List,
@@ -1325,6 +1339,9 @@ fn main() {
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
         },
         Commands::Env { .. } => unreachable!("handled before the match"),
+        Commands::Simulators { cmd } => match cmd {
+            SimulatorsCmd::Open { worktree } => cmd_simulators_open(worktree.as_deref()),
+        },
         Commands::Groups { cmd } => match cmd {
             GroupsCmd::List => cmd_groups_list(),
             GroupsCmd::Create { name, color } => cmd_groups_create(&name, color.as_deref()),
@@ -4512,6 +4529,25 @@ fn cmd_groups_rename(group: &str, new_name: &str) -> Result<CommandResult, Strin
     })
 }
 
+fn cmd_simulators_open(worktree: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let id = resolve_worktree_id(&client, worktree)?;
+    validate::validate_name(&id, "Worktree id")?;
+    let data = client.trpc_mutate("simulators.open", &serde_json::json!({"worktreeId": id}))?;
+    let name = data
+        .pointer("/device/name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("simulator");
+    let state = data
+        .pointer("/device/state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    Ok(CommandResult {
+        text: format!("Opened the Simulator tab of {id} ({name}, {state})\n"),
+        json: data,
+    })
+}
+
 fn cmd_groups_remove(group: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let id = resolve_group_id(&client, group)?;
@@ -5844,6 +5880,14 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--clear", "type": "boolean", "required": false, "description": "Clear the title, so the name shows again"},
             ],
             "notes": "Changes only what the sidebar shows. The worktree id, folder and git branch stay the same. Agents may use this command for worktrees on their own worker."
+        }),
+        serde_json::json!({
+            "name": "simulators open",
+            "description": "Boot the worktree's iOS simulator and open its Simulator tab in the Band UI",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": false, "positional": true, "description": "Worktree ID (defaults to the worktree of the current directory)"},
+            ],
+            "notes": "The worktree's worker must be a Mac with Xcode. The tab opens on every connected client. Not available to an agent on a worker: an agent uses the simulator_* tools."
         }),
         serde_json::json!({
             "name": "groups list",

@@ -74,6 +74,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "groups create": "creating groups is a person's call, not an agent's",
   "groups rename": "renaming groups is a person's call, not an agent's",
   "groups remove": "deleting groups is a person's call, not an agent's",
+  "simulators open": "opens a tab in a person's UI; an agent uses the simulator_* tools",
   "worktrees set-origin": "rewires the sidebar tree, which is a person's call, not an agent's",
   "worktrees mark-unread": "a person's reading state, not an agent's",
   "worktrees mark-read": "a person's reading state, not an agent's",

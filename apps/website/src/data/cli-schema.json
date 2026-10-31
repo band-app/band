@@ -250,6 +250,20 @@
       ]
     },
     {
+      "description": "Boot the worktree's iOS simulator and open its Simulator tab in the Band UI",
+      "name": "simulators open",
+      "notes": "The worktree's worker must be a Mac with Xcode. The tab opens on every connected client. Not available to an agent on a worker: an agent uses the simulator_* tools.",
+      "parameters": [
+        {
+          "description": "Worktree ID (defaults to the worktree of the current directory)",
+          "name": "worktree",
+          "positional": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
       "description": "List groups in sidebar order",
       "name": "groups list",
       "notes": "JSON output: `{\"groups\": [{\"id\": \"...\", \"name\": \"...\", \"color\": \"...\"}]}`",

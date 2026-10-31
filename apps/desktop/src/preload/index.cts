@@ -61,6 +61,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "reveal_in_finder",
   "check_app_exists",
   "open_with_app",
+  "reveal_simulator",
   "install_cli",
   "open_external",
   // App-update toast

@@ -12,7 +12,7 @@
 
 import { CENTER_TABS_PREFIX } from "@band-app/shared/client-state-keys";
 
-export type CenterTabKind = "chat" | "term" | "browser" | "file" | "diff";
+export type CenterTabKind = "chat" | "term" | "browser" | "file" | "diff" | "plugin";
 
 export interface CenterTab {
   id: string;
@@ -24,7 +24,14 @@ export interface CenterTabs {
   active: string | null;
 }
 
-export const CENTER_TAB_KINDS = new Set<string>(["chat", "term", "browser", "file", "diff"]);
+export const CENTER_TAB_KINDS = new Set<string>([
+  "chat",
+  "term",
+  "browser",
+  "file",
+  "diff",
+  "plugin",
+]);
 
 export function centerTabsKey(worktreeId: string): string {
   return `${CENTER_TABS_PREFIX}${worktreeId}`;

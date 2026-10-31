@@ -40,3 +40,44 @@ export async function* decodeFrames(source: AsyncIterable<Uint8Array>): AsyncGen
     }
   }
 }
+
+/**
+ * Mixed text and binary messages over a channel, for a plugin's live stream. Each message is a
+ * 4-byte big-endian length, a kind byte (0 text, 1 bytes) and the payload.
+ */
+const KIND_TEXT = 0;
+const KIND_BYTES = 1;
+
+export function encodeMessageFrame(message: string | Uint8Array): Buffer {
+  const body = typeof message === "string" ? Buffer.from(message, "utf8") : message;
+  const out = Buffer.allocUnsafe(5 + body.byteLength);
+  out.writeUInt32BE(1 + body.byteLength, 0);
+  out[4] = typeof message === "string" ? KIND_TEXT : KIND_BYTES;
+  out.set(body, 5);
+  return out;
+}
+
+/** Splits arriving chunks into messages. Throws on a length over {@link MAX_FRAME_BYTES} or a bad kind. */
+export class MessageFrameReader {
+  private pending: Buffer = Buffer.alloc(0);
+
+  push(chunk: Uint8Array): Array<string | Buffer> {
+    this.pending = this.pending.length
+      ? Buffer.concat([this.pending, chunk])
+      : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    const out: Array<string | Buffer> = [];
+    for (;;) {
+      if (this.pending.length < 4) break;
+      const length = this.pending.readUInt32BE(0);
+      if (length < 1 || length > MAX_FRAME_BYTES) throw new Error(`Frame of ${length} bytes`);
+      if (this.pending.length < 4 + length) break;
+      const kind = this.pending[4];
+      const body = this.pending.subarray(5, 4 + length);
+      if (kind === KIND_TEXT) out.push(body.toString("utf8"));
+      else if (kind === KIND_BYTES) out.push(Buffer.from(body));
+      else throw new Error(`Unknown frame kind ${kind}`);
+      this.pending = this.pending.subarray(4 + length);
+    }
+    return out;
+  }
+}
