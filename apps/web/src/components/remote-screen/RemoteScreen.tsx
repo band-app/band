@@ -122,6 +122,10 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
         if (disposed || ws !== sock) return;
         // The worker refused, is not there, or cannot open the stream: the hub carries it instead.
         if (direct && directSocketClosed(worktreeId, event, opened) === "fallback") {
+          // The hub's socket starts view-only, so a control taken on the worker is over.
+          controllingRef.current = false;
+          pressedRef.current = false;
+          setControlling(false);
           open(null);
           return;
         }

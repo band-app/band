@@ -334,7 +334,12 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
 
   // Simulator tab S1: the stream goes to this Mac's worker on loopback and the hub carries none
   // of it. S2: when the worker goes away the tab falls back to the hub's stream.
-  if (CAN_RUN_SIMULATOR) {
+  if (!CAN_RUN_SIMULATOR) {
+    test.info().annotations.push({
+      type: "skip",
+      description: "The Simulator step needs Xcode, and on CI BAND_TEST_SIMULATOR=1",
+    });
+  } else {
     const pluginSockets = () =>
       sockets.filter((u) => /\/plugins\/simulator\/(?:worktrees\/[^/]+\/)?stream/.test(u));
     await hubCall("simulators.open", { worktreeId });

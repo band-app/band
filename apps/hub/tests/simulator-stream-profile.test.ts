@@ -17,6 +17,7 @@ import {
   jpegSize,
   openScreenStream,
 } from "../../../plugins/simulator/src/worker/stream";
+import { waitFor } from "./helpers/wait-for";
 
 const CAN_RUN = process.platform === "darwin";
 const WIDTH = 400;
@@ -117,9 +118,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!CAN_RUN) return;
-  hid.close();
-  await new Promise((resolve) => http.close(resolve));
+  for (const client of hid.clients) client.terminate();
+  await new Promise((resolve) => hid.close(resolve));
   http.closeAllConnections();
+  await new Promise((resolve) => http.close(resolve));
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -163,7 +165,9 @@ describe.skipIf(!CAN_RUN)("the simulator stream's profiles (S3)", () => {
       input.length = 0;
       const stream = openScreenStream(helper, helpers, info, { profile });
       stream.write(JSON.stringify({ type: "touch", phase: "begin", x: 0.25, y: 0.75 }));
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await waitFor(() => (input.length > 0 ? true : undefined), {
+        label: "the touch reached the device",
+      });
       stream.close();
       expect(input, profile).toEqual([
         { type: 3, payload: { type: "begin", x: 0.25, y: 0.75, edge: 0 } },

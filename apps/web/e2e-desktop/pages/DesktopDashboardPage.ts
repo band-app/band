@@ -30,18 +30,19 @@ export class DesktopDashboardPage {
     return urls;
   }
 
-  /** The Simulator tab's screen, and which way its frames come (`direct`, `hub` or `pending`). */
+  /** The Simulator tab's screen. Its `data-route` is `direct`, `hub` or `pending`. */
   get remoteScreen(): Locator {
     return this.page.getByTestId("remote-screen");
   }
 
-  /** Waits for the Simulator tab's screen to go live and returns the way it connected. */
+  /** Waits until the Simulator tab's screen connects by the given route. */
   async waitForRemoteScreenRoute(route: "direct" | "hub", timeout = 360_000): Promise<void> {
     await test.step(`Wait for the simulator screen to stream ${route === "direct" ? "from this Mac" : "through the hub"}`, async () => {
       await expect(this.remoteScreen).toHaveAttribute("data-route", route, { timeout });
     });
   }
 
+  /** Waits until the Simulator tab's screen shows frames. */
   async waitForRemoteScreenLive(timeout = 360_000): Promise<void> {
     await test.step("Wait for the simulator screen to go live", async () => {
       await expect(this.remoteScreen).toHaveAttribute("data-phase", "live", { timeout });

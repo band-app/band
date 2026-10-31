@@ -94,10 +94,11 @@ export function streamProfile(params: unknown): "hub" | "direct" {
 /** Halves a JPEG with `sips`, which ships with macOS (the only system the simulator runs on). */
 class FrameScaler {
   private dir: Promise<string> | null = null;
+  private disposed = false;
 
   async scale(frame: Buffer): Promise<Buffer> {
     const size = jpegSize(frame);
-    if (!size) return frame;
+    if (!size || this.disposed) return frame;
     const width = Math.max(1, Math.floor(size.width * HUB_SCALE));
     const height = Math.max(1, Math.floor(size.height * HUB_SCALE));
     try {
@@ -132,6 +133,7 @@ class FrameScaler {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     const dir = this.dir ? await this.dir.catch(() => null) : null;
     this.dir = null;
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -198,9 +200,10 @@ const unit = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null;
 
 /**
- * The live screen of one device (frame size and rate follow the `profile` in `params`). Messages to the viewer are text `{"type":"info"}` and then one
+ * The live screen of one device. Messages to the viewer are text `{"type":"info"}` and then one
  * binary JPEG per frame (the newest one when the viewer is slow). Messages from the viewer are
- * JSON: `touch` (phase and 0..1 coordinates), `button`, `key` and `text`.
+ * JSON: `touch` (phase and 0..1 coordinates), `button`, `key` and `text`. Frame size and rate
+ * follow the `profile` in `params`.
  */
 export function openScreenStream(
   helper: Helper,
