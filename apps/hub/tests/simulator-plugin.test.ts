@@ -37,7 +37,7 @@ import {
 } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 function hasSimctl(): boolean {
   try {
@@ -473,15 +473,24 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     // launched or a home screen after Home keeps animating, but a different app, the home screen
     // or a lock screen has different labels.
     const labels = async () => {
-      // The accessibility tree can be unavailable for a while after a launch, so a reply without
-      // elements is retried, and its text is logged when it never arrives.
+      // The accessibility tree can be unavailable for a while after a launch or a button press,
+      // and can come back as an empty list or with no labels while the screen changes. A real
+      // screen always has labels, so a reply without any is retried, and its text is logged when
+      // it never arrives.
+      // The status bar clock changes every minute, so it is not part of the comparison.
+      const labelsOf = (list: Array<{ label?: string }>) =>
+        list
+          .map((e) => e.label ?? "")
+          .filter((label) => !/^\d{1,2}:\d{2}(\s?[AP]M)?$/i.test(label))
+          .join("|");
       let elements: Array<{ label?: string }> | undefined;
       let reply = "";
       for (let attempt = 0; attempt < 12 && !elements; attempt++) {
         const r = await turn(sim, a, `a-labels-${chatCount}`, [call("tree", "simulator_describe")]);
         const tree = r.tree as ToolReply;
         reply = JSON.stringify(tree.rpc.result ?? tree.rpc);
-        elements = (textOf(tree) as { elements?: Array<{ label?: string }> }).elements;
+        const found = (textOf(tree) as { elements?: Array<{ label?: string }> }).elements;
+        elements = found && labelsOf(found) !== "" ? found : undefined;
         if (!elements) await new Promise((r) => setTimeout(r, 5000));
       }
       if (!elements) {
@@ -499,11 +508,7 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
           `simulator_describe returned no elements after 12 tries: ${reply.slice(0, 500)}`,
         );
       }
-      // The status bar clock changes every minute, so it is not part of the comparison.
-      return elements
-        .map((e) => e.label ?? "")
-        .filter((label) => !/^\d{1,2}:\d{2}(\s?[AP]M)?$/i.test(label))
-        .join("|");
+      return labelsOf(elements);
     };
     // Rows of a freshly launched app load a moment after it appears, so a baseline is taken once
     // two reads in a row agree.

@@ -32,7 +32,8 @@ import { waitFor } from "./wait-for";
 /** The lease the test hub grants workers: short, so waiting it out costs a couple of seconds. */
 export const LEASE_MS = 1500;
 
-export const WORKER_BIN = join(import.meta.dirname, "../../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./worker-bin";
+export { WORKER_BIN };
 
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {

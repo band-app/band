@@ -107,7 +107,7 @@ export function assertNoWorkerPathAccess(home: string): void {
   );
 }
 
-const WORKER_BIN = join(import.meta.dirname, "../../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./worker-bin";
 
 interface LoopbackWorker {
   hostId: string;

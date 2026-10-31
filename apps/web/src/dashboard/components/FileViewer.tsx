@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDirectAssetUrl } from "../../lib/use-direct-asset-url";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
 import { isHtmlFile } from "../lib/html-preview";
@@ -508,10 +509,16 @@ export function FileViewer({
 
   // External files don't have a worktree-relative raw URL endpoint, so
   // image/PDF rendering for external paths is intentionally not wired.
-  const fileUrl =
+  const hubFileUrl =
     !external && adapter.getWorktreeFileUrl
       ? adapter.getWorktreeFileUrl(worktreeId, filePath)
       : undefined;
+  // On the desktop app, a file of a worktree on this computer's worker comes from the worker.
+  const fileUrl = useDirectAssetUrl(
+    previewType === "image" || previewType === "video" || previewType === "pdf"
+      ? hubFileUrl
+      : undefined,
+  );
 
   const showMarkdownToggle = previewType === "markdown" && !!renderMarkdownBlock;
   const showVisualToggle =

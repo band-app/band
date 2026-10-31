@@ -6,6 +6,7 @@ import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
 import { hubAssetUrl } from "../../lib/hub-config";
 import { parseSharedFileUrl, sharedFilePath } from "../../lib/shared-file";
+import { useDirectAssetUrl } from "../../lib/use-direct-asset-url";
 import { streamdownPlugins } from "../streamdown-components";
 import { getWorktreeLeafActions } from "../WorktreeCenter";
 import {
@@ -96,6 +97,7 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
   const canPreview = isImage || isText;
   const filename = part.filename ?? "File";
   const shared = useMemo(() => parseSharedFileUrl(part.url), [part.url]);
+  const imageUrl = useDirectAssetUrl(isImage ? hubAssetUrl(part.url) : undefined);
 
   // A file an agent shared opens in a center tab; anything else previews in an overlay.
   const openInTab = useCallback(() => {
@@ -126,7 +128,7 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
           className="group/img relative max-w-xs cursor-pointer overflow-hidden rounded-md"
         >
           <img
-            src={hubAssetUrl(part.url)}
+            src={imageUrl}
             alt={filename}
             className="rounded-md transition-opacity group-hover/img:opacity-90"
           />

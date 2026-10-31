@@ -23,7 +23,8 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "voice-test-token";
 const KEY = "sk-stub-secret-key-0123456789";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 const AUDIO = Buffer.from("fake webm audio bytes");
 const M4A = readFileSync(join(import.meta.dirname, "fixtures/dictation.m4a"));

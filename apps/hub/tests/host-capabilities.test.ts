@@ -25,7 +25,9 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const SHARED_TOKEN = "host-capabilities-shared-secret";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const STUB_AGENT = join(import.meta.dirname, "fixtures/acp-stub-agent.mjs");
 
 interface HostView {

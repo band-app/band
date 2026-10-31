@@ -32,7 +32,8 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "isolation-shared-secret";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { processGuardEnv, WORKER_BIN } from "./helpers/worker-bin";
 
 interface HostRequest {
   id: string;
@@ -92,7 +93,7 @@ const workerRunner = (id: string, isolation: string, pool: string, maxConcurrent
   isolation,
   maxConcurrent,
   timeoutSec: 90,
-  env: { BAND_WORKER_BIN: WORKER_BIN, BAND_IDLE_EXIT: "120s" },
+  env: { BAND_WORKER_BIN: WORKER_BIN, ...processGuardEnv(), BAND_IDLE_EXIT: "120s" },
 });
 const setRunners = (runners: unknown[]) => m("settings.update", { runners });
 const place = (branch: string, placement: Record<string, unknown>) =>

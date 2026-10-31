@@ -15,6 +15,7 @@ import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import { createTerminalBackend } from "@band-app/host-local/terminals/create-backend";
 import { RemoteHost } from "@band-app/host-remote";
 import { VOICE_TRANSCRIBE_PATH } from "@band-app/shared/speech-transcription";
+import { hostedFileHeaders } from "@band-app/worktree-ops/http-files";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
@@ -416,15 +417,6 @@ function getCachedScalarHtml(): string {
  * Serve a file from a subdirectory of a root path.
  * Prevents path traversal and streams the file with the correct MIME type.
  */
-/** Headers that keep an agent-written HTML or SVG file from running with the hub's origin. */
-function hostedFileHeaders(contentType: string): Record<string, string> {
-  const headers: Record<string, string> = { "X-Content-Type-Options": "nosniff" };
-  if (/^(text\/html|image\/svg\+xml)\b/.test(contentType)) {
-    headers["Content-Security-Policy"] = "sandbox allow-scripts";
-  }
-  return headers;
-}
-
 function serveStaticFile(
   res: ServerResponse,
   root: string,

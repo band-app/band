@@ -29,7 +29,8 @@ import {
 import { StatusStream } from "./helpers/status-stream";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const TOKEN = "host-battery-token";
 
 const scratch: string[] = [];

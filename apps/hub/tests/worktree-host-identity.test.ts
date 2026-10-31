@@ -23,7 +23,8 @@ import { removeTmpHome } from "./helpers/tmp-home";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "worktree-host-identity-secret";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 interface WorktreeView {
   name: string;

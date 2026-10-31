@@ -30,7 +30,9 @@ import { TerminalSocket } from "./helpers/terminal-socket";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "workers-alias-secret";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const NAMES = ["workers", "hosts"] as const;
 
 const scratch: string[] = [];

@@ -23,7 +23,8 @@ import {
 } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const STDIO_SERVER = join(import.meta.dirname, "fixtures/mcp-stdio-server.mjs");
 const SECRET = "stdio-SECRET-VALUE-0123456789";
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");

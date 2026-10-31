@@ -37,7 +37,9 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = TEST_TOKEN;
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { processGuardEnv, WORKER_BIN } from "./helpers/worker-bin";
+
 const LOCAL_HOOKS = join(import.meta.dirname, "../../../runners/local");
 const IDLE_MS = 2500;
 
@@ -282,6 +284,7 @@ beforeAll(async () => {
           FAKE_FAIL_RESTORE: failRestore,
           LOCAL_HOOKS,
           BAND_WORKER_BIN: WORKER_BIN,
+          ...processGuardEnv(),
         },
       },
     ],

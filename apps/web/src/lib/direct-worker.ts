@@ -16,11 +16,13 @@ import type { AppRouter } from "@band-app/server";
 import {
   DIRECT_CALL_PREFIX,
   DIRECT_FALLBACK_CLOSE_CODE,
+  DIRECT_FILE_ROUTES,
   DIRECT_LSP_PATH,
   DIRECT_TERMINAL_PATH,
   DIRECT_WATCH_PATH,
   type DirectAccess,
   type DirectCallReply,
+  directPluginStreamPath,
   isDirectProcedure,
 } from "@band-app/shared/direct-access";
 import { worktreeIdIsOnHost } from "@band-app/shared/worktree-id";
@@ -185,6 +187,19 @@ export async function directTerminalTarget(
   };
 }
 
+/** Where a plugin's live stream connects on this computer's worker, or null when the hub must carry it. */
+export async function directPluginStreamTarget(
+  pluginId: string,
+  worktreeId: string,
+): Promise<DirectSocketTarget | null> {
+  const access = await directAccessFor(worktreeId);
+  if (!access) return null;
+  return {
+    url: `ws://127.0.0.1:${access.port}${directPluginStreamPath(pluginId)}?worktreeId=${encodeURIComponent(worktreeId)}`,
+    protocols: [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${access.token}`],
+  };
+}
+
 /** Where a language server socket for `worktreeId` and `lang` connects directly, or null for the hub. */
 export async function directLspTarget(
   worktreeId: string,
@@ -321,4 +336,68 @@ export function directWorkerLink(): TRPCLink<AppRouter> {
         };
       });
     };
+}
+
+/** Path prefix to the worktree id in the hub's file routes. */
+const FILE_ROUTE_PREFIXES = Object.values(DIRECT_FILE_ROUTES);
+
+/** The worktree a hub file URL (`/api/worktree-file|uploads|shared/<worktree>/...`) names, or null. */
+export function fileRouteWorktreeId(url: string): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(url, "http://hub.invalid").pathname;
+  } catch {
+    return null;
+  }
+  const prefix = FILE_ROUTE_PREFIXES.find((p) => pathname.startsWith(p));
+  if (!prefix) return null;
+  const first = pathname.slice(prefix.length).split("/")[0];
+  try {
+    return first ? decodeURIComponent(first) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads a file route from this computer's worker, or null when the hub must
+ * serve it. The token goes in the `Authorization` header and never in the URL, so
+ * a page shows the bytes as a Blob. `url` is the hub's path, with or without
+ * its origin and query token; only the path and `download` are sent on.
+ */
+export async function fetchDirectFile(
+  url: string,
+  init: { signal?: AbortSignal; range?: string } = {},
+): Promise<Response | null> {
+  const worktreeId = fileRouteWorktreeId(url);
+  if (!worktreeId) return null;
+  const access = await directAccessFor(worktreeId);
+  if (!access) return null;
+  const parsed = new URL(url, "http://hub.invalid");
+  const target = new URL(`http://127.0.0.1:${access.port}${parsed.pathname}`);
+  if (parsed.searchParams.get("download") === "1") target.searchParams.set("download", "1");
+  const timeout = AbortSignal.timeout(CALL_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(target, {
+      headers: {
+        Authorization: `Bearer ${access.token}`,
+        ...(init.range ? { Range: init.range } : {}),
+      },
+      credentials: "omit",
+      signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+    });
+  } catch (err) {
+    if (init.signal?.aborted) throw err;
+    markDirectDown(worktreeId);
+    return null;
+  }
+  if (res.status === 401) {
+    forgetDirectToken(worktreeId);
+    return null;
+  }
+  // The file is on the worker, so the hub would answer these the same way. Anything else is the hub's.
+  if ([200, 206, 400, 404, 416].includes(res.status)) return res;
+  await res.body?.cancel();
+  return null;
 }

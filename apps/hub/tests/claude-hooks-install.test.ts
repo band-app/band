@@ -31,7 +31,9 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "claude-hooks-install-token";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const USER_HOOK = { type: "command", command: "/usr/bin/true user-own-hook" };
 
 type HookEntry = { hooks: { type: string; command: string }[] };

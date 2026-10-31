@@ -30,7 +30,9 @@ import { removeTmpHome } from "./helpers/tmp-home";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = TEST_TOKEN;
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const SLOW_TURN_MS = 12_000;
 
 interface RepoView {
