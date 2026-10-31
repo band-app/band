@@ -473,10 +473,26 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     // launched or a home screen after Home keeps animating, but a different app, the home screen
     // or a lock screen has different labels.
     const labels = async () => {
-      const r = await turn(sim, a, `a-labels-${chatCount}`, [call("tree", "simulator_describe")]);
-      const tree = textOf(r.tree as ToolReply) as { elements: Array<{ label?: string }> };
+      // The accessibility tree can be unavailable for a while after a launch, so a reply without
+      // elements is retried, and its text is logged when it never arrives.
+      let elements: Array<{ label?: string }> | undefined;
+      let reply = "";
+      for (let attempt = 0; attempt < 12 && !elements; attempt++) {
+        const r = await turn(sim, a, `a-labels-${chatCount}`, [call("tree", "simulator_describe")]);
+        reply = JSON.stringify(r.rpc.result ?? r.rpc);
+        elements = (textOf(r.tree as ToolReply) as { elements?: Array<{ label?: string }> })
+          .elements;
+        if (!elements) await new Promise((r) => setTimeout(r, 5000));
+      }
+      if (!elements) {
+        console.error(`[simulator describe] no elements after 12 tries: ${reply.slice(0, 2000)}`);
+        // The runner is a VM with no GPU and no display. A screen that streams but whose
+        // accessibility tree never comes is skipped there, and fails on a person's Mac.
+        if (process.env.CI) ctx.skip("the CI runner gave no accessibility tree (see the log)");
+        throw new Error("simulator_describe returned no elements");
+      }
       // The status bar clock changes every minute, so it is not part of the comparison.
-      return tree.elements
+      return elements
         .map((e) => e.label ?? "")
         .filter((label) => !/^\d{1,2}:\d{2}(\s?[AP]M)?$/i.test(label))
         .join("|");
