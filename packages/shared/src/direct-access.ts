@@ -1,7 +1,7 @@
 /**
  * The local direct path: the desktop app talks
- * to a worker on its own machine over `127.0.0.1` for terminals, files, diff
- * and search, with a short-lived token the hub issued. These are the wire
+ * to a worker on its own machine over `127.0.0.1` for terminals, files, diff,
+ * search and plugin streams, with a short-lived token the hub issued. These are the wire
  * names both ends share.
  */
 
@@ -42,6 +42,16 @@ export const DIRECT_WATCH_PATH = "/watch";
 
 /** Close code of a watch socket whose watch ended (the worktree directory went away). */
 export const DIRECT_WATCH_ENDED_CLOSE_CODE = 4101;
+
+/**
+ * A plugin's live stream (the simulator's screen), with `worktreeId` in the query. The same
+ * stream the hub serves at `/api/plugins/<id>/worktrees/<worktree>/stream`, minus the hub.
+ */
+export const DIRECT_PLUGIN_STREAM_PATH = /^\/plugins\/([a-z0-9][a-z0-9-]*)\/stream$/;
+
+export function directPluginStreamPath(pluginId: string): string {
+  return `/plugins/${pluginId}/stream`;
+}
 
 /**
  * Close code of a direct terminal socket that cannot serve the terminal (no

@@ -16,6 +16,7 @@ import {
   DIRECT_CALL_PREFIX,
   DIRECT_FALLBACK_CLOSE_CODE,
   DIRECT_LSP_PATH,
+  DIRECT_PLUGIN_STREAM_PATH,
   DIRECT_TERMINAL_PATH,
   DIRECT_TOKEN_PREFIX,
   DIRECT_WATCH_ENDED_CLOSE_CODE,
@@ -28,6 +29,7 @@ import { directOps, type WorktreeOps } from "@band-app/worktree-ops/direct";
 import { subscribeToFileChanges } from "@band-app/worktree-ops/file-watch";
 import { FilesService } from "@band-app/worktree-ops/files";
 import { serveLspSocket } from "@band-app/worktree-ops/lsp-socket";
+import { bridgePluginStream } from "@band-app/worktree-ops/plugin-stream-socket";
 import type { WorktreeResolver } from "@band-app/worktree-ops/resolver";
 import { SearchService } from "@band-app/worktree-ops/search";
 import {
@@ -317,6 +319,11 @@ export class DirectListener {
     const refused = this.refusal(req);
     if (refused !== null) return refuse(refused);
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    const pluginStream = DIRECT_PLUGIN_STREAM_PATH.exec(url.pathname);
+    if (pluginStream?.[1]) {
+      this.upgradePluginStream(req, socket, head, url, pluginStream[1]);
+      return;
+    }
     if (url.pathname === DIRECT_LSP_PATH) return this.upgradeLsp(req, socket, head, url, refuse);
     if (url.pathname === DIRECT_WATCH_PATH)
       return this.upgradeWatch(req, socket, head, url, refuse);
@@ -347,6 +354,69 @@ export class DirectListener {
         // A PTY that appeared while the socket waited is fresh, so it gets no reconnect nudge.
         attachSession(this.terminals, ws, inbox, terminalId, worktreeId, info === null);
       });
+    });
+  }
+
+  /**
+   * A plugin's live stream for the token's worktree, bridged as the hub bridges it
+   * (`bridgePluginStream`), with the `direct` profile: full-size frames, since no hub link
+   * carries them. A stream that cannot open closes with the fallback code, so the client asks the
+   * hub, which gives the real reason.
+   */
+  private upgradePluginStream(
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    url: URL,
+    pluginId: string,
+  ): void {
+    const refuse = (status: number) => {
+      socket.end(`HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Refused"}\r\n\r\n`);
+    };
+    const plugins = this.ctx.plugins;
+    if (!plugins) {
+      refuse(404);
+      return;
+    }
+    const worktreeId = url.searchParams.get("worktreeId");
+    if (!worktreeId) {
+      refuse(400);
+      return;
+    }
+    const scope = this.scopeOf(socketToken(req));
+    if (!scope) {
+      refuse(401);
+      return;
+    }
+    if (scope.worktreeId !== worktreeId) {
+      refuse(403);
+      return;
+    }
+
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      const release = this.ctx.activity.hold();
+      ws.once("close", release);
+      void bridgePluginStream(
+        ws,
+        `${pluginId} direct stream of ${worktreeId}`,
+        async () => {
+          const path = await this.ctx.policy.resolve(scope.path, true);
+          this.ctx.lease.assertMayRun(path);
+          const stream = await plugins.stream(
+            pluginId,
+            "screen",
+            { profile: "direct" },
+            worktreeId,
+            path,
+          );
+          return {
+            messages: stream.output,
+            send: (m) => stream.write(m),
+            close: () => stream.close(),
+          };
+        },
+        (message) => ws.close(DIRECT_FALLBACK_CLOSE_CODE, message.slice(0, 100)),
+      );
     });
   }
 

@@ -724,6 +724,47 @@ describe("what the LSP and watch sockets refuse", () => {
   });
 });
 
+describe("the plugin stream route", () => {
+  const streamUrl = (port: number, pluginId: string, worktreeId: string) =>
+    `ws://127.0.0.1:${port}/plugins/${pluginId}/stream?worktreeId=${encodeURIComponent(worktreeId)}`;
+
+  /** What a socket does after it opens: the close code and reason the worker ends it with. */
+  const closeOf = (url: string, protocols: string[]) =>
+    new Promise<{ code: number; reason: string }>((resolve, reject) => {
+      const ws = new WebSocket(url, protocols, { headers: { origin: "app://h-0123456789ab" } });
+      ws.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+      ws.once("error", reject);
+    });
+
+  it("checks the token, the worktree, the host and the origin before it opens a stream", async () => {
+    const access = await liveAccess(WT_A);
+    const protocols = ["band", `band-token.${access.token}`];
+    const url = streamUrl(access.port, "simulator", WT_A);
+    expect(await upgradeResult(url, ["band"])).toBe(401);
+    // A hub token, or one an agent's relay holds, is no credential here.
+    expect(await upgradeResult(url, ["band", `band-token.${TEST_TOKEN}`])).toBe(401);
+    expect(await upgradeResult(url, ["band", "band-token.brt_agentrelaytoken"])).toBe(401);
+    expect(await upgradeResult(streamUrl(access.port, "simulator", WT_B), protocols)).toBe(403);
+    expect(await upgradeResult(url, protocols, { origin: "https://evil.example" })).toBe(403);
+    expect(await upgradeResult(url, protocols, { origin: "app://local" })).toBe(403);
+    expect(await upgradeResult(url, protocols, { host: `evil.example:${access.port}` })).toBe(421);
+    expect(
+      await upgradeResult(`ws://127.0.0.1:${access.port}/plugins/simulator/stream`, protocols),
+    ).toBe(400);
+  });
+
+  it("closes with the fallback code when the worker cannot open the stream", async () => {
+    const access = await liveAccess(WT_A);
+    const closed = await closeOf(streamUrl(access.port, "no-such-plugin", WT_A), [
+      "band",
+      `band-token.${access.token}`,
+    ]);
+    // The client then asks the hub, which gives the real reason.
+    expect(closed.code).toBe(DIRECT_FALLBACK_CLOSE_CODE);
+    expect(closed.reason).toContain("no-such-plugin");
+  });
+});
+
 describe("who may get a token", () => {
   it("refuses worktree.directAccess without a device token", async () => {
     for (const token of ["", "not-a-device-token"]) {

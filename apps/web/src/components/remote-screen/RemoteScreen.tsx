@@ -6,6 +6,11 @@ import type {
 import { Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
 import { Camera, CircleAlert, Hand, Pointer } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type DirectSocketTarget,
+  directPluginStreamTarget,
+  directSocketClosed,
+} from "../../lib/direct-worker";
 import { HubWebSocket, hubWsUrl } from "../../lib/hub-config";
 
 /** Waits before each reconnect after the stream drops. A fourth drop stays closed. */
@@ -15,6 +20,8 @@ const RECONNECT_DELAYS_MS = [500, 1500, 4000];
 const FINAL_CLOSE_CODES = new Set([4001, 1008]);
 
 type Phase = "connecting" | "live" | "closed";
+/** Which way the frames come: from this computer's worker on loopback, or through the hub. */
+type Route = "direct" | "hub";
 
 const NAMED_KEYS = new Set(["Enter", "Backspace", "Tab", "Escape"]);
 
@@ -22,7 +29,11 @@ const NAMED_KEYS = new Set(["Enter", "Backspace", "Tab", "Escape"]);
  * A live remote screen served by a plugin's stream (`/api/plugins/<id>/worktrees/<worktree>/stream`).
  * Binary messages are JPEG frames, drawn on a canvas. Text messages are JSON; `{"type":"info"}`
  * describes the screen. The viewer starts view-only: pointer and key events are sent only after
- * Take control, which asks the hub to stop dropping them. The stream stays connected while the
+ * Take control, which asks the hub (or the worker, on the direct path) to stop dropping them.
+ * In the desktop app, a worktree on this computer's own worker streams from that worker on
+ * `127.0.0.1` with full-size frames. Any refusal or failure to connect falls back to the hub at
+ * once, which sends smaller frames, and the direct path is tried again after a rest
+ * (`direct-worker.ts`). The stream stays connected while the
  * tab is hidden. Pointer positions are sent as 0..1 fractions of the screen, so the plugin maps
  * them to its own units.
  */
@@ -36,6 +47,7 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
   const [controlling, setControlling] = useState(false);
   const [info, setInfo] = useState<RemoteScreenInfo | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [route, setRoute] = useState<Route | null>(null);
   const retriesRef = useRef(0);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -46,12 +58,11 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
     void attempt;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let ws: WebSocket | null = null;
     setPhase("connecting");
-    const ws = new HubWebSocket(
-      hubWsUrl(`/api/plugins/${pluginId}/worktrees/${encodeURIComponent(worktreeId)}/stream`),
+    const hubUrl = hubWsUrl(
+      `/api/plugins/${pluginId}/worktrees/${encodeURIComponent(worktreeId)}/stream`,
     );
-    ws.binaryType = "arraybuffer";
-    wsRef.current = ws;
     let drawing = false;
     const draw = async () => {
       // A hidden tab keeps the newest frame and decodes it when it is shown again.
@@ -79,40 +90,63 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
         drawing = false;
       }
     };
-    ws.addEventListener("open", () => {
-      retriesRef.current = 0;
-    });
-    ws.addEventListener("message", (event) => {
-      if (typeof event.data === "string") {
-        try {
-          const msg = JSON.parse(event.data) as { type?: string } & RemoteScreenInfo;
-          if (msg.type === "info") setInfo(msg);
-        } catch {
-          // Not JSON: ignored.
-        }
-        return;
-      }
-      pendingRef.current = event.data as ArrayBuffer;
-      void draw();
-    });
-    ws.addEventListener("close", (event) => {
+
+    /** Opens the socket: to this computer's worker when `direct` is set, else to the hub. */
+    const open = (direct: DirectSocketTarget | null) => {
       if (disposed) return;
-      setPhase("closed");
-      setCloseReason(event.reason || null);
-      controllingRef.current = false;
-      pressedRef.current = false;
-      setControlling(false);
-      const delay = RECONNECT_DELAYS_MS[retriesRef.current];
-      if (!FINAL_CLOSE_CODES.has(event.code) && delay !== undefined) {
-        retriesRef.current += 1;
-        timer = setTimeout(() => setAttempt((n) => n + 1), delay);
-      }
-    });
+      const sock = direct ? new WebSocket(direct.url, direct.protocols) : new HubWebSocket(hubUrl);
+      sock.binaryType = "arraybuffer";
+      ws = sock;
+      wsRef.current = sock;
+      setRoute(direct ? "direct" : "hub");
+      let opened = false;
+      sock.addEventListener("open", () => {
+        opened = true;
+        retriesRef.current = 0;
+      });
+      sock.addEventListener("message", (event) => {
+        if (ws !== sock) return;
+        if (typeof event.data === "string") {
+          try {
+            const msg = JSON.parse(event.data) as { type?: string } & RemoteScreenInfo;
+            if (msg.type === "info") setInfo(msg);
+          } catch {
+            // Not JSON: ignored.
+          }
+          return;
+        }
+        pendingRef.current = event.data as ArrayBuffer;
+        void draw();
+      });
+      sock.addEventListener("close", (event) => {
+        if (disposed || ws !== sock) return;
+        // The worker refused, is not there, or cannot open the stream: the hub carries it instead.
+        if (direct && directSocketClosed(worktreeId, event, opened) === "fallback") {
+          // The hub's socket starts view-only, so a control taken on the worker is over.
+          controllingRef.current = false;
+          pressedRef.current = false;
+          setControlling(false);
+          open(null);
+          return;
+        }
+        setPhase("closed");
+        setCloseReason(event.reason || null);
+        controllingRef.current = false;
+        pressedRef.current = false;
+        setControlling(false);
+        const delay = RECONNECT_DELAYS_MS[retriesRef.current];
+        if (!FINAL_CLOSE_CODES.has(event.code) && delay !== undefined) {
+          retriesRef.current += 1;
+          timer = setTimeout(() => setAttempt((n) => n + 1), delay);
+        }
+      });
+    };
+    directPluginStreamTarget(pluginId, worktreeId).then(open, () => open(null));
     return () => {
       disposed = true;
       clearTimeout(timer);
       wsRef.current = null;
-      ws.close();
+      ws?.close();
     };
   }, [pluginId, worktreeId, attempt]);
 
@@ -185,6 +219,7 @@ export function RemoteScreen({ pluginId, worktreeId, visible, title, actions }: 
       data-band-leaf-root=""
       data-testid="remote-screen"
       data-phase={phase}
+      data-route={route ?? "pending"}
       data-controlling={controlling ? "true" : "false"}
       data-visible={visible ? "true" : "false"}
     >

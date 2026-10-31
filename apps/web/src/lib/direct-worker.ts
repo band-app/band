@@ -21,6 +21,7 @@ import {
   DIRECT_WATCH_PATH,
   type DirectAccess,
   type DirectCallReply,
+  directPluginStreamPath,
   isDirectProcedure,
 } from "@band-app/shared/direct-access";
 import { worktreeIdIsOnHost } from "@band-app/shared/worktree-id";
@@ -181,6 +182,19 @@ export async function directTerminalTarget(
   const query = `worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${encodeURIComponent(terminalId)}`;
   return {
     url: `ws://127.0.0.1:${access.port}${DIRECT_TERMINAL_PATH}?${query}`,
+    protocols: [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${access.token}`],
+  };
+}
+
+/** Where a plugin's live stream connects on this computer's worker, or null when the hub must carry it. */
+export async function directPluginStreamTarget(
+  pluginId: string,
+  worktreeId: string,
+): Promise<DirectSocketTarget | null> {
+  const access = await directAccessFor(worktreeId);
+  if (!access) return null;
+  return {
+    url: `ws://127.0.0.1:${access.port}${directPluginStreamPath(pluginId)}?worktreeId=${encodeURIComponent(worktreeId)}`,
     protocols: [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${access.token}`],
   };
 }
