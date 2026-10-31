@@ -19,7 +19,8 @@ import { connectStandInWorker, type StandInWorker } from "./helpers/stand-in-wor
 import { waitFor } from "./helpers/wait-for";
 
 const ADMIN = "worker-versions-dev-admin";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 interface HostView {
   id: string;

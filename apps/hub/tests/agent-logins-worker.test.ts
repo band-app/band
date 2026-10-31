@@ -29,7 +29,8 @@ import {
 } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const SETUP_TOKEN = "sk-ant-oat01-WORKER-SETUPTOKEN-plaintext-7777";
 const WORKER_AUTH_TOKEN = "worker-machine-anthropic-auth-token";
 

@@ -1,3 +1,4 @@
 {
-  "setup": "pnpm install"
+  "setup": "pnpm install",
+  "teardown": "./scripts/worktree-teardown.sh"
 }

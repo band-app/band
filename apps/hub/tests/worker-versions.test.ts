@@ -22,7 +22,7 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const ADMIN = "worker-versions-admin";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
 /** The hub under test is told to report this release (`BAND_HUB_VERSION`); a second hub runs the unreleased default. */
 const HUB_VERSION = "0.50.0";
 

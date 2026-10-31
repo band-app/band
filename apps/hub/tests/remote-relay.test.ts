@@ -41,7 +41,7 @@ import { connectStandInWorker } from "./helpers/stand-in-worker";
 import { TerminalSocket } from "./helpers/terminal-socket";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 const scratch: string[] = [];
 const tmp = (prefix: string) => {

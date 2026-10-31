@@ -37,7 +37,8 @@ import { waitFor } from "./helpers/wait-for";
 const TOKEN = "git-credentials-shared-secret";
 const GIT_TOKEN = "gitpat_s3cr3t_0123456789abcdef";
 const GIT_USER = "band-bot";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { processGuardEnv, WORKER_BIN } from "./helpers/worker-bin";
 
 const scratch: string[] = [];
 const tmp = (prefix: string) => {
@@ -238,6 +239,7 @@ describe("a worker the runner starts", () => {
           timeoutSec: 90,
           env: {
             BAND_WORKER_BIN: WORKER_BIN,
+            ...processGuardEnv(),
             BAND_IDLE_EXIT: "300s",
             ...identity,
           },

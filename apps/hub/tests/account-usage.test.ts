@@ -23,7 +23,9 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "account-usage-token";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 // Secrets that must never appear in an answer.
 const CLAUDE_X = "sk-ant-oat-secret-x";
 const CLAUDE_Y = "sk-ant-oat-secret-y";

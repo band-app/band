@@ -26,7 +26,8 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const SHARED_TOKEN = "desktop-host-shared-secret";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 interface HostView {
   id: string;

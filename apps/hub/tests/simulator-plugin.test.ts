@@ -32,7 +32,7 @@ import {
 } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 function which(bin: string): string | null {
   try {

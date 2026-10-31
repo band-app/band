@@ -39,7 +39,9 @@ import { waitFor } from "./helpers/wait-for";
 
 // The chat stream helpers authenticate with this token.
 const TOKEN = TEST_TOKEN;
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { processGuardEnv, WORKER_BIN } from "./helpers/worker-bin";
+
 const IDLE_MS = 2500;
 
 interface Worktree {
@@ -239,6 +241,7 @@ beforeAll(async () => {
         timeoutSec: 90,
         env: {
           BAND_WORKER_BIN: WORKER_BIN,
+          ...processGuardEnv(),
           BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
           BAND_TEST_ACP_STATE: stubState,
           BAND_TEST_ACP_LOG: stubLog,
