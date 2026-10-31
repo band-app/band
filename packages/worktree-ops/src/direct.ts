@@ -10,7 +10,6 @@ import type { DiffService } from "./diff";
 import type { FilesService } from "./files";
 import type { GitGraphService } from "./git-graph";
 import {
-  copyPathInput,
   createDirectoryInput,
   createFileInput,
   deletePathInput,
@@ -129,7 +128,7 @@ export const directOps = {
     run: (ops, i) => ops.files.renamePath(i.worktreeId, i.fromPath, i.toPath),
   }),
   "worktree.copyPath": op({
-    input: copyPathInput,
+    input: renamePathInput,
     run: (ops, i) => ops.files.copyPath(i.worktreeId, i.fromPath, i.toPath),
   }),
 } satisfies Record<DirectProcedure, Op<z.ZodTypeAny, unknown>>;

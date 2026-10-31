@@ -142,6 +142,4 @@ export const renamePathInput = z.object({
   toPath: z.string().min(1),
 });
 
-export const copyPathInput = renamePathInput;
-
 export const resolvePathInput = z.object({ worktreeId: z.string(), path: z.string().min(1) });
