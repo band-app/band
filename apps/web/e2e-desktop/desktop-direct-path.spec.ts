@@ -97,6 +97,8 @@ function seedRemoteRepo(parent: string): string {
   mkdirSync(work, { recursive: true });
   git(work, ["init", "-q", "-b", "main"]);
   writeFileSync(join(work, "README.md"), "# proj\n");
+  mkdirSync(join(work, "src"));
+  writeFileSync(join(work, "src", "app.ts"), "export const answer = 42;\n");
   git(work, ["add", "."]);
   git(work, ["commit", "-q", "-m", "seed"]);
   git(parent, ["init", "-q", "--bare", "-b", "main", origin]);
@@ -151,7 +153,11 @@ const portOf = (url: string) => new URL(url).port;
 
 test.beforeAll(async () => {
   remoteHome = createTmpHome();
-  seedSettings(remoteHome, { tokenSecret: REMOTE_TOKEN, webServerPort: await getRandomPort() });
+  seedSettings(remoteHome, {
+    tokenSecret: REMOTE_TOKEN,
+    webServerPort: await getRandomPort(),
+    enableLSP: true,
+  });
   remote = await startServer({ tmpHome: remoteHome });
 });
 
@@ -260,6 +266,17 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
     ).toBe(true);
     expect(hubCalls(procedure), procedure).toEqual([]);
   }
+  // File changes come from the worker's /watch socket, and the hub holds no watch subscription for it.
+  const socketsAt = (pathname: string) => sockets.filter((u) => new URL(u).pathname === pathname);
+  expect(socketsAt("/watch").length).toBeGreaterThan(0);
+  expect(socketsAt("/watch").every((u) => /^ws:\/\/127\.0\.0\.1:\d+\//.test(u))).toBe(true);
+  // A TypeScript file asks for a language server, and the socket goes to the worker too. The
+  // bundled worker ships no language server, so this checks where the editor connects, and the
+  // answers of a real one are in apps/hub/tests/direct-path.test.ts.
+  await files.expandFileTreeFolder("src", "src/app.ts");
+  await files.openFile("src/app.ts");
+  await expect.poll(() => socketsAt("/lsp").length, { timeout: 30_000 }).toBeGreaterThan(0);
+  expect(socketsAt("/lsp").every((u) => /^ws:\/\/127\.0\.0\.1:\d+\//.test(u))).toBe(true);
   // Changes go there as well.
   await files.openChangesTab("notes.txt");
   expect(directCalls().some((u) => u.endsWith("/direct/worktree.getChanges"))).toBe(true);
@@ -269,7 +286,8 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
 
   // Back to the terminal for the restart. The file tab is closed first: the shared tab list may
   // make an open file tab the active one again while the worker is away.
-  await worktreePage.closeFileTab("README.md");
+  // Opening a second file replaced the README preview tab.
+  await worktreePage.closeFileTab("src/app.ts");
   await showTerminal();
 
   // S4: the worker restarts. The terminal reconnects through the hub with its screen, by itself.

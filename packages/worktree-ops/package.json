@@ -15,6 +15,8 @@
     "./direct": "./src/direct.ts",
     "./terminal-socket": "./src/terminal-socket.ts",
     "./plugin-stream-socket": "./src/plugin-stream-socket.ts",
+    "./lsp-socket": "./src/lsp-socket.ts",
+    "./file-watch": "./src/file-watch.ts",
     "./strip-queries": "./src/strip-queries.ts",
     "./resolver": "./src/resolver.ts"
   },
