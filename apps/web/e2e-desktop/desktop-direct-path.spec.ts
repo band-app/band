@@ -308,6 +308,35 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   await expect.poll(() => viewer.readText(), { timeout: 30_000 }).toContain("after restart");
   await expect(viewer.errorBanner).toHaveCount(0);
   await worktreePage.closeFileTab("notes.txt");
+
+  // The watch and language server sockets fall back the same way. The watch socket dropped with
+  // the worker, so the explorer must still see a file created now (through the hub watch while the
+  // direct path rests, or the new listener after), and the editor must still get a language server
+  // socket, to whichever side answers.
+  await hubCall("worktree.createFile", {
+    worktreeId,
+    path: "after-restart.txt",
+    content: "created after the restart\n",
+  });
+  await worktreePage.selectRightPanelTab("explorer");
+  await expect(files.fileTreeRow("after-restart.txt")).toBeVisible({ timeout: 60_000 });
+  const lspBefore = socketsAt("/lsp").length;
+  await files.openFile("src/app.ts");
+  await expect.poll(() => socketsAt("/lsp").length, { timeout: 30_000 }).toBeGreaterThan(lspBefore);
+  await worktreePage.closeFileTab("src/app.ts");
+
+  // After the 15 s rest, a new editor connects to the worker again.
+  const directLspBefore = () => socketsAt("/lsp").filter((u) => portOf(u) !== hubPort).length;
+  const lspDirectBefore = directLspBefore();
+  await expect(async () => {
+    await files.openFile("src/app.ts");
+    try {
+      await expect.poll(directLspBefore, { timeout: 4_000 }).toBeGreaterThan(lspDirectBefore);
+    } finally {
+      // Closed on every attempt, so the next one opens a new language server socket.
+      await worktreePage.closeFileTab("src/app.ts");
+    }
+  }).toPass({ timeout: 90_000, intervals: [5_000] });
   await showTerminal();
 
   // Once the listener is back and the UI's retry pause is over, a new tab in the same page
