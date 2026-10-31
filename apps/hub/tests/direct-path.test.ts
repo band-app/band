@@ -464,6 +464,235 @@ describe("files, diff and search on the direct path (S2)", () => {
   });
 });
 
+/** A GET on the listener's file routes, with the token as a header. */
+const directGet = (
+  access: { port: number; token?: string },
+  path: string,
+  headers: Record<string, string> = {},
+) =>
+  fetch(`http://127.0.0.1:${access.port}${path}`, {
+    headers: { ...(access.token && { authorization: `Bearer ${access.token}` }), ...headers },
+  });
+
+const filePath = (worktreeId: string, path: string) =>
+  `/api/worktree-file/${encodeURIComponent(worktreeId)}/${path.split("/").map(encodeURIComponent).join("/")}`;
+
+describe("history, branches and explorer actions on the direct path (S1)", () => {
+  it("answers commit history, a commit and the branch list as the hub does", async () => {
+    const dir = worktreeDir("feat-a");
+    writeFileSync(join(dir, "history.txt"), "one\n");
+    git(dir, "add", "history.txt");
+    git(dir, "commit", "-q", "-m", "add history");
+
+    const signature = await bothPaths("worktree.getCommitHistorySignature", { worktreeId: WT_A });
+    expect(signature.direct).toEqual(signature.hub);
+    expect(signature.direct).not.toBe("");
+
+    const history = await bothPaths("worktree.getCommitHistory", { worktreeId: WT_A, limit: 10 });
+    expect(history.direct).toEqual(history.hub);
+    const commits = (history.direct as { commits: { sha: string; subject: string }[] }).commits;
+    expect(commits.map((c) => c.subject)).toEqual(["add history", "init"]);
+
+    const details = await bothPaths("worktree.getCommitDetails", {
+      worktreeId: WT_A,
+      sha: commits[0].sha,
+    });
+    expect(details.direct).toEqual(details.hub);
+    expect(JSON.stringify(details.direct)).toContain("history.txt");
+
+    const branches = await bothPaths("worktree.listBranches", { worktreeId: WT_A });
+    expect(branches.direct).toEqual(branches.hub);
+    expect(JSON.stringify(branches.direct)).toContain("feat-b");
+  });
+
+  it("creates, copies, renames and deletes in the explorer, ", async () => {
+    const dir = worktreeDir("feat-a");
+    const call = async (procedure: string, input: Record<string, unknown>) => {
+      const res = await directCall(await liveAccess(WT_A), procedure, {
+        worktreeId: WT_A,
+        ...input,
+      });
+      expect(res.status, procedure).toBe(200);
+      return ((await res.json()) as { result: unknown }).result;
+    };
+    await call("worktree.createDirectory", { path: "made" });
+    await call("worktree.createFile", { path: "made/a.txt", content: "made directly\n" });
+    expect(readFileSync(join(dir, "made", "a.txt"), "utf8")).toBe("made directly\n");
+    await call("worktree.copyPath", { fromPath: "made/a.txt", toPath: "made/b.txt" });
+    await call("worktree.renamePath", { fromPath: "made/b.txt", toPath: "made/c.txt" });
+    const listed = await q<{ entries: { name: string }[] }>("worktree.listFiles", {
+      worktreeId: WT_A,
+      path: "made",
+    });
+    expect(listed.entries.map((e) => e.name).sort()).toEqual(["a.txt", "c.txt"]);
+
+    // resolvePath stays on the hub: a file outside the worker's roots must still be seen as existing.
+    const notServed = await directCall(await liveAccess(WT_A), "worktree.resolvePath", {
+      worktreeId: WT_A,
+      path: "made/a.txt",
+    });
+    expect(notServed.status).toBe(404);
+
+    await call("worktree.deletePath", { path: "made" });
+    const gone = await q<{ entries: { name: string }[] }>("worktree.listFiles", {
+      worktreeId: WT_A,
+      path: "",
+    });
+    expect(gone.entries.map((e) => e.name)).not.toContain("made");
+  });
+
+  it("refuses an explorer path outside the worktree as the hub does", async () => {
+    const input = { worktreeId: WT_A, path: "../escaped.txt", content: "" };
+    const res = await directCall(await liveAccess(WT_A), "worktree.createFile", input);
+    expect(res.status).toBe(500);
+    const { error } = (await res.json()) as { error: { message: string } };
+    const hub = await trpcMutate(server.url, "worktree.createFile", input, TEST_TOKEN);
+    expect(error.message).toBe(
+      ((await hub.json()) as { error: { message: string } }).error.message,
+    );
+  });
+});
+
+describe("file routes on the direct path (S2)", () => {
+  const BYTES = Buffer.from(Array.from({ length: 4096 }, (_, i) => i % 251));
+
+  beforeAll(() => {
+    const dir = worktreeDir("feat-a");
+    mkdirSync(join(dir, "assets"), { recursive: true });
+    writeFileSync(join(dir, "assets", "clip.mp4"), BYTES);
+    writeFileSync(join(dir, "assets", 'we"ird; näme.txt'), "odd name");
+    symlinkSync(join(root, "outside.txt"), join(dir, "assets", "escape.txt"));
+    writeFileSync(join(root, "outside.txt"), "outside the worktree");
+    mkdirSync(join(root, ".band-uploads", WT_A), { recursive: true });
+    writeFileSync(join(root, ".band-uploads", WT_A, "up.png"), BYTES);
+    mkdirSync(join(root, ".band-shared", WT_A, "chat-1"), { recursive: true });
+    writeFileSync(join(root, ".band-shared", WT_A, "chat-1", "note.txt"), "shared note");
+  });
+
+  it("serves the same bytes and headers as the hub, and a Range as 206", async () => {
+    const access = await liveAccess(WT_A);
+    const path = filePath(WT_A, "assets/clip.mp4");
+    const direct = await directGet(access, path);
+    expect(direct.status).toBe(200);
+    expect(direct.headers.get("content-type")).toBe("video/mp4");
+    expect(direct.headers.get("accept-ranges")).toBe("bytes");
+    expect(direct.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(Buffer.from(await direct.arrayBuffer()).equals(BYTES)).toBe(true);
+    const hub = await fetch(`${server.url}${path}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(Buffer.from(await hub.arrayBuffer()).equals(BYTES)).toBe(true);
+
+    const part = await directGet(access, path, { Range: "bytes=100-199" });
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe(`bytes 100-199/${BYTES.length}`);
+    expect(Buffer.from(await part.arrayBuffer()).equals(BYTES.subarray(100, 200))).toBe(true);
+    const past = await directGet(access, path, { Range: `bytes=${BYTES.length + 10}-` });
+    expect(past.status).toBe(416);
+  });
+
+  it("downloads as an attachment and refuses a folder", async () => {
+    const access = await liveAccess(WT_A);
+    const res = await directGet(access, `${filePath(WT_A, 'assets/we"ird; näme.txt')}?download=1`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toContain(
+      "filename*=UTF-8''we%22ird%3B%20n%C3%A4me.txt",
+    );
+    expect(await res.text()).toBe("odd name");
+    expect((await directGet(access, `${filePath(WT_A, "assets")}?download=1`)).status).toBe(400);
+  });
+
+  it("answers 400 for a path out of the worktree and 404 for a missing file", async () => {
+    const access = await liveAccess(WT_A);
+    const outOfTree = `/api/worktree-file/${encodeURIComponent(WT_A)}/${encodeURIComponent("../secret.txt")}`;
+    expect((await directGet(access, outOfTree)).status).toBe(400);
+    expect((await directGet(access, filePath(WT_A, "assets/escape.txt"))).status).toBe(400);
+    expect((await directGet(access, filePath(WT_A, "assets/missing.png"))).status).toBe(404);
+  });
+
+  it("serves an upload and a shared file from the worker's directories", async () => {
+    const access = await liveAccess(WT_A);
+    const upload = await directGet(
+      access,
+      `/api/uploads/${encodeURIComponent(WT_A)}/${encodeURIComponent("up.png")}`,
+    );
+    expect(upload.status).toBe(200);
+    expect(upload.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await upload.arrayBuffer()).equals(BYTES)).toBe(true);
+    const shared = await directGet(
+      access,
+      `/api/shared/${encodeURIComponent(WT_A)}/chat-1/note.txt`,
+    );
+    expect(shared.status).toBe(200);
+    expect(await shared.text()).toBe("shared note");
+    expect(
+      (await directGet(access, `/api/shared/${encodeURIComponent(WT_A)}/chat-1/missing.txt`))
+        .status,
+    ).toBe(404);
+    // A name with a path in it never leaves the card's folder.
+    expect(
+      (
+        await directGet(
+          access,
+          `/api/uploads/${encodeURIComponent(WT_A)}/${encodeURIComponent("../../outside.txt")}`,
+        )
+      ).status,
+    ).toBe(400);
+  });
+
+  it("refuses no token, a bad token, another worktree's token and a hub token", async () => {
+    const access = await liveAccess(WT_A);
+    const path = filePath(WT_A, "assets/clip.mp4");
+    expect((await directGet({ port: access.port }, path)).status).toBe(401);
+    expect((await directGet({ port: access.port, token: "bwd_unknown" }, path)).status).toBe(401);
+    expect((await directGet({ port: access.port, token: TEST_TOKEN }, path)).status).toBe(401);
+    expect((await directGet(access, filePath(WT_B, "hello.txt"))).status).toBe(403);
+    expect(
+      (await directGet(access, `/api/shared/${encodeURIComponent(WT_B)}/chat-1/note.txt`)).status,
+    ).toBe(403);
+    // A page other than the desktop app's is refused, and a token in the URL is no credential.
+    expect((await directGet(access, path, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await directGet({ port: access.port }, `${path}?token=${access.token}`)).status).toBe(
+      401,
+    );
+  });
+
+  it("refuses a foreign Host header on the file routes", async () => {
+    const access = await liveAccess(WT_A);
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = request(
+        {
+          host: "127.0.0.1",
+          port: access.port,
+          path: filePath(WT_A, "assets/clip.mp4"),
+          headers: { host: "rebind.example", authorization: `Bearer ${access.token}` },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.once("error", reject);
+      req.end();
+    });
+    expect(status).toBe(421);
+  });
+
+  it("answers 401 once the token has expired, so a client falls back to the hub", async () => {
+    const access = await liveAccess(WT_A);
+    const path = filePath(WT_A, "assets/clip.mp4");
+    expect((await directGet(access, path)).status).toBe(200);
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, access.expiresAt - Date.now()) + 200),
+    );
+    expect((await directGet(access, path)).status).toBe(401);
+    const hub = await fetch(`${server.url}${path}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(hub.status).toBe(200);
+  });
+});
+
 describe("what the listener refuses (S3)", () => {
   it("refuses a call with no token, an unknown token or an expired one", async () => {
     const access = await liveAccess(WT_A);
@@ -563,6 +792,90 @@ describe("what the listener refuses (S3)", () => {
     expect(await upgradeResult(url, protocols, { host: `evil.example:${live.port}` })).toBe(421);
     expect(await upgradeResult(url, protocols, { origin: "app://local" })).toBe(403);
     expect(await upgradeResult(url, protocols, { origin: "app://h-0123456789ab" })).toBe("open");
+  });
+});
+
+describe("falling back to the hub (S3)", () => {
+  it("answers 401 for every moved call and route once the token expired, and the hub serves the same", async () => {
+    mkdirSync(join(worktreeDir("feat-a"), "fallback"), { recursive: true });
+    writeFileSync(join(worktreeDir("feat-a"), "fallback", "pic.png"), "png-bytes");
+    mkdirSync(join(root, ".band-uploads", WT_A), { recursive: true });
+    writeFileSync(join(root, ".band-uploads", WT_A, "fb.png"), "upload-bytes");
+    mkdirSync(join(root, ".band-shared", WT_A, "chat-fb"), { recursive: true });
+    writeFileSync(join(root, ".band-shared", WT_A, "chat-fb", "note.txt"), "shared-bytes");
+    const sha = git(worktreeDir("feat-a"), "rev-parse", "HEAD").trim();
+
+    const access = await liveAccess(WT_A);
+    const calls: Array<{ procedure: string; kind: "query" | "mutation"; input: object }> = [
+      { procedure: "worktree.getCommitHistory", kind: "query", input: { worktreeId: WT_A } },
+      {
+        procedure: "worktree.getCommitHistorySignature",
+        kind: "query",
+        input: { worktreeId: WT_A },
+      },
+      { procedure: "worktree.getCommitDetails", kind: "query", input: { worktreeId: WT_A, sha } },
+      { procedure: "worktree.listBranches", kind: "query", input: { worktreeId: WT_A } },
+      {
+        procedure: "worktree.createFile",
+        kind: "mutation",
+        input: { worktreeId: WT_A, path: "fallback/new.txt", content: "x" },
+      },
+      {
+        procedure: "worktree.createDirectory",
+        kind: "mutation",
+        input: { worktreeId: WT_A, path: "fallback/dir" },
+      },
+      {
+        procedure: "worktree.copyPath",
+        kind: "mutation",
+        input: { worktreeId: WT_A, fromPath: "fallback/new.txt", toPath: "fallback/copy.txt" },
+      },
+      {
+        procedure: "worktree.renamePath",
+        kind: "mutation",
+        input: { worktreeId: WT_A, fromPath: "fallback/copy.txt", toPath: "fallback/moved.txt" },
+      },
+      {
+        procedure: "worktree.deletePath",
+        kind: "mutation",
+        input: { worktreeId: WT_A, path: "fallback/moved.txt" },
+      },
+    ];
+    const routes = [
+      { path: filePath(WT_A, "fallback/pic.png"), body: "png-bytes" },
+      { path: `/api/uploads/${encodeURIComponent(WT_A)}/fb.png`, body: "upload-bytes" },
+      { path: `/api/shared/${encodeURIComponent(WT_A)}/chat-fb/note.txt`, body: "shared-bytes" },
+    ];
+
+    // Live token: the direct listener serves the route.
+    expect((await directGet(access, routes[0].path)).status).toBe(200);
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, access.expiresAt - Date.now()) + 200),
+    );
+
+    for (const { procedure, input } of calls) {
+      const res = await directCall(access, procedure, input);
+      expect(res.status, `${procedure} with an expired token`).toBe(401);
+    }
+    for (const { path } of routes) {
+      expect((await directGet(access, path)).status, path).toBe(401);
+    }
+    // An unknown token is refused the same way.
+    expect(
+      (await directGet({ port: access.port, token: "bwd_revoked" }, routes[0].path)).status,
+    ).toBe(401);
+
+    // The client then asks the hub, which serves each call and route.
+    for (const { procedure, kind, input } of calls) {
+      await (kind === "query" ? q(procedure, input) : m(procedure, input));
+    }
+    for (const { path, body } of routes) {
+      const res = await fetch(`${server.url}${path}`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      expect(res.status, path).toBe(200);
+      expect(await res.text()).toBe(body);
+    }
   });
 });
 

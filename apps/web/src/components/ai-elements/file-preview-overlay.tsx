@@ -5,6 +5,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
 import { CodeMirrorViewer } from "@/dashboard";
 import { hubAssetUrl } from "../../lib/hub-config";
+import { useDirectAssetUrl } from "../../lib/use-direct-asset-url";
 
 import { detectLanguageFromFilename, downloadFile, isTextMediaType } from "./file-preview-utils";
 
@@ -90,9 +91,10 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
 }
 
 function ImagePreview({ url, alt }: { url: string; alt: string }) {
+  const src = useDirectAssetUrl(hubAssetUrl(url));
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <img src={hubAssetUrl(url)} alt={alt} className="max-h-full max-w-full object-contain" />
+      <img src={src} alt={alt} className="max-h-full max-w-full object-contain" />
     </div>
   );
 }

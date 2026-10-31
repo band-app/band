@@ -6,6 +6,7 @@ import {
   type DirectSocketTarget,
   directWatchTarget,
   directWorkerLink,
+  fetchDirectFile,
   markDirectDown,
 } from "../../lib/direct-worker";
 import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
@@ -649,12 +650,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   async downloadWorktreeFile(worktreeId: string, path: string): Promise<void> {
-    const res = await hubFetch(
-      `/api/worktree-file/${encodeURIComponent(worktreeId)}/${path
-        .split("/")
-        .map(encodeURIComponent)
-        .join("/")}?download=1`,
-    );
+    const route = `/api/worktree-file/${encodeURIComponent(worktreeId)}/${path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}?download=1`;
+    // A worktree on this computer's worker is read from the worker, else from the hub.
+    const res = (await fetchDirectFile(route)) ?? (await hubFetch(route));
     if (!res.ok) throw new Error(`Download failed (${res.status})`);
     const url = URL.createObjectURL(await res.blob());
     try {

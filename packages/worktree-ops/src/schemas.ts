@@ -100,3 +100,46 @@ export const searchContentInput = z.object({
   regex: z.boolean().default(false),
   limit: z.number().default(100),
 });
+
+/**
+ * A commit SHA passed to the commit-history procedures. Pinned to 7–40 hex
+ * chars so git can never read it as a flag (`--exec=…`) or a symbolic ref:
+ * the Commits panel always hands us a real object id.
+ */
+export const commitShaSchema = z
+  .string()
+  .regex(/^[0-9a-f]{7,40}$/i, "sha must be a 7–40 character hex commit id");
+
+export const listBranchesInput = z.object({
+  worktreeId: z.string(),
+  query: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+});
+
+export const getCommitHistoryInput = z.object({
+  worktreeId: z.string(),
+  skip: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+});
+
+export const getCommitHistorySignatureInput = z.object({ worktreeId: z.string() });
+
+export const getCommitDetailsInput = z.object({ worktreeId: z.string(), sha: commitShaSchema });
+
+export const createFileInput = z.object({
+  worktreeId: z.string(),
+  path: z.string().min(1),
+  content: z.string().default(""),
+});
+
+export const createDirectoryInput = z.object({ worktreeId: z.string(), path: z.string().min(1) });
+
+export const deletePathInput = z.object({ worktreeId: z.string(), path: z.string().min(1) });
+
+export const renamePathInput = z.object({
+  worktreeId: z.string(),
+  fromPath: z.string().min(1),
+  toPath: z.string().min(1),
+});
+
+export const resolvePathInput = z.object({ worktreeId: z.string(), path: z.string().min(1) });

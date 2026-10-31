@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CodeMirrorViewer, getFilePreviewType } from "@/dashboard";
 import { hubAssetUrl, hubFetch } from "../lib/hub-config";
 import { sharedFileUrl } from "../lib/shared-file";
+import { useDirectAssetUrl } from "../lib/use-direct-asset-url";
 import { detectLanguageFromFilename, downloadFile } from "./ai-elements/file-preview-utils";
 import { MessageResponse } from "./ai-elements/message";
 
@@ -73,8 +74,9 @@ export function SharedFileLeaf({ worktreeId, filePath }: { worktreeId: string; f
   const isHtml = /\.html?$/i.test(name);
   const needsText = !!url && kind !== "image" && kind !== "pdf";
   const loaded = useSharedText(url ?? "", needsText);
+  const hubAsset = url ? hubAssetUrl(url) : undefined;
+  const assetUrl = useDirectAssetUrl(hubAsset);
   if (!url) return null;
-  const assetUrl = hubAssetUrl(url);
 
   let body: React.ReactNode;
   if (kind === "image") {
@@ -129,7 +131,7 @@ export function SharedFileLeaf({ worktreeId, filePath }: { worktreeId: string; f
           variant="outline"
           size="sm"
           data-testid="shared-file__binary-download"
-          onClick={() => downloadFile(assetUrl, name)}
+          onClick={() => downloadFile(hubAsset ?? "", name)}
         >
           <Download className="size-4" />
           Download
@@ -168,7 +170,7 @@ export function SharedFileLeaf({ worktreeId, filePath }: { worktreeId: string; f
           size="sm"
           aria-label="Download file"
           data-testid="shared-file__download"
-          onClick={() => downloadFile(assetUrl, name)}
+          onClick={() => downloadFile(hubAsset ?? "", name)}
         >
           <Download className="size-4" />
         </Button>

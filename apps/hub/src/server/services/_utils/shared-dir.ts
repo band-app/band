@@ -60,29 +60,4 @@ export function sharedFileUrl(worktreeId: string, chatId: string, filename: stri
   return `/api/shared/${encodeURIComponent(worktreeId)}/${encodeURIComponent(chatId)}/${encodeURIComponent(filename)}`;
 }
 
-/**
- * Splits the part of a shared-file URL after `/api/shared/` into its decoded
- * segments: `<worktreeId>/<chatId>/<name>`, or the older `<worktreeId>/<name>`.
- * Returns null for anything else, including a segment that is empty, `.`,
- * `..` or holds a path separator after decoding.
- */
-export function parseSharedPath(
-  rest: string,
-): { worktreeId: string; chatId?: string; name: string } | null {
-  const raw = rest.split("?")[0].split("/");
-  if (raw.length !== 2 && raw.length !== 3) return null;
-  const parts: string[] = [];
-  for (const segment of raw) {
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(segment);
-    } catch {
-      return null;
-    }
-    if (!decoded || decoded === "." || decoded === ".." || /[/\\\0]/.test(decoded)) return null;
-    parts.push(decoded);
-  }
-  return parts.length === 3
-    ? { worktreeId: parts[0], chatId: parts[1], name: parts[2] }
-    : { worktreeId: parts[0], name: parts[1] };
-}
+export { parseSharedPath } from "@band-app/worktree-ops/http-files";

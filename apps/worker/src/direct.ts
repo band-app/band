@@ -28,6 +28,7 @@ import { DiffService } from "@band-app/worktree-ops/diff";
 import { directOps, type WorktreeOps } from "@band-app/worktree-ops/direct";
 import { subscribeToFileChanges } from "@band-app/worktree-ops/file-watch";
 import { FilesService } from "@band-app/worktree-ops/files";
+import { GitGraphService } from "@band-app/worktree-ops/git-graph";
 import { serveLspSocket } from "@band-app/worktree-ops/lsp-socket";
 import { bridgePluginStream } from "@band-app/worktree-ops/plugin-stream-socket";
 import type { WorktreeResolver } from "@band-app/worktree-ops/resolver";
@@ -41,6 +42,7 @@ import { WebSocketServer } from "ws";
 import { handleChatRoute, isChatRoute } from "./chats/local-http.ts";
 import type { ChatOwner } from "./chats/owner.ts";
 import { hostDirs, type Registrar, type WorkerContext } from "./context.ts";
+import { isFileRoute, serveDirectFile } from "./direct-files.ts";
 import { mapError, num, type Params, str } from "./rpc-util.ts";
 
 /** Largest request body, a saved file included. The editor opens files of up to 1 MB. */
@@ -76,11 +78,13 @@ interface Grant {
  * each token over the link (`direct.register`) with the worktree it is for and
  * an expiry, and the worker keeps only the token's SHA-256.
  *
- * File, diff and search calls run the same services the hub runs
+ * File, diff, search, commit history and path calls run the same services the hub runs
  * (`@band-app/worktree-ops`), over a host whose every call goes through this
  * worker's own method handlers, so the path policy and parameter checks of a
  * link call apply unchanged. The terminal socket speaks the hub's `/terminal`
- * protocol and attaches to PTYs the hub already spawned here.
+ * protocol and attaches to PTYs the hub already spawned here. `GET` on the hub's
+ * file routes (`direct-files.ts`) streams a worktree file, upload or shared file
+ * from this disk under the same token.
  *
  * It is separate from the agent relay (`relay.ts`), whose tokens reach the hub
  * and never this listener.
@@ -219,7 +223,7 @@ export class DirectListener {
         ...cors,
         // GET is the chat event stream, read with fetch so it can carry the token.
         "Access-Control-Allow-Methods": "GET, POST",
-        "Access-Control-Allow-Headers": "authorization, content-type",
+        "Access-Control-Allow-Headers": "authorization, content-type, range",
         // Chrome's private network access preflight, for a page calling loopback.
         ...(req.headers["access-control-request-private-network"] === "true" && {
           "Access-Control-Allow-Private-Network": "true",
@@ -249,6 +253,18 @@ export class DirectListener {
         else res.destroy();
       } finally {
         release();
+      }
+      return;
+    }
+    if (isFileRoute(url.pathname)) {
+      const scope = this.scopeOf(bearerToken(req));
+      if (!scope) return fail(401, "UNAUTHORIZED", "Unauthorized");
+      try {
+        await serveDirectFile(this.ctx, req, res, url, scope, cors);
+      } catch (err) {
+        this.ctx.log.warn({ err: err instanceof Error ? err.message : String(err) }, "file route");
+        if (!res.headersSent) fail(500, "INTERNAL", "Internal error");
+        else res.destroy();
       }
       return;
     }
@@ -306,6 +322,7 @@ export class DirectListener {
       files: new FilesService(resolver),
       diff: new DiffService(resolver),
       search: new SearchService(resolver),
+      gitGraph: new GitGraphService(resolver),
     };
   }
 
@@ -588,6 +605,7 @@ function checkedHost(ctx: WorkerContext, r: Registrar): Host {
     {
       stat: (path, options) =>
         call<FsStat>("fs.stat", { path, followSymlinks: options?.followSymlinks }),
+      realpath: (path) => call<string>("fs.realpath", { path }),
       readFile: (path) => call<Uint8Array>("fs.readFile", { path }),
       list: (path) => call<FsEntry[]>("fs.list", { path }),
       writeFile: (path, data, options) =>

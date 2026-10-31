@@ -18,7 +18,10 @@
     "./lsp-socket": "./src/lsp-socket.ts",
     "./file-watch": "./src/file-watch.ts",
     "./strip-queries": "./src/strip-queries.ts",
-    "./resolver": "./src/resolver.ts"
+    "./resolver": "./src/resolver.ts",
+    "./git-graph": "./src/git-graph.ts",
+    "./resolve-path": "./src/resolve-path.ts",
+    "./http-files": "./src/http-files.ts"
   },
   "dependencies": {
     "@band-app/host-api": "workspace:^",
