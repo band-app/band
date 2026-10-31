@@ -144,16 +144,21 @@ export default defineWorkerPlugin({
         }
       },
 
-      async stream(name, _params, { worktreeKey }) {
+      async stream(name, params, { worktreeKey }) {
         if (name !== "screen") throw new Error(`unknown simulator stream ${name}`);
         const device = await devices.exclusive(() => devices.ensureBooted(worktreeKey));
         const helper = await helpers.helper(device.udid);
         const screen = (await helpers.screen(device.udid)) ?? { width: 0, height: 0 };
-        return openScreenStream(helper, helpers, {
-          ...screen,
-          udid: device.udid,
-          name: device.name,
-        });
+        return openScreenStream(
+          helper,
+          helpers,
+          {
+            ...screen,
+            udid: device.udid,
+            name: device.name,
+          },
+          params,
+        );
       },
 
       async release(worktreeKey, reason) {

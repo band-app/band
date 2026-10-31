@@ -19,6 +19,7 @@ All of these must hold:
 | --- | --- |
 | HTTP `POST /direct/<procedure>` | `worktree.listFiles`, `getFile`, `saveFile`, `getDiff`, `getChanges`, `getFileDiff`, `searchFiles`, `searchContent` |
 | WebSocket `/terminal?worktreeId=…&terminalId=…` | The hub's terminal protocol: replay on `attach`, `ack`, input, `resize`, `ping`, title and exit frames |
+| WebSocket `/plugins/<plugin id>/stream?worktreeId=…` | A plugin's live stream, today the Simulator tab's screen. The messages and the view-only rule are those of the hub's `/api/plugins/<id>/worktrees/<worktree>/stream` route (`bridgePluginStream` in `@band-app/worktree-ops`), and the worker opens the stream with the profile `direct`: serve-sim's full-size frames at their own rate. The hub path asks for the `hub` profile (see [the simulator](simulator.md#the-stream)) |
 
 A chat this worker owns ([chat ownership](chat-ownership.md)) goes there too: its event stream, messages, stop and answers, on the same token. Everything else goes to the hub: the events of chats the hub runs, LSP, file watching, the formatter, git staging, commits, pull and push, worktree lifecycle, the browser pane and the desktop viewer. The list of direct procedures is `DIRECT_PROCEDURES` in `packages/shared/src/direct-access.ts`.
 
@@ -42,7 +43,7 @@ The listener (`apps/worker/src/direct.ts`) binds `127.0.0.1` only, on a port the
 - The `Host` header is `127.0.0.1:<port>` or `localhost:<port>` (421 otherwise), which stops a page that rebinds a DNS name to loopback.
 - An `Origin`, when present, is the desktop app's page for a remote hub, `app://h-<12 hex>` (403 otherwise, `app://local` included). CORS answers only those origins.
 - The token is registered and not expired (401 otherwise). A hub device token is no credential here.
-- The call names the token's worktree (403 otherwise). A terminal must also belong to that worktree.
+- The call names the token's worktree (403 otherwise). A terminal must also belong to that worktree, and a plugin stream opens only for the token's worktree. A stream the worker cannot open (the plugin is missing or unavailable, or the lease fenced the worker) closes with `4100`.
 
 File, diff and search calls then run the same service classes the hub runs (`@band-app/worktree-ops`), over a worker whose calls go through the worker's own method handlers (`Registrar.invoke`). So the path policy that keeps a link call inside the worker's roots applies unchanged, and a refused path fails with the same message on both paths.
 
@@ -56,11 +57,12 @@ The app's tRPC clients have a link in front of the hub link (`directWorkerLink`,
 
 A 500 with an error is the procedure failing, as it would on the hub, so the app shows it.
 
-The terminal socket (`lib/terminal-cache.ts`) asks for a direct target before each connect. A direct socket that never opens, closes with `4100`, or drops after it opened reconnects through the hub at once, and the hub replays the screen. After a connection failure the direct path rests for 15 seconds, and new connections after that try the worker again. A socket that is already open on the hub stays there.
+The terminal socket (`lib/terminal-cache.ts`) and the Simulator tab (`components/remote-screen/RemoteScreen.tsx`, `directPluginStreamTarget`) ask for a direct target before each connect. A direct socket that never opens, closes with `4100`, or drops after it opened reconnects through the hub at once, and the hub replays the screen. After a connection failure the direct path rests for 15 seconds, and new connections after that try the worker again. A socket that is already open on the hub stays there.
 
 ## Tests
 
 - `apps/hub/tests/direct-path.test.ts`: a real hub and a real `band-worker`. It types, resizes and reattaches over the direct terminal socket, compares every direct procedure's answer with the hub's for the same worktree, covers the refusals (no token, unknown, expired, another worktree, a path outside the worktree, a non-loopback interface, a foreign `Host` or `Origin`) and a worker restart with its shell kept in the terminal daemon.
-- `apps/web/e2e-desktop/desktop-direct-path.spec.ts`: the real desktop app with this Mac added as a worker. The terminal socket goes to `127.0.0.1`, the file tree and a file read go there and not to the hub, a worker restart falls back to the hub with the screen kept, a file opened after the restart reads without an error, and a later connection uses the worker again.
+- `apps/hub/tests/direct-path.test.ts` also covers the plugin stream route: token, worktree, `Host` and `Origin` checks, and the `4100` close for a plugin the worker does not have. `apps/hub/tests/simulator-stream-profile.test.ts` checks the frame size and rate of each profile against a stand-in serve-sim.
+- `apps/web/e2e-desktop/desktop-direct-path.spec.ts`: the real desktop app with this Mac added as a worker. The terminal socket goes to `127.0.0.1`, the file tree and a file read go there and not to the hub, a worker restart falls back to the hub with the screen kept, a file opened after the restart reads without an error, and a later connection uses the worker again. On a Mac with Xcode, the Simulator tab streams from `127.0.0.1` with no stream socket to the hub, and falls back to the hub's stream when the worker restarts.
 
 Not measured automatically: terminal echo latency over a slow link to the hub. Check it with macOS Network Link Conditioner (about 300 ms RTT) and the packaged app.

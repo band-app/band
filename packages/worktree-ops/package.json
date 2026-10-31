@@ -14,6 +14,7 @@
     "./schemas": "./src/schemas.ts",
     "./direct": "./src/direct.ts",
     "./terminal-socket": "./src/terminal-socket.ts",
+    "./plugin-stream-socket": "./src/plugin-stream-socket.ts",
     "./strip-queries": "./src/strip-queries.ts",
     "./resolver": "./src/resolver.ts"
   },

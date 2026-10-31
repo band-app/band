@@ -35,6 +35,18 @@ import { isPackagedRun, type LaunchedDesktop, launchDesktop } from "./helpers/de
 import { DesktopDashboardPage } from "./pages/DesktopDashboardPage";
 import { ThisComputerPage } from "./pages/ThisComputerPage";
 
+function hasSimctl(): boolean {
+  try {
+    execFileSync("xcrun", ["simctl", "help"], { stdio: "ignore" });
+    return process.platform === "darwin";
+  } catch {
+    return false;
+  }
+}
+// Booting a device takes minutes on a CI runner, so CI skips the Simulator step unless asked.
+const CAN_RUN_SIMULATOR =
+  hasSimctl() && (!process.env.CI || process.env.BAND_TEST_SIMULATOR === "1");
+
 const REMOTE_TOKEN = "desktop-direct-e2e-remote-token";
 const FAKE_LAUNCHCTL = join(import.meta.dirname, "fixtures", "fake-launchctl.mjs");
 const LABEL = "app.band.worker";
@@ -318,5 +330,29 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
         route,
       ).toEqual([]);
     }
+  }
+
+  // Simulator tab S1: the stream goes to this Mac's worker on loopback and the hub carries none
+  // of it. S2: when the worker goes away the tab falls back to the hub's stream.
+  if (CAN_RUN_SIMULATOR) {
+    const pluginSockets = () =>
+      sockets.filter((u) => /\/plugins\/simulator\/(?:worktrees\/[^/]+\/)?stream/.test(u));
+    await hubCall("simulators.open", { worktreeId });
+    await dashboard.gotoDeepLink(worktreeId);
+    await dashboard.waitForRemoteScreenRoute("direct");
+    await dashboard.waitForRemoteScreenLive();
+    const direct = pluginSockets().filter((u) => portOf(u) !== hubPort);
+    expect(direct.length).toBeGreaterThan(0);
+    expect(direct[0]).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/plugins\/simulator\/stream\?worktreeId=/);
+    expect(pluginSockets().filter((u) => portOf(u) === hubPort)).toEqual([]);
+    // The token is a subprotocol, never part of a URL.
+    expect(direct.join(" ")).not.toContain("bwd_");
+
+    launchctl("kickstart", "-k", `gui/0/${LABEL}`);
+    await dashboard.waitForRemoteScreenRoute("hub", 120_000);
+    // Playwright reports a socket a moment after the page creates it.
+    await expect
+      .poll(() => pluginSockets().filter((u) => portOf(u) === hubPort).length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
   }
 });
