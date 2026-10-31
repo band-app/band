@@ -34,7 +34,8 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "provisioning-shared-secret";
 const GIT_TOKEN = "gitpat_provision_0123456789abcdef";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 const scratch: string[] = [];
 const tmp = (prefix: string) => {

@@ -36,7 +36,8 @@ import { TerminalSocket } from "./helpers/terminal-socket";
 import { removeTmpHome } from "./helpers/tmp-home";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 /** Short, so the expiry case does not wait ten minutes. Every case asks for a fresh token. */
 const TOKEN_TTL_MS = 3000;
 

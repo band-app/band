@@ -22,6 +22,15 @@ export const ACP_STUB = fileURLToPath(
 process.env.BAND_TEST_ACP_AGENT = ACP_STUB;
 
 export const WORKER_BIN = fileURLToPath(new URL("../bin/band-worker.mjs", import.meta.url));
+const PROCESS_GUARD = new URL("../../../scripts/test-process-guard.mjs", import.meta.url).href;
+
+/** Makes a node process exit once this test process is gone (scripts/test-process-guard.mjs). */
+function processGuardEnv(): NodeJS.ProcessEnv {
+  return {
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import ${PROCESS_GUARD}`].filter(Boolean).join(" "),
+    TEST_PROCESS_GUARD_OWNER_PID: String(process.pid),
+  };
+}
 export const TOKEN = "test-token";
 
 /** A directory under the temp dir, resolved so it matches what the worker reports. */
@@ -252,7 +261,7 @@ export interface WorkerProcess {
 /** Runs the real `band-worker` binary with a throwaway BAND_HOME. */
 export function spawnWorkerProcess(args: string[], env: NodeJS.ProcessEnv = {}): WorkerProcess {
   const child = spawn(process.execPath, [WORKER_BIN, ...args], {
-    env: { ...process.env, BAND_HOME, LOG_LEVEL: "debug", ...env },
+    env: { ...process.env, BAND_HOME, LOG_LEVEL: "debug", ...env, ...processGuardEnv() },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

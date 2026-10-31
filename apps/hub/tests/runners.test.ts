@@ -35,7 +35,8 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "runners-shared-secret";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { processGuardEnv, WORKER_BIN } from "./helpers/worker-bin";
 
 interface HostRequest {
   id: string;
@@ -221,7 +222,7 @@ describe("the local hook", () => {
         isolation: "process",
         maxConcurrent: 1,
         timeoutSec: 90,
-        env: { BAND_WORKER_BIN: WORKER_BIN, BAND_IDLE_EXIT: "120s" },
+        env: { BAND_WORKER_BIN: WORKER_BIN, ...processGuardEnv(), BAND_IDLE_EXIT: "120s" },
       },
     ]);
     const created = await create("runner-local", { labels: { pool: "local" } });
@@ -309,7 +310,7 @@ describe("the repo path a hook prints", () => {
     isolation: "process",
     maxConcurrent: 1,
     timeoutSec: 90,
-    env: { BAND_WORKER_BIN: WORKER_BIN, BAND_IDLE_EXIT: "120s" },
+    env: { BAND_WORKER_BIN: WORKER_BIN, ...processGuardEnv(), BAND_IDLE_EXIT: "120s" },
   });
 
   it("reads the older BAND_HOST_REPO_PATH name", async () => {

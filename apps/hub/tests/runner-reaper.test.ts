@@ -38,7 +38,9 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = TEST_TOKEN;
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { processGuardEnv, WORKER_BIN } from "./helpers/worker-bin";
+
 const RUNNERS_DIR = join(import.meta.dirname, "../../../runners");
 const REAPER_ENV = {
   BAND_SERVE_UI: "false",
@@ -413,6 +415,7 @@ describe("maximum lifetime and the destroy action", () => {
     );
     runnerEnv = {
       BAND_WORKER_BIN: WORKER_BIN,
+      ...processGuardEnv(),
       BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
       BAND_TEST_ACP_STATE: stubState,
       BAND_TEST_ACP_SCENARIO: scenario,

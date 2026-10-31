@@ -31,7 +31,8 @@ import {
 } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+import { WORKER_BIN } from "./helpers/worker-bin";
+
 const API_KEY = "sk-relay-MCP-PLAINTEXT-9876543210";
 
 const scratch: string[] = [];

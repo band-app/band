@@ -28,7 +28,8 @@ import {
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "repos-by-url-secret";
-const WORKER_BIN = join(import.meta.dirname, "../../worker/bin/band-worker.mjs");
+
+import { WORKER_BIN } from "./helpers/worker-bin";
 
 interface RepoView {
   name: string;
