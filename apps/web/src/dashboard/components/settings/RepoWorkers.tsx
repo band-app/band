@@ -136,7 +136,7 @@ function AddWorkerDialog({
                     disabled={added}
                     className={cn(
                       "flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left",
-                      added ? "text-muted-foreground" : "hover:bg-accent",
+                      added ? "text-muted-foreground" : "hover:bg-list-highlight",
                       h.id === activeId && "bg-accent",
                     )}
                     data-testid="settings-repo__add-worker-option"

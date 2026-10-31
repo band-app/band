@@ -208,6 +208,30 @@ export async function openWithApp(path: string, appName: string): Promise<void> 
 }
 
 // ---------------------------------------------------------------------------
+// revealSimulator
+// ---------------------------------------------------------------------------
+
+const SIMULATOR_UDID = /^[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$/;
+
+/** Shows a simulator device in Simulator.app (macOS only), starting the app when it is not running. */
+export async function revealSimulator(udid: string): Promise<void> {
+  if (process.platform !== "darwin") {
+    throw new Error(NOT_SUPPORTED);
+  }
+  if (!SIMULATOR_UDID.test(udid)) throw new Error("Not a simulator id");
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn("open", ["-a", "Simulator", "--args", "-CurrentDeviceUDID", udid], {
+      stdio: "ignore",
+    });
+    proc.on("error", (err) => reject(new Error(`Failed to open Simulator: ${err.message}`)));
+    proc.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`open -a Simulator failed with exit code ${code}`));
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // installCli
 // ---------------------------------------------------------------------------
 

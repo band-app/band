@@ -251,7 +251,7 @@ export function HistoryPopover({ worktreeId, onNavigate }: HistoryPopoverProps) 
                   {group.entries.map((entry) => (
                     <li
                       key={entry.id}
-                      className="group relative flex min-w-0 items-center gap-2 py-1.5 pl-3 pr-2 hover:bg-accent/60"
+                      className="group relative flex min-w-0 items-center gap-2 py-1.5 pl-3 pr-2 hover:bg-list-highlight"
                     >
                       {entry.faviconUrl ? (
                         <img

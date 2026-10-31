@@ -143,8 +143,8 @@ export function FileMentionSuggestions({ worktreeId }: FileMentionSuggestionsPro
                 className={cn(
                   "flex w-full cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-left text-sm outline-none transition-colors",
                   index === selectedIndex
-                    ? "bg-accent text-accent-foreground"
-                    : "text-popover-foreground hover:bg-accent/50",
+                    ? "bg-list-highlight text-list-highlight-foreground"
+                    : "text-popover-foreground hover:bg-list-highlight/50",
                 )}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onMouseDown={(e) => {

@@ -1,0 +1,23 @@
+name: Use the shared build
+description: >
+  Downloads the `build` artifact of ci.yml (web client, hub bundle, worker
+  bundle and the release CLI) and unpacks it over the checkout, then points the
+  tests at it. Run after setup-node-rust, which installs dependencies. Tar keeps
+  the file modes that upload-artifact would drop (node-pty's spawn-helper).
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: build
+        path: ${{ runner.temp }}/build
+
+    - name: Unpack the build
+      shell: bash
+      run: |
+        tar -xzf "$RUNNER_TEMP/build/build.tar.gz"
+        rm -rf "$RUNNER_TEMP/build"
+        # The hub suite and the worker find the CLI here, and the hub's
+        # `pretest` build is skipped, so tests run the artifact as built.
+        echo "BAND_CLI_PATH=$GITHUB_WORKSPACE/apps/cli/target/release/band" >> "$GITHUB_ENV"
+        echo "BAND_PREBUILT=1" >> "$GITHUB_ENV"

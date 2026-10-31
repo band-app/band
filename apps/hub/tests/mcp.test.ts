@@ -148,6 +148,9 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames).toContain("band_tunnel_status");
     expect(toolNames).toContain("band_worktrees_create");
     expect(toolNames).toContain("band_cronjobs_list");
+    // The hub update procedures are for a person's token only.
+    expect(toolNames).not.toContain("band_workers_hubInterruptions");
+    expect(toolNames).not.toContain("band_workers_updateHub");
     // Credentials stay out of agent reach.
     expect(toolNames.filter((n) => n.startsWith("band_vault_"))).toEqual([]);
     expect(toolNames.filter((n) => n.startsWith("band_agentLogins_"))).toEqual([]);

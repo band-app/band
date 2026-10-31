@@ -75,6 +75,7 @@ import { reviewsRouter } from "./reviews/router";
 import { runnersRouter } from "./runners/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
+import { simulatorsRouter } from "./simulators/router";
 import { statusesRouter, statusRouter } from "./statuses/router";
 import { subscriptionsRouter } from "./subscriptions/router";
 import { systemRouter } from "./system/router";
@@ -136,6 +137,7 @@ export const appRouter = t.router({
   queue: queueRouter,
   reports: reportsRouter,
   plugins: pluginsRouter,
+  simulators: simulatorsRouter,
   reviews: reviewsRouter,
   // `system` is the new home for the legacy `servicesRouter`. The wire
   // surface is preserved by mounting it under the original `services`

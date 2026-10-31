@@ -1,14 +1,17 @@
-import type {
-  PollResult,
-  PollSubscription,
-  PollUnit,
-  SourceEvent,
-  SubscriptionContext,
-  SubscriptionSourceProvider,
+import {
+  githubCiKey,
+  githubCiKeyPrefix,
+  githubPrKeyPrefix,
+  type PollResult,
+  type PollSubscription,
+  type PollUnit,
+  type SourceEvent,
+  type SubscriptionContext,
+  type SubscriptionSourceProvider,
 } from "@band-app/plugin-api";
 import type { BandServerApi } from "@band-app/plugin-api/server";
 import { aggregateBranchHead, aggregateCommit, type CheckTrigger } from "./check-runs";
-import { ciKey, obj } from "./json";
+import { obj } from "./json";
 import { buildPrActivityQuery, initialCursor, parsePrActivity } from "./pr-activity";
 import {
   HOOK_EVENTS,
@@ -24,6 +27,8 @@ export const SOURCE_ID = "github";
 const SIGNATURE = "x-hub-signature-256";
 const EVENT = "x-github-event";
 const DELIVERY = "x-github-delivery";
+/** Branches whose last CI verdict the provider remembers. */
+const MAX_TRACKED_BRANCHES = 500;
 
 function toBuffer(bodyBase64: string): Buffer {
   return Buffer.from(bodyBase64, "base64");
@@ -51,7 +56,11 @@ function isCheckTrigger(value: unknown): value is CheckTrigger {
  * `reviews.changed` call this provider makes for each verified delivery.
  */
 export function createSubscriptionSource(api: BandServerApi): SubscriptionSourceProvider {
-  /** The last CI event id seen per `repo@branch`, so a finished commit signals once. */
+  /**
+   * The last CI event id seen per `repo@branch`, so a finished commit signals once. It holds the
+   * most recently polled branches only: an evicted branch signals once more on its next poll,
+   * and the event id still keeps the core from delivering the verdict twice.
+   */
   const lastCiEvent = new Map<string, string>();
 
   function signal(target: ReviewTarget): void {
@@ -70,7 +79,7 @@ export function createSubscriptionSource(api: BandServerApi): SubscriptionSource
     unit: PollUnit,
     ctx: SubscriptionContext,
   ): Promise<PollResult[]> {
-    const numberOf = (s: PollSubscription) => Number(s.key.slice(`github:pr:${repo}#`.length));
+    const numberOf = (s: PollSubscription) => Number(s.key.slice(githubPrKeyPrefix(repo).length));
     const subs = unit.subscriptions;
     const numbers = [...new Set(subs.map(numberOf))].filter((n) => Number.isInteger(n) && n > 0);
     if (numbers.length === 0) return [];
@@ -113,15 +122,22 @@ export function createSubscriptionSource(api: BandServerApi): SubscriptionSource
     if (!event) return [];
     // The event id is the commit and verdict, so repeated polls of a finished commit deliver once.
     const seen = `${repo}@${branch}`;
-    if (lastCiEvent.get(seen) !== event.id) {
-      lastCiEvent.set(seen, event.id);
-      signal({ repo, branch });
+    const changed = lastCiEvent.get(seen) !== event.id;
+    lastCiEvent.delete(seen);
+    lastCiEvent.set(seen, event.id);
+    if (lastCiEvent.size > MAX_TRACKED_BRANCHES) {
+      lastCiEvent.delete(lastCiEvent.keys().next().value as string);
     }
+    if (changed) signal({ repo, branch });
     return [{ events: [event] }];
   }
 
   return {
     id: SOURCE_ID,
+
+    hasSignature(headers) {
+      return !!headers[SIGNATURE];
+    },
 
     async verifyDelivery({ secret, headers, bodyBase64 }) {
       if (!secret || !verifyGithubSignature(secret, toBuffer(bodyBase64), headers[SIGNATURE])) {
@@ -143,7 +159,7 @@ export function createSubscriptionSource(api: BandServerApi): SubscriptionSource
       const { repo, branch, sha } = parsed.trigger;
       return {
         type: "check",
-        key: ciKey(repo, branch),
+        key: githubCiKey(repo, branch),
         flight: `${repo}@${sha}`,
         trigger: parsed.trigger,
       };
@@ -191,10 +207,10 @@ export function createSubscriptionSource(api: BandServerApi): SubscriptionSource
 
     pollUnits(repo, subscriptions) {
       const units: PollUnit[] = [];
-      const prefix = `github:pr:${repo}#`;
+      const prefix = githubPrKeyPrefix(repo);
       const pullRequests = subscriptions.filter((s) => s.key.startsWith(prefix));
       if (pullRequests.length > 0) units.push({ id: `pr:${repo}`, subscriptions: pullRequests });
-      const ciPrefix = `github:ci:${repo}@`;
+      const ciPrefix = githubCiKeyPrefix(repo);
       const branches = new Set<string>();
       for (const sub of subscriptions) {
         if (sub.key.startsWith(ciPrefix)) branches.add(sub.key.slice(ciPrefix.length));

@@ -7,6 +7,7 @@
 //   band-worker.mjs, terminal-daemon.mjs, agent-daemon.mjs   the worker and its two daemons
 //   agents/<name>.mjs                      the ACP adapters (acp-launch.ts looks next to the bundle)
 //   node_modules/node-pty, node_modules/@vscode/ripgrep(+ platform packages)
+//   node_modules/serve-sim and node_modules/ws   the simulator plugin's capture and input (serve-sim imports ws)
 import {
   chmodSync,
   cpSync,
@@ -108,5 +109,13 @@ for (const arch of ["x64", "arm64"]) {
   cpSync(join(pkgDir, "bin", rgName), join(dest, "bin", rgName));
   chmodSync(join(dest, "bin", rgName), 0o755);
 }
+
+// serve-sim: the simulator plugin runs its CLI (dist/serve-sim.js, with the native addon and the
+// helper binaries beside it) as a child process. Its one runtime import is `ws`.
+const serveSim = dirname(dirname(require.resolve("serve-sim/middleware")));
+const serveSimOut = join(out, "node_modules", "serve-sim");
+cpSync(serveSim, serveSimOut, { recursive: true, dereference: true });
+const wsDir = dirname(createRequire(join(serveSim, "package.json")).resolve("ws/package.json"));
+cpSync(wsDir, join(out, "node_modules", "ws"), { recursive: true, dereference: true });
 
 console.log(`worker for the desktop app written to ${out}`);

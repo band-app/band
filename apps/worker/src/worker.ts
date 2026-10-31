@@ -168,6 +168,11 @@ export class Worker {
    */
   static async start(config: WorkerConfig, options: WorkerOptions = {}): Promise<Worker> {
     await ensureStateDir(config.stateDir);
+    // A plugin's availability probe can run an external tool (the simulator one runs
+    // `xcrun simctl help`, up to 20 s on a cold macOS runner). It starts here, beside the token
+    // exchange and the capability probes, so the hello waits only for what is left of it.
+    const plugins = WorkerPlugins.start({ stateDir: config.stateDir, log });
+    plugins.catch(() => undefined);
     let workerId = config.workerId ?? (await loadOrCreateWorkerId(config.stateDir));
     const extraRoots = (await loadExtraRoots(config.stateDir)).filter((dir) => existsSync(dir));
     const policy = await PathPolicy.create([
@@ -209,7 +214,7 @@ export class Worker {
     // The hello carries the capability report, so the first probe finishes before it.
     await host.awaitReport();
     const info = await host.info();
-    const plugins = await WorkerPlugins.start({ stateDir: config.stateDir, log });
+    const runningPlugins = await plugins;
 
     const serviceManager =
       options.serviceManager !== undefined
@@ -239,7 +244,7 @@ export class Worker {
           // The loopback listener for the desktop app on this machine (`direct.ts`).
           CAPABILITY_DIRECT,
           ...(config.ownChats ? [CAPABILITY_CHAT_OWNERSHIP] : []),
-          ...plugins.capabilities(),
+          ...runningPlugins.capabilities(),
         ],
         labels: config.labels,
         roots: policy.rootPaths,
@@ -273,7 +278,7 @@ export class Worker {
       reposDir: config.reposDir,
       cli: (await WorkerCli.start(config.stateDir, log)) ?? undefined,
       ownsChats: config.ownChats,
-      plugins,
+      plugins: runningPlugins,
       ...(agentHolder ? { agentHolder } : {}),
     };
     const registrar = new Registrar(ctx);

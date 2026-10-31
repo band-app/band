@@ -49,6 +49,7 @@ export const Channels = {
   revealInFinder: "reveal_in_finder",
   checkAppExists: "check_app_exists",
   openWithApp: "open_with_app",
+  revealSimulator: "reveal_simulator",
   installCli: "install_cli",
   openExternal: "open_external",
 

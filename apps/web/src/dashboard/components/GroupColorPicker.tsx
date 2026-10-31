@@ -50,7 +50,7 @@ export function GroupColorPicker({
             type="button"
             data-testid={`${testId}-custom-button`}
             onClick={() => customRef.current?.click()}
-            className="rounded px-2 py-1 text-left text-xs text-foreground hover:bg-accent"
+            className="rounded px-2 py-1 text-left text-xs text-foreground hover:bg-list-highlight"
           >
             Custom colour…
           </button>

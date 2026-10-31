@@ -128,6 +128,8 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure === "workers.setTrust" ||
   procedure === "workers.audit" ||
   procedure === "workers.updateHub" ||
+  procedure === "workers.hubInterruptions" ||
+  procedure === "hosts.hubInterruptions" ||
   procedure === "workers.dismissHubUpdate" ||
   procedure === "workers.updateAll" ||
   procedure === "hosts.updateHub" ||
@@ -750,6 +752,12 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
       }
     }
     named = rest;
+  }
+  if (procedure === "statuses.notify") {
+    // `band notify` sends the worker's own id, and the relay writes it again in `pinWorktreeHost`.
+    // Any other id stays in the input and is refused as a target the relay cannot check.
+    const { hostId, ...rest } = (input ?? {}) as Record<string, unknown>;
+    if (hostId === workerId) named = rest;
   }
   if (procedure === "subscriptions.remove") {
     const { id } = (input ?? {}) as { id?: unknown };

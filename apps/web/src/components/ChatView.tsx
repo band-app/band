@@ -69,6 +69,7 @@ import { ChatLoginMenu } from "./chat/ChatLoginMenu";
 import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
 import { QueuedMessages, type QueuedMessageView } from "./chat/QueuedMessages";
+import { StalledPill } from "./chat/StalledPill";
 import { useChatFind } from "./chat/use-chat-find";
 import { useChatSubscription } from "./chat/use-chat-subscription";
 import {
@@ -681,6 +682,7 @@ export function ChatView({
           />
         )}
         <ListeningPill chatId={chatId} />
+        <StalledPill worktreeId={worktreeId} chatId={chatId} />
         <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
           {/* Absolutely positioned so it never shifts content while an older
               page loads (issue #572). */}

@@ -1,67 +1,62 @@
-# Origin links
+---
+title: Origin links
+description: How Band records which worktree, chat or terminal a worktree was started from, and how to set or clear the parent.
+section: using-band
+order: 90
+---
 
-A worktree records where it was started from. This replaces the removed projects feature (implementation plan, section 15).
+A worktree remembers where it was started from. When an agent in worktree A starts worktree B, B records A as its parent. The sidebar shows B nested under A, so a piece of work and the work it spawned stay together. This replaced the removed projects feature.
 
-## What is stored
+## How the parent is set
 
-Three nullable columns on `worktrees`: `origin_worktree_id`, `origin_chat_id` and `origin_terminal_id`. They hold plain ids, with no foreign key, because the origin can be on any repo and worker.
+A parent is set in one of these ways.
 
-`RepoQueries.saveAll` rewrites the whole repo and worktree tables, so it copies the origin columns from the rows it replaces and ignores what its snapshot says. They change only through `RepoQueries.setOrigin`.
-
-## How the origin is set
-
-`worktrees.create` takes two optional fields.
-
-- `origin` is the id of the worktree to record as the parent. It must exist.
-- `noOrigin: true` records none. Passing both is an error.
-
-With neither, the hub uses the caller's identity. The chat or terminal is never read from the request body. It comes from one of two places the hub controls:
-
-- The worker relay. A relay token is issued for one process with a scope of `{ worktreeId, chatId?, terminalId? }`. The hub sets the `x-band-worktree-id`, `x-band-chat-id` and `x-band-terminal-id` headers from that scope when it replays a call, and drops any such header the caller sent. A shell on a worker that runs `band worktrees create` gets its worktree and terminal recorded.
-- The built-in `band` MCP server. Every chat session gets an MCP entry at `<hub or relay URL>/mcp-proxy/band` with the chat's session token (`mcp_...`). The token names the chat, and the chat names its worktree.
-
-An explicit `origin` keeps the caller's chat or terminal only when it names the caller's own worktree. Through a relay it must be a worktree on the worker's worker.
-
-On the hub's own machine the CLI has no relay token. `band worktrees create` sends `$BAND_WORKTREE_ID` as `origin`, so a local terminal or agent records the worktree but not the chat or terminal. A call that carries the identity headers directly is as trusted as the device token that made it.
-
-## The `band` MCP server
-
-The tool `worktrees_create` takes `repo`, `branch`, and optionally `base`, `hostId`, `prompt`, `codingAgentId`, `origin` and `noOrigin`. It returns the path and worktree id (or a provisioning request id). The new worktree's chat can call the tool too, which builds a tree.
-
-A chat on a worker creates worktrees on that worker only. A chat on the hub's machine may name any worker. The name `band` is reserved, so `mcp.add` refuses it.
-
-## Setting the parent by hand
-
-`worktrees.setOrigin { repo, name, hostId?, origin }` sets a worktree's parent, or clears it when `origin` is null. A manual parent has no chat or terminal, and clearing removes all three ids. The hub refuses the worktree itself and any of its descendants (a cycle) and an unknown id, then emits a `worktree-origin-changed` status event so other clients refetch the repo list. In the sidebar, the card's context menu has "Set parent…" (a searchable list of every other worktree, on any repo and worker, minus the worktree and its descendants) and "Remove parent" (shown only when there is a parent).
-
-## Reading links
-
-`repos.list` returns, for every worktree:
-
-- `origin`: `{ worktreeId, chatId?, terminalId?, removed, repo?, branch? }` or `null`. `removed` is true when the origin worktree no longer exists. The ids stay so a view can say "parent removed". `repo` and `branch` are present while it exists.
-- `children`: the ids of worktrees whose origin is this one, across repos and workers.
-
-## CLI
+- **From an agent.** Every chat gets a built-in MCP server named `band`, with the tool `worktrees_create`. A worktree the agent creates records the agent's worktree and chat as its origin. The new worktree's chat has the same tool, so the links form a tree. A chat running on a worker creates worktrees on that worker only. A chat on the hub's own machine can name another worker.
+- **From the CLI.** `band worktrees create` run in a Band terminal or agent records the worktree it runs in. Inside a worker's terminal, the hub also records the terminal. Pass `--origin <id>` to choose a parent, or `--no-origin` to record none.
+- **By hand.** Use **Set parent…** in the card menu, `band worktrees set-origin`, or drag a card onto the middle of another card.
 
 ```sh
-band worktrees create <repo> <branch> [--origin <worktree id> | --no-origin]
-band worktrees set-origin <repo> <name> [--worker <worker>] (--origin <worktree id> | --none)
-band worktrees list            # ORIGIN column
+band worktrees create atlas feat-login-tests --origin atlas-feat-login
+band worktrees create atlas feat-spike --no-origin
+band worktrees set-origin atlas feat-login-tests --origin atlas-feat-login
+band worktrees set-origin atlas feat-login-tests --none
+band worktrees list
 ```
 
-## Tests
+`worktrees list` has an ORIGIN column. For `set-origin`, the second argument is the worktree name, which is the branch it was created on, and `--worker` names its worker when it is not on `local`.
 
-`apps/hub/tests/origin-links.test.ts` (explicit origins, the tree, removal), `origin-links-relay.test.ts` (a real worker: a chat through the `band` MCP server, a shell through the relay, forged identity), and `worktrees_create_records_the_origin_and_list_shows_it` in `apps/cli/tests/integration.rs`.
+The hub refuses a parent that would make a cycle, meaning the worktree itself or any worktree started from it. **Set parent…** opens a searchable list of every other worktree, on any repo and worker, minus those. **Remove parent** clears the link and shows when there is one.
 
-## Sidebar
+A chat or terminal is recorded only by the hub, from the identity of the caller. A request cannot name a chat or terminal of its own, so an agent cannot claim to come from a chat that is not its own. A parent you set by hand has no chat or terminal.
 
-The sidebar has one list. Below Pinned, each worktree group is a collapsible header (color dot, name, count) in the order Settings > Groups sets. Worktrees in no group come after the last group as plain top-level rows, with no header. Headers share the Pinned header's left edge. A row's status dot starts where its group's name starts, and a child's dot starts where its parent's name starts. Dragging a header above or below another, or Move up / Move down in its menu, reorders the groups (`groups.reorder`). Under a header the group's worktrees nest by origin, and every card shows the repo avatar and name. With no group defined the sidebar lists worktrees under their repos until the first group exists.
+The `worktrees_create` tool takes `repo`, `branch`, and optionally `base`, `hostId`, `prompt`, `codingAgentId`, `origin` and `noOrigin`. It returns the path and worktree id.
 
-- A worktree with no origin, or whose origin is gone, nests under its repo's main when that main is in the same group, and a gone parent also shows a "parent removed" hint. A worktree started from one in another group is a top-level row, with a "from <parent>" chip that opens the parent. A chevron collapses a subtree, and the choice is kept per device. A card shows a worker tag when its worker is not the hub's own machine.
-- The group filter (All, each group, and "New group…" after a separator) shows one group laid out exactly as in All: same header, collapse control, indent and order. A header's menu renames, recolors and deletes the group (deleting leaves its worktrees ungrouped), and its "+" starts a worktree in that group. A new worktree joins its origin's group, the group the sidebar is filtered to, or none.
-- Pinned is the first section. Each pin shows the worktrees started from it, all the way down, and those leave the normal tree, so nothing is listed twice. A pin with children has a chevron that uses the same collapsed set as the group tree. The group filter applies to pins and their children. The header button folds every group header, the Pinned section and every parent with children the list shows for the current filter, then unfolds the same ones, and its icon and label show the next action. A group the filter hides keeps its state.
-- Dragging: a mouse drags after 8 px and a finger after a 250 ms hold, so a click or tap still opens the worktree. The drag preview is the row's own card. Dropping on a group header moves the worktree to that group, and dropping on a top-level row or the strip above the first group (drawn while no top-level row exists) takes it out of its group and out of a parent that is in a group (`worktrees.setGroup`), and a dialog asks "Move its N children too?" when it has children. Dropping on the middle of another worktree makes the dragged one its child (`worktrees.setOrigin`) and moves it into that worktree's group. Dropping in the gap above or below a row makes it a sibling of that row, so beside a top-level row its parent is cleared. A worktree can't go under itself or under a worktree started from it, and the sidebar shows the reason. Pins reorder among themselves, and dragging into or out of Pinned does not pin or unpin. While no group exists, a worktree reorders within its repo (`worktrees.reorder`, `sort_index`; pins use `pin_sort_index`).
-- The mobile list matches: a section per group holding the origin tree, the same filter, and "New group…" in its group picker. A row's long-press menu has "Set parent…" and "Remove parent" in place of drag and drop.
-- The worktree view has no "Started from" bar. The relationship shows only in the tree.
+## What the sidebar shows
 
-Tests: `apps/web/e2e/sidebar-grouping.spec.ts`, `apps/web/e2e/sidebar-pins-drag.spec.ts` (pins, collapse, reordering while no group exists, a phone), `apps/web/e2e/sidebar-groups.spec.ts`, `apps/web/e2e/settings-groups.spec.ts`, `apps/hub/tests/worktree-reorder.test.ts`.
+The sidebar is one list. Pinned worktrees come first, then each [group](groups.md) as a collapsible header, then worktrees with no group. Under a header the worktrees nest by parent.
+
+- A worktree with no parent, or whose parent is gone, sits under its repo's default-branch worktree when that one is in the same group. A gone parent also shows "parent removed".
+- A worktree started from one in another group is a top-level row with a "from <parent>" label. Click the label to open the parent.
+- A chevron collapses a parent's children. Each device keeps its own choice.
+- Each pin shows the worktrees started from it, all the way down. Those worktrees leave the normal tree, so nothing is listed twice.
+- The header button folds every group, the Pinned section and every parent with children, then unfolds the same ones.
+
+Drag and drop moves things around:
+
+- A mouse drags after 8 px of movement and a finger after a 250 ms hold, so a click or tap still opens the worktree.
+- Dropping on a group header moves the worktree to that group. A dialog asks "Move its N children too?" when it has children.
+- Dropping on the middle of another card makes the dragged worktree its child, and moves it into that card's group.
+- Dropping in the gap above or below a card makes it a sibling of that card.
+- Dropping on a top-level row, or on the strip above the first group, takes the worktree out of its group and out of a parent that is in a group.
+- A worktree cannot go under itself or under a worktree started from it. The sidebar says why.
+- Pins reorder among themselves. Dragging into or out of Pinned does not pin or unpin.
+
+The phone layout has the same list and filter. A row's long-press menu has **Set parent…** and **Remove parent** in place of drag and drop. The worktree view itself has no "Started from" bar.
+
+A new worktree joins its parent's group, unless you pick a group or the sidebar is filtered to one.
+
+## Details
+
+The links are stored on the worktree as three plain ids: the origin worktree, chat and terminal. They have no foreign key, because the origin can be on any repo and worker. Removing the origin worktree keeps the ids, and the list marks the origin as removed.
+
+Through a worker's relay, an explicit `origin` must be a worktree on that worker. A call on the hub's own machine that carries identity headers directly is as trusted as the device token that made it. `repos.list` returns `origin` and `children` for each worktree, and `worktrees.setOrigin` sets or clears a parent.

@@ -310,7 +310,7 @@ export function CheckpointSidepanel({ worktreeId }: { worktreeId: string }) {
                     data-path={f.path}
                     data-status={f.status}
                     onClick={() => setSelected(f.path)}
-                    className={`flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-accent/50 ${selected === f.path ? "bg-accent" : ""}`}
+                    className={`flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-list-highlight ${selected === f.path ? "bg-accent" : ""}`}
                   >
                     <span className="min-w-0 flex-1 truncate">{f.path}</span>
                     <span className="shrink-0 text-xs text-muted-foreground">
@@ -348,7 +348,7 @@ export function CheckpointSidepanel({ worktreeId }: { worktreeId: string }) {
                     data-testid="checkpoint-panel__file"
                     data-path={p}
                     onClick={() => setSelected(p)}
-                    className={`flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-accent/50 ${selected === p ? "bg-accent" : ""}`}
+                    className={`flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-list-highlight ${selected === p ? "bg-accent" : ""}`}
                   >
                     <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate">{p}</span>

@@ -30,13 +30,47 @@ import { taskService } from "../../services/task-service";
 import { worktreeService } from "../../services/worktree-service";
 import { publicProcedure, t } from "../trpc";
 
+/** Default silence after which a running turn counts as stalled: 20 minutes. */
+const TURN_QUIET_STALL_MS = 20 * 60_000;
+
+function turnQuietStallMs(): number {
+  const raw = process.env.BAND_TURN_QUIET_STALL_MS;
+  const override = raw ? Number(raw) : Number.NaN;
+  return Number.isFinite(override) && override > 0 ? override : TURN_QUIET_STALL_MS;
+}
+
+/**
+ * When the chat's agent last sent anything, and whether its running turn has been silent for
+ * `BAND_TURN_QUIET_STALL_MS`. A turn waiting on a permission or form request is not stalled, and
+ * Band never stops a stalled turn by itself. Chats a worker owns report no activity.
+ */
+function turnActivity(
+  chatId: string,
+  now: number,
+): { lastActivityAt: number | null; stalled: boolean } {
+  if (chatOwnershipService.isOwned(chatId)) return { lastActivityAt: null, stalled: false };
+  const task = taskService.getTask(chatId);
+  const running = task?.status === "running";
+  const lastActivityAt = agentSessionService.lastActivityAt(chatId);
+  const since = Math.max(lastActivityAt ?? 0, running ? task.startedAt : 0);
+  const stalled =
+    running && !agentSessionService.hasPendingRequest(chatId) && now - since >= turnQuietStallMs();
+  return { lastActivityAt, stalled };
+}
+
 // ---------------------------------------------------------------------------
 // Chats (multi-pane chat management)
 // ---------------------------------------------------------------------------
 
 export const chatsRouter = t.router({
   list: publicProcedure.input(z.object({ worktreeId: z.string() })).query(({ input }) => {
-    return { chats: chatService.list(input.worktreeId) };
+    const now = Date.now();
+    return {
+      chats: chatService.list(input.worktreeId).map((chat) => ({
+        ...chat,
+        ...turnActivity(chat.id, now),
+      })),
+    };
   }),
 
   create: publicProcedure
@@ -215,7 +249,7 @@ export const chatsRouter = t.router({
         summary: z.string().max(1000).optional(),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       // Lazily ensure the server-side chat record exists. The client
       // generates chatIds locally, so setActiveSession may be called
       // before the first message is sent (which normally creates the record).
@@ -238,7 +272,8 @@ export const chatsRouter = t.router({
         summary,
         lastModified,
       });
-      chatOwnershipService.syncActiveSession(input.chatId);
+      // The owner has the pick before this answers, so a stream opened on the owner next sees it.
+      await chatOwnershipService.syncActiveSession(input.chatId);
       return { ok: true };
     }),
 

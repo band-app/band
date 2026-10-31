@@ -24,6 +24,8 @@ function tool<S extends z.ZodRawShape>(
 const POINTS =
   "Coordinates are in points, not screenshot pixels: divide pixels by the scale that simulator_status reports (3 on current iPhones).";
 
+const POINTS_NOTE = "Coordinates are in points.";
+
 const TOOLS: PluginTool[] = [
   tool(
     "simulator_status",
@@ -50,6 +52,12 @@ const TOOLS: PluginTool[] = [
     },
   ),
   tool(
+    "simulator_describe",
+    `Read the iOS simulator screen's accessibility tree: each element's type, label, value and id, its frame and the point to tap it at. Cheaper and more exact than reading a screenshot. ${POINTS_NOTE}`,
+    {},
+    async (_args, ctx) => json(await ctx.call("describe")),
+  ),
+  tool(
     "simulator_tap",
     `Tap the iOS simulator screen. ${POINTS}`,
     {
@@ -67,7 +75,7 @@ const TOOLS: PluginTool[] = [
   tool(
     "simulator_button",
     "Press a hardware button on the iOS simulator.",
-    { button: z.enum(["HOME", "LOCK", "SIDE_BUTTON", "APPLE_PAY", "SIRI"]) },
+    { button: z.enum(["HOME", "LOCK", "SIDE_BUTTON", "SIRI"]) },
     async (args, ctx) => json(await ctx.call("button", args)),
   ),
   tool(

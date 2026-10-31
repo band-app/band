@@ -8,6 +8,7 @@ import {
   withLocalMembership,
 } from "@band-app/client/center-tabs";
 import { chatTabLabel } from "@band-app/client/chat-tab-label";
+import { ClientPluginHostProvider } from "@band-app/plugin-api/client";
 import {
   Button,
   ContextMenu,
@@ -168,6 +169,14 @@ import {
   unregisterPaneOwner,
 } from "../lib/terminal-split-registry";
 import { trpc } from "../lib/trpc-client";
+import { clientPluginHost } from "../plugins/client-plugin-host";
+import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
+import {
+  findPanelContribution,
+  parsePluginPanelTabId,
+  pluginPanelTabId,
+  useWorktreePanels,
+} from "../plugins/use-plugin-slot";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { discardWarning } from "./ChangesSections";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
@@ -222,7 +231,7 @@ import {
 // carries over unchanged from the legacy per-app inner layouts.
 // ---------------------------------------------------------------------------
 
-export type LeafKind = "chat" | "term" | "browser" | "file" | "diff";
+export type LeafKind = "chat" | "term" | "browser" | "file" | "diff" | "plugin";
 
 const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   chat: MessageSquare,
@@ -461,7 +470,14 @@ const LAYOUT_KEY_PREFIX = "band:dockview-layout-v9:";
 // Leaf component names this layout can actually render. A saved layout that
 // references anything else (a removed kind, a hand-edited blob) is sanitized on
 // load so `fromJSON` never instantiates a panel we can't mount.
-const KNOWN_LEAF_COMPONENTS = new Set<string>(["chat", "term", "browser", "file", "diff"]);
+const KNOWN_LEAF_COMPONENTS = new Set<string>([
+  "chat",
+  "term",
+  "browser",
+  "file",
+  "diff",
+  "plugin",
+]);
 
 function layoutKey(worktreeId: string): string {
   return `${LAYOUT_KEY_PREFIX}${worktreeId}`;
@@ -489,6 +505,10 @@ function reinjectParams(
         panel.renderer = "always";
       } else if (comp === "file" || comp === "diff") {
         panel.params = viewLeafParams(comp, id, worktreeId);
+      } else if (comp === "plugin") {
+        panel.params = { worktreeId, ...parsePluginPanelTabId(id) };
+        // A stream tab stays connected while hidden.
+        panel.renderer = "always";
       } else panel.params = { worktreeId };
     }
   }
@@ -850,6 +870,38 @@ function BrowserLeaf({ params, api }: LayoutPanelProps<BrowserLeafParams>) {
         // biome-ignore lint/suspicious/noExplicitAny: layout panel props require matching shape
         {...({} as any)}
       />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Plugin panel leaf (a `worktree.panels` contribution, e.g. the Simulator)
+// ---------------------------------------------------------------------------
+
+interface PluginLeafParams {
+  worktreeId: string;
+  pluginId: string;
+  panelId: string;
+}
+
+function PluginLeaf({ params }: LayoutPanelProps<PluginLeafParams>) {
+  const { visible, worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeId = hostWorktreeId ?? params.worktreeId;
+  const contribution = findPanelContribution(pluginPanelTabId(params.pluginId, params.panelId));
+  if (!worktreeId || !contribution) return null;
+  const Panel = contribution.panel.component;
+  return (
+    <div
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      tabIndex={-1}
+      data-band-leaf-root=""
+      data-testid={`center-plugin-leaf--${params.pluginId}-${params.panelId}`}
+    >
+      <PluginErrorBoundary pluginId={contribution.pluginId}>
+        <ClientPluginHostProvider value={clientPluginHost}>
+          <Panel worktreeId={worktreeId} visible={visible} />
+        </ClientPluginHostProvider>
+      </PluginErrorBoundary>
     </div>
   );
 }
@@ -2188,6 +2240,10 @@ interface LeafActions {
    *  without it. */
   onAdd: (kind: LeafKind, groupId?: string, agentId?: string) => void;
   onSplit: (kind: LeafKind, groupId: string, direction: "right" | "below") => void;
+  /** The worktree this layout is for, so the "+" menu can ask which plugin panels it offers. */
+  worktreeId: string;
+  /** Opens a plugin panel's tab, or selects it when it is already open. */
+  onAddPanel: (pluginId: string, panelId: string, groupId?: string) => void;
   onClose: (id: string, kind: LeafKind) => void;
   openFile: (
     filePath: string,
@@ -2484,6 +2540,39 @@ function TerminalTab(props: LayoutTabProps<TermLeafParams>) {
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+function PluginTab(props: LayoutTabProps<PluginLeafParams>) {
+  const { pluginId, panelId } = props.params;
+  const contribution = findPanelContribution(pluginPanelTabId(pluginId, panelId));
+  const Icon = contribution?.panel.icon ?? Globe;
+  const label = contribution?.panel.label ?? panelId;
+  const containerApi = props.containerApi;
+  const isActive = useTabActive(props.api);
+  const tabId = pluginPanelTabId(pluginId, panelId);
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      leafActionsByApiId.get(containerApi.id)?.current?.onClose(tabId, "plugin");
+    },
+    [containerApi, tabId],
+  );
+  return (
+    <div className={TAB_ROOT_CLASS} data-testid={`center-plugin-tab--${pluginId}-${panelId}`}>
+      <div className={TAB_CONTENT_WRAP}>
+        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className={TAB_TITLE_CLASS} title={label}>
+          {label}
+        </span>
+      </div>
+      <TabEndSlot
+        isActive={isActive}
+        onClose={handleClose}
+        closeTitle="Close tab"
+        closeTestId={`center-plugin-tab--${pluginId}-${panelId}__close`}
+      />
+    </div>
   );
 }
 
@@ -2895,9 +2984,35 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
   );
 });
 
+/** The "+" menu entries of the plugin panels the worktree's worker can serve (the Simulator). */
+function PluginPanelItems({
+  worktreeId,
+  onPick,
+}: {
+  worktreeId: string;
+  onPick: (pluginId: string, panelId: string) => void;
+}) {
+  const panels = useWorktreePanels(worktreeId);
+  return (
+    <>
+      {panels.map(({ pluginId, panel }) => (
+        <DropdownMenuItem
+          key={`${pluginId}.${panel.id}`}
+          onClick={() => onPick(pluginId, panel.id)}
+          data-testid={`worktree-center__new-tab--${pluginId}-${panel.id}`}
+        >
+          <panel.icon className="size-4" />
+          {panel.label}
+        </DropdownMenuItem>
+      ))}
+    </>
+  );
+}
+
 function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
   const add = (kind: LeafKind, agentId?: string) =>
     leafActionsByApiId.get(apiId)?.current?.onAdd(kind, groupId, agentId);
+  const panelWorktreeId = leafActionsByApiId.get(apiId)?.current?.worktreeId;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -2927,6 +3042,14 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
             <DropdownMenuShortcut>{formatShortcut("Cmd+Shift+B")}</DropdownMenuShortcut>
           </DropdownMenuItem>
         )}
+        {panelWorktreeId && (
+          <PluginPanelItems
+            worktreeId={panelWorktreeId}
+            onPick={(pluginId, panelId) =>
+              leafActionsByApiId.get(apiId)?.current?.onAddPanel(pluginId, panelId, groupId)
+            }
+          />
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -2943,6 +3066,7 @@ const components: Record<string, React.FunctionComponent<LayoutPanelProps<any>>>
   browser: BrowserLeaf,
   file: FileLeaf,
   diff: DiffLeaf,
+  plugin: PluginLeaf,
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: the layout registers components by name with their own params
@@ -2952,6 +3076,7 @@ const tabComponents: Record<string, React.FunctionComponent<LayoutTabProps<any>>
   browser: BrowserTab,
   file: FileTab,
   diff: DiffTab,
+  plugin: PluginTab,
   icon: IconTab,
 };
 
@@ -2997,6 +3122,32 @@ function addTermLeaf(
     // never unmounts and rebuilds the nested split layout. The xterm itself is
     // still parked and re-attached through the terminal cache, driven by
     // `TerminalLeaf`'s folded `visible` (selected tab AND visible worktree).
+    renderer: "always",
+  });
+}
+
+function addPluginLeaf(
+  api: LayoutApi,
+  worktreeId: string,
+  pluginId: string,
+  panelId: string,
+  position?: AddPanelOptions["position"],
+): void {
+  const id = pluginPanelTabId(pluginId, panelId);
+  const existing = api.getPanel(id);
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  const label = findPanelContribution(id)?.panel.label ?? panelId;
+  api.addPanel({
+    id,
+    component: "plugin",
+    tabComponent: "plugin",
+    title: label,
+    params: { worktreeId, pluginId, panelId },
+    position: position ?? centralPanelPosition(api),
+    // A live stream would reconnect if the layout detached it with the tab.
     renderer: "always",
   });
 }
@@ -3067,9 +3218,30 @@ function persistCenterTabs(api: LayoutApi, worktreeId: string, keepOrder: boolea
 function addSharedViewLeaf(
   api: LayoutApi,
   worktreeId: string,
-  tab: CenterTab & { kind: "file" | "diff" },
+  tab: CenterTab & { kind: "file" | "diff" | "plugin" },
   afterId: string | null,
 ): void {
+  const position: AddPanelOptions["position"] =
+    afterId && api.getPanel(afterId)
+      ? { referencePanel: afterId, direction: "within" }
+      : centralPanelPosition(api);
+  if (tab.kind === "plugin") {
+    const parsed = parsePluginPanelTabId(tab.id);
+    const contribution = findPanelContribution(tab.id);
+    // A panel this build does not know is left out, and the list keeps the entry for other devices.
+    if (!parsed || !contribution) return;
+    api.addPanel({
+      id: tab.id,
+      component: "plugin",
+      tabComponent: "plugin",
+      title: contribution.panel.label,
+      params: { worktreeId, ...parsed },
+      position,
+      renderer: "always",
+      inactive: true,
+    });
+    return;
+  }
   const params = viewLeafParams(tab.kind, tab.id, worktreeId);
   const allOf = (params as DiffLeafParams).allOf;
   api.addPanel({
@@ -3078,16 +3250,13 @@ function addSharedViewLeaf(
     tabComponent: tab.kind,
     title: allOf ? SECTION_LABELS[allOf] : basename(params.filePath),
     params,
-    position:
-      afterId && api.getPanel(afterId)
-        ? { referencePanel: afterId, direction: "within" }
-        : centralPanelPosition(api),
+    position,
     inactive: true,
   });
 }
 
-function isViewTab(tab: CenterTab): tab is CenterTab & { kind: "file" | "diff" } {
-  return tab.kind === "file" || tab.kind === "diff";
+function isViewTab(tab: CenterTab): tab is CenterTab & { kind: "file" | "diff" | "plugin" } {
+  return tab.kind === "file" || tab.kind === "diff" || tab.kind === "plugin";
 }
 
 /**
@@ -3496,6 +3665,21 @@ export const WorktreeCenter = memo(function WorktreeCenter({
     [worktreeId, launchAgent],
   );
 
+  const handleAddPanel = useCallback(
+    (pluginId: string, panelId: string, groupId?: string) => {
+      const api = apiRef.current;
+      if (!api) return;
+      addPluginLeaf(
+        api,
+        worktreeId,
+        pluginId,
+        panelId,
+        groupId ? { referenceGroup: groupId } : undefined,
+      );
+    },
+    [worktreeId],
+  );
+
   // Actually remove a leaf (panel + any server-side instance). Shared by the
   // normal close path and the "Close without saving" confirm button. For a
   // `file` leaf, also drop its persisted editor state so the next open starts
@@ -3835,6 +4019,8 @@ export const WorktreeCenter = memo(function WorktreeCenter({
   const actionsRef = useRef<LeafActions>({
     onAdd: () => {},
     onSplit: () => {},
+    worktreeId,
+    onAddPanel: () => {},
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
@@ -3846,6 +4032,8 @@ export const WorktreeCenter = memo(function WorktreeCenter({
   actionsRef.current = {
     onAdd: handleAdd,
     onSplit: handleSplit,
+    worktreeId,
+    onAddPanel: handleAddPanel,
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,
@@ -4185,6 +4373,11 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       const d = (e as CustomEvent<OpenPaneDetail>).detail;
       const api = apiRef.current;
       if (d.worktreeId !== worktreeId || !api) return;
+      if (d.kind === "plugin") {
+        const parsed = parsePluginPanelTabId(d.paneId);
+        if (parsed) addPluginLeaf(api, worktreeId, parsed.pluginId, parsed.panelId);
+        return;
+      }
       if (!api.getPanel(d.paneId)) {
         // The launch answered before the creation event.
         if (d.kind === "chat") addChatLeaf(api, worktreeId, d.paneId);

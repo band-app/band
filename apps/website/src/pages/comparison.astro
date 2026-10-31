@@ -2,7 +2,7 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 ---
 
-<BaseLayout title="Comparison — Band" description="See how Band compares to running agents directly or using IDE-native features.">
+<BaseLayout title="Comparison | Band" description="See how Band compares to running agents directly or using IDE-native features.">
   <main class="pt-16">
     <section class="py-20 md:py-28">
       <div class="mx-auto max-w-4xl px-6">
@@ -39,7 +39,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
               </tr>
               <tr>
                 <td class="py-3 pr-6 text-muted-foreground">Multi-agent support</td>
-                <td class="py-3 pr-6 text-success">Claude Code, Codex, OpenCode</td>
+                <td class="py-3 pr-6 text-success">Claude Code, Codex, OpenCode, Gemini CLI, Cursor CLI</td>
                 <td class="py-3 pr-6 text-success">Any</td>
                 <td class="py-3 text-muted-foreground">IDE's agent only</td>
               </tr>
@@ -56,28 +56,28 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 <td class="py-3 text-muted-foreground">No</td>
               </tr>
               <tr>
-                <td class="py-3 pr-6 text-muted-foreground">Scheduled tasks (cron)</td>
+                <td class="py-3 pr-6 text-muted-foreground">Scheduled prompts (cron)</td>
                 <td class="py-3 pr-6 text-success">Yes</td>
                 <td class="py-3 pr-6 text-muted-foreground">External tools</td>
                 <td class="py-3 text-muted-foreground">No</td>
               </tr>
               <tr>
                 <td class="py-3 pr-6 text-muted-foreground">Remote access</td>
-                <td class="py-3 pr-6 text-success">Built-in tunnel</td>
+                <td class="py-3 pr-6 text-success">Tunnel, Tailscale, or your own HTTPS</td>
                 <td class="py-3 pr-6 text-muted-foreground">Manual setup</td>
                 <td class="py-3 text-muted-foreground">No</td>
               </tr>
               <tr>
                 <td class="py-3 pr-6 text-muted-foreground">Mobile dashboard</td>
-                <td class="py-3 pr-6 text-success">Yes</td>
+                <td class="py-3 pr-6 text-success">iOS app and mobile web</td>
                 <td class="py-3 pr-6 text-muted-foreground">No</td>
                 <td class="py-3 text-muted-foreground">No</td>
               </tr>
               <tr>
-                <td class="py-3 pr-6 text-muted-foreground">Window management</td>
-                <td class="py-3 pr-6 text-success">Auto-position</td>
-                <td class="py-3 pr-6 text-muted-foreground">Manual</td>
-                <td class="py-3 text-muted-foreground">Single window</td>
+                <td class="py-3 pr-6 text-muted-foreground">Runs on other machines</td>
+                <td class="py-3 pr-6 text-success">Linux and macOS workers</td>
+                <td class="py-3 pr-6 text-muted-foreground">SSH by hand</td>
+                <td class="py-3 text-muted-foreground">Remote extensions</td>
               </tr>
               <tr>
                 <td class="py-3 pr-6 text-muted-foreground">CLI automation</td>
@@ -118,7 +118,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-muted-foreground">&bull;</span>
-                  No remote or mobile access
+                  No remote or mobile view
                 </li>
               </ul>
             </div>
@@ -127,7 +127,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
               <ul class="mt-3 space-y-2 text-sm text-muted-foreground">
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-primary">&bull;</span>
-                  One-click worktree creation with isolated worktrees
+                  One-click worktree creation, each with its own branch
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-primary">&bull;</span>
@@ -143,7 +143,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="mt-1 text-primary">&bull;</span>
-                  Access from anywhere via Cloudflare tunnel
+                  Access from anywhere with a tunnel, Tailscale, or your own address
                 </li>
               </ul>
             </div>
@@ -169,7 +169,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
               <h3 class="font-semibold text-text">Agent lock-in</h3>
               <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
                 IDE-native features typically only support the IDE's own agent. With Band, you can use Claude Code
-                in one worktree and Cursor in another, choosing the best agent for each task.
+                in one worktree and Cursor CLI in another, choosing the best agent for each task.
               </p>
             </div>
             <div class="rounded-xl border border-border bg-card/50 p-5">
@@ -186,7 +186,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         <div class="mt-16">
           <h2 class="text-2xl font-bold text-text">Why a separate orchestrator?</h2>
           <p class="mt-4 leading-relaxed text-muted-foreground">
-            As coding agents become a daily tool, you need infrastructure around them — just like you need CI/CD
+            As coding agents become a daily tool, you need infrastructure around them, just like you need CI/CD
             infrastructure around your code. Band is that infrastructure layer.
           </p>
           <ul class="mt-4 space-y-2 text-muted-foreground">
@@ -221,7 +221,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
               data-download="comparison"
               class="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
             >
-              Download for macOS
+              Download for macOS (Apple Silicon)
             </a>
             <a
               href="/docs/getting-started"

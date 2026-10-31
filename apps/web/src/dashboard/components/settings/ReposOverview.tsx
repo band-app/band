@@ -96,7 +96,7 @@ export function ReposOverview({ onOpen }: { onOpen: (name: string) => void }) {
               <li key={repo.name}>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/40"
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-list-highlight"
                   data-testid="settings-repos__row"
                   data-repo={repo.name}
                   data-limited={repo.allowedHostIds ? "true" : "false"}

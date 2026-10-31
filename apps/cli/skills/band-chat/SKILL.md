@@ -40,7 +40,7 @@ band chats list [worktree_id]
 ```
 
 Text output: `ID\tNAME\tAGENT\tSTATUS\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).
-JSON output: `{"chats": [{"id": "...", "name": "...", "agent": "...", "status": "...", "labels": {"k": "v"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable.
+JSON output: `{"chats": [{"id": "...", "name": "...", "agent": "...", "status": "...", "labels": {"k": "v"}, "lastActivityAt": 1767225600000, "stalled": false}]}`. `lastActivityAt` is when the chat's agent last sent anything (ms since epoch, `null` if never). `stalled` is true while a turn runs and the agent has sent nothing for `BAND_TURN_QUIET_STALL_MS` (20 minutes by default); the text output then shows `running (stalled)`. Band does not stop a stalled turn, so decide with `band chats stop`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable.
 
 ### Create a new chat pane in a worktree
 

@@ -32,7 +32,7 @@
     "start": "node dist/start-server.mjs",
     "prepack": "node scripts/copy-ui.mjs",
     "postpack": "node scripts/copy-ui.mjs --clean",
-    "pretest": "pnpm --filter @band-app/web build && pnpm build",
+    "pretest": "node scripts/pretest.mjs",
     "test": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' vitest run",
     "postinstall": "node -e \"process.platform!=='win32'&&require('child_process').execSync('chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true',{stdio:'ignore'})\""
   },

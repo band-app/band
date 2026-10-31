@@ -167,14 +167,30 @@ async function addWorker(name: string, scenario: object, issued?: IssuedWorker):
     httpLog: join(home, "http-log.jsonl"),
     stubLog: join(home, "stub-log.jsonl"),
   };
-  const worker = startWorkerProcess(base, issued.token);
+  let output = "";
+  const worker = startWorkerProcess(base, issued.token, {
+    onOutput: (chunk) => {
+      output += chunk;
+    },
+  });
+  // A worker that never gets online says why: its exit code and what it printed.
   await waitFor(
     async () => {
+      if (worker.child.exitCode !== null) {
+        throw new Error(
+          `${name} exited with ${worker.child.exitCode} before it was online\n${output}`,
+        );
+      }
       const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
       return hosts.find((h) => h.id === issued.hostId)?.status === "online" ? true : undefined;
     },
-    { label: `${name} online`, timeoutMs: 20_000 },
-  );
+    // A worker started from source compiles its whole module graph with tsx before it says
+    // anything. On a loaded macOS runner that took over 20 s with the worker alive and silent
+    // (CI run 41036105270), so this waits for that one condition up to 60 s.
+    { label: `${name} online`, timeoutMs: 60_000 },
+  ).catch((err: Error) => {
+    throw new Error(`${err.message}\n${output}`);
+  });
   return worker;
 }
 
@@ -313,6 +329,7 @@ beforeAll(async () => {
           // Updating the hub runs an admin's command on the hub's machine.
           post("hub-update", "/trpc/workers.updateHub", {}),
           post("update-all", "/trpc/workers.updateAll", {}),
+          probe("hub-interruptions", "/trpc/workers.hubInterruptions"),
           // Unread is a person's reading state; an agent may not set it, even on its own worktree.
           post("set-unread", "/trpc/worktrees.setUnread", { worktreeId: WT_A, unread: true }),
           post("vault-oauth", "/trpc/vault.startOAuth", {
@@ -364,6 +381,14 @@ beforeAll(async () => {
           // route for it, so no host id gets an agent through, including the hub's own.
           probe("desktop-local", "/api/hosts/local/desktop"),
           probe("desktop-worker", "/api/hosts/h-0123456789ab/desktop"),
+          // A plugin's live stream (the simulator's screen) is for a person's device token too, and
+          // so are the procedures that open the Simulator tab.
+          probe("plugin-stream", `/api/plugins/simulator/worktrees/${WT_A}/stream`),
+          post("simulators-open", "/trpc/simulators.open", { worktreeId: WT_A }),
+          probe(
+            "simulators-status",
+            `/trpc/simulators.status?input=${encodeURIComponent(JSON.stringify({ worktreeId: WT_A }))}`,
+          ),
           // Dictation spends the hub's speech-to-text key, so an agent gets neither the audio
           // route nor the voice procedures.
           post("voice-transcribe", "/api/voice/transcribe", {}),
@@ -566,6 +591,7 @@ describe("the worker relay (S2)", () => {
     expect(by("vault-oauth")?.status).toBe(403);
     expect(by("hub-update")?.status).toBe(403);
     expect(by("update-all")?.status).toBe(403);
+    expect(by("hub-interruptions")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);
     expect(by("set-unread")?.status).toBe(403);
@@ -574,6 +600,9 @@ describe("the worker relay (S2)", () => {
     expect(by("file-range")?.status).toBe(403);
     expect(by("desktop-local")?.status).toBe(403);
     expect(by("desktop-worker")?.status).toBe(403);
+    expect(by("plugin-stream")?.status).toBe(403);
+    expect(by("simulators-open")?.status).toBe(403);
+    expect(by("simulators-status")?.status).toBe(403);
     expect(by("voice-transcribe")?.status).toBe(403);
     expect(by("voice-status")?.status).toBe(403);
     expect(by("voice-test")?.status).toBe(403);
@@ -1389,7 +1418,7 @@ describe("hooks through the relay (S3)", () => {
 
       // What `band notify` posts for a Claude Code hook, sent with the shell's own environment.
       socket.type(
-        `curl -s -o /dev/null -w 'hook=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d "{\\"cwd\\":\\"$PWD\\",\\"payload\\":{\\"session_id\\":\\"relay-hook\\",\\"cwd\\":\\"$PWD\\",\\"hook_event_name\\":\\"UserPromptSubmit\\"},\\"agent\\":\\"claude-code\\",\\"dispatch\\":\\"terminal\\"}"\r`,
+        `curl -s -o /dev/null -w 'hook=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d "{\\"cwd\\":\\"$PWD\\",\\"payload\\":{\\"session_id\\":\\"relay-hook\\",\\"cwd\\":\\"$PWD\\",\\"hook_event_name\\":\\"UserPromptSubmit\\"},\\"hostId\\":\\"${a.hostId}\\",\\"agent\\":\\"claude-code\\",\\"dispatch\\":\\"terminal\\"}"\r`,
       );
       await socket.waitForOutput("hook=200");
     } finally {
@@ -1423,7 +1452,7 @@ describe("hooks through the relay (S3)", () => {
     });
     try {
       socket.type(
-        `curl -s -o /dev/null -w 'foreign=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d '{"cwd":"${worktreeOf(a, "relay-a")}","payload":{"session_id":"x"},"agent":"claude-code","dispatch":"terminal"}'\r`,
+        `curl -s -o /dev/null -w 'foreign=%{http_code}\\n' -X POST "$BAND_SERVER_URL/trpc/statuses.notify" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d '{"cwd":"${worktreeOf(a, "relay-a")}","payload":{"session_id":"x"},"hostId":"${a.hostId}","agent":"claude-code","dispatch":"terminal"}'\r`,
       );
       await socket.waitForOutput("foreign=403");
     } finally {

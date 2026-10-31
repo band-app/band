@@ -110,12 +110,12 @@ export class SubscriptionSourceService {
   ): Promise<DeliveryResult> {
     const provider = await pluginHost.subscriptionSourceFor(source);
     if (!provider) return "unavailable";
-    const input: DeliveryInput = {
-      headers: flattenHeaders(headers),
-      bodyBase64: body.toString("base64"),
-    };
+    const flat = flattenHeaders(headers);
     const secret = readWebhookSecret();
-    const verdict = secret ? await provider.verifyDelivery({ ...input, secret }) : { ok: false };
+    // No secret or no signature header: refuse before the body is copied and encoded.
+    if (!secret || !provider.hasSignature(flat)) return "unauthorized";
+    const input: DeliveryInput = { headers: flat, bodyBase64: body.toString("base64") };
+    const verdict = await provider.verifyDelivery({ ...input, secret });
     if (!verdict.ok) return "unauthorized";
     const delivery = "deliveryId" in verdict ? verdict.deliveryId : null;
     if (!delivery || !markSeen(delivery)) return "accepted";

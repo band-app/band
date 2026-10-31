@@ -1,7 +1,4 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants } from "node:fs";
-import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
 
 export interface RunResult {
   stdout: string;
@@ -12,10 +9,10 @@ export interface RunResult {
 export function run(
   bin: string,
   args: string[],
-  options: { timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+  options: { timeoutMs?: number; env?: NodeJS.ProcessEnv; stdin?: string } = {},
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       bin,
       args,
       {
@@ -32,28 +29,6 @@ export function run(
         }
       },
     );
+    if (options.stdin !== undefined) child.stdin?.end(options.stdin);
   });
-}
-
-/**
- * Finds a binary on the PATH and in the directories where Homebrew and pipx put tools, because
- * a worker started by launchd has a short PATH. `BAND_<NAME>_BIN` replaces the lookup.
- */
-export function findBinary(name: string, envName: string): string | null {
-  const fromEnv = process.env[envName];
-  if (fromEnv) return fromEnv;
-  const dirs = [
-    ...(process.env.PATH ?? "").split(delimiter),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    join(homedir(), ".local", "bin"),
-  ];
-  for (const dir of dirs) {
-    if (!dir) continue;
-    try {
-      accessSync(join(dir, name), constants.X_OK);
-      return join(dir, name);
-    } catch {}
-  }
-  return null;
 }

@@ -176,19 +176,24 @@ export const hostsRouter = t.router({
    * Runs the admin's `hubUpdate.command` on the hub's machine, detached, and answers at once. The
    * command usually restarts the hub, so `updateStatus` reports progress after it comes back.
    */
-  updateHub: adminProcedure.mutation(() => {
-    try {
-      return hubUpdateService.start();
-    } catch (err) {
-      if (err instanceof HubUpdateError) {
-        throw new TRPCError({
-          code: err.reason === "not-configured" ? "PRECONDITION_FAILED" : "CONFLICT",
-          message: err.message,
-        });
+  updateHub: adminProcedure
+    .input(z.object({ confirmInterruptions: z.boolean().default(false) }).default({}))
+    .mutation(({ input }) => {
+      try {
+        return hubUpdateService.start(input.confirmInterruptions);
+      } catch (err) {
+        if (err instanceof HubUpdateError) {
+          throw new TRPCError({
+            code: err.reason === "not-configured" ? "PRECONDITION_FAILED" : "CONFLICT",
+            message: err.message,
+          });
+        }
+        throw err;
       }
-      throw err;
-    }
-  }),
+    }),
+
+  /** The agents a hub restart ends, on all workers, for the confirm dialog and update scripts. */
+  hubInterruptions: adminProcedure.query(() => ({ agents: hubUpdateService.interruptions() })),
 
   /** Dismisses a failed hub update. */
   dismissHubUpdate: adminProcedure.mutation(() => {

@@ -1,4 +1,6 @@
 mod api;
+#[cfg(test)]
+mod docs_examples;
 mod skills;
 mod state;
 mod validate;
@@ -70,6 +72,11 @@ enum Commands {
     Groups {
         #[command(subcommand)]
         cmd: GroupsCmd,
+    },
+    /// Open a worktree's iOS simulator as a tab in the Band UI (Mac workers with Xcode)
+    Simulators {
+        #[command(subcommand)]
+        cmd: SimulatorsCmd,
     },
     /// List the workers worktrees can run on
     #[command(name = "workers", alias = "hosts")]
@@ -750,6 +757,15 @@ enum SubscriptionsCmd {
 }
 
 #[derive(Subcommand)]
+enum SimulatorsCmd {
+    /// Boot the worktree's simulator and open its Simulator tab for every connected client
+    Open {
+        /// Worktree ID (defaults to the worktree of the current directory)
+        worktree: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum GroupsCmd {
     /// List groups in sidebar order
     List,
@@ -1323,6 +1339,9 @@ fn main() {
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
         },
         Commands::Env { .. } => unreachable!("handled before the match"),
+        Commands::Simulators { cmd } => match cmd {
+            SimulatorsCmd::Open { worktree } => cmd_simulators_open(worktree.as_deref()),
+        },
         Commands::Groups { cmd } => match cmd {
             GroupsCmd::List => cmd_groups_list(),
             GroupsCmd::Create { name, color } => cmd_groups_create(&name, color.as_deref()),
@@ -2479,7 +2498,14 @@ fn cmd_chats_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
         let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let name = chat.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let agent = chat.get("agent").and_then(|v| v.as_str()).unwrap_or("");
-        let status = chat.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let mut status = chat
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if chat.get("stalled").and_then(serde_json::Value::as_bool) == Some(true) {
+            status.push_str(" (stalled)");
+        }
         // Labels are persisted as a Record<string, string> on the server and
         // returned inline on each chat. Render them as `k=v,k=v` to keep the
         // table compact — empty record or missing field both render as an
@@ -2502,7 +2528,7 @@ fn cmd_chats_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
             id.to_string(),
             name.to_string(),
             agent.to_string(),
-            status.to_string(),
+            status,
             labels,
         ]);
         json_chats.push(chat.clone());
@@ -4503,6 +4529,25 @@ fn cmd_groups_rename(group: &str, new_name: &str) -> Result<CommandResult, Strin
     })
 }
 
+fn cmd_simulators_open(worktree: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let id = resolve_worktree_id(&client, worktree)?;
+    validate::validate_name(&id, "Worktree id")?;
+    let data = client.trpc_mutate("simulators.open", &serde_json::json!({"worktreeId": id}))?;
+    let name = data
+        .pointer("/device/name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("simulator");
+    let state = data
+        .pointer("/device/state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    Ok(CommandResult {
+        text: format!("Opened the Simulator tab of {id} ({name}, {state})\n"),
+        json: data,
+    })
+}
+
 fn cmd_groups_remove(group: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let id = resolve_group_id(&client, group)?;
@@ -5837,6 +5882,14 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Changes only what the sidebar shows. The worktree id, folder and git branch stay the same. Agents may use this command for worktrees on their own worker."
         }),
         serde_json::json!({
+            "name": "simulators open",
+            "description": "Boot the worktree's iOS simulator and open its Simulator tab in the Band UI",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": false, "positional": true, "description": "Worktree ID (defaults to the worktree of the current directory)"},
+            ],
+            "notes": "The worktree's worker must be a Mac with Xcode. The tab opens on every connected client. Not available to an agent on a worker: an agent uses the simulator_* tools."
+        }),
+        serde_json::json!({
             "name": "groups list",
             "description": "List groups in sidebar order",
             "parameters": [],
@@ -6206,7 +6259,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
             ],
-            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable."
+            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}, \"lastActivityAt\": 1767225600000, \"stalled\": false}]}`. `lastActivityAt` is when the chat's agent last sent anything (ms since epoch, `null` if never). `stalled` is true while a turn runs and the agent has sent nothing for `BAND_TURN_QUIET_STALL_MS` (20 minutes by default); the text output then shows `running (stalled)`. Band does not stop a stalled turn, so decide with `band chats stop`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable."
         }),
         serde_json::json!({
             "name": "chats create",

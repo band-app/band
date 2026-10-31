@@ -1,5 +1,6 @@
 import type { SourceEvent } from "@band-app/plugin-api";
-import { type Json, obj, prKey, snippet, str } from "./json";
+import { githubPrKey } from "@band-app/plugin-api";
+import { type Json, obj, snippet, str } from "./json";
 
 /** Newest comments, reviews and review threads one query reads per PR. */
 const PAGE = 30;
@@ -62,7 +63,7 @@ export function parsePrActivity(
   for (const number of numbers) {
     const pr = obj(repository[`pr${number}`]);
     if (!pr) continue;
-    const key = prKey(repo, number);
+    const key = githubPrKey(repo, number);
     const prUrl = str(pr.url);
     const items: PrActivity[] = [];
     const add = (

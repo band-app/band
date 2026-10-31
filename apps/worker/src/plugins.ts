@@ -1,9 +1,16 @@
 import { accessSync, constants, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { METHOD_PLUGIN_CALL, RpcError } from "@band-app/link";
+import {
+  encodeMessageFrame,
+  METHOD_PLUGIN_CALL,
+  METHOD_PLUGIN_STREAM,
+  MessageFrameReader,
+  RpcError,
+} from "@band-app/link";
 import type { Logger } from "@band-app/logger";
 import { parseRequires, pluginManifestSchema } from "@band-app/plugin-api";
 import type {
+  PluginStream,
   ReleaseReason,
   WorkerPlugin,
   WorkerPluginInstance,
@@ -11,6 +18,7 @@ import type {
 import { BUNDLED_WORKER_PLUGINS, type BundledWorkerPlugin } from "./bundled-worker-plugins.ts";
 import type { Registrar, WorkerContext } from "./context.ts";
 import { RPC_INVALID_PARAMS, str } from "./rpc-util.ts";
+import { serve } from "./streams.ts";
 
 interface Running {
   instance: WorkerPluginInstance;
@@ -146,6 +154,31 @@ export class WorkerPlugins {
     return running.instance.call(method, params, { worktreeKey, worktreePath });
   }
 
+  async stream(
+    pluginId: string,
+    name: string,
+    params: unknown,
+    worktreeKey: string,
+    worktreePath: string,
+  ): Promise<PluginStream> {
+    const running = this.running.get(pluginId);
+    if (!running) {
+      const why = this.reasons.get(pluginId);
+      throw new RpcError(
+        RPC_INVALID_PARAMS,
+        why ? `this worker cannot run ${pluginId}: ${why}` : `unknown plugin ${pluginId}`,
+      );
+    }
+    if (!running.instance.stream) {
+      throw new RpcError(RPC_INVALID_PARAMS, `${pluginId} has no live streams`);
+    }
+    if (running.scopes.get(worktreeKey) !== worktreePath) {
+      running.scopes.set(worktreeKey, worktreePath);
+      this.saveScopes();
+    }
+    return running.instance.stream(name, params, { worktreeKey, worktreePath });
+  }
+
   /** The worktree at `path` was removed: every plugin deletes its state for it. */
   async releasePath(path: string): Promise<void> {
     await this.release((_key, at) => at === path, "removed");
@@ -202,6 +235,45 @@ export function registerPluginMethods(r: Registrar, ctx: WorkerContext): () => P
       str(a, "worktreeKey"),
       worktreePath,
     );
+  });
+  // One channel carries the stream in both directions as `encodeMessageFrame` messages. The hub
+  // resetting the channel closes the plugin's stream.
+  r.raw(METHOD_PLUGIN_STREAM, async (a) => {
+    const worktreePath = await ctx.policy.resolve(str(a, "worktreePath"), true);
+    ctx.lease.assertMayRun(worktreePath);
+    const stream = await plugins.stream(
+      str(a, "pluginId"),
+      str(a, "stream"),
+      a.params,
+      str(a, "worktreeKey"),
+      worktreePath,
+    );
+    let ch: ReturnType<typeof ctx.session.openChannel>;
+    try {
+      ch = ctx.session.openChannel("plugin.stream", { pluginId: str(a, "pluginId") });
+    } catch (err) {
+      stream.close();
+      throw err;
+    }
+    const reader = new MessageFrameReader();
+    serve(
+      ch,
+      (async function* () {
+        for await (const message of stream.output) yield encodeMessageFrame(message);
+      })(),
+      {
+        release: ctx.activity.hold(),
+        onInput: (chunk) => {
+          try {
+            for (const message of reader.push(chunk)) stream.write(message);
+          } catch {
+            ch.reset("bad frame");
+          }
+        },
+        onClosed: () => stream.close(),
+      },
+    );
+    return { chan: ch.id };
   });
   ctx.lease.onFence(() => plugins.releaseAll("fenced"));
   return () => plugins.stop();
