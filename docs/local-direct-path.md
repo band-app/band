@@ -1,6 +1,6 @@
 # Local direct path
 
-When the desktop app uses a remote hub and a worktree lives on this computer's own worker, the app sends that worktree's terminal traffic, file tree, file reads and saves, diffs and searches straight to the worker on `127.0.0.1`. Without it, every keystroke in a terminal on your own Mac travels Mac to hub to Mac and back, so a slow link to the hub slows your own machine.
+When the desktop app uses a remote hub and a worktree lives on this computer's own worker, the app sends that worktree's terminal traffic, file tree, file reads and saves, explorer actions, commit history, branch list, diffs, searches and file bytes straight to the worker on `127.0.0.1`. Without it, every keystroke in a terminal on your own Mac travels Mac to hub to Mac and back, so a slow link to the hub slows your own machine.
 
 The hub still decides who may do what. It issues a short-lived token for one worktree, and every call the worker serves passes the same checks as the same call from the hub. If the direct path fails, the app uses the hub without showing anything.
 
@@ -17,12 +17,19 @@ All of these must hold:
 
 | Path | Procedures |
 | --- | --- |
-| HTTP `POST /direct/<procedure>` | `worktree.listFiles`, `getFile`, `saveFile`, `getDiff`, `getChanges`, `getFileDiff`, `searchFiles`, `searchContent` |
+| HTTP `POST /direct/<procedure>` | `worktree.listFiles`, `getFile`, `saveFile`, `getDiff`, `getChanges`, `getFileDiff`, `searchFiles`, `searchContent`, `listBranches`, `getCommitHistory`, `getCommitHistorySignature`, `getCommitDetails`, `createFile`, `createDirectory`, `renamePath`, `copyPath`, `deletePath` |
+| HTTP `GET` | `/api/worktree-file/<worktree>/<path>` (preview, `?download=1`, one `Range`), `/api/uploads/<worktree>/<name>`, `/api/shared/<worktree>/<chat>/<name>`, the same paths as the hub |
 | WebSocket `/terminal?worktreeId=…&terminalId=…` | The hub's terminal protocol: replay on `attach`, `ack`, input, `resize`, `ping`, title and exit frames |
 
-A chat this worker owns ([chat ownership](chat-ownership.md)) goes there too: its event stream, messages, stop and answers, on the same token. Everything else goes to the hub: the events of chats the hub runs, LSP, file watching, the formatter, git staging, commits, pull and push, worktree lifecycle, the browser pane and the desktop viewer. The list of direct procedures is `DIRECT_PROCEDURES` in `packages/shared/src/direct-access.ts`.
+A chat this worker owns ([chat ownership](chat-ownership.md)) goes there too: its event stream, messages, stop and answers, on the same token. Everything else goes to the hub: the events of chats the hub runs, LSP, file watching (`worktree.fileChanges` is a subscription), the formatter (`formatFile` runs Prettier, which the worker does not carry), `worktree.resolvePath` (the worker's path policy would report a file outside its roots as missing), the signed `/api/worktree-preview` route (the hub holds its secret and annotates HTML for visual edit), the chat upload `POST`, git staging, commits, pull and push, worktree lifecycle, the browser pane and the desktop viewer. The list of direct procedures is `DIRECT_PROCEDURES` in `packages/shared/src/direct-access.ts`.
 
 A new terminal is still created through the hub (`terminal.create`), which spawns the PTY on the worker. The app opens the tab's socket at the same time, so the worker holds an upgrade for up to 5 seconds until the PTY appears. A terminal that never appears there closes with code `4100`, and the app reconnects through the hub, which spawns it. A pane whose first connect carries spawn options (`init`) goes to the hub from the start. Closing a terminal also goes through the hub (`terminal.kill`), so a `close` frame on a direct socket leaves the PTY running.
+
+### File bytes
+
+The file routes read the token from the `Authorization` header only. A `?token=` in the URL is no credential, so no token ends up in a URL or a log. A page cannot put a header on an `<img>`, `<video>` or `<iframe>`, so the app reads the file with `fetch` and shows a Blob URL (`useDirectAssetUrl`, `lib/use-direct-asset-url.ts`). A file above 64 MB stays on the hub, because a Blob holds the whole file in memory. Downloads use the same fetch (`fetchDirectFile`). The worker serves a single `Range` request (206, 416 past the end) for any client that sends one, but a Blob needs no seeking from the server.
+
+The path rules match the hub route: `..` and a symlink that leads out of the worktree or the card's folder answer 400, a missing file 404, a folder 400 with `?download=1`. An upload is read from `<first root>/.band-uploads/<worktree>/<name>` and a shared file from `<first root>/.band-shared/<worktree>/<chat>/<name>`, where the hub keeps them for a remote worker.
 
 ## Tokens
 
@@ -44,7 +51,7 @@ The listener (`apps/worker/src/direct.ts`) binds `127.0.0.1` only, on a port the
 - The token is registered and not expired (401 otherwise). A hub device token is no credential here.
 - The call names the token's worktree (403 otherwise). A terminal must also belong to that worktree.
 
-File, diff and search calls then run the same service classes the hub runs (`@band-app/worktree-ops`), over a worker whose calls go through the worker's own method handlers (`Registrar.invoke`). So the path policy that keeps a link call inside the worker's roots applies unchanged, and a refused path fails with the same message on both paths.
+File, diff, search, commit history and path calls then run the same service classes the hub runs (`@band-app/worktree-ops`), over a worker whose calls go through the worker's own method handlers (`Registrar.invoke`). So the path policy that keeps a link call inside the worker's roots applies unchanged, and a refused path fails with the same message on both paths.
 
 ## Falling back
 
@@ -60,7 +67,7 @@ The terminal socket (`lib/terminal-cache.ts`) asks for a direct target before ea
 
 ## Tests
 
-- `apps/hub/tests/direct-path.test.ts`: a real hub and a real `band-worker`. It types, resizes and reattaches over the direct terminal socket, compares every direct procedure's answer with the hub's for the same worktree, covers the refusals (no token, unknown, expired, another worktree, a path outside the worktree, a non-loopback interface, a foreign `Host` or `Origin`) and a worker restart with its shell kept in the terminal daemon.
+- `apps/hub/tests/direct-path.test.ts`: a real hub and a real `band-worker`. It types, resizes and reattaches over the direct terminal socket, compares every direct procedure's answer with the hub's for the same worktree, runs the explorer writes, serves files with `Range`, download, upload and shared routes, covers the refusals (no token, unknown, expired, another worktree, a path outside the worktree, a non-loopback interface, a foreign `Host` or `Origin`) and a worker restart with its shell kept in the terminal daemon.
 - `apps/web/e2e-desktop/desktop-direct-path.spec.ts`: the real desktop app with this Mac added as a worker. The terminal socket goes to `127.0.0.1`, the file tree and a file read go there and not to the hub, a worker restart falls back to the hub with the screen kept, a file opened after the restart reads without an error, and a later connection uses the worker again.
 
 Not measured automatically: terminal echo latency over a slow link to the hub. Check it with macOS Network Link Conditioner (about 300 ms RTT) and the packaged app.

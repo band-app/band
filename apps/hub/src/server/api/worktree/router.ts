@@ -1,5 +1,6 @@
 import { directOps, type WorktreeOps } from "@band-app/worktree-ops/direct";
-import { filePathSchema } from "@band-app/worktree-ops/schemas";
+import { PathsService } from "@band-app/worktree-ops/resolve-path";
+import { commitShaSchema, filePathSchema, resolvePathInput } from "@band-app/worktree-ops/schemas";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { worktreePreviewUrl } from "../../services/_utils/worktree-preview-link";
@@ -37,21 +38,19 @@ import { publicProcedure, t } from "../trpc";
  * `trpc.worktree.*`.
  */
 
+const pathsService = new PathsService(worktreeService);
+
 /** The services the procedures shared with a worker's direct listener run on. */
-const worktreeOps: WorktreeOps = { files: filesService, diff: diffService, search: searchService };
+const worktreeOps: WorktreeOps = {
+  files: filesService,
+  diff: diffService,
+  search: searchService,
+  gitGraph: gitGraphService,
+};
 
 /** Paths for the stage / unstage / discard mutations. A header action sends
  *  every file of its section; the service hands them to git in batches. */
 const pathListSchema = z.array(filePathSchema).min(1).max(50_000);
-
-/**
- * A commit SHA passed to the commit-history procedures. Pinned to 7–40 hex
- * chars so git can never read it as a flag (`--exec=…`) or a symbolic ref:
- * the Commits panel always hands us a real object id.
- */
-const commitShaSchema = z
-  .string()
-  .regex(/^[0-9a-f]{7,40}$/i, "sha must be a 7–40 character hex commit id");
 
 /**
  * Wire-contract note: every worktree-tier service error (including
@@ -220,39 +219,20 @@ export const worktreeRouter = t.router({
     }),
 
   listBranches: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        query: z.string().max(200).optional(),
-        limit: z.number().int().min(1).max(500).optional(),
-      }),
-    )
-    .query(({ input }) =>
-      diffService.listBranches(input.worktreeId, { query: input.query, limit: input.limit }),
-    ),
+    .input(directOps["worktree.listBranches"].input)
+    .query(({ input }) => directOps["worktree.listBranches"].run(worktreeOps, input)),
 
   getCommitHistory: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        skip: z.number().int().min(0).optional(),
-        limit: z.number().int().min(1).max(500).optional(),
-      }),
-    )
-    .query(({ input }) =>
-      gitGraphService.getCommitHistory(input.worktreeId, {
-        skip: input.skip,
-        limit: input.limit,
-      }),
-    ),
+    .input(directOps["worktree.getCommitHistory"].input)
+    .query(({ input }) => directOps["worktree.getCommitHistory"].run(worktreeOps, input)),
 
   getCommitHistorySignature: publicProcedure
-    .input(z.object({ worktreeId: z.string() }))
-    .query(({ input }) => gitGraphService.getCommitHistorySignature(input.worktreeId)),
+    .input(directOps["worktree.getCommitHistorySignature"].input)
+    .query(({ input }) => directOps["worktree.getCommitHistorySignature"].run(worktreeOps, input)),
 
   getCommitDetails: publicProcedure
-    .input(z.object({ worktreeId: z.string(), sha: commitShaSchema }))
-    .query(({ input }) => gitGraphService.getCommitDetails(input.worktreeId, input.sha)),
+    .input(directOps["worktree.getCommitDetails"].input)
+    .query(({ input }) => directOps["worktree.getCommitDetails"].run(worktreeOps, input)),
 
   getCommitFileDiff: publicProcedure
     .input(
@@ -344,44 +324,24 @@ export const worktreeRouter = t.router({
     .mutation(({ input }) => directOps["worktree.saveFile"].run(worktreeOps, input)),
 
   createFile: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        path: z.string().min(1),
-        content: z.string().default(""),
-      }),
-    )
-    .mutation(({ input }) => filesService.createFile(input.worktreeId, input.path, input.content)),
+    .input(directOps["worktree.createFile"].input)
+    .mutation(({ input }) => directOps["worktree.createFile"].run(worktreeOps, input)),
 
   createDirectory: publicProcedure
-    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
-    .mutation(({ input }) => filesService.createDirectory(input.worktreeId, input.path)),
+    .input(directOps["worktree.createDirectory"].input)
+    .mutation(({ input }) => directOps["worktree.createDirectory"].run(worktreeOps, input)),
 
   deletePath: publicProcedure
-    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
-    .mutation(({ input }) => filesService.deletePath(input.worktreeId, input.path)),
+    .input(directOps["worktree.deletePath"].input)
+    .mutation(({ input }) => directOps["worktree.deletePath"].run(worktreeOps, input)),
 
   renamePath: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        fromPath: z.string().min(1),
-        toPath: z.string().min(1),
-      }),
-    )
-    .mutation(({ input }) =>
-      filesService.renamePath(input.worktreeId, input.fromPath, input.toPath),
-    ),
+    .input(directOps["worktree.renamePath"].input)
+    .mutation(({ input }) => directOps["worktree.renamePath"].run(worktreeOps, input)),
 
   copyPath: publicProcedure
-    .input(
-      z.object({
-        worktreeId: z.string(),
-        fromPath: z.string().min(1),
-        toPath: z.string().min(1),
-      }),
-    )
-    .mutation(({ input }) => filesService.copyPath(input.worktreeId, input.fromPath, input.toPath)),
+    .input(directOps["worktree.copyPath"].input)
+    .mutation(({ input }) => directOps["worktree.copyPath"].run(worktreeOps, input)),
 
   /** A signed, expiring URL for one worktree file, for a browser tab that cannot send the auth header. */
   previewUrl: publicProcedure
@@ -412,9 +372,9 @@ export const worktreeRouter = t.router({
   // it's how the client decides between a worktree-relative and an external
   // tab. Do not "harden" this by dropping the out-of-worktree classification.
   resolvePath: publicProcedure
-    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
+    .input(resolvePathInput)
     .query(({ input }) =>
-      editorService.resolvePath({ worktreeId: input.worktreeId, filePath: input.path }),
+      pathsService.resolvePath({ worktreeId: input.worktreeId, filePath: input.path }),
     ),
 
   searchContent: publicProcedure

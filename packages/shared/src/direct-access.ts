@@ -15,6 +15,15 @@ export const DIRECT_PROCEDURES = [
   "worktree.getFileDiff",
   "worktree.searchFiles",
   "worktree.searchContent",
+  "worktree.listBranches",
+  "worktree.getCommitHistory",
+  "worktree.getCommitHistorySignature",
+  "worktree.getCommitDetails",
+  "worktree.createFile",
+  "worktree.createDirectory",
+  "worktree.deletePath",
+  "worktree.renamePath",
+  "worktree.copyPath",
 ] as const;
 
 export type DirectProcedure = (typeof DIRECT_PROCEDURES)[number];
@@ -25,6 +34,19 @@ export function isDirectProcedure(path: string): path is DirectProcedure {
 
 /** `POST <origin>/direct/<procedure>` with the input as the JSON body. */
 export const DIRECT_CALL_PREFIX = "/direct/";
+
+/**
+ * The file routes a worker's direct listener serves with `GET`, by the hub's
+ * own path. The token is an `Authorization: Bearer` header, so a page reads
+ * them with `fetch` and shows a Blob. Never put it in a URL.
+ * `/api/worktree-preview` (signed with the hub's secret, edit-annotated) and the
+ * chat upload `POST` stay on the hub.
+ */
+export const DIRECT_FILE_ROUTES = {
+  worktreeFile: "/api/worktree-file/",
+  uploads: "/api/uploads/",
+  shared: "/api/shared/",
+} as const;
 
 /** The terminal WebSocket, with `worktreeId` and `terminalId` in the query, as on the hub. */
 export const DIRECT_TERMINAL_PATH = "/terminal";

@@ -8,12 +8,22 @@ import type { DirectProcedure } from "@band-app/shared/direct-access";
 import type { z } from "zod";
 import type { DiffService } from "./diff";
 import type { FilesService } from "./files";
+import type { GitGraphService } from "./git-graph";
 import {
+  copyPathInput,
+  createDirectoryInput,
+  createFileInput,
+  deletePathInput,
   getChangesInput,
+  getCommitDetailsInput,
+  getCommitHistoryInput,
+  getCommitHistorySignatureInput,
   getDiffInput,
   getFileDiffInput,
   getFileInput,
+  listBranchesInput,
   listFilesInput,
+  renamePathInput,
   saveFileInput,
   searchContentInput,
   searchFilesInput,
@@ -24,6 +34,7 @@ export interface WorktreeOps {
   files: FilesService;
   diff: DiffService;
   search: SearchService;
+  gitGraph: GitGraphService;
 }
 
 interface Op<S extends z.ZodTypeAny, R> {
@@ -84,5 +95,41 @@ export const directOps = {
         regex: i.regex,
         limit: i.limit,
       }),
+  }),
+  "worktree.listBranches": op({
+    input: listBranchesInput,
+    run: (ops, i) => ops.diff.listBranches(i.worktreeId, { query: i.query, limit: i.limit }),
+  }),
+  "worktree.getCommitHistory": op({
+    input: getCommitHistoryInput,
+    run: (ops, i) => ops.gitGraph.getCommitHistory(i.worktreeId, { skip: i.skip, limit: i.limit }),
+  }),
+  "worktree.getCommitHistorySignature": op({
+    input: getCommitHistorySignatureInput,
+    run: (ops, i) => ops.gitGraph.getCommitHistorySignature(i.worktreeId),
+  }),
+  "worktree.getCommitDetails": op({
+    input: getCommitDetailsInput,
+    run: (ops, i) => ops.gitGraph.getCommitDetails(i.worktreeId, i.sha),
+  }),
+  "worktree.createFile": op({
+    input: createFileInput,
+    run: (ops, i) => ops.files.createFile(i.worktreeId, i.path, i.content),
+  }),
+  "worktree.createDirectory": op({
+    input: createDirectoryInput,
+    run: (ops, i) => ops.files.createDirectory(i.worktreeId, i.path),
+  }),
+  "worktree.deletePath": op({
+    input: deletePathInput,
+    run: (ops, i) => ops.files.deletePath(i.worktreeId, i.path),
+  }),
+  "worktree.renamePath": op({
+    input: renamePathInput,
+    run: (ops, i) => ops.files.renamePath(i.worktreeId, i.fromPath, i.toPath),
+  }),
+  "worktree.copyPath": op({
+    input: copyPathInput,
+    run: (ops, i) => ops.files.copyPath(i.worktreeId, i.fromPath, i.toPath),
   }),
 } satisfies Record<DirectProcedure, Op<z.ZodTypeAny, unknown>>;

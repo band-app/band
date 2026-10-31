@@ -1,7 +1,7 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
-import { directWorkerLink } from "../../lib/direct-worker";
+import { directWorkerLink, fetchDirectFile } from "../../lib/direct-worker";
 import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
@@ -581,12 +581,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   async downloadWorktreeFile(worktreeId: string, path: string): Promise<void> {
-    const res = await hubFetch(
-      `/api/worktree-file/${encodeURIComponent(worktreeId)}/${path
-        .split("/")
-        .map(encodeURIComponent)
-        .join("/")}?download=1`,
-    );
+    const route = `/api/worktree-file/${encodeURIComponent(worktreeId)}/${path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}?download=1`;
+    // A worktree on this computer's worker is read from the worker, else from the hub.
+    const res = (await fetchDirectFile(route)) ?? (await hubFetch(route));
     if (!res.ok) throw new Error(`Download failed (${res.status})`);
     const url = URL.createObjectURL(await res.blob());
     try {
