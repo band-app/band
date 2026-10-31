@@ -486,10 +486,9 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
       }
       if (!elements) {
         console.error(`[simulator describe] no elements after 12 tries: ${reply.slice(0, 2000)}`);
-        // The runner is a VM with no GPU and no display. A screen that streams but whose
-        // accessibility tree never comes is skipped there, and fails on a person's Mac.
-        if (process.env.CI) ctx.skip("the CI runner gave no accessibility tree (see the log)");
-        throw new Error("simulator_describe returned no elements");
+        throw new Error(
+          `simulator_describe returned no elements after 12 tries: ${reply.slice(0, 500)}`,
+        );
       }
       // The status bar clock changes every minute, so it is not part of the comparison.
       return elements
