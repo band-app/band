@@ -878,6 +878,164 @@ describe("falling back to the hub (S3)", () => {
   });
 });
 
+/** A minimal language client over a direct `/lsp` socket: JSON-RPC, one message per frame. */
+class DirectLsp {
+  private nextId = 1;
+  private readonly pending = new Map<
+    number,
+    (msg: { result?: unknown; error?: unknown }) => void
+  >();
+
+  private constructor(private readonly ws: WebSocket) {
+    ws.on("message", (data) => {
+      const msg = JSON.parse(data.toString()) as { id?: number; method?: string };
+      if (msg.method === undefined && msg.id != null) this.pending.get(msg.id)?.(msg);
+    });
+  }
+
+  static async open(access: DirectAccess, worktreeId: string): Promise<DirectLsp> {
+    const url = `ws://127.0.0.1:${access.port}/lsp?worktreeId=${encodeURIComponent(worktreeId)}&lang=typescript`;
+    const ws = new WebSocket(url, ["band", `band-token.${access.token}`]);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    return new DirectLsp(ws);
+  }
+
+  request(method: string, params: unknown): Promise<{ result?: unknown; error?: unknown }> {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no answer to ${method}`)), 30_000);
+      this.pending.set(id, (msg) => {
+        clearTimeout(timer);
+        resolve(msg);
+      });
+      this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    });
+  }
+
+  notify(method: string, params: unknown): void {
+    this.ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+  }
+
+  close(): void {
+    this.ws.close();
+  }
+}
+
+/** The text frames a direct `/watch` socket delivers, and the close code once it ends. */
+async function openWatch(access: DirectAccess, worktreeId: string) {
+  const url = `ws://127.0.0.1:${access.port}/watch?worktreeId=${encodeURIComponent(worktreeId)}`;
+  const ws = new WebSocket(url, ["band", `band-token.${access.token}`]);
+  const paths: string[] = [];
+  ws.on("message", (data) => paths.push((JSON.parse(data.toString()) as { path: string }).path));
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  return { ws, paths };
+}
+
+describe("language server on the direct path", () => {
+  const MAIN_TS =
+    "function addNumbers(a: number, b: number): number {\n  return a + b;\n}\nexport const total = addNumbers(1, 2);\n";
+
+  it("answers go-to-definition through the worker's own language server", async () => {
+    const dir = worktreeDir("feat-a");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
+    const appModules = join(import.meta.dirname, "..", "node_modules");
+    symlinkSync(realpathSync(join(appModules, "typescript")), join(dir, "node_modules/typescript"));
+    symlinkSync(
+      join(appModules, ".bin/typescript-language-server"),
+      join(dir, "node_modules/.bin/typescript-language-server"),
+    );
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    writeFileSync(join(dir, "src/lsp-main.ts"), MAIN_TS);
+
+    const lsp = await DirectLsp.open(await liveAccess(WT_A), WT_A);
+    try {
+      const uri = `file://${dir}/src/lsp-main.ts`;
+      await lsp.request("initialize", {
+        processId: null,
+        rootUri: `file://${dir}`,
+        capabilities: {},
+      });
+      lsp.notify("initialized", {});
+      lsp.notify("textDocument/didOpen", {
+        textDocument: { uri, languageId: "typescript", version: 0, text: MAIN_TS },
+      });
+      const answer = await lsp.request("textDocument/definition", {
+        textDocument: { uri },
+        position: { line: 3, character: 21 },
+      });
+      expect(answer.error).toBeUndefined();
+      expect(answer.result).toEqual([
+        { uri, range: { start: { line: 0, character: 9 }, end: { line: 0, character: 19 } } },
+      ]);
+    } finally {
+      lsp.close();
+    }
+  }, 90_000);
+});
+
+describe("file changes on the direct path", () => {
+  it("sends the changed directory when a file changes on disk, and nothing for ignored folders", async () => {
+    const dir = worktreeDir("feat-a");
+    mkdirSync(join(dir, "watched"), { recursive: true });
+    mkdirSync(join(dir, "node_modules/pkg"), { recursive: true });
+    const { ws, paths } = await openWatch(await liveAccess(WT_A), WT_A);
+    try {
+      // The OS watch needs a moment before it reports; write until the first event arrives.
+      await waitFor(
+        async () => {
+          writeFileSync(join(dir, "watched", "changed.txt"), `${Date.now()}\n`);
+          return paths.includes("watched") ? true : undefined;
+        },
+        { label: "a change event", timeoutMs: 20_000, intervalMs: 300 },
+      );
+      writeFileSync(join(dir, "node_modules/pkg/ignored.js"), "x\n");
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      expect(paths.some((p) => p.startsWith("node_modules"))).toBe(false);
+    } finally {
+      ws.close();
+    }
+  }, 60_000);
+});
+
+describe("what the LSP and watch sockets refuse", () => {
+  const routes = (worktreeId: string, port: number) => [
+    `ws://127.0.0.1:${port}/lsp?worktreeId=${encodeURIComponent(worktreeId)}&lang=typescript`,
+    `ws://127.0.0.1:${port}/watch?worktreeId=${encodeURIComponent(worktreeId)}`,
+  ];
+
+  it("checks the token, the worktree, the Host and the Origin", async () => {
+    const access = await liveAccess(WT_A);
+    const good = ["band", `band-token.${access.token}`];
+    for (const url of routes(WT_A, access.port)) {
+      expect(await upgradeResult(url, ["band"]), url).toBe(401);
+      expect(await upgradeResult(url, ["band", "band-token.bwd_unknown"]), url).toBe(401);
+      // A hub device token is no credential here.
+      expect(await upgradeResult(url, ["band", `band-token.${TEST_TOKEN}`]), url).toBe(401);
+      expect(await upgradeResult(url, good, { origin: "https://evil.example" }), url).toBe(403);
+      expect(await upgradeResult(url, good, { origin: "app://local" }), url).toBe(403);
+      expect(await upgradeResult(url, good, { host: `evil.example:${access.port}` }), url).toBe(
+        421,
+      );
+    }
+    // A token for A does not open B's sockets.
+    for (const url of routes(WT_B, access.port)) {
+      expect(await upgradeResult(url, good), url).toBe(403);
+    }
+    // No worktree named.
+    expect(await upgradeResult(`ws://127.0.0.1:${access.port}/watch`, good)).toBe(400);
+  });
+});
+
 describe("who may get a token", () => {
   it("refuses worktree.directAccess without a device token", async () => {
     for (const token of ["", "not-a-device-token"]) {

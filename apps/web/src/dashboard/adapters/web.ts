@@ -1,7 +1,14 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
+import { DIRECT_WATCH_ENDED_CLOSE_CODE } from "@band-app/shared/direct-access";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
-import { directWorkerLink, fetchDirectFile } from "../../lib/direct-worker";
+import {
+  type DirectSocketTarget,
+  directWatchTarget,
+  directWorkerLink,
+  fetchDirectFile,
+  markDirectDown,
+} from "../../lib/direct-worker";
 import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
@@ -403,7 +410,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
       }
     };
 
-    const connect = () => {
+    const openHub = () => {
       currentSub = this.trpc.worktree.fileChanges.subscribe(
         { worktreeId },
         {
@@ -416,6 +423,68 @@ export class WebDashboardAdapter implements DashboardAdapter {
           },
           onStopped: handleDisconnect,
           onError: handleDisconnect,
+        },
+      );
+    };
+
+    /** How long a direct socket may take to open before the hub gets the subscription. */
+    const DIRECT_OPEN_TIMEOUT_MS = 5_000;
+
+    // On this computer's own worker the changes come from the worker's
+    // socket, and the hub holds no watch for this client. A socket that does
+    // not open, or drops, rests the direct path for 15 s (`markDirectDown`)
+    // and the hub's subscription takes over.
+    const openDirect = (target: DirectSocketTarget) => {
+      const ws = new WebSocket(target.url, target.protocols);
+      let opened = false;
+      let stopped = false;
+      const sub = {
+        unsubscribe: () => {
+          stopped = true;
+          clearTimeout(timer);
+          ws.close();
+        },
+      };
+      currentSub = sub;
+      const timer = setTimeout(() => ws.close(), DIRECT_OPEN_TIMEOUT_MS);
+      ws.onopen = () => {
+        opened = true;
+        clearTimeout(timer);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const { path } = JSON.parse(String(event.data)) as { path?: unknown };
+          if (typeof path !== "string") return;
+          attempt = 0;
+          handler(path);
+        } catch {
+          // Not a change frame.
+        }
+      };
+      ws.onclose = (event) => {
+        clearTimeout(timer);
+        if (stopped) return;
+        if (!opened) {
+          markDirectDown(worktreeId);
+          openHub();
+          return;
+        }
+        if (event.code !== DIRECT_WATCH_ENDED_CLOSE_CODE) markDirectDown(worktreeId);
+        handleDisconnect();
+      };
+    };
+
+    let connectSeq = 0;
+    const connect = () => {
+      const seq = ++connectSeq;
+      directWatchTarget(worktreeId).then(
+        (target) => {
+          if (!active || seq !== connectSeq) return;
+          if (target) openDirect(target);
+          else openHub();
+        },
+        () => {
+          if (active && seq === connectSeq) openHub();
         },
       );
     };

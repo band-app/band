@@ -15,6 +15,7 @@ import {
   type Text,
 } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
+import { directLspTarget, markDirectDown } from "../../lib/direct-worker";
 import { HubWebSocket, hubWsUrl } from "../../lib/hub-config";
 
 // ---------------------------------------------------------------------------
@@ -320,12 +321,51 @@ interface CloseableTransport extends Transport {
   close(): void;
 }
 
-function createWebSocketTransport(url: string): Promise<CloseableTransport> {
+/** How long a direct socket may take to open before the hub gets the connection instead. */
+const DIRECT_OPEN_TIMEOUT_MS = 5_000;
+
+/**
+ * Connects to this computer's worker when the worktree lives there, else, or
+ * when that socket does not open, to the hub. A direct socket that fails to
+ * open also rests the direct path for 15 seconds (`markDirectDown`).
+ */
+async function connectTransport(url: string, worktreeId?: string): Promise<CloseableTransport> {
+  if (worktreeId) {
+    const lang = new URL(url, "http://localhost").searchParams.get("lang");
+    const target = lang ? await directLspTarget(worktreeId, lang) : null;
+    if (target) {
+      try {
+        return await createWebSocketTransport(
+          () => new WebSocket(target.url, target.protocols),
+          url,
+          DIRECT_OPEN_TIMEOUT_MS,
+        );
+      } catch {
+        markDirectDown(worktreeId);
+      }
+    }
+  }
+  return createWebSocketTransport(() => new HubWebSocket(url), url);
+}
+
+function createWebSocketTransport(
+  open: () => WebSocket,
+  url: string,
+  openTimeoutMs?: number,
+): Promise<CloseableTransport> {
   return new Promise<CloseableTransport>((resolve, reject) => {
-    const ws = new HubWebSocket(url);
+    const ws = open();
+    const timer =
+      openTimeoutMs === undefined
+        ? null
+        : setTimeout(() => {
+            ws.close();
+            reject(new Error(`WebSocket connection timed out: ${url}`));
+          }, openTimeoutMs);
     let handlers: ((value: string) => void)[] = [];
 
     ws.onopen = () => {
+      if (timer) clearTimeout(timer);
       resolve({
         send(message: string) {
           if (ws.readyState === WebSocket.OPEN) {
@@ -350,10 +390,14 @@ function createWebSocketTransport(url: string): Promise<CloseableTransport> {
     };
 
     ws.onerror = () => {
+      if (timer) clearTimeout(timer);
       reject(new Error(`WebSocket connection failed: ${url}`));
     };
 
     ws.onclose = () => {
+      // A socket that closes before it opens is a failed connect.
+      if (timer) clearTimeout(timer);
+      reject(new Error(`WebSocket connection failed: ${url}`));
       // Clear handlers on close
       handlers = [];
     };
@@ -407,7 +451,7 @@ async function getOrCreateClient(
       extensions: languageServerExtensions(),
       timeout: 10000,
     });
-    const ready = createWebSocketTransport(wsUrl).then((transport) => {
+    const ready = connectTransport(wsUrl, worktreeId).then((transport) => {
       client.connect(transport);
       return { client, transport };
     });

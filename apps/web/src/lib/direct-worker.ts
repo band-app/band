@@ -17,7 +17,9 @@ import {
   DIRECT_CALL_PREFIX,
   DIRECT_FALLBACK_CLOSE_CODE,
   DIRECT_FILE_ROUTES,
+  DIRECT_LSP_PATH,
   DIRECT_TERMINAL_PATH,
+  DIRECT_WATCH_PATH,
   type DirectAccess,
   type DirectCallReply,
   isDirectProcedure,
@@ -180,6 +182,30 @@ export async function directTerminalTarget(
   const query = `worktreeId=${encodeURIComponent(worktreeId)}&terminalId=${encodeURIComponent(terminalId)}`;
   return {
     url: `ws://127.0.0.1:${access.port}${DIRECT_TERMINAL_PATH}?${query}`,
+    protocols: [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${access.token}`],
+  };
+}
+
+/** Where a language server socket for `worktreeId` and `lang` connects directly, or null for the hub. */
+export async function directLspTarget(
+  worktreeId: string,
+  lang: string,
+): Promise<DirectSocketTarget | null> {
+  const access = await directAccessFor(worktreeId);
+  if (!access) return null;
+  const query = `worktreeId=${encodeURIComponent(worktreeId)}&lang=${encodeURIComponent(lang)}`;
+  return {
+    url: `ws://127.0.0.1:${access.port}${DIRECT_LSP_PATH}?${query}`,
+    protocols: [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${access.token}`],
+  };
+}
+
+/** Where the file-change socket for `worktreeId` connects directly, or null for the hub. */
+export async function directWatchTarget(worktreeId: string): Promise<DirectSocketTarget | null> {
+  const access = await directAccessFor(worktreeId);
+  if (!access) return null;
+  return {
+    url: `ws://127.0.0.1:${access.port}${DIRECT_WATCH_PATH}?worktreeId=${encodeURIComponent(worktreeId)}`,
     protocols: [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${access.token}`],
   };
 }

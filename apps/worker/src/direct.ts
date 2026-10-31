@@ -15,15 +15,20 @@ import {
 import {
   DIRECT_CALL_PREFIX,
   DIRECT_FALLBACK_CLOSE_CODE,
+  DIRECT_LSP_PATH,
   DIRECT_TERMINAL_PATH,
   DIRECT_TOKEN_PREFIX,
+  DIRECT_WATCH_ENDED_CLOSE_CODE,
+  DIRECT_WATCH_PATH,
   type DirectCallReply,
   isDirectProcedure,
 } from "@band-app/shared/direct-access";
 import { DiffService } from "@band-app/worktree-ops/diff";
 import { directOps, type WorktreeOps } from "@band-app/worktree-ops/direct";
+import { subscribeToFileChanges } from "@band-app/worktree-ops/file-watch";
 import { FilesService } from "@band-app/worktree-ops/files";
 import { GitGraphService } from "@band-app/worktree-ops/git-graph";
+import { serveLspSocket } from "@band-app/worktree-ops/lsp-socket";
 import type { WorktreeResolver } from "@band-app/worktree-ops/resolver";
 import { SearchService } from "@band-app/worktree-ops/search";
 import {
@@ -329,6 +334,9 @@ export class DirectListener {
     const refused = this.refusal(req);
     if (refused !== null) return refuse(refused);
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === DIRECT_LSP_PATH) return this.upgradeLsp(req, socket, head, url, refuse);
+    if (url.pathname === DIRECT_WATCH_PATH)
+      return this.upgradeWatch(req, socket, head, url, refuse);
     if (url.pathname !== DIRECT_TERMINAL_PATH) return refuse(404);
     const worktreeId = url.searchParams.get("worktreeId");
     const terminalId = url.searchParams.get("terminalId");
@@ -356,6 +364,90 @@ export class DirectListener {
         // A PTY that appeared while the socket waited is fresh, so it gets no reconnect nudge.
         attachSession(this.terminals, ws, inbox, terminalId, worktreeId, info === null);
       });
+    });
+  }
+
+  /** The token's scope for a socket of `worktreeId`, or the status to refuse it with. */
+  private socketScope(
+    req: IncomingMessage,
+    worktreeId: string | null,
+  ): DirectScopeParams | 400 | 401 | 403 {
+    if (!worktreeId) return 400;
+    const scope = this.scopeOf(socketToken(req));
+    if (!scope) return 401;
+    return scope.worktreeId === worktreeId ? scope : 403;
+  }
+
+  /** The hub's `/lsp` protocol, over the language server of this worker. */
+  private upgradeLsp(
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    url: URL,
+    refuse: (status: number) => void,
+  ): void {
+    const lang = url.searchParams.get("lang");
+    const worktreeId = url.searchParams.get("worktreeId");
+    const scope = this.socketScope(req, worktreeId);
+    if (typeof scope === "number") {
+      refuse(scope);
+      return;
+    }
+    if (!lang || !worktreeId) {
+      refuse(400);
+      return;
+    }
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      const release = this.ctx.activity.hold();
+      ws.once("close", release);
+      void serveLspSocket(ws, worktreeId, lang, async () => {
+        // The root passes the same path policy a link call's does.
+        const root = await this.ctx.policy.resolve(scope.path, true);
+        return this.ctx.host.lsp.connect({ worktreeId, lang, root });
+      });
+    });
+  }
+
+  /** One text frame `{"path"}` per change in the worktree, as `worktree.fileChanges` sends them. */
+  private upgradeWatch(
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    url: URL,
+    refuse: (status: number) => void,
+  ): void {
+    const worktreeId = url.searchParams.get("worktreeId");
+    const scope = this.socketScope(req, worktreeId);
+    if (typeof scope === "number") {
+      refuse(scope);
+      return;
+    }
+    if (!worktreeId) {
+      refuse(400);
+      return;
+    }
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      const release = this.ctx.activity.hold();
+      let unsubscribe: (() => void) | null = null;
+      ws.once("close", () => {
+        unsubscribe?.();
+        release();
+      });
+      void this.ctx.policy.resolve(scope.path, true).then(
+        (root) => {
+          if (ws.readyState !== ws.OPEN) return;
+          unsubscribe = subscribeToFileChanges(
+            worktreeId,
+            () => ({ host: this.ctx.host, root }),
+            (path) => {
+              if (ws.readyState !== ws.OPEN) return;
+              if (path === null) ws.close(DIRECT_WATCH_ENDED_CLOSE_CODE, "Watch ended");
+              else ws.send(JSON.stringify({ path }));
+            },
+          );
+        },
+        () => ws.close(DIRECT_WATCH_ENDED_CLOSE_CODE, "Watch ended"),
+      );
     });
   }
 

@@ -51,6 +51,20 @@ export const DIRECT_FILE_ROUTES = {
 /** The terminal WebSocket, with `worktreeId` and `terminalId` in the query, as on the hub. */
 export const DIRECT_TERMINAL_PATH = "/terminal";
 
+/** The language server WebSocket, with `worktreeId` and `lang` in the query, as on the hub. */
+export const DIRECT_LSP_PATH = "/lsp";
+
+/**
+ * The file-change WebSocket, with `worktreeId` in the query. It sends one text
+ * frame per change, `{"path": "<worktree-relative parent directory>"}`, as the
+ * hub's `worktree.fileChanges` subscription does, and closes with
+ * {@link DIRECT_WATCH_ENDED_CLOSE_CODE} when the watch ends.
+ */
+export const DIRECT_WATCH_PATH = "/watch";
+
+/** Close code of a watch socket whose watch ended (the worktree directory went away). */
+export const DIRECT_WATCH_ENDED_CLOSE_CODE = 4101;
+
 /**
  * Close code of a direct terminal socket that cannot serve the terminal (no
  * such PTY on the worker yet, or a refused token). The client falls back to
