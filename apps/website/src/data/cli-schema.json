@@ -896,6 +896,12 @@
       "parameters": []
     },
     {
+      "description": "Ask GitHub for the latest Band release now",
+      "name": "workers check-updates",
+      "notes": "Needs an admin token. The hub otherwise checks once every 24 hours. Calls within 30 seconds of each other share one GitHub request. Text output: `Latest release: <version>` and `Checked <n>s ago`. Exits 1 when the check is turned off (`BAND_UPDATE_CHECK=off`) or GitHub gave no answer yet.\nJSON output: `{\"enabled\": true, \"latest\": \"0.56.0\", \"updateAvailable\": true, \"checkedAt\": 0, \"error\": null}`.",
+      "parameters": []
+    },
+    {
       "description": "Remove an offline worker that has no worktrees, and revoke its tokens",
       "name": "workers remove",
       "notes": "Needs an admin token. Refused for the local worker, a worker that is online or lost, and a worker that still has worktrees.",
