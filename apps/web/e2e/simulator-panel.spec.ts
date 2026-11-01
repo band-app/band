@@ -268,13 +268,37 @@ test.describe("with a Mac worker", () => {
     await expect(sim.status).toHaveText("View only");
     await sim.saveEvidence("S3-simulator-tab-live");
 
-    // The screen updates when something else changes the device (here, an app launching).
-    const before = await sim.canvasPixels();
+    // The screen updates when something else changes the device (here, an app launching). The
+    // launch must change the screen, so first make sure Settings is not already showing: end it
+    // (a no-op when it is not running), wait for the home screen, then wait for the canvas to
+    // stop changing before `before` is taken.
     const udid = myDevices().find((d) => d.name.endsWith(simWorktree))?.udid ?? "";
     expect(udid).not.toBe("");
-    execFileSync("xcrun", ["simctl", "launch", udid, "com.apple.Preferences"]);
+    try {
+      execFileSync("xcrun", ["simctl", "terminate", udid, "com.apple.Preferences"], {
+        stdio: "ignore",
+      });
+    } catch {}
+    await expect.poll(() => foreground(udid), { timeout: 90_000 }).toBe("com.apple.springboard");
+    let before = await sim.canvasPixels();
     await expect
-      .poll(async () => (await sim.canvasPixels()).equals(before), { timeout: 30_000 })
+      .poll(
+        async () => {
+          const next = await sim.canvasPixels();
+          const same = next.equals(before);
+          before = next;
+          return same;
+        },
+        { timeout: 90_000, intervals: [1000] },
+      )
+      .toBe(true);
+    execFileSync("xcrun", ["simctl", "launch", udid, "com.apple.Preferences"]);
+    await expect.poll(() => foreground(udid), { timeout: 90_000 }).toBe("com.apple.Preferences");
+    await expect
+      .poll(async () => (await sim.canvasPixels()).equals(before), {
+        timeout: 90_000,
+        intervals: [1000],
+      })
       .toBe(false);
     await sim.saveEvidence("S3-screen-updated-after-launch");
 

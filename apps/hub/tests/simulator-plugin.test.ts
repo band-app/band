@@ -490,7 +490,7 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
         const tree = r.tree as ToolReply;
         reply = JSON.stringify(tree.rpc.result ?? tree.rpc);
         const found = (textOf(tree) as { elements?: Array<{ label?: string }> }).elements;
-        elements = found && labelsOf(found) !== "" ? found : undefined;
+        elements = Array.isArray(found) && labelsOf(found) !== "" ? found : undefined;
         if (!elements) await new Promise((r) => setTimeout(r, 5000));
       }
       if (!elements) {
@@ -512,6 +512,8 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     };
     // Rows of a freshly launched app load a moment after it appears, so a baseline is taken once
     // two reads in a row agree.
+    // After 10 reads that keep changing (a clock-like widget) the last read is returned, and the
+    // caller's own condition decides.
     const settledLabels = async () => {
       let last = await labels();
       for (let i = 0; i < 10; i++) {
@@ -519,16 +521,25 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
         if (next === last) return next;
         last = next;
       }
-      throw new Error("the screen never settled");
+      return last;
     };
+    // Polls the labels until a condition holds, so a slow runner gets the time it needs and a
+    // read taken mid-transition is not asserted on.
+    const labelsWhen = (label: string, ok: (labels: string) => boolean) =>
+      waitFor(
+        async () => {
+          const now = await settledLabels();
+          return ok(now) ? now : undefined;
+        },
+        { label, timeoutMs: 120_000, intervalMs: 1000 },
+      );
     await turn(sim, a, "a-open-settings", [
       call("open", "simulator_launch", { bundleId: "com.apple.Preferences" }),
-      { sleep: 2500 },
     ]);
-    const before = await settledLabels();
-    expect(before).toContain("Settings");
+    const before = await labelsWhen("Settings is frontmost", (l) => l.includes("Settings"));
 
-    // View-only: a Home press from the viewer does not reach the device.
+    // View-only: a Home press from the viewer does not reach the device. This is a check that
+    // nothing happens, so it has to give the press a window in which it would have.
     screen.ws.send(JSON.stringify({ type: "button", name: "HOME" }));
     await new Promise((r) => setTimeout(r, 2500));
     expect(await settledLabels()).toBe(before);
@@ -536,21 +547,14 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     // After the control request the same press does.
     screen.ws.send(JSON.stringify({ type: "control", enabled: true }));
     screen.ws.send(JSON.stringify({ type: "button", name: "HOME" }));
-    await waitFor(async () => ((await labels()) !== before ? true : undefined), {
-      label: "Home reached the device",
-      timeoutMs: 30_000,
-      intervalMs: 1500,
-    });
+    await labelsWhen("Home reached the device", (l) => l !== before && l.includes("Maps"));
 
-    // Releasing stops it again.
+    // Releasing stops it again. Widgets change their text over time, so the home screen is
+    // recognised by its icons: a locked device shows none of them.
     screen.ws.send(JSON.stringify({ type: "control", enabled: false }));
-    const homeLabels = await labels();
-    expect(homeLabels).toContain("Maps");
     screen.ws.send(JSON.stringify({ type: "button", name: "LOCK" }));
     await new Promise((r) => setTimeout(r, 2500));
-    // Widgets change their text over time, so the home screen is recognised by its icons: a
-    // locked device shows none of them.
-    expect(await labels()).toContain("Maps");
+    expect(await settledLabels()).toContain("Maps");
     screen.ws.close();
   }, 700_000);
 
