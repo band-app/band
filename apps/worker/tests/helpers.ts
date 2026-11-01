@@ -12,6 +12,12 @@ import { Worker, type WorkerOptions } from "../src/worker.ts";
 // Nothing in these tests may touch the real ~/.band, and the agents are the
 // scripted ACP stub, not the installed adapters.
 export const BAND_HOME = realpathSync(mkdtempSync(join(tmpdir(), "band-worker-home-")));
+const leakedDirs: string[] = [BAND_HOME];
+// Runs on pass, failure and throw. Worker children exit with the test process (the process guard),
+// and retries cover one that still holds a file for a moment.
+process.on("exit", () => {
+  for (const dir of leakedDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+});
 process.env.BAND_HOME = BAND_HOME;
 // The band CLI sync installs skills under $HOME, so an in-process worker must never see the real one.
 process.env.HOME = BAND_HOME;
@@ -35,7 +41,9 @@ export const TOKEN = "test-token";
 
 /** A directory under the temp dir, resolved so it matches what the worker reports. */
 export function tmpDir(prefix = "band-worker-test-"): string {
-  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  leakedDirs.push(dir);
+  return dir;
 }
 
 export function cleanup(...dirs: string[]): void {

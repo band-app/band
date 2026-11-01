@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -13,6 +13,18 @@ import {
   submissionUrls,
 } from "../scripts/release.mjs";
 
+const tmpDirs: string[] = [];
+// Runs on pass, failure and throw, so no release-test-* directory outlives the process.
+process.on("exit", () => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+});
+
+function makeTmp(): string {
+  const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+  tmpDirs.push(dir);
+  return dir;
+}
+
 function git(cwd: string, ...args: string[]) {
   execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
     cwd,
@@ -22,7 +34,7 @@ function git(cwd: string, ...args: string[]) {
 
 /** A repo with tag v1.0.0, then a commit touching `changed`, then tag v1.1.0. */
 function repoWithTwoTags(changed: string): string {
-  const repo = mkdtempSync(join(tmpdir(), "release-test-"));
+  const repo = makeTmp();
   git(repo, "init", "-q");
   mkdirSync(join(repo, "apps/hub"), { recursive: true });
   writeFileSync(join(repo, "apps/hub/a.txt"), "a");
@@ -79,7 +91,7 @@ describe("detect", () => {
 
 describe("setVersion", () => {
   it("writes expo.version and keeps the rest", () => {
-    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const dir = makeTmp();
     const file = join(dir, "app.json");
     writeFileSync(file, JSON.stringify({ expo: { name: "Band", version: "0.1.0" } }));
     setVersion(file, "2.3.4");
@@ -113,7 +125,7 @@ console.log("Build [production] queued\\n" + JSON.stringify([{ buildDetailsPageU
   }
 
   function setup() {
-    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const dir = makeTmp();
     writeFileSync(join(dir, "app.json"), JSON.stringify({ expo: { version: "0.1.0" } }));
     process.env.EAS_BIN = stubEas(dir);
     process.env.EAS_LOG = join(dir, "eas.log");
@@ -154,7 +166,7 @@ console.log("Build [production] queued\\n" + JSON.stringify([{ buildDetailsPageU
 
 describe("ship through the CLI", () => {
   it("writes urls to GITHUB_OUTPUT and names them in the summary", () => {
-    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const dir = makeTmp();
     const bin = join(dir, "eas-stub.mjs");
     writeFileSync(
       bin,
