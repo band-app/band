@@ -1,11 +1,14 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter } from "node:path";
+import { createLogger } from "@band-app/logger";
+
+const log = createLogger("shell-path");
 
 /**
  * Resolve the user's interactive `$PATH` by spawning a login shell and
- * echoing `$PATH`. Cached for the lifetime of the process — the value
- * doesn't change without a server restart.
+ * echoing `$PATH`. A successful lookup is cached for the lifetime of the
+ * process; a failed one is retried (see `shellPath`).
  *
  * Lives in the infra tier so other infra adapters (tunnel-client,
  * lsp-manager, terminal-pool) can reach it without crossing back into
@@ -101,7 +104,54 @@ export function scriptInvocation(scriptPath: string): { file: string; args: stri
 }
 
 let cachedShellPath: string | null = null;
+let fallbackPath: { value: string; at: number } | null = null;
+let inFlight: Promise<string> | null = null;
 
+/** How long a failed login-shell lookup is answered with the fallback before the shell runs again. */
+const RETRY_AFTER_FAILURE_MS = 30_000;
+
+function probeLoginShell(shell: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    execFile(shell, ["-li", "-c", "echo $PATH"], { timeout: 5000 }, (err, stdout) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
+async function resolveShellPath(): Promise<string> {
+  const shell = defaultShell();
+  let failure: string;
+  try {
+    const result = await probeLoginShell(shell);
+    if (result) {
+      cachedShellPath = result;
+      fallbackPath = null;
+      return result;
+    }
+    failure = "the shell printed an empty PATH";
+  } catch (err) {
+    failure = err instanceof Error ? err.message : String(err);
+  }
+
+  // A failed lookup (timeout, a slow rc file, a blocked directory at boot) is not final. Answer with
+  // the process PATH for a while and look again afterwards.
+  const value = prependBinDirs(process.env.PATH);
+  fallbackPath = { value, at: Date.now() };
+  log.warn(
+    `Could not read PATH from login shell ${shell}: ${failure}. Using ${value} and retrying in ${RETRY_AFTER_FAILURE_MS / 1000}s`,
+  );
+  return value;
+}
+
+/**
+ * The user's interactive `$PATH`. A successful lookup is cached for the life of the process. A failed
+ * one is answered with the process PATH plus `extraBinDirs()` and retried at most every 30 s, so a
+ * burst of launches spawns one shell.
+ */
 export async function shellPath(): Promise<string> {
   if (cachedShellPath) return cachedShellPath;
 
@@ -115,28 +165,13 @@ export async function shellPath(): Promise<string> {
     return cachedShellPath;
   }
 
-  const shell = defaultShell();
-  try {
-    const result = await new Promise<string>((resolve, reject) => {
-      execFile(shell, ["-li", "-c", "echo $PATH"], { timeout: 5000 }, (err, stdout) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve(stdout.trim());
-      });
-    });
-    if (result) {
-      cachedShellPath = result;
-      return result;
-    }
-  } catch {
-    // Fall through to default
+  if (fallbackPath && Date.now() - fallbackPath.at < RETRY_AFTER_FAILURE_MS) {
+    return fallbackPath.value;
   }
-
-  const fallback = prependBinDirs(process.env.PATH);
-  cachedShellPath = fallback;
-  return fallback;
+  inFlight ??= resolveShellPath().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
 }
 
 /** Resolve a binary against the user's interactive `$PATH`, or `null` when absent. */

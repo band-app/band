@@ -88,8 +88,8 @@ function binary(def: AcpAgentDefinition, names: string[], path: string, extra: s
 }
 
 /** Why a configured command cannot start: it is on no directory of the PATH. */
-function notFound(command: string): string {
-  return `The command "${command}" was not found or is not executable`;
+function notFound(command: string, path: string): string {
+  return `The command "${command}" was not found or is not executable. Searched PATH: ${path.replace(/\s+/g, " ")}`;
 }
 
 /**
@@ -110,7 +110,7 @@ export async function resolveAcpLaunch(def: AcpAgentDefinition): Promise<AcpLaun
         : null;
   if (agentBinary) {
     const found = binary(def, agentBinary.names, path);
-    if (def.command && !found) return notFound(def.command);
+    if (def.command && !found) return notFound(def.command, path);
     if (found) env[agentBinary.variable] = found;
   }
 
