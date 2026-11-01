@@ -14,6 +14,8 @@ const log = createLogger("release-check");
 const DAY_MS = 24 * 60 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const REPO = "band-app/band";
+/** Calls to `checkNow` closer together than this reuse the last answer. */
+const CHECK_NOW_THROTTLE_MS = 30_000;
 
 export interface ReleaseStatus {
   /** False when the check is turned off. */
@@ -30,6 +32,9 @@ export class ReleaseCheckService {
   private checkedAt: number | null = null;
   private timer: NodeJS.Timeout | null = null;
   private failing = false;
+  private lastError: string | null = null;
+  private lastCheckNowAt = 0;
+  private inFlight: Promise<void> | null = null;
 
   /** Whether the check runs. Read on every call. */
   enabled(): boolean {
@@ -60,9 +65,31 @@ export class ReleaseCheckService {
     };
   }
 
+  /**
+   * An admin's "check now". Asks GitHub unless an admin's check ran in the last 30 seconds, in which
+   * case the last answer (or its error) is returned. Never throws.
+   */
+  async checkNow(): Promise<ReleaseStatus & { error: string | null }> {
+    if (this.enabled() && Date.now() - this.lastCheckNowAt >= CHECK_NOW_THROTTLE_MS) {
+      this.lastCheckNowAt = Date.now();
+      await this.check();
+    } else if (this.inFlight) {
+      await this.inFlight;
+    }
+    return { ...this.status(), error: this.enabled() ? this.lastError : null };
+  }
+
   /** Fetches the latest release once. Never throws: a failure keeps the earlier answer and is logged once. */
-  async check(): Promise<void> {
-    if (!this.enabled()) return;
+  check(): Promise<void> {
+    if (!this.enabled()) return Promise.resolve();
+    if (this.inFlight) return this.inFlight;
+    this.inFlight = this.fetchLatest().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
+  }
+
+  private async fetchLatest(): Promise<void> {
     const base = (process.env.BAND_GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, "");
     try {
       const res = await fetch(`${base}/repos/${REPO}/releases/latest`, {
@@ -80,9 +107,11 @@ export class ReleaseCheckService {
         throw new Error("the latest release has no plain version");
       }
       this.failing = false;
+      this.lastError = null;
       this.checkedAt = Date.now();
       this.latest = version;
     } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
       // Once per outage, not once per day.
       if (!this.failing) {
         log.info(`could not check for a new release: ${err instanceof Error ? err.message : err}`);

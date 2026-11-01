@@ -795,6 +795,8 @@ enum GroupsCmd {
 enum HostsCmd {
     /// List workers with their status, labels, agents, roots and last contact
     List,
+    /// Ask GitHub for the latest Band release now (admin token only)
+    CheckUpdates,
     /// Set how far a worker's agents reach through the relay (admin token only)
     Trust {
         /// Worker (id or name)
@@ -1350,6 +1352,7 @@ fn main() {
         },
         Commands::Workers { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
+            HostsCmd::CheckUpdates => cmd_hosts_check_updates(),
             HostsCmd::Trust { host, level } => cmd_hosts_trust(&host, &level),
             HostsCmd::SetAgentCommand {
                 host,
@@ -4640,6 +4643,48 @@ fn cmd_worktrees_set_group(
     })
 }
 
+#[allow(clippy::format_push_string)]
+fn cmd_hosts_check_updates() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("workers.checkForUpdates", &serde_json::json!({}))?;
+    if data.get("enabled").and_then(serde_json::Value::as_bool) == Some(false) {
+        return Err("The update check is turned off on this hub (BAND_UPDATE_CHECK=off).".into());
+    }
+    let latest = data.get("latest").and_then(|v| v.as_str());
+    let checked_at = data.get("checkedAt").and_then(serde_json::Value::as_u64);
+    let error = data.get("error").and_then(|v| v.as_str());
+    let text = match (latest, checked_at) {
+        (Some(v), Some(ms)) => {
+            let ago = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+                .saturating_sub(ms)
+                / 1000;
+            let mut out = format!("Latest release: {v}\nChecked {ago}s ago\n");
+            if data
+                .get("updateAvailable")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                out.push_str("The hub is behind this release.\n");
+            }
+            if let Some(e) = error {
+                out.push_str(&format!(
+                    "The last check failed ({e}); showing the earlier answer.\n"
+                ));
+            }
+            out
+        }
+        _ => {
+            return Err(format!(
+                "Could not check for updates: {}",
+                error.unwrap_or("no answer from GitHub")
+            ))
+        }
+    };
+    Ok(CommandResult { text, json: data })
+}
+
 fn cmd_hosts_remove(id: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     client.trpc_mutate("workers.remove", &serde_json::json!({"hostId": id}))?;
@@ -6142,6 +6187,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "List the workers worktrees can run on",
             "parameters": [],
             "notes": "Text output: `ID  NAME  STATUS  VERSION  LABELS  AGENTS  ROOTS  LAST SEEN` (space-padded table). STATUS is online, offline, lost or disposed. VERSION is the Band version the worker runs (the hub's for the local worker), followed by `(behind)` when it is lower than the hub's, `(update)` when the worker never reported one, or `(update required)` when the hub refused its link for being too far from the hub's version. AGENTS are the coding agents the worker can start, ROOTS the directories it serves worktrees from (`-` when none).\nJSON output: `{\"hosts\": [{\"id\": \"local\", \"name\": \"Local\", \"status\": \"online\", \"labels\": [], \"agents\": [], \"roots\": [], \"capabilities\": [], \"home\": null, \"lastSeenAt\": null, \"workerVersion\": \"0.50.0\", \"versionState\": \"current\", \"updateTarget\": null}]}`. `versionState` is current, behind, ahead, unknown or refused."
+        }),
+        serde_json::json!({
+            "name": "workers check-updates",
+            "description": "Ask GitHub for the latest Band release now",
+            "parameters": [],
+            "notes": "Needs an admin token. The hub otherwise checks once every 24 hours. Calls within 30 seconds of each other share one GitHub request. Text output: `Latest release: <version>` and `Checked <n>s ago`. Exits 1 when the check is turned off (`BAND_UPDATE_CHECK=off`) or GitHub gave no answer yet.\nJSON output: `{\"enabled\": true, \"latest\": \"0.56.0\", \"updateAvailable\": true, \"checkedAt\": 0, \"error\": null}`."
         }),
         serde_json::json!({
             "name": "workers remove",

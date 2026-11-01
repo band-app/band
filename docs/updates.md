@@ -13,6 +13,8 @@ Settings > Workers shows the Band version each worker runs. It marks a worker th
 
 Once a day the hub asks GitHub for the latest release. When a newer one exists, an "Update available" button with the new version appears in the sidebar footer. It opens the "Update Band" panel. The panel lists the hub and every worker with their version and the version to move to.
 
+To check right away after a release, an admin clicks "Check for updates" in Settings > Workers, or runs `band workers check-updates`. The page shows when the hub last checked. The Update buttons and the sidebar button appear without a reload. Checks within 30 seconds of each other share one GitHub request, because the unauthenticated API allows 60 requests an hour. A failed check shows an error icon and keeps the earlier answer.
+
 To turn the daily check off, for example on an air-gapped hub, set `BAND_UPDATE_CHECK=off` in the hub's environment.
 
 ## Update the desktop app

@@ -16,6 +16,7 @@ import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
+import { CheckForUpdates } from "./CheckForUpdates";
 import { useIsAdmin } from "./DevicesSettings";
 import { EvacuateHostDialog } from "./EvacuateHostDialog";
 import { HostAgentCommands } from "./HostAgentCommands";
@@ -328,6 +329,7 @@ export function HostsSettings() {
         label="Workers"
         description="Computers that run worktrees. Workers connect to the hub and appear here. The hub's own machine is the built-in worker. On a hub started with BAND_LOCAL_WORKER=off it runs no worktrees and is not listed."
       >
+        <CheckForUpdates />
         <ul className="divide-y divide-border rounded-md border border-border">
           {(hosts.data ?? []).map((host) => (
             <li

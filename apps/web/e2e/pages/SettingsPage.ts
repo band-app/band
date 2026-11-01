@@ -1113,6 +1113,25 @@ export class SettingsPage {
     });
   }
 
+  /** The "Check for updates" button and its "Last checked" text on Settings > Workers. */
+  checkUpdatesButton(): Locator {
+    return this.page.getByTestId("settings__check-updates");
+  }
+
+  checkUpdatesLast(): Locator {
+    return this.page.getByTestId("settings__check-updates-last");
+  }
+
+  checkUpdatesErrorIcon(): Locator {
+    return this.page.getByTestId("settings__check-updates-error-icon");
+  }
+
+  /** Opens the failed-check popover and returns its message. */
+  async openCheckUpdatesError(): Promise<Locator> {
+    await this.checkUpdatesErrorIcon().click();
+    return this.page.getByTestId("settings__check-updates-error");
+  }
+
   /** Clicks Remove on a worker row. */
   async removeHost(hostId: string): Promise<void> {
     await test.step(`Remove worker ${hostId}`, async () => {
