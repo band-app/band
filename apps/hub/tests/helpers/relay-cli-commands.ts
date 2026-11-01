@@ -68,6 +68,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "mcp add": "MCP server management is admin only",
   "mcp remove": "MCP server management is admin only",
   "workers remove": "admin only, removes a worker",
+  "workers check-updates": "admin only, makes the hub contact GitHub",
   "worktrees move": "moves work between workers, which an agent on a worker must not do",
   "worktrees restore": "moves work between workers, which an agent on a worker must not do",
   "worktrees continue": "moves work between workers, which an agent on a worker must not do",

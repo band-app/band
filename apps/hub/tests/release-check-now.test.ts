@@ -35,7 +35,7 @@ async function boot(tag: string, env: Record<string, string> = {}): Promise<Rele
   seedSettings(home, { tokenSecret: ADMIN });
   server = await startServer({
     tmpHome: home,
-    env: { BAND_GITHUB_API_URL: stub.url, BAND_HUB_VERSION: "0.50.0", ...env },
+    env: { BAND_GITHUB_API_URL: stub.url, ...env },
   });
   return stub;
 }
