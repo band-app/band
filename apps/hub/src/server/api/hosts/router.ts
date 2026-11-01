@@ -172,6 +172,9 @@ export const hostsRouter = t.router({
     };
   }),
 
+  /** Asks GitHub for the latest release now. Calls within 30 s of each other share one request. */
+  checkForUpdates: adminProcedure.mutation(() => releaseCheckService.checkNow()),
+
   /**
    * Runs the admin's `hubUpdate.command` on the hub's machine, detached, and answers at once. The
    * command usually restarts the hub, so `updateStatus` reports progress after it comes back.

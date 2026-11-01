@@ -6650,3 +6650,37 @@ fn worktrees_create_isolation_container_waits_for_a_runner() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+#[test]
+fn workers_check_updates_prints_the_latest_release_and_when_it_was_checked() {
+    use std::io::Write;
+
+    // A stand-in for GitHub's "latest release" endpoint, used by the hub through BAND_GITHUB_API_URL.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let body = r#"{"tag_name":"v9.9.9","draft":false,"prerelease":false}"#;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    let url = format!("http://127.0.0.1:{port}");
+    let env = TestEnv::with_server_env(&[("BAND_GITHUB_API_URL", url.as_str())]);
+
+    let out = env.band(&["workers", "check-updates"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Latest release: 9.9.9"), "{text}");
+    assert!(text.contains("Checked "), "{text}");
+
+    let json = json_of(&env.band(&["workers", "check-updates", "--output", "json"]));
+    assert_eq!(json["latest"], "9.9.9");
+    assert_eq!(json["updateAvailable"], true);
+}

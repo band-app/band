@@ -304,6 +304,14 @@ band workers list
 
 Shows each worker's id, name, status (`online`, `offline`, `lost`, `disposed`), trust level (`restricted`, `standard`, `admin`), Band version, labels, agents, roots and last contact. The version is followed by `(behind)` when the worker runs an older Band than the hub, `(update)` when it never reported one, and `(update required)` when the hub refused its link for being more than one minor version away. The local worker is always listed. With `--output json` it is `{"hosts": [...]}`, and each worker also carries `capabilities`, `home`, `workerVersion`, `versionState` (`current`, `behind`, `ahead`, `unknown` or `refused`) and `updateTarget`. Updating a worker is a click on Settings > Workers, or `npm i -g @band-app/worker@<version>` on the worker. An agent on a worker gets a shorter view: id, name, status, mode, OS, architecture, agents, capabilities and labels, with no roots or home.
 
+### Check for a new Band release now
+
+```sh
+band workers check-updates
+```
+
+Asks GitHub for the latest release at once instead of waiting for the hub's 24 hour check, and prints the version and how long ago it was checked. Calls within 30 seconds of each other share one request. After it finds a newer release, `band workers list` shows `(behind)` and the Update buttons appear in Settings > Workers. Needs a person's admin token, never an agent's. It fails when the check is turned off (`BAND_UPDATE_CHECK=off`) or GitHub does not answer.
+
 ### Set a worker's trust level
 
 ```sh

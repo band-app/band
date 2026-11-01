@@ -222,3 +222,94 @@ test.describe("nothing to update", () => {
     }
   });
 });
+
+test.describe("check for updates now", () => {
+  test("finds a release published after the hub started", async ({ page }) => {
+    // The hub starts on an interval too long to matter, so only the button can see the new release.
+    const stub = await startReleasesStub("v0.50.0");
+    const home = createTmpHome();
+    seedSettings(home, { tokenSecret: TOKEN });
+    const hub = await startServer({
+      tmpHome: home,
+      env: { BAND_GITHUB_API_URL: stub.url, BAND_HUB_VERSION: "0.50.0" },
+    });
+    const worker = await connectStandInWorker({
+      hubUrl: hub.url,
+      adminToken: TOKEN,
+      name: "box",
+      version: "0.49.0",
+      serviceManager: "systemd",
+    });
+    try {
+      await expect.poll(() => stub.requests()).toBeGreaterThan(0);
+      const update = new UpdatePanelPage(page, hub.url, TOKEN);
+      const settings = new SettingsPage(page, hub.url, TOKEN);
+      await settings.goto();
+      await settings.openDialog("hosts");
+      await expect(update.badge).toHaveCount(0);
+      await expect(settings.checkUpdatesLast()).toContainText("Last checked");
+
+      // A newer release, published after the hub's own check. Nothing reloads.
+      stub.setLatest("v9.0.0");
+      const before = stub.requests();
+      await settings.checkUpdatesButton().click();
+      await expect(update.badge).toContainText("9.0.0");
+      expect(stub.requests()).toBe(before + 1);
+      await expect(settings.checkUpdatesErrorIcon()).toHaveCount(0);
+    } finally {
+      await worker.close();
+      await hub.close();
+      await stub.close();
+      cleanupTmpHome(home);
+    }
+  });
+
+  test("shows an error icon when GitHub fails and keeps the earlier answer", async ({ page }) => {
+    const stub = await startReleasesStub("v9.0.0");
+    const home = createTmpHome();
+    seedSettings(home, { tokenSecret: TOKEN });
+    const hub = await startServer({
+      tmpHome: home,
+      env: { BAND_GITHUB_API_URL: stub.url, BAND_HUB_VERSION: "0.50.0" },
+    });
+    try {
+      await expect.poll(() => stub.requests()).toBeGreaterThan(0);
+      const update = new UpdatePanelPage(page, hub.url, TOKEN);
+      const settings = new SettingsPage(page, hub.url, TOKEN);
+      await settings.goto();
+      await settings.openDialog("hosts");
+      await expect(update.badge).toContainText("9.0.0");
+
+      stub.failWith(500);
+      await settings.checkUpdatesButton().click();
+      await expect(settings.checkUpdatesErrorIcon()).toHaveAccessibleName("Update check failed");
+      await expect(await settings.openCheckUpdatesError()).toContainText("500");
+      await expect(update.badge).toContainText("9.0.0");
+    } finally {
+      await hub.close();
+      await stub.close();
+      cleanupTmpHome(home);
+    }
+  });
+
+  test("hides the button when the check is turned off", async ({ page }) => {
+    const stub = await startReleasesStub("v9.0.0");
+    const home = createTmpHome();
+    seedSettings(home, { tokenSecret: TOKEN });
+    const hub = await startServer({
+      tmpHome: home,
+      env: { BAND_GITHUB_API_URL: stub.url, BAND_UPDATE_CHECK: "off" },
+    });
+    try {
+      const settings = new SettingsPage(page, hub.url, TOKEN);
+      await settings.goto();
+      await settings.openDialog("hosts");
+      await expect(settings.checkUpdatesButton()).toHaveCount(0);
+      expect(stub.requests()).toBe(0);
+    } finally {
+      await hub.close();
+      await stub.close();
+      cleanupTmpHome(home);
+    }
+  });
+});

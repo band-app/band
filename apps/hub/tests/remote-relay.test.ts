@@ -329,6 +329,7 @@ beforeAll(async () => {
           // Updating the hub runs an admin's command on the hub's machine.
           post("hub-update", "/trpc/workers.updateHub", {}),
           post("update-all", "/trpc/workers.updateAll", {}),
+          post("check-updates", "/trpc/workers.checkForUpdates", {}),
           probe("hub-interruptions", "/trpc/workers.hubInterruptions"),
           // Unread is a person's reading state; an agent may not set it, even on its own worktree.
           post("set-unread", "/trpc/worktrees.setUnread", { worktreeId: WT_A, unread: true }),
@@ -591,6 +592,7 @@ describe("the worker relay (S2)", () => {
     expect(by("vault-oauth")?.status).toBe(403);
     expect(by("hub-update")?.status).toBe(403);
     expect(by("update-all")?.status).toBe(403);
+    expect(by("check-updates")?.status).toBe(403);
     expect(by("hub-interruptions")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);
