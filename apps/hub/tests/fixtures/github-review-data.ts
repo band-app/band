@@ -139,7 +139,37 @@ export function reviewThreadNode(input: {
   };
 }
 
+/** Where a PR sits in GitHub's merge queue, as the stubbed queries report it. */
+export interface MergeQueueInput {
+  state?: "QUEUED" | "AWAITING_CHECKS" | "MERGEABLE" | "LOCKED" | "UNMERGEABLE";
+  position: number;
+  /** Entries in the base branch's queue. */
+  total?: number;
+}
+
+/** The merge queue fields of a PR node: in the queue, auto-merge on, or neither. */
+export function mergeQueueFields(input: { mergeQueue?: MergeQueueInput; autoMerge?: boolean }) {
+  return {
+    isInMergeQueue: input.mergeQueue !== undefined,
+    mergeQueueEntry: input.mergeQueue
+      ? {
+          state: input.mergeQueue.state ?? "QUEUED",
+          position: input.mergeQueue.position,
+          enqueuedAt: "2026-01-02T09:00:00Z",
+          estimatedTimeToMerge: null,
+          mergeQueue: { entries: { totalCount: input.mergeQueue.total ?? 0 } },
+        }
+      : null,
+    autoMergeRequest:
+      input.autoMerge || input.mergeQueue
+        ? { enabledAt: "2026-01-02T09:00:00Z", mergeMethod: "SQUASH" }
+        : null,
+  };
+}
+
 interface PullRequestInput {
+  mergeQueue?: MergeQueueInput;
+  autoMerge?: boolean;
   number: number;
   title?: string;
   state?: "OPEN" | "MERGED" | "CLOSED";
@@ -167,6 +197,7 @@ export function pullRequestNode(input: PullRequestInput) {
     updatedAt: input.updatedAt ?? "2026-01-02T09:30:00Z",
     mergeStateStatus: input.mergeStateStatus ?? "CLEAN",
     reviewDecision: input.reviewDecision === undefined ? null : input.reviewDecision,
+    ...mergeQueueFields(input),
     reviewRequests: { nodes: input.reviewRequests ?? [] },
     reviews: { totalCount: (input.reviews ?? []).length, nodes: input.reviews ?? [] },
     comments: { totalCount: (input.comments ?? []).length, nodes: input.comments ?? [] },

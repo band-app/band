@@ -298,6 +298,7 @@ describe("github subscriptions", () => {
         "check_suite",
         "check_run",
         "workflow_run",
+        "merge_group",
         "push",
       ]),
     );

@@ -13,6 +13,7 @@ export const HOOK_EVENTS = [
   "check_suite",
   "check_run",
   "workflow_run",
+  "merge_group",
   "push",
 ] as const;
 
@@ -178,6 +179,7 @@ const REVIEW_EVENTS = new Set([
   "check_run",
   "check_suite",
   "workflow_run",
+  "merge_group",
 ]);
 
 /**
@@ -208,6 +210,12 @@ export function reviewTargetOf(eventType: string, payload: unknown): ReviewTarge
     case "issue_comment": {
       const issue = obj(body.issue);
       return issue?.pull_request ? target("", issue.number) : null;
+    }
+    case "merge_group": {
+      // The queue's temporary branch is `gh-readonly-queue/<base>/pr-<number>-<sha>`.
+      const headRef = str(obj(body.merge_group)?.head_ref);
+      const match = headRef.match(/^(?:refs\/heads\/)?gh-readonly-queue\/.+\/pr-(\d+)-[0-9a-f]+$/i);
+      return match ? target("", match[1]) : { repo };
     }
     default: {
       const run = obj(body[eventType]);

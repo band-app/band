@@ -5,6 +5,7 @@ import {
   type GraphQLRepoResponse,
   parseBranchStatusResponse,
 } from "@band-app/plugin-github/branch-query";
+import { isUnknownMergeQueueField } from "@band-app/plugin-github/merge-queue";
 import { describe, expect, it } from "vitest";
 
 /** Runs `parseBranchStatusResponse` with each alias as a branch name, so the cases below read as `ws_N` is branch `ws_N`. */
@@ -125,8 +126,12 @@ describe("buildBranchStatusQuery", () => {
       'pullRequests(headRefName: "feature-branch", first: 5, states: [OPEN, MERGED, CLOSED]',
     );
     expect(query).toContain(
-      "nodes { number title state url isDraft headRepositoryOwner { login } }",
+      "nodes { number title state url isDraft headRepositoryOwner { login } ",
     );
+    expect(query).toContain("isInMergeQueue");
+    expect(query).toContain("mergeQueueEntry { state position enqueuedAt estimatedTimeToMerge");
+    expect(query).toContain("autoMergeRequest { enabledAt mergeMethod }");
+    expect(buildBranchStatusQuery(repo, ["b"], { mergeQueue: false })).not.toContain("MergeQueue");
     expect(query).toContain('ref(qualifiedName: "refs/heads/feature-branch")');
     expect(query).toContain("checkSuites(first: 20)");
     expect(query).toContain("workflowRun {");
@@ -684,5 +689,89 @@ describe("parseBranchStatusResponse", () => {
 
     const result = parseAliases(data, ["ws_0"]);
     expect(result.get("ws_0")?.state).toBe("failure");
+  });
+});
+
+describe("merge queue fields", () => {
+  const pr = (extra: Record<string, unknown>) =>
+    ({
+      owner: { login: "o" },
+      pullRequests: {
+        nodes: [
+          {
+            number: 7,
+            title: "Queued",
+            state: "OPEN",
+            url: "https://github.com/o/r/pull/7",
+            isDraft: false,
+            headRepositoryOwner: { login: "o" },
+            ...extra,
+          },
+        ],
+      },
+      ref: null,
+    }) as GraphQLRepoResponse;
+
+  it("reads the queue entry of an open PR", () => {
+    const result = parseAliases(
+      {
+        ws_0: pr({
+          isInMergeQueue: true,
+          mergeQueueEntry: {
+            state: "AWAITING_CHECKS",
+            position: 2,
+            enqueuedAt: "2026-01-01T00:00:00Z",
+            estimatedTimeToMerge: 300,
+            mergeQueue: { entries: { totalCount: 3 } },
+          },
+          autoMergeRequest: { enabledAt: "2026-01-01T00:00:00Z", mergeMethod: "SQUASH" },
+        }),
+      },
+      ["ws_0"],
+    );
+    expect(result.get("ws_0")?.pr).toMatchObject({
+      mergeQueue: { state: "awaiting_checks", position: 2, total: 3, estimatedTimeToMerge: 300 },
+    });
+    // Auto-merge is told apart from queued: a queued PR carries only the queue.
+    expect(result.get("ws_0")?.pr).not.toHaveProperty("autoMerge");
+  });
+
+  it("reads auto-merge on a PR that is not queued", () => {
+    const result = parseAliases(
+      {
+        ws_0: pr({
+          isInMergeQueue: false,
+          mergeQueueEntry: null,
+          autoMergeRequest: { enabledAt: "2026-01-01T00:00:00Z", mergeMethod: "SQUASH" },
+        }),
+      },
+      ["ws_0"],
+    );
+    expect(result.get("ws_0")?.pr).toMatchObject({
+      autoMerge: { enabledAt: "2026-01-01T00:00:00Z", method: "squash" },
+    });
+    expect(result.get("ws_0")?.pr).not.toHaveProperty("mergeQueue");
+  });
+
+  it("reads a PR node that has no queue fields at all, like a host without them", () => {
+    const result = parseAliases({ ws_0: pr({}) }, ["ws_0"]);
+    const review = result.get("ws_0")?.pr;
+    expect(review).toMatchObject({ number: 7, state: "open" });
+    expect(review).not.toHaveProperty("mergeQueue");
+    expect(review).not.toHaveProperty("autoMerge");
+  });
+
+  it("falls back only for GitHub's unknown-field error", () => {
+    expect(
+      isUnknownMergeQueueField(
+        new Error("Field 'mergeQueueEntry' doesn't exist on type 'PullRequest'"),
+      ),
+    ).toBe(true);
+    expect(
+      isUnknownMergeQueueField(
+        new Error("Command failed: gh api graphql -f query=... mergeQueueEntry { state }"),
+      ),
+    ).toBe(false);
+    expect(isUnknownMergeQueueField(new Error("timeout"))).toBe(false);
   });
 });

@@ -156,6 +156,27 @@ export type MergeState =
   | "draft"
   | "unknown";
 
+/** GitHub's state for an entry in the merge queue. */
+export type MergeQueueState = "queued" | "awaiting_checks" | "mergeable" | "locked" | "unmergeable";
+
+/** A review's place in the forge's merge queue. */
+export interface MergeQueueInfo {
+  state: MergeQueueState;
+  /** 1 is next to merge. */
+  position: number;
+  enqueuedAt: string | null;
+  /** Seconds, when the forge estimates it. */
+  estimatedTimeToMerge?: number | null;
+  /** Entries in the base branch's queue, when the forge reported it. */
+  total?: number | null;
+}
+
+/** Auto-merge set on a review that is not in the queue yet. */
+export interface AutoMergeInfo {
+  enabledAt: string | null;
+  method: MergeMethod | null;
+}
+
 export type ReviewDecision = "approved" | "changes_requested" | "review_required";
 
 export type MergeMethod = "merge" | "squash" | "rebase";
@@ -243,6 +264,10 @@ export interface ReviewInfo {
   discussion?: ReviewDiscussion;
   /** What the person may do to this review now. */
   actions: ReviewAction[];
+  /** Set while the review is in the merge queue. Absent when the provider has none. */
+  mergeQueue?: MergeQueueInfo | null;
+  /** Set while auto-merge is on. Absent when the provider has none. */
+  autoMerge?: AutoMergeInfo | null;
 }
 
 export interface ReviewProvider {
@@ -285,6 +310,9 @@ export interface BranchReview {
   url: string;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  /** Absent in rows stored before the merge queue was read. */
+  mergeQueue?: MergeQueueInfo | null;
+  autoMerge?: AutoMergeInfo | null;
 }
 
 /** What the worktree card shows for one branch: the CI icon and the review badge. */

@@ -8,6 +8,7 @@
     "./server": "./src/server/index.ts",
     "./subscriptions": "./src/server/subscriptions.ts",
     "./branch-query": "./src/server/branch-query.ts",
+    "./merge-queue": "./src/server/merge-queue.ts",
     "./pr-activity": "./src/server/pr-activity.ts"
   },
   "dependencies": {

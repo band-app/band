@@ -2,7 +2,7 @@
 // CI query returns (`plugins/github/src/server/branch-query.ts`),
 // served by `ghStub.setBranchStatusQuery`. Defaults are obviously fake.
 
-import { FAKE_REPO } from "./github-review-data";
+import { FAKE_REPO, type MergeQueueInput, mergeQueueFields } from "./github-review-data";
 
 export function prUrl(number: number): string {
   return `https://github.com/${FAKE_REPO.owner}/${FAKE_REPO.name}/pull/${number}`;
@@ -16,6 +16,8 @@ interface PullRequestInput {
   /** The owner of the head repository; a fork's owner makes it a fork PR. */
   headOwner?: string;
   url?: string;
+  mergeQueue?: MergeQueueInput;
+  autoMerge?: boolean;
 }
 
 export function prNode(input: PullRequestInput) {
@@ -26,6 +28,7 @@ export function prNode(input: PullRequestInput) {
     url: input.url ?? prUrl(input.number),
     isDraft: input.isDraft ?? false,
     headRepositoryOwner: { login: input.headOwner ?? FAKE_REPO.owner },
+    ...mergeQueueFields(input),
   };
 }
 

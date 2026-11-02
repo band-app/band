@@ -198,6 +198,41 @@ describe("review-changed status event", () => {
     expect(signals[0]).not.toContain(OTHER_REPO_WORKTREE);
   });
 
+  it.each([
+    "enqueued",
+    "dequeued",
+    "auto_merge_enabled",
+    "auto_merge_disabled",
+  ])("signals the PR's branch for a pull_request %s delivery", async (action) => {
+    signals.length = 0;
+    await deliver("pull_request", {
+      action,
+      repository: { full_name: FULL },
+      pull_request: {
+        number: 5,
+        head: { ref: "feat/a" },
+        title: "t",
+        html_url: "https://example.test/pr/5",
+      },
+      sender: { login: "mia" },
+    });
+    await waitFor(async () => signals.length > 0, { timeoutMs: 5_000 });
+    expect(signals[0]).toEqual([WORKTREE_A]);
+  });
+
+  it("signals the repo's worktrees for a merge_group delivery", async () => {
+    signals.length = 0;
+    await deliver("merge_group", {
+      action: "checks_requested",
+      repository: { full_name: FULL },
+      merge_group: { head_ref: `refs/heads/gh-readonly-queue/main/pr-5-${"b".repeat(40)}` },
+      sender: { login: "github" },
+    });
+    await waitFor(async () => signals.length > 0, { timeoutMs: 5_000 });
+    expect(signals[0]).toEqual(expect.arrayContaining([WORKTREE_A, WORKTREE_B]));
+    expect(signals[0]).not.toContain(OTHER_REPO_WORKTREE);
+  });
+
   it("signals the worktree after a review action succeeds (S3)", async () => {
     signals.length = 0;
     await trpcMutate(
