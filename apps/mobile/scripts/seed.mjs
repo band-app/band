@@ -169,6 +169,9 @@ const PERMIT_OPTIONS = [
   { optionId: "reject_once", name: "Reject", kind: "reject_once" },
 ];
 
+/** A shell command of 1,000+ characters, like the one that pushed the answer buttons off screen. */
+const LONG_COMMAND = `for d in $(ls -d /tmp/band-test-*); do ${"if ! lsof +D \"$d\" >/dev/null 2>&1; then rm -rf \"$d\"; fi; ".repeat(12)}done; echo cleaned`;
+
 /** A form with each field type the web supports: choice with a free-text box, multi, boolean, integer, text. */
 const FORM_SCHEMA = {
   type: "object",
@@ -232,6 +235,24 @@ export const SCENARIO = {
             ],
           },
           after: { allow: [{ say: "Done." }], deny: [{ say: "Skipped." }] },
+        },
+      ],
+    },
+    {
+      match: "^bigcmd",
+      steps: [
+        {
+          permission: {
+            toolCall: {
+              toolCallId: "tool-3",
+              title: LONG_COMMAND,
+              kind: "execute",
+              status: "pending",
+              rawInput: { command: LONG_COMMAND, description: "Delete old Band test temp dirs not held open by any process" },
+            },
+            options: PERMIT_OPTIONS,
+          },
+          after: { allow_once: [{ say: "Long permission granted." }] },
         },
       ],
     },
@@ -306,6 +327,7 @@ export const WORKTREES = {
   /** Empty chats for the interaction flows: permission allow and reject, the form, the plan, the listening pill. */
   GAMMA_PERMIT_ALLOW: "gamma-permit-allow",
   GAMMA_PERMIT_REJECT: "gamma-permit-reject",
+  GAMMA_PERMIT_LONG: "gamma-permit-long",
   GAMMA_FORM: "gamma-form",
   GAMMA_PLAN: "gamma-plan",
   GAMMA_LISTEN: "gamma-listen",
@@ -417,7 +439,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "cutoff", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "two", "permit-allow", "permit-reject", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "cutoff", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "two", "permit-allow", "permit-reject", "permit-long", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.

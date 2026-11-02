@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import {
   permissionInput,
   permissionTexts,
@@ -24,6 +24,7 @@ export function PermissionCard({
   onAnswer: (optionId: string | null) => Promise<void>;
 }) {
   const { toolCall, options } = entry.request;
+  const { height } = useWindowDimensions();
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,22 +46,28 @@ export function PermissionCard({
   const texts = permissionTexts(entry);
   return (
     <View style={styles.card} testID="request__permission">
-      <Text style={styles.title}>
-        <Text style={styles.muted}>The agent asks to run </Text>
-        {toolCall.title ?? "a tool"}
-      </Text>
-      {input.length > 0 ? (
-        <View style={styles.input}>
-          {input.map((line) => (
-            <Text key={line} style={styles.inputLine} numberOfLines={6}>
-              {line}
-            </Text>
-          ))}
-        </View>
-      ) : null}
-      {texts.map((text) => (
-        <Markdown key={text} text={text} />
-      ))}
+      <ScrollView
+        style={{ maxHeight: height * 0.4 }}
+        contentContainerStyle={styles.body}
+        testID="request__body"
+      >
+        <Text style={styles.title}>
+          <Text style={styles.muted}>The agent asks to run </Text>
+          {toolCall.title ?? "a tool"}
+        </Text>
+        {input.length > 0 ? (
+          <View style={styles.input}>
+            {input.map((line) => (
+              <Text key={line} style={styles.inputLine} numberOfLines={6}>
+                {line}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+        {texts.map((text) => (
+          <Markdown key={text} text={text} />
+        ))}
+      </ScrollView>
       <View style={styles.options}>
         {options.map((option) => (
           <View key={option.optionId} style={styles.option}>
@@ -101,6 +108,7 @@ export const requestCardStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   card: requestCardStyles.card,
+  body: { gap: 10 },
   title: { color: colors.foreground, fontSize: 16, fontWeight: "600" },
   muted: { color: colors.mutedForeground, fontWeight: "400" },
   input: { backgroundColor: colors.muted, borderRadius: 14, gap: 2, padding: 10 },
