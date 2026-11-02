@@ -488,8 +488,11 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
       for (let attempt = 0; attempt < 12 && !elements; attempt++) {
         const r = await turn(sim, a, `a-labels-${chatCount}`, [call("tree", "simulator_describe")]);
         const tree = r.tree as ToolReply;
-        reply = JSON.stringify(tree.rpc.result ?? tree.rpc);
-        const found = (textOf(tree) as { elements?: Array<{ label?: string }> }).elements;
+        // A turn whose tool call got no reply has no `rpc`; it is retried like an empty tree.
+        reply = JSON.stringify(tree?.rpc?.result ?? tree?.rpc ?? r);
+        const found = tree?.rpc
+          ? (textOf(tree) as { elements?: Array<{ label?: string }> }).elements
+          : undefined;
         elements = Array.isArray(found) && labelsOf(found) !== "" ? found : undefined;
         if (!elements) await new Promise((r) => setTimeout(r, 5000));
       }
@@ -542,7 +545,11 @@ describe.skipIf(!CAN_RUN)("simulator plugin", () => {
     // nothing happens, so it has to give the press a window in which it would have.
     screen.ws.send(JSON.stringify({ type: "button", name: "HOME" }));
     await new Promise((r) => setTimeout(r, 2500));
-    expect(await settledLabels()).toBe(before);
+    // Rows of the Settings screen (the Apple Account row) can finish loading after `before` was
+    // read, so the labels are not compared whole: the app must still be Settings, not the home screen.
+    const afterViewOnlyPress = await settledLabels();
+    expect(afterViewOnlyPress).toContain("Settings");
+    expect(afterViewOnlyPress).not.toContain("Maps");
 
     // After the control request the same press does.
     screen.ws.send(JSON.stringify({ type: "control", enabled: true }));
