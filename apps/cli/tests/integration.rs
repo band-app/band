@@ -3436,6 +3436,178 @@ fn vault_put_git_credential() {
     assert_eq!(item["metadata"]["username"], "band-bot");
 }
 
+// --- Editor extensions ---
+
+#[test]
+fn extensions_list_reload_and_errors() {
+    let env = TestEnv::new();
+    let extensions = env.band_dir.join("extensions");
+    let good = extensions.join("sheet");
+    fs::create_dir_all(&good).unwrap();
+    fs::write(
+        good.join("band-extension.json"),
+        r#"{"id":"sheet","name":"Sheet","version":"1.0.0","extensionApi":1,
+            "contributes":{"fileEditors":[{"id":"grid","label":"Grid","selector":["*.xlsx","*.csv"],"entry":"index.html"}]}}"#,
+    )
+    .unwrap();
+    let bad = extensions.join("broken");
+    fs::create_dir_all(&bad).unwrap();
+    fs::write(
+        bad.join("band-extension.json"),
+        r#"{"id":"broken","name":"B","version":"1","extensionApi":1,"surprise":true}"#,
+    )
+    .unwrap();
+
+    let reloaded = env.band(&["extensions", "reload", "--output", "json"]);
+    assert!(reloaded.status.success(), "stderr: {}", stderr(&reloaded));
+    let json = json_of(&reloaded);
+    assert_eq!(json["extensions"][0]["id"], "sheet");
+    assert_eq!(json["errors"][0]["folder"], "broken");
+
+    let text = stdout(&env.band(&["extensions", "list"]));
+    assert!(text.starts_with("ID"), "text: {text}");
+    assert!(text.contains("Grid (*.xlsx, *.csv)"), "text: {text}");
+    assert!(text.contains("error: broken:"), "text: {text}");
+
+    // A second extension copied in shows up after a reload.
+    let second = extensions.join("second");
+    fs::create_dir_all(&second).unwrap();
+    fs::write(
+        second.join("band-extension.json"),
+        r#"{"id":"second","name":"Second","version":"2","extensionApi":1}"#,
+    )
+    .unwrap();
+    let listed = json_of(&env.band(&["extensions", "reload", "--output", "json"]));
+    let ids: Vec<&str> = listed["extensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["second", "sheet"]);
+}
+
+/// Packs `<id>/` with a manifest and a page into `<dir>/<id>-<version>.tar.gz` using the system `tar`.
+fn make_extension_archive(dir: &Path, id: &str, version: &str) -> PathBuf {
+    let src = dir.join(format!("src-{version}"));
+    fs::create_dir_all(src.join(id)).unwrap();
+    fs::write(
+        src.join(id).join("band-extension.json"),
+        format!(
+            r#"{{"id":"{id}","name":"Demo","version":"{version}","extensionApi":1,"contributes":{{"fileEditors":[{{"id":"main","label":"Main","selector":["*.demo"],"entry":"index.html"}}]}}}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(src.join(id).join("index.html"), format!("<p>{version}</p>")).unwrap();
+    let archive = dir.join(format!("{id}-{version}.tar.gz"));
+    let status = Command::new("tar")
+        .args(["-czf"])
+        .arg(&archive)
+        .arg("-C")
+        .arg(&src)
+        .arg(id)
+        .status()
+        .expect("run tar");
+    assert!(status.success());
+    archive
+}
+
+/// Serves `body` for every GET on a loopback port and returns the port.
+fn serve_bytes(body: Vec<u8>) -> u16 {
+    use std::io::{Read, Write};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 2048];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            if request.contains(".sha256") {
+                let _ = stream.write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                continue;
+            }
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            );
+            let _ = stream.write_all(&body);
+        }
+    });
+    port
+}
+
+#[test]
+fn extensions_install_from_url_and_file_and_remove() {
+    let env = TestEnv::new();
+    let dir = env.tmp.path().to_path_buf();
+
+    // From a URL (a loopback stub, no .sha256 file).
+    let v1 = make_extension_archive(&dir, "demo", "1.0.0");
+    let port = serve_bytes(fs::read(&v1).unwrap());
+    let url = format!("http://127.0.0.1:{port}/demo-1.0.0.tar.gz");
+    let installed = env.band(&["extensions", "install", &url, "--output", "json"]);
+    assert!(installed.status.success(), "stderr: {}", stderr(&installed));
+    assert_eq!(json_of(&installed)["extension"]["version"], "1.0.0");
+    let text = stdout(&env.band(&["extensions", "list"]));
+    assert!(text.contains("demo"), "text: {text}");
+
+    // From a local file, which the CLI uploads, with a wrong and then the right sha256.
+    let v2 = make_extension_archive(&dir, "demo", "2.0.0");
+    let wrong = env.band(&[
+        "extensions",
+        "install",
+        v2.to_str().unwrap(),
+        "--sha256",
+        &"0".repeat(64),
+    ]);
+    assert!(!wrong.status.success());
+    assert!(
+        stderr(&wrong).contains("sha256"),
+        "stderr: {}",
+        stderr(&wrong)
+    );
+    let bytes = fs::read(&v2).unwrap();
+    let hash = {
+        let out = Command::new("shasum")
+            .args(["-a", "256"])
+            .arg(&v2)
+            .output()
+            .expect("run shasum");
+        String::from_utf8(out.stdout).unwrap()[..64].to_string()
+    };
+    assert!(!bytes.is_empty());
+    let upgraded = env.band(&[
+        "extensions",
+        "install",
+        v2.to_str().unwrap(),
+        "--sha256",
+        &hash,
+        "--output",
+        "json",
+    ]);
+    assert!(upgraded.status.success(), "stderr: {}", stderr(&upgraded));
+    assert_eq!(json_of(&upgraded)["extension"]["version"], "2.0.0");
+    let listed = json_of(&env.band(&["extensions", "list", "--output", "json"]));
+    assert_eq!(listed["extensions"][0]["version"], "2.0.0");
+
+    // A missing file is refused, and remove deletes the extension.
+    assert!(!env
+        .band(&["extensions", "install", "./does-not-exist.tar.gz"])
+        .status
+        .success());
+    let removed = env.band(&["extensions", "remove", "demo"]);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+    let after = json_of(&env.band(&["extensions", "list", "--output", "json"]));
+    assert!(after["extensions"].as_array().unwrap().is_empty());
+    assert!(!env.band(&["extensions", "remove", "demo"]).status.success());
+}
+
 // --- MCP proxy tests ---
 
 #[test]

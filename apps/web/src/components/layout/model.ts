@@ -104,6 +104,8 @@ export interface PanelApi {
   setTitle(title: string): void;
   getParameters<T extends PanelParams = PanelParams>(): T;
   updateParameters(params: PanelParams): void;
+  /** Keep the panel's element attached while it is not selected (an iframe reloads when detached). */
+  setRenderer(renderer: PanelRenderer): void;
   setActive(): void;
   moveTo(options: MovePanelOptions): void;
   close(): void;
@@ -130,7 +132,7 @@ export class LayoutPanel<P extends PanelParams = PanelParams> {
   readonly id: string;
   readonly contentComponent: string;
   readonly tabComponent: string | undefined;
-  readonly renderer: PanelRenderer | undefined;
+  renderer: PanelRenderer | undefined;
   readonly api: PanelApi;
 
   private _title: string;
@@ -184,6 +186,11 @@ export class LayoutPanel<P extends PanelParams = PanelParams> {
       setTitle: (title) => panel.setTitle(title),
       getParameters: <T extends PanelParams>() => panel._params as unknown as T,
       updateParameters: (params) => panel.updateParams(params),
+      setRenderer: (renderer) => {
+        if (panel.renderer === renderer) return;
+        panel.renderer = renderer;
+        owner.touch();
+      },
       setActive: () => owner.setActivePanel(panel),
       moveTo: (options) => owner.movePanel(panel, options),
       close: () => owner.removePanel(panel),

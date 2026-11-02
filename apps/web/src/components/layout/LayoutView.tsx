@@ -355,7 +355,22 @@ const GroupView = memo(function GroupView({
       const el = panel.element;
       const selected = group.activePanel === panel;
       if (selected || panel.renderer === "always") {
-        if (el.parentElement !== host) host.appendChild(el);
+        if (el.parentElement !== host) {
+          // `moveBefore` moves a connected node without resetting it, so an iframe
+          // (an extension editor) keeps its document when its tab changes group.
+          const movable = host as HTMLElement & {
+            moveBefore?: (n: Node, ref: Node | null) => void;
+          };
+          if (el.isConnected && movable.moveBefore) {
+            try {
+              movable.moveBefore(el, null);
+            } catch {
+              host.appendChild(el);
+            }
+          } else {
+            host.appendChild(el);
+          }
+        }
         el.style.display = selected ? "" : "none";
         el.toggleAttribute("data-selected", selected);
       } else if (el.parentElement === host) {

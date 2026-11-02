@@ -32,6 +32,11 @@ import { handleChatHistory } from "./src/api/chat-history.ts";
 import { handleChatSubmit } from "./src/api/chat-submit.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/server/api/context.ts";
+import { EXT_PREFIX, handleExtensionFile } from "./src/server/api/extensions/handler.ts";
+import {
+  EXT_INSTALL_PATH,
+  handleExtensionInstall,
+} from "./src/server/api/extensions/install-handler.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import {
@@ -47,6 +52,7 @@ import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { handleOAuthCallback, OAUTH_CALLBACK_PATH } from "./src/server/api/vault/oauth-callback.ts";
 import { handleVoiceTranscribe } from "./src/server/api/voice/handler";
 import { handleWebAppManifest } from "./src/server/api/web-app-manifest.ts";
+import { handleWorktreeFilePut } from "./src/server/api/worktree-file-put.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
@@ -96,6 +102,7 @@ import { browserService } from "./src/server/services/browser-service.ts";
 import { checkpointService } from "./src/server/services/checkpoint-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
+import { extensionService } from "./src/server/services/extension-service.ts";
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
@@ -973,6 +980,13 @@ async function main() {
   });
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // An extension's static files. Before CORS and the device-token check: the extension's iframe
+    // has a `null` origin and no credentials, and the route allows every origin itself.
+    if (req.url?.startsWith(EXT_PREFIX)) {
+      await handleExtensionFile(req, res);
+      return;
+    }
+
     // CORS first: preflights carry no credentials, and a denied origin gets
     // no data from any route.
     if (handleCors(req, res)) return;
@@ -1068,6 +1082,12 @@ async function main() {
     // Auth check (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
 
+    // Installing an extension from an uploaded .tar.gz (admin token).
+    if (req.url?.split("?")[0] === EXT_INSTALL_PATH) {
+      await handleExtensionInstall(req, res, requestDevice(req).admin);
+      return;
+    }
+
     // Dictation: the audio clip goes to the hub, which calls the configured speech-to-text endpoint.
     if (req.url?.split("?")[0] === VOICE_TRANSCRIBE_PATH) {
       await handleVoiceTranscribe(req, res);
@@ -1146,6 +1166,12 @@ async function main() {
         ? join("shared", parsed.worktreeId, parsed.chatId)
         : join("shared", parsed.worktreeId);
       serveStaticFile(res, bandHome(), subdir, encodedName);
+      return;
+    }
+
+    // Save a worktree file from an extension editor — raw body, 50 MB cap.
+    if (req.method === "PUT" && req.url?.startsWith("/api/worktree-file/")) {
+      await handleWorktreeFilePut(req, res, "/api/worktree-file/");
       return;
     }
 
@@ -1786,6 +1812,11 @@ async function main() {
       } catch (err) {
         console.error("First-time setup failed:", err);
       }
+
+      // Read the extension manifests now, so a broken one logs at boot.
+      await extensionService.reload().catch((err) => {
+        console.error("Extension scan failed:", err);
+      });
 
       // Terminals outlive this server in the terminal daemon; drop the ones
       // whose worktree was deleted while no server was running.

@@ -8,6 +8,11 @@ import { useCallback, useMemo, useRef } from "react";
 // switching between tabs.
 
 export interface TabFileState {
+  /**
+   * The editor chosen with "Open With…": `<extensionId>/<editorId>` for an extension's editor,
+   * `builtin` for the code viewer. Unset follows the defaults (`lib/extensions.ts`).
+   */
+  editor?: string;
   /** View mode for preview-capable files (e.g. markdown). */
   viewMode?: "preview" | "source";
   /** Unsaved file content — stored for dirty detection and persistence across reloads. */
