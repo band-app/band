@@ -2,7 +2,7 @@
  * Page object for the PR badge in a sidebar worktree row
  * (`dashboard/components/PullRequestBadge.tsx`): the PR number as an
  * outlined tag, `worktree-card__pr-badge` (its `data-tone` is the CI color:
- * `failure`, `pending`, `success`, `neutral`, `merged` or `closed`), and its
+ * `failure`, `pending`, `success`, `neutral`, `merged`, `closed` or `queued`), and its
  * popover `pr-popover`, with `pr-popover__number` (the same tag, with the
  * same `data-tone`), `__status`, `__draft`, `__title`, `__open` and
  * `__copy`. The status element's `data-status` is the CI state
@@ -43,6 +43,10 @@ export class PullRequestBadgePage {
   readonly popoverNumber: Locator;
   readonly popoverStatus: Locator;
   readonly popoverDraft: Locator;
+  /** The GitHub entry state line, present only for a queued PR. */
+  readonly popoverQueue: Locator;
+  /** "Auto-merge on", present only for a PR with auto-merge that is not queued. */
+  readonly popoverAutoMerge: Locator;
   readonly popoverTitle: Locator;
   readonly openButton: Locator;
   readonly copyButton: Locator;
@@ -59,6 +63,8 @@ export class PullRequestBadgePage {
     this.popoverNumber = page.getByTestId("pr-popover__number");
     this.popoverStatus = page.getByTestId("pr-popover__status");
     this.popoverDraft = page.getByTestId("pr-popover__draft");
+    this.popoverQueue = page.getByTestId("pr-popover__queue");
+    this.popoverAutoMerge = page.getByTestId("pr-popover__auto-merge");
     this.popoverTitle = page.getByTestId("pr-popover__title");
     this.openButton = page.getByTestId("pr-popover__open");
     this.copyButton = page.getByTestId("pr-popover__copy");

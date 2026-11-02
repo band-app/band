@@ -184,6 +184,18 @@ export interface PullRequestSummary {
   url: string;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  /** Absent in rows stored before the merge queue was read. */
+  mergeQueue?: {
+    state: "queued" | "awaiting_checks" | "mergeable" | "locked" | "unmergeable";
+    position: number;
+    enqueuedAt: string | null;
+    estimatedTimeToMerge?: number | null;
+    total?: number | null;
+  } | null;
+  autoMerge?: {
+    enabledAt: string | null;
+    method: "merge" | "squash" | "rebase" | null;
+  } | null;
 }
 
 export interface CIStatus {

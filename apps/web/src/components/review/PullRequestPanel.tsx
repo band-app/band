@@ -13,6 +13,7 @@ import {
   GitMerge,
   GitPullRequest,
   GitPullRequestArrow,
+  ListEnd,
   Loader,
   RefreshCw,
   RotateCw,
@@ -184,10 +185,53 @@ function ReviewHeader({
       <p className="text-[11px] text-muted-foreground" data-testid="pr-checks__updated">
         PR updated {new Date(review.updatedAt).toLocaleString()}
       </p>
+      <MergeQueueLine review={review} />
       <MergeControl worktreeId={worktreeId} review={review} />
       <HeaderActions worktreeId={worktreeId} actions={review.actions} />
     </div>
   );
+}
+
+const QUEUE_STATE_LABEL = {
+  queued: "queued",
+  awaiting_checks: "awaiting checks",
+  mergeable: "ready to merge",
+  locked: "locked",
+  unmergeable: "has conflicts",
+} as const;
+
+/** Where the review is in the forge's merge queue, or that auto-merge is on. Nothing otherwise. */
+function MergeQueueLine({ review }: { review: ReviewInfo }) {
+  const queue = review.mergeQueue;
+  if (queue) {
+    const position = queue.total
+      ? `position ${queue.position} of ${queue.total}`
+      : `position ${queue.position}`;
+    return (
+      <p
+        className="flex items-center gap-1.5 text-xs text-info"
+        data-testid="pr-checks__merge-queue"
+        data-queue-state={queue.state}
+      >
+        <ListEnd className="size-3.5 shrink-0" aria-hidden />
+        <span>
+          In merge queue, {position} ({QUEUE_STATE_LABEL[queue.state]})
+        </span>
+      </p>
+    );
+  }
+  if (review.autoMerge && review.state === "open") {
+    return (
+      <p
+        className="flex items-center gap-1.5 text-xs text-muted-foreground"
+        data-testid="pr-checks__auto-merge"
+      >
+        <GitMerge className="size-3.5 shrink-0" aria-hidden />
+        <span>Auto-merge on, waiting for checks</span>
+      </p>
+    );
+  }
+  return null;
 }
 
 function BranchHeader({

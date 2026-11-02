@@ -1,5 +1,5 @@
 import { Button, Popover, PopoverAnchor, PopoverContent } from "@band-app/ui";
-import { Check, ExternalLink, Link } from "lucide-react";
+import { Check, ExternalLink, Link, ListEnd } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { writeClipboardText } from "../../lib/clipboard";
 import { useCapabilities } from "../context";
@@ -10,11 +10,20 @@ import type { CIState, PullRequestSummary } from "../types";
  * checks, or only cancelled ones, stays neutral. Merged is violet, as on
  * GitHub, and closed is struck through.
  */
-export type PullRequestTone = "failure" | "pending" | "success" | "neutral" | "merged" | "closed";
+export type PullRequestTone =
+  | "failure"
+  | "pending"
+  | "success"
+  | "neutral"
+  | "merged"
+  | "closed"
+  | "queued";
 
 export function pullRequestTone(pr: PullRequestSummary, ciState: CIState): PullRequestTone {
   if (pr.state === "merged") return "merged";
   if (pr.state === "closed") return "closed";
+  // In GitHub's merge queue, the queue decides what happens next, not the branch's own checks.
+  if (pr.mergeQueue) return "queued";
   switch (ciState) {
     case "failure":
       return "failure";
@@ -35,6 +44,7 @@ const TONE_CLASS: Record<PullRequestTone, string> = {
   success: "text-success border-success/40 bg-success-bg",
   neutral: "text-muted-foreground border-border bg-muted/50",
   merged: "text-merged border-merged/40 bg-merged-bg",
+  queued: "text-info border-info/40 bg-info-bg",
   closed: "text-muted-foreground border-border bg-muted/50 line-through",
 };
 
@@ -42,9 +52,23 @@ const TONE_CLASS: Record<PullRequestTone, string> = {
 const TAG_CLASS = "inline-flex items-center rounded border px-1 py-px leading-none";
 const NUMBER_CLASS = `${TAG_CLASS} text-[11px] font-semibold tabular-nums`;
 
+const QUEUE_STATE_LABEL = {
+  queued: "Queued",
+  awaiting_checks: "Awaiting checks",
+  mergeable: "Ready to merge",
+  locked: "Locked",
+  unmergeable: "Has conflicts",
+} as const;
+
+/** "In merge queue · position 2", the text the popover and the badge's label share. */
+function queueLabel(queue: NonNullable<PullRequestSummary["mergeQueue"]>): string {
+  return `In merge queue · position ${queue.position}`;
+}
+
 function statusLabel(pr: PullRequestSummary, ciState: CIState): string {
   if (pr.state === "merged") return "Merged";
   if (pr.state === "closed") return "Closed";
+  if (pr.mergeQueue) return queueLabel(pr.mergeQueue);
   switch (ciState) {
     case "failure":
       return "Checks failing";
@@ -169,7 +193,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
             }
           }}
         >
-          #{pr.number}
+          {tone === "queued" && <ListEnd aria-hidden className="mr-0.5 size-2.5" />}#{pr.number}
         </button>
       </PopoverAnchor>
       <PopoverContent
@@ -226,6 +250,16 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
             {statusLabel(pr, ciState)}
           </span>
         </div>
+        {pr.mergeQueue && (
+          <p data-testid="pr-popover__queue" className="mt-1 text-xs text-muted-foreground">
+            GitHub entry state: {QUEUE_STATE_LABEL[pr.mergeQueue.state]}
+          </p>
+        )}
+        {pr.autoMerge && !pr.mergeQueue && (
+          <p data-testid="pr-popover__auto-merge" className="mt-1 text-xs text-muted-foreground">
+            Auto-merge on
+          </p>
+        )}
         <p
           data-testid="pr-popover__title"
           className="mt-1.5 line-clamp-3 break-words text-[13px] font-medium text-foreground"

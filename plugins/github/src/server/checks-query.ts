@@ -15,6 +15,12 @@ import type {
   ReviewThread,
 } from "@band-app/plugin-api";
 import { rerunActions, reviewActions } from "./actions";
+import {
+  MERGE_QUEUE_FIELDS,
+  type MergeQueueNode,
+  parseAutoMerge,
+  parseMergeQueue,
+} from "./merge-queue";
 
 // What one query fetches of the discussion. Past a cap the newest messages
 // win for comments and reviews, and the first ones for threads; the
@@ -45,7 +51,9 @@ const CHECK_RUN_FIELDS = `
  * the branch head for when there is no pull request. Variables: `owner`,
  * `name`, `branch` and `ref` (`refs/heads/<branch>`).
  */
-export const REVIEW_QUERY = `query($owner: String!, $name: String!, $branch: String!, $ref: String!) {
+export const reviewQuery = (
+  options: { mergeQueue?: boolean } = {},
+): string => `query($owner: String!, $name: String!, $branch: String!, $ref: String!) {
   repository(owner: $owner, name: $name) {
     pullRequests(headRefName: $branch, first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {
@@ -58,6 +66,7 @@ export const REVIEW_QUERY = `query($owner: String!, $name: String!, $branch: Str
         updatedAt
         mergeStateStatus
         reviewDecision
+        ${options.mergeQueue === false ? "" : MERGE_QUEUE_FIELDS}
         reviewRequests(first: ${MAX_REVIEW_REQUESTS}) {
           nodes {
             asCodeOwner
@@ -187,7 +196,7 @@ interface ReviewRequestNode {
     | null;
 }
 
-interface PullRequestNode {
+interface PullRequestNode extends MergeQueueNode {
   number: number;
   title: string;
   url: string;
@@ -279,7 +288,14 @@ export function parseReview(
     reviewers: parseReviewers(pr),
     discussion: parseDiscussion(pr),
   };
-  return { ...review, actions: reviewActions(review) };
+  const mergeQueue = pr.state === "OPEN" ? parseMergeQueue(pr) : null;
+  const autoMerge = pr.state === "OPEN" ? parseAutoMerge(pr) : null;
+  return {
+    ...review,
+    actions: reviewActions(review),
+    ...(mergeQueue && { mergeQueue }),
+    ...(autoMerge && { autoMerge }),
+  };
 }
 
 const REVIEWER_STATES: Record<string, ReviewerState> = {

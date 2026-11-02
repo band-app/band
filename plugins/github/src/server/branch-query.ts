@@ -5,6 +5,12 @@ import type {
   RepoInfo,
 } from "@band-app/plugin-api";
 import { statePriority } from "@band-app/plugin-api";
+import {
+  MERGE_QUEUE_FIELDS,
+  type MergeQueueNode,
+  parseAutoMerge,
+  parseMergeQueue,
+} from "./merge-queue";
 
 interface CheckSuiteNode {
   status: string;
@@ -16,7 +22,7 @@ interface CheckSuiteNode {
   } | null;
 }
 
-interface PullRequestNode {
+interface PullRequestNode extends MergeQueueNode {
   number: number;
   title: string;
   state: string;
@@ -49,7 +55,12 @@ export function branchAlias(index: number): string {
  * Build a single GraphQL query that fetches the review and CI check suites
  * for several branches of one repo in one request.
  */
-export function buildBranchStatusQuery(repoInfo: RepoInfo, branches: string[]): string {
+export function buildBranchStatusQuery(
+  repoInfo: RepoInfo,
+  branches: string[],
+  options: { mergeQueue?: boolean } = {},
+): string {
+  const queueFields = options.mergeQueue === false ? "" : ` ${MERGE_QUEUE_FIELDS}`;
   const owner = escapeGraphQL(repoInfo.owner);
   const repo = escapeGraphQL(repoInfo.repo);
   const fragments = branches.map((name, index) => {
@@ -58,7 +69,7 @@ export function buildBranchStatusQuery(repoInfo: RepoInfo, branches: string[]): 
     return `${branchAlias(index)}: repository(owner: "${owner}", name: "${repo}") {
     owner { login }
     pullRequests(headRefName: "${branch}", first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { number title state url isDraft headRepositoryOwner { login } }
+      nodes { number title state url isDraft headRepositoryOwner { login }${queueFields} }
     }
     ref(qualifiedName: "refs/heads/${branch}") {
       target {
@@ -109,12 +120,17 @@ function pickPullRequest(
       ? undefined
       : (nodes.find((n) => n.state === "MERGED") ?? nodes.find((n) => n.state === "CLOSED")));
   if (!node) return null;
+  const open = node.state === "OPEN";
+  const mergeQueue = open ? parseMergeQueue(node) : null;
+  const autoMerge = open ? parseAutoMerge(node) : null;
   return {
     number: node.number,
     title: node.title,
     url: node.url,
-    state: node.state === "OPEN" ? "open" : node.state === "MERGED" ? "merged" : "closed",
+    state: open ? "open" : node.state === "MERGED" ? "merged" : "closed",
     isDraft: node.isDraft,
+    ...(mergeQueue && { mergeQueue }),
+    ...(autoMerge && { autoMerge }),
   };
 }
 

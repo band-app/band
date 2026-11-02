@@ -9,10 +9,11 @@ import {
 import {
   parseBranchChecks,
   parseReview,
-  REVIEW_QUERY,
   type ReviewQueryResponse,
+  reviewQuery,
 } from "./checks-query";
 import { ghGraphql, repoArg, runGh } from "./gh";
+import { isUnknownMergeQueueField } from "./merge-queue";
 import { createSubscriptionSource } from "./subscriptions";
 
 // github.com accepts these as aliases of itself: `www.` over HTTPS and
@@ -46,17 +47,37 @@ export default definePlugin({
     const handoff = new Map<string, { at: number; data: ReviewQueryResponse }>();
     const keyOf = (repo: RepoInfo, branch: string) => `${repoArg(repo)}#${branch}`;
 
+    // Hosts that refused the merge queue fields (an older GitHub Enterprise Server). They are
+    // asked without them from then on, so the extra attempt happens once per host.
+    const noMergeQueue = new Set<string>();
+
+    async function withMergeQueueFallback<T>(
+      repo: RepoInfo,
+      run: (mergeQueue: boolean) => Promise<T>,
+    ): Promise<T> {
+      if (noMergeQueue.has(repo.host)) return run(false);
+      try {
+        return await run(true);
+      } catch (error) {
+        if (!isUnknownMergeQueueField(error)) throw error;
+        noMergeQueue.add(repo.host);
+        return run(false);
+      }
+    }
+
     function query(
       repo: RepoInfo,
       branch: string,
       ctx: ProviderContext,
     ): Promise<ReviewQueryResponse> {
-      return ghGraphql<ReviewQueryResponse>(
-        api,
-        repo,
-        REVIEW_QUERY,
-        { owner: repo.owner, name: repo.repo, branch, ref: `refs/heads/${branch}` },
-        ctx,
+      return withMergeQueueFallback(repo, (mergeQueue) =>
+        ghGraphql<ReviewQueryResponse>(
+          api,
+          repo,
+          reviewQuery({ mergeQueue }),
+          { owner: repo.owner, name: repo.repo, branch, ref: `refs/heads/${branch}` },
+          ctx,
+        ),
       );
     }
 
@@ -65,20 +86,26 @@ export default definePlugin({
       matches: (repo) => githubHost(repo) !== null,
       async getBranchStatuses(repo, branches, ctx) {
         const target = normalize(repo);
-        const args = [
-          "api",
-          "graphql",
-          "-f",
-          `query=${buildBranchStatusQuery(
-            target,
-            branches.map((b) => b.branch),
-          )}`,
-        ];
-        if (target.host !== "github.com") args.push("--hostname", target.host);
-        const output = await runGh(api, args, ctx);
-        const { data } = JSON.parse(output) as {
-          data: Record<string, GraphQLRepoResponse | null>;
-        };
+        const names = branches.map((b) => b.branch);
+        const data = await withMergeQueueFallback(target, async (mergeQueue) => {
+          const args = [
+            "api",
+            "graphql",
+            "-f",
+            `query=${buildBranchStatusQuery(target, names, { mergeQueue })}`,
+          ];
+          if (target.host !== "github.com") args.push("--hostname", target.host);
+          const output = await runGh(api, args, ctx);
+          const parsed = JSON.parse(output) as {
+            data?: Record<string, GraphQLRepoResponse | null>;
+            errors?: Array<{ message: string }>;
+          };
+          // A host without the fields answers with errors and no data.
+          if (!parsed.data && parsed.errors?.length) {
+            throw new Error(parsed.errors.map((e) => e.message).join("; "));
+          }
+          return parsed.data ?? {};
+        });
         return parseBranchStatusResponse(data, branches);
       },
     });

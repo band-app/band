@@ -57,6 +57,10 @@ export class PrChecksPanelPage {
   readonly number: Locator;
   readonly state: Locator;
   readonly title: Locator;
+  /** "In merge queue, position N", present only while the PR is queued. */
+  readonly mergeQueueLine: Locator;
+  /** "Auto-merge on, waiting for checks", present only while auto-merge waits. */
+  readonly autoMergeLine: Locator;
   readonly branch: Locator;
   readonly noReview: Locator;
   readonly mergeButton: Locator;
@@ -115,6 +119,8 @@ export class PrChecksPanelPage {
     this.number = page.getByTestId("pr-checks__number");
     this.state = page.getByTestId("pr-checks__state");
     this.title = page.getByTestId("pr-checks__title");
+    this.mergeQueueLine = page.getByTestId("pr-checks__merge-queue");
+    this.autoMergeLine = page.getByTestId("pr-checks__auto-merge");
     this.branch = page.getByTestId("pr-checks__branch");
     this.noReview = page.getByTestId("pr-checks__no-review");
     this.mergeButton = page.getByTestId("pr-checks__merge");
