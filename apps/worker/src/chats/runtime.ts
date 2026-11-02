@@ -17,6 +17,7 @@ import {
   type AcpAgentHandlers,
   AcpAgentProcess,
   type AttachedSession,
+  isSessionLostError,
   type PermissionOutcome,
 } from "@band-app/chat-runtime/acp-agent-process";
 import { findOption, selectValues } from "@band-app/chat-runtime/config-options";
@@ -481,7 +482,10 @@ export class ChatRuntime {
     }
   }
 
-  private async attach(purpose: "prompt" | "view" = "prompt"): Promise<void> {
+  private async attach(
+    purpose: "prompt" | "view" = "prompt",
+    strictSession = false,
+  ): Promise<void> {
     const info = this.info;
     const target = info.activeSessionId;
     const logged = target ? this.env.store.events.currentRevision(target) > 0 : false;
@@ -526,6 +530,12 @@ export class ChatRuntime {
       });
       return;
     }
+    // A caller that needs this very session gets the failure.
+    if (strictSession) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(`${proc.agentName} can't reopen session ${target}`);
+    }
     await this.attachNew(proc);
     this.record({
       type: "notice",
@@ -538,9 +548,12 @@ export class ChatRuntime {
   }
 
   /** Starts the agent when needed and attaches the chat's session. Returns the session id. */
-  async ensureSession(purpose: "prompt" | "view" = "prompt"): Promise<string | null> {
+  async ensureSession(
+    purpose: "prompt" | "view" = "prompt",
+    options: { strictSession?: boolean } = {},
+  ): Promise<string | null> {
     while (this.attaching) await this.attaching.catch(() => undefined);
-    this.attaching = this.attach(purpose);
+    this.attaching = this.attach(purpose, options.strictSession);
     try {
       await this.attaching;
     } finally {
@@ -581,7 +594,19 @@ export class ChatRuntime {
     this.inTurn = true;
     this.turnSeq++;
     try {
-      return await proc.prompt(this.sessionId, blocks);
+      try {
+        return await proc.prompt(this.sessionId, blocks);
+      } catch (err) {
+        if (!isSessionLostError(err) || this.process !== proc) throw err;
+        // The adapter lost its session but still runs. Start a new one, reattach the saved
+        // session and send the prompt once more.
+        this.env.log.warn({ chatId: this.chatId, err }, "agent session lost; restarting the agent");
+        this.stopProcess();
+        await this.ensureSession("prompt", { strictSession: true });
+        const next = this.process;
+        if (!next?.alive || !this.sessionId) throw err;
+        return await next.prompt(this.sessionId, blocks);
+      }
     } finally {
       this.inTurn = false;
     }

@@ -70,6 +70,14 @@
  *   { "waitForCancel": true }               block until session/cancel
  *   { "stop": "end_turn" | ... , "usage": { ...PromptResponse.usage } }
  *   { "fail": "message" }                   the prompt request errors
+ *   { "failDetails": "text" }               the prompt errors -32603 with data.details
+ *   { "sessionLost": "once"|"forget"|true } the prompt errors the way the Claude adapter
+ *                                           does once its CLI died: -32603 with
+ *                                           details "Session not found", the process
+ *                                           stays alive. "once" does it for the first
+ *                                           prompt of a session only (a later process
+ *                                           answers normally), "forget" also drops the
+ *                                           session so session/load fails
  *   { "exit": code }                        the process exits mid-turn
  *   { "stderr": "text" }                    write text to the process's stderr
  *   { "kill": "SIGKILL" }                   the process kills itself with a signal
@@ -110,7 +118,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
@@ -389,6 +397,19 @@ async function runSteps(cx, sessionId, steps, signal, record) {
       throw new Cancelled();
     } else if (step.fail) {
       throw new acp.RequestError(-32603, step.fail);
+    } else if (step.failDetails) {
+      throw new acp.RequestError(-32603, "Internal error", { details: step.failDetails });
+    } else if (step.sessionLost) {
+      const s = sessions.get(sessionId);
+      if (step.sessionLost === "once") {
+        if (s?.lostOnce) continue;
+        if (s) s.lostOnce = true;
+        save(sessionId);
+      } else if (step.sessionLost === "forget") {
+        sessions.delete(sessionId);
+        if (stateDir) rmSync(sessionFile(sessionId), { force: true });
+      }
+      throw new acp.RequestError(-32603, "Internal error", { details: "Session not found" });
     } else if (step.stderr !== undefined) {
       process.stderr.write(`${step.stderr}\n`);
     } else if (step.kill) {

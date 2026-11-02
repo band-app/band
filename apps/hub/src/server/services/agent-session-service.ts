@@ -31,6 +31,7 @@ import {
   AgentProcessError,
   type AsyncTaskUpdate,
   type AttachedSession,
+  isSessionLostError,
   launchSpecHash,
   type PermissionOutcome,
 } from "@band-app/chat-runtime/acp-agent-process";
@@ -422,6 +423,36 @@ async function restartIfLaunchChanged(
   rt.process = null;
   rt.sessionId = null;
   runtimes.delete(chat.id);
+}
+
+/**
+ * Sends a prompt. When the adapter answers that its session is gone but it still runs (its agent
+ * child died), closes it, reattaches the chat's saved session on a new process and sends the prompt
+ * once more. A second failure is the turn's result.
+ */
+async function promptWithRecovery(
+  chatId: string,
+  rt: Runtime,
+  proc: AcpAgentProcess,
+  blocks: acp.ContentBlock[],
+): Promise<acp.PromptResponse> {
+  const sessionId = rt.sessionId;
+  if (!sessionId)
+    throw new Error("The agent is not running. Send the message again to restart it.");
+  try {
+    return await proc.prompt(sessionId, blocks);
+  } catch (err) {
+    if (!isSessionLostError(err) || rt.process !== proc || runtimes.get(chatId) !== rt) throw err;
+    log.warn({ chatId, err }, "agent session lost; restarting the agent");
+    for (const p of [...rt.pending.values()]) p.cancel();
+    proc.close();
+    rt.process = null;
+    rt.sessionId = null;
+    await agentSessionService.ensureSession(chatId, "prompt", { strictSession: true });
+    const next = rt.process as AcpAgentProcess | null;
+    if (!next?.alive || !rt.sessionId) throw err;
+    return await next.prompt(rt.sessionId, blocks);
+  }
 }
 
 /**
@@ -1460,11 +1491,13 @@ export class AgentSessionService {
     const stalled = new Promise<never>((_, reject) => {
       watchdog = setInterval(
         () => {
-          const cutOff = !proc.alive || proc.detached || rt.process !== proc;
+          const current = rt.process;
+          const cutOff =
+            !current || !current.alive || current.detached || runtimes.get(chatId) !== rt;
           if (!cutOff || Date.now() - rt.lastUpdateAt < stallMs) return;
           log.warn({ chatId, stallMs }, "turn stalled with its agent gone; ending it");
           // A detached agent still runs in its worker; nothing else will stop it now.
-          proc.close();
+          (current ?? proc).close();
           reject(new Error("The agent stopped responding. Send the message again to restart it."));
         },
         Math.min(Math.max(stallMs / 4, 250), 30_000),
@@ -1472,7 +1505,7 @@ export class AgentSessionService {
       watchdog.unref();
     });
     try {
-      return await Promise.race([proc.prompt(rt.sessionId, blocks), stalled]);
+      return await Promise.race([promptWithRecovery(chatId, rt, proc, blocks), stalled]);
     } finally {
       clearInterval(watchdog);
       rt.inTurn = false;
