@@ -201,8 +201,12 @@ test.describe("phone", () => {
         return maxScrollLeft - scrollLeft;
       })
       .toBeGreaterThan(100);
-    // The strip scrolls the active tab into view; the swipe starts only once that has happened.
+    // The strip scrolls the active tab into view. The terminal tab sits before the files, so on a
+    // narrow strip the second file's tab can be entirely past the right edge. Bring it in view
+    // before the swipe, which starts on it.
     await expect.poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[0]))).toBe(true);
+    await strip.waitForScrollSettled();
+    await worktreePage.fileTab(FILES[1]).scrollIntoViewIfNeeded();
     await strip.waitForScrollSettled();
     const before = (await strip.readScroll()).scrollLeft;
 
