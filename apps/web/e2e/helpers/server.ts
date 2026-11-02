@@ -33,8 +33,16 @@ export interface ServerHandle {
   restart: () => Promise<ServerHandle>;
 }
 
+const createdHomes: string[] = [];
+// Runs on pass, failure and throw, so a spec that never reaches its afterAll leaves no
+// band-e2e-test-* directory behind.
+process.on("exit", () => {
+  for (const dir of createdHomes) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+});
+
 export function createTmpHome(): string {
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-e2e-test-")));
+  createdHomes.push(tmp);
   const bandDir = join(tmp, ".band");
   mkdirSync(bandDir, { recursive: true });
   mkdirSync(join(bandDir, "status"), { recursive: true });

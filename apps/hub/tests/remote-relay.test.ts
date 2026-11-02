@@ -44,6 +44,18 @@ import { waitFor } from "./helpers/wait-for";
 import { WORKER_BIN } from "./helpers/worker-bin";
 
 const scratch: string[] = [];
+// Keeps the list, so a second pass can remove what a daemon wrote after the first.
+const removeScratch = () => {
+  for (const dir of scratch) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+    } catch {
+      // A worker's terminal daemon may still be writing; the later passes try again.
+    }
+  }
+};
+// Runs on pass, failure and throw, after afterAll, for any dir afterAll could not remove.
+process.on("exit", removeScratch);
 const tmp = (prefix: string) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   scratch.push(dir);
@@ -454,7 +466,11 @@ afterAll(async () => {
   a?.child.kill("SIGKILL");
   b?.child.kill("SIGKILL");
   await server?.close();
-  for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  removeScratch();
+  // A worker's terminal daemon exits once its run dir is gone, but it can write terminal-history
+  // into the state dir first. A second pass removes what it wrote.
+  await new Promise((r) => setTimeout(r, 1500));
+  removeScratch();
 });
 
 describe("uploads (S1)", () => {
