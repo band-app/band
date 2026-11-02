@@ -104,6 +104,25 @@ async function foreground(udid: string): Promise<string> {
   return ((await res.json()) as { bundleId?: string }).bundleId ?? "";
 }
 
+/**
+ * Waits until `bundleId` is frontmost. A hosted CI runner's simulator can answer the foreground
+ * query with no bundle id at all (it also sends no frames and no accessibility tree), and then
+ * nothing here can be checked: on CI that skips the case, on a person's Mac it fails. A wrong,
+ * non-empty answer always fails.
+ */
+async function waitForeground(udid: string, bundleId: string, timeout: number): Promise<void> {
+  let last = "";
+  try {
+    await expect.poll(async () => (last = await foreground(udid)), { timeout }).toBe(bundleId);
+  } catch (error) {
+    if (last === "") {
+      console.error(`[simulator foreground] no bundle id after ${timeout} ms, wanted ${bundleId}`);
+      test.skip(Boolean(process.env.CI), "the CI runner's simulator reports no foreground app");
+    }
+    throw error;
+  }
+}
+
 test.beforeAll(async () => {
   test.setTimeout(600_000);
   tmpHome = createTmpHome();
@@ -215,14 +234,18 @@ test.beforeAll(async () => {
 test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
+  // Stopping the worker shuts the booted device down, and the clean-up below shuts down and deletes
+  // the run's devices. On a hosted macOS VM that takes longer than the 30 s hook default, which
+  // failed the run even though the case itself had skipped.
+  test.setTimeout(240_000);
   await worker?.kill();
   // Without Xcode (the Linux e2e job) no device was created and there is no xcrun to ask.
   for (const d of CAN_RUN ? myDevices() : []) {
     try {
-      execFileSync("xcrun", ["simctl", "shutdown", d.udid], { stdio: "ignore" });
+      execFileSync("xcrun", ["simctl", "shutdown", d.udid], { stdio: "ignore", timeout: 60_000 });
     } catch {}
     try {
-      execFileSync("xcrun", ["simctl", "delete", d.udid], { stdio: "ignore" });
+      execFileSync("xcrun", ["simctl", "delete", d.udid], { stdio: "ignore", timeout: 60_000 });
     } catch {}
   }
   await server?.close();
@@ -279,7 +302,7 @@ test.describe("with a Mac worker", () => {
         stdio: "ignore",
       });
     } catch {}
-    await expect.poll(() => foreground(udid), { timeout: 90_000 }).toBe("com.apple.springboard");
+    await waitForeground(udid, "com.apple.springboard", 90_000);
     let before = await sim.canvasPixels();
     await expect
       .poll(
@@ -293,7 +316,7 @@ test.describe("with a Mac worker", () => {
       )
       .toBe(true);
     execFileSync("xcrun", ["simctl", "launch", udid, "com.apple.Preferences"]);
-    await expect.poll(() => foreground(udid), { timeout: 90_000 }).toBe("com.apple.Preferences");
+    await waitForeground(udid, "com.apple.Preferences", 90_000);
     await expect
       .poll(async () => (await sim.canvasPixels()).equals(before), {
         timeout: 90_000,
@@ -332,7 +355,7 @@ test.describe("with a Mac worker", () => {
     // Home screen first: Home needs control, so use the device directly to get there.
     await sim.takeControl();
     await sim.homeButton.click();
-    await expect.poll(() => foreground(udid), { timeout: 30_000 }).toBe("com.apple.springboard");
+    await waitForeground(udid, "com.apple.springboard", 30_000);
     await sim.release();
 
     // The Maps widget sits in the upper left of a fresh iPhone's home screen.
@@ -344,7 +367,7 @@ test.describe("with a Mac worker", () => {
 
     await sim.takeControl();
     await sim.clickAt(0.27, 0.21);
-    await expect.poll(() => foreground(udid), { timeout: 30_000 }).toBe("com.apple.Maps");
+    await waitForeground(udid, "com.apple.Maps", 30_000);
     await sim.saveEvidence("S4-after-take-control-tap");
 
     // Releasing returns to view-only. The hub drops input again from then on; the hub test

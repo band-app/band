@@ -36,6 +36,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A re-based merge-queue entry gets a new sha, so the concurrency group above
+  # does not cancel the run of the entry it replaced, and that run keeps its
+  # macOS runners. Expressions cannot parse the PR number out of
+  # `gh-readonly-queue/main/pr-<n>-<sha>`, so this job does: it cancels every
+  # older merge_group run of the same PR (a lower run id, so a late-starting old
+  # run can never cancel its replacement) and leaves other PRs alone.
+  cancel-superseded:
+    name: Cancel superseded queue runs
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel older runs of this PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          PR=$(printf '%s' "$HEAD_REF" | sed -n 's|^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*|\1|p')
+          if [ -z "$PR" ]; then
+            echo "No PR number in $HEAD_REF; nothing to cancel."
+            exit 0
+          fi
+          for status in queued in_progress; do
+            gh api --paginate "repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&status=$status&per_page=100" \
+              --jq ".workflow_runs[] | select(.head_branch | test(\"^gh-readonly-queue/[^/]+/pr-$PR-\")) | select(.id < $RUN_ID) | .id" |
+              while read -r id; do
+                echo "Cancelling run $id (older entry of PR #$PR)"
+                gh api -X POST "repos/$REPO/actions/runs/$id/cancel" || true
+              done
+          done
+
   # Decides whether a pull request changed anything the test jobs cover. A
   # change only to docs, the website or root Markdown skips them; the two
   # required checks still report (see `lint-test-build`). Pushes and the merge
