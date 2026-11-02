@@ -623,7 +623,7 @@ function withStderr(
   exit: Lifecycle["exit"] = null,
   scrub: (text: string) => string = (text) => text,
 ): AgentProcessError {
-  const message = scrub(err instanceof Error ? err.message : describe(err));
+  const message = scrub(err instanceof Error ? withData(err) : describe(err));
   const detail = stderr.trim();
   return new AgentProcessError(`${label}: ${message}${detail ? `\n\n${detail}` : ""}`, {
     exitCode: exit?.code ?? null,
@@ -631,6 +631,28 @@ function withStderr(
     stderr,
     timedOut: err instanceof RequestTimeoutError,
   });
+}
+
+/** An `Error` from the SDK keeps the agent's `data.details` beside its message. */
+function withData(err: Error): string {
+  const data = (err as { data?: unknown }).data;
+  let text = "";
+  if (typeof data === "string") text = data;
+  else if (data && typeof data === "object") {
+    const details = (data as { details?: unknown }).details;
+    text = typeof details === "string" ? details : JSON.stringify(data);
+  }
+  return text && !err.message.includes(text) ? `${err.message}: ${text}` : err.message;
+}
+
+/**
+ * True when a prompt failed because the agent's session is gone while its adapter process still
+ * runs (claude-agent-acp answers -32603 "Session not found" after its `claude` child died). The
+ * adapter gives no structured code, so this reads the text.
+ */
+export function isSessionLostError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : "";
+  return /session not found|agent process exited unexpectedly|session (has )?ended/i.test(message);
 }
 
 /** JSON-RPC errors arrive as plain `{ code, message, data }` objects. */
