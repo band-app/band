@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Test text editor</title>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      body { display: flex; flex-direction: column; font: 13px sans-serif; }
+      textarea { flex: 1; border: 0; padding: 8px; resize: none; font: 13px monospace; }
+      #status, #probe { margin: 0; padding: 4px 8px; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <textarea id="text" aria-label="Document text" disabled></textarea>
+    <div id="status" data-testid="status">starting</div>
+    <pre id="probe" data-testid="probe"></pre>
+    <script src="editor.js"></script>
+  </body>
+</html>

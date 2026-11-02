@@ -1,0 +1,9 @@
+{
+  "tools": [
+    {
+      "name": "get_text",
+      "description": "Returns the text in the editor",
+      "inputSchema": { "type": "object", "properties": {} }
+    }
+  ]
+}

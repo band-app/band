@@ -389,6 +389,17 @@ band tokens revoke <id>
 
 `list` shows each token's id, kind, label, state and last use, never its secret. `create-device` prints a new device token once, for a UI or script. Add `--admin` only for a token that must manage tokens too; without it the token gets 403 on `band tokens`. These commands need an admin token, which the shared token in `settings.json` is. `revoke` stops a token from authenticating. The shared token in `settings.json` cannot be revoked. These commands change who can reach the hub, so run them only when the user asks.
 
+### Editor extensions
+
+```sh
+band extensions list
+band extensions reload
+band extensions install <url | file.tar.gz> [--sha256 <hex>]
+band extensions remove <id>
+```
+
+An extension is a folder in `<BAND_HOME>/extensions/<id>/` on the hub with a `band-extension.json`. It adds an editor for some files (for example spreadsheets) that opens in a center tab. `list` shows each extension and its editors, and an `error:` line for a folder that failed to load, with the reason. `reload` rereads the folder after you copy an extension in and needs an admin token. `install` takes a release archive (a `.tar.gz` with one folder named by the extension id) from an https URL or a local file, and checks its sha256 when given or when `<url>.sha256` exists. `remove` deletes an extension. These commands need an admin token. Run `reload`, `install` and `remove` only when the user asks.
+
 ### Proxy an MCP server through the hub
 
 ```sh

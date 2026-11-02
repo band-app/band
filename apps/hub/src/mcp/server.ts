@@ -51,6 +51,7 @@ function discoverProcedures(): ProcedureInfo[] {
       // The Simulator tab is a person's; an agent uses the simulator_* tools.
       path.startsWith("simulators.") ||
       path.startsWith("voice.") ||
+      path.startsWith("extensions.") ||
       path.startsWith("provisioning.") ||
       // Writes ~/.claude/settings.json on a host; only a person's click may.
       path.startsWith("hooks.")

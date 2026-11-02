@@ -38,6 +38,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { OpenWithItems } from "../../components/extensions/OpenWithItems";
 import { writeClipboardText } from "../../lib/clipboard";
 import { useAdapter, useCapabilities } from "../context";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
@@ -387,6 +388,7 @@ interface TreeNodeProps {
   onRevealInFinder?: (path: string) => void;
   /** Save a file to the user's computer. Files only. */
   onDownload?: (path: string) => void;
+  worktreeId: string;
 }
 
 function TreeNode({
@@ -425,6 +427,7 @@ function TreeNode({
   dnd,
   onRevealInFinder,
   onDownload,
+  worktreeId,
 }: TreeNodeProps) {
   const entryPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
   const isDir = entry.type === "directory";
@@ -631,6 +634,14 @@ function TreeNode({
             Download
           </ContextMenuItem>
         )}
+        {!isDir && (
+          <OpenWithItems
+            worktreeId={worktreeId}
+            filePath={entryPath}
+            testidPrefix="file-tree"
+            onOpen={() => (onOpenFilePinned ?? onOpenFile)(entryPath)}
+          />
+        )}
         {canCut && (
           <ContextMenuItem
             data-testid="file-tree__cut"
@@ -769,6 +780,7 @@ function TreeNode({
               dnd={dnd}
               onRevealInFinder={onRevealInFinder}
               onDownload={onDownload}
+              worktreeId={worktreeId}
             />
           );
           const newEntryInput = showInlineInput ? (
@@ -1789,6 +1801,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                   dnd={dnd}
                   onRevealInFinder={onRevealInFinder}
                   onDownload={onDownload}
+                  worktreeId={worktreeId}
                 />
               );
               const rootInput = showRootInput ? (

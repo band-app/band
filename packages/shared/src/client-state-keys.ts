@@ -154,8 +154,10 @@ const RULES: KeyRule[] = [
   perWorktree("band-draft:", [rawPart("all")]),
   // A file's unsaved text, or an untitled buffer's (`<prefix><ws>:<path>`).
   perWorktreeLeaf("band-unsaved:", [rawPart("all")]),
+  // The editor a person chose as the default for a file name glob (`*.xlsx`), by extension.
+  exact("band:extension-defaults", [jsonPart("all")]),
   perWorktree("band-tab-state:", [
-    perFileFieldsPart("all", ["viewMode", "language"]),
+    perFileFieldsPart("all", ["viewMode", "language", "editor"]),
     perFileFieldsPart("device", ["scrollTop", "selection"]),
   ]),
 

@@ -109,6 +109,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: McpCmd,
     },
+    /// List the editor extensions installed on the hub, or reread them from disk
+    Extensions {
+        #[command(subcommand)]
+        cmd: ExtensionsCmd,
+    },
     /// Show current settings
     Settings,
     /// Print the CLI version and, when the hub answers, the hub version
@@ -944,6 +949,27 @@ enum VaultCmd {
 }
 
 #[derive(Subcommand)]
+enum ExtensionsCmd {
+    /// List the installed extensions and the folders that failed to load
+    List,
+    /// Reread `<BAND_HOME>/extensions` (admin token)
+    Reload,
+    /// Install an extension from a release archive (admin token)
+    Install {
+        /// An https URL (or http on loopback) or a local `.tar.gz` file, which is uploaded to the hub
+        source: String,
+        /// Expected sha256 of the archive. Without it the hub checks `<url>.sha256` when that exists.
+        #[arg(long)]
+        sha256: Option<String>,
+    },
+    /// Delete an installed extension (admin token)
+    Remove {
+        /// Extension id (from `band extensions list`)
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum McpCmd {
     /// List the proxied MCP servers
     List,
@@ -1427,6 +1453,14 @@ fn main() {
                 disabled,
             ),
             McpCmd::Remove { name } => cmd_mcp_remove(&name),
+        },
+        Commands::Extensions { cmd } => match cmd {
+            ExtensionsCmd::List => cmd_extensions("extensions.list", false),
+            ExtensionsCmd::Reload => cmd_extensions("extensions.reload", true),
+            ExtensionsCmd::Install { source, sha256 } => {
+                cmd_extensions_install(&source, sha256.as_deref())
+            }
+            ExtensionsCmd::Remove { id } => cmd_extensions_remove(&id),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Version => Ok(cmd_version(json_output)),
@@ -5258,6 +5292,98 @@ fn split_list(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn cmd_extensions_install(source: &str, sha256: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let is_url = source.starts_with("http://") || source.starts_with("https://");
+    let data = if is_url {
+        let mut input = serde_json::json!({"url": source});
+        if let Some(hash) = sha256 {
+            input["sha256"] = serde_json::json!(hash);
+        }
+        client.trpc_mutate("extensions.install", &input)?
+    } else {
+        let bytes = std::fs::read(source).map_err(|e| format!("Cannot read {source}: {e}"))?;
+        let path = match sha256 {
+            Some(hash) => format!("/api/extensions/install?sha256={hash}"),
+            None => "/api/extensions/install".to_string(),
+        };
+        let reply = client.post_bytes(&path, &bytes)?;
+        reply.get("extension").cloned().unwrap_or(reply)
+    };
+    let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    Ok(CommandResult {
+        text: format!("Installed extension {} {}\n", text("id"), text("version")),
+        json: serde_json::json!({"extension": data}),
+    })
+}
+
+fn cmd_extensions_remove(id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("extensions.remove", &serde_json::json!({"id": id}))?;
+    Ok(CommandResult {
+        text: format!("Removed extension {id}\n"),
+        json: serde_json::json!({"ok": true}),
+    })
+}
+
+fn cmd_extensions(procedure: &str, mutate: bool) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = if mutate {
+        client.trpc_mutate(procedure, &serde_json::json!({}))?
+    } else {
+        client.trpc_query(procedure, &serde_json::json!({}))?
+    };
+    let extensions = data
+        .get("extensions")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let errors = data
+        .get("errors")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut rows: Vec<[String; 4]> = Vec::new();
+    for ext in &extensions {
+        let text = |key: &str| ext.get(key).and_then(|v| v.as_str()).unwrap_or("");
+        let editors: Vec<String> = ext
+            .pointer("/contributes/fileEditors")
+            .and_then(|v| v.as_array())
+            .map(|list| {
+                list.iter()
+                    .map(|e| {
+                        let selectors: Vec<&str> = e
+                            .get("selector")
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.iter().filter_map(|s| s.as_str()).collect())
+                            .unwrap_or_default();
+                        format!(
+                            "{} ({})",
+                            e.get("label").and_then(|v| v.as_str()).unwrap_or(""),
+                            selectors.join(", ")
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        rows.push([
+            text("id").to_string(),
+            text("name").to_string(),
+            text("version").to_string(),
+            editors.join("; "),
+        ]);
+    }
+    let mut out = format_table(&["ID", "NAME", "VERSION", "EDITORS"], &rows);
+    for err in &errors {
+        let text = |key: &str| err.get(key).and_then(|v| v.as_str()).unwrap_or("");
+        let _ = writeln!(out, "error: {}: {}", text("folder"), text("error"));
+    }
+    Ok(CommandResult {
+        text: out,
+        json: data,
+    })
+}
+
 fn cmd_mcp_list() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let data = client.trpc_query("mcp.list", &serde_json::json!({}))?;
@@ -6236,6 +6362,35 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Re-encrypt every stored credential under a new key",
             "parameters": [],
             "notes": "Needs an admin token. Only for a key file in BAND_HOME; a key from BAND_VAULT_KEY is changed in the environment."
+        }),
+        serde_json::json!({
+            "name": "extensions list",
+            "description": "List the editor extensions installed on the hub and the extension folders that failed to load",
+            "parameters": [],
+            "notes": "Text output: `ID  NAME  VERSION  EDITORS`, then one `error: <folder>: <reason>` line per folder that failed to load.\nJSON output: `{\"extensions\": [{\"id\": \"...\", \"name\": \"...\", \"version\": \"...\", \"contributes\": {\"fileEditors\": []}}], \"errors\": [{\"folder\": \"...\", \"error\": \"...\"}]}`."
+        }),
+        serde_json::json!({
+            "name": "extensions reload",
+            "description": "Reread <BAND_HOME>/extensions on the hub, so a newly copied extension shows up",
+            "parameters": [],
+            "notes": "Needs an admin token. Prints the same list as `extensions list`."
+        }),
+        serde_json::json!({
+            "name": "extensions install",
+            "description": "Install an editor extension from a release archive (.tar.gz with one folder named by the extension id)",
+            "parameters": [
+                {"name": "source", "type": "string", "required": true, "positional": true, "description": "An https URL (or http on loopback) or a local .tar.gz file, which is uploaded to the hub"},
+                {"name": "sha256", "type": "string", "required": false, "description": "Expected sha256 of the archive. Without it the hub checks <url>.sha256 when that file exists."}
+            ],
+            "notes": "Needs an admin token. The old version stays until the new one passes every check. Prints `Installed extension <id> <version>`."
+        }),
+        serde_json::json!({
+            "name": "extensions remove",
+            "description": "Delete an installed editor extension",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Extension id (from `band extensions list`)"}
+            ],
+            "notes": "Needs an admin token. Prints `Removed extension <id>`."
         }),
         serde_json::json!({
             "name": "mcp list",

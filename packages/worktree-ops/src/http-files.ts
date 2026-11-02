@@ -88,6 +88,7 @@ const MIME_TYPES: Record<string, string> = {
   ".yaml": "application/x-yaml",
   ".yml": "application/x-yaml",
   ".zip": "application/zip",
+  ".wasm": "application/wasm",
 };
 
 /**

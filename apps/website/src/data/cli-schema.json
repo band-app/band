@@ -998,6 +998,52 @@
       "parameters": []
     },
     {
+      "description": "List the editor extensions installed on the hub and the extension folders that failed to load",
+      "name": "extensions list",
+      "notes": "Text output: `ID  NAME  VERSION  EDITORS`, then one `error: <folder>: <reason>` line per folder that failed to load.\nJSON output: `{\"extensions\": [{\"id\": \"...\", \"name\": \"...\", \"version\": \"...\", \"contributes\": {\"fileEditors\": []}}], \"errors\": [{\"folder\": \"...\", \"error\": \"...\"}]}`.",
+      "parameters": []
+    },
+    {
+      "description": "Reread <BAND_HOME>/extensions on the hub, so a newly copied extension shows up",
+      "name": "extensions reload",
+      "notes": "Needs an admin token. Prints the same list as `extensions list`.",
+      "parameters": []
+    },
+    {
+      "description": "Install an editor extension from a release archive (.tar.gz with one folder named by the extension id)",
+      "name": "extensions install",
+      "notes": "Needs an admin token. The old version stays until the new one passes every check. Prints `Installed extension <id> <version>`.",
+      "parameters": [
+        {
+          "description": "An https URL (or http on loopback) or a local .tar.gz file, which is uploaded to the hub",
+          "name": "source",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Expected sha256 of the archive. Without it the hub checks <url>.sha256 when that file exists.",
+          "name": "sha256",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Delete an installed editor extension",
+      "name": "extensions remove",
+      "notes": "Needs an admin token. Prints `Removed extension <id>`.",
+      "parameters": [
+        {
+          "description": "Extension id (from `band extensions list`)",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
       "description": "List the HTTP MCP servers the hub proxies for agents",
       "name": "mcp list",
       "notes": "Needs an admin token. Text output: `NAME  URL  CREDENTIAL  TOOLS  MODE`.\nJSON output: `{\"servers\": [{\"id\": \"m-...\", \"name\": \"...\", \"url\": \"...\", \"vaultItemId\": null, \"allowTools\": null, \"readOnly\": false, \"readOnlyTools\": [], \"enabled\": true}]}`.",

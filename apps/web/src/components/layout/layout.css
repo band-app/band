@@ -222,6 +222,12 @@ html[data-band-layout-dragging] webview {
   pointer-events: none;
 }
 
+/* An extension editor's iframe swallows pointer events the same way. */
+html[data-band-layout-dragging] iframe,
+html[data-band-layout-resizing] iframe {
+  pointer-events: none;
+}
+
 /* ---------------------------------------------------------------------------
  * Center area (`band-layout--center`): tabs size to their title, bounded by a
  * min (short tabs stay tappable) and a max (a long name truncates and shows in

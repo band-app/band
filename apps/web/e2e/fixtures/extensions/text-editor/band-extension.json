@@ -1,0 +1,19 @@
+{
+  "id": "text-editor",
+  "name": "Test text editor",
+  "version": "0.0.1",
+  "extensionApi": 1,
+  "contributes": {
+    "fileEditors": [
+      {
+        "id": "text",
+        "label": "Test text editor",
+        "selector": ["*.band-test"],
+        "default": true,
+        "entry": "index.html",
+        "binary": false,
+        "tools": "tools.json"
+      }
+    ]
+  }
+}

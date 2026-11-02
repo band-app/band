@@ -128,6 +128,13 @@ import { clientStorage, hydrateWorktree, subscribeClientState } from "../lib/cli
 import { writeClipboardText } from "../lib/clipboard";
 import { announceIfMoved, promptOnHostOffline } from "../lib/continue-prompt";
 import { listen as desktopListen } from "../lib/desktop-ipc";
+import {
+  isExtensionDirty,
+  resolveEditor,
+  useExtensionDefaults,
+  useExtensions,
+  useFileEditorChoice,
+} from "../lib/extensions";
 import { hubUrl } from "../lib/hub-config";
 import { isDesktop } from "../lib/is-desktop";
 import {
@@ -187,6 +194,8 @@ import {
   SidebarGutter,
   useWorktreeChrome,
 } from "./DesktopTitleBar";
+import { ExtensionEditor } from "./extensions/ExtensionEditor";
+import { OpenWithItems } from "./extensions/OpenWithItems";
 import {
   type LayoutHeaderActionsProps,
   type LayoutPanelProps,
@@ -1057,7 +1066,7 @@ function setEditedHere(ws: string, path: string, edited: boolean): void {
 
 function isFileDirty(ws: string, path: string): boolean {
   readTabStates(ws); // moves a legacy `editedContent` out of the blob first
-  return getUnsavedContent(ws, path) !== null;
+  return getUnsavedContent(ws, path) !== null || isExtensionDirty(ws, path);
 }
 
 // File leaves closed by the user. `doCloseLeaf` drops the leaf's tab state
@@ -1300,7 +1309,69 @@ function FileLeaf(props: LayoutPanelProps<FileLeafParams>) {
       />
     );
   }
+  return <EditorChoiceFileLeaf {...props} />;
+}
+
+/**
+ * Picks the editor for a worktree file: an extension's editor when "Open With…" chose one or a
+ * default matches, else the built-in viewer. The tab and its panel id stay `file:<path>` either way.
+ */
+function EditorChoiceFileLeaf(props: LayoutPanelProps<FileLeafParams>) {
+  const { worktreeId: hostWorktreeId } = usePanelVisibility();
+  const worktreeId = hostWorktreeId ?? props.params.worktreeId ?? "";
+  const filePath = props.params.filePath ?? "";
+  const untitled = props.params.untitled === true || isUntitledPath(filePath);
+  const external = untitled ? false : (props.params.external ?? filePath.startsWith("/"));
+  const { list, loading } = useExtensions();
+  const defaults = useExtensionDefaults();
+  const choice = useFileEditorChoice(worktreeId, filePath);
+  const resolved = untitled || external ? null : resolveEditor(list, filePath, choice, defaults);
+  const { api } = props;
+  // An iframe reloads when its element is detached, so an extension tab stays attached while
+  // another tab of its group is selected.
+  useEffect(() => {
+    api.setRenderer(resolved ? "always" : "onlyWhenVisible");
+  }, [api, resolved]);
+  if (!untitled && !external && loading) return null;
+  if (resolved) {
+    return (
+      <ExtensionFileLeaf
+        api={api}
+        worktreeId={worktreeId}
+        filePath={filePath}
+        extensionId={resolved.extensionId}
+        editor={resolved.editor}
+      />
+    );
+  }
   return <WorktreeFileLeaf {...props} />;
+}
+
+function ExtensionFileLeaf({
+  api,
+  worktreeId,
+  filePath,
+  extensionId,
+  editor,
+}: {
+  api: LayoutPanelProps<FileLeafParams>["api"];
+  worktreeId: string;
+  filePath: string;
+  extensionId: string;
+  editor: import("@band-app/plugin-api").FileEditorManifest;
+}) {
+  const { visible } = usePanelVisibility();
+  useActiveFileTracking(api, worktreeId, filePath, visible);
+  return (
+    <ExtensionEditor
+      key={`${extensionId}/${editor.id}`}
+      worktreeId={worktreeId}
+      filePath={filePath}
+      extensionId={extensionId}
+      editor={editor}
+      visible={visible}
+    />
+  );
 }
 
 function WorktreeFileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
@@ -2636,11 +2707,14 @@ function TabPathContextMenu({
   filePath,
   testidPrefix,
   children,
+  openWith,
 }: {
   worktreeId: string;
   filePath: string;
   testidPrefix: string;
   children: React.ReactNode;
+  /** A file tab offers "Open With…". */
+  openWith?: boolean;
 }) {
   const worktreePath = useWorktreePath(worktreeId);
   const isAbsolute = filePath.startsWith("/");
@@ -2654,6 +2728,9 @@ function TabPathContextMenu({
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent data-testid={`${testidPrefix}__context-menu`}>
+        {openWith && !isAbsolute && (
+          <OpenWithItems worktreeId={worktreeId} filePath={filePath} testidPrefix={testidPrefix} />
+        )}
         <ContextMenuItem
           onClick={() => void writeClipboardText(filePath)}
           data-testid={`${testidPrefix}__context-menu-item--copy-relative-path`}
@@ -2715,6 +2792,7 @@ function FileTab(props: LayoutTabProps<FileLeafParams>) {
       worktreeId={worktreeId}
       filePath={filePath}
       testidPrefix={`center-file-tab--${filePath}`}
+      openWith
     >
       <div
         className={TAB_ROOT_CLASS}

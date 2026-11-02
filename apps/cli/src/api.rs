@@ -130,6 +130,36 @@ impl ApiClient {
             .map_err(|e| format!("Cannot connect to Band web server. Make sure it's running.\n{e}"))
     }
 
+    /// POSTs raw bytes (a local file for the hub to install) and returns the JSON answer.
+    /// The hub answers `{"error": "..."}` with a 4xx status for a refusal.
+    pub fn post_bytes(&self, path: &str, body: &[u8]) -> Result<serde_json::Value, String> {
+        let mut req = self
+            .agent
+            .post(&format!("{}{path}", self.base_url))
+            .header("Content-Type", "application/octet-stream");
+        if let Some(ref token) = self.token {
+            req = req.header("Cookie", &format!("band_token={token}"));
+        }
+        let mut response = req.send(body).map_err(|e| {
+            format!("Cannot connect to Band web server. Make sure it's running.\n{e}")
+        })?;
+        let status = response.status().as_u16();
+        if status == 401 {
+            return Err("Authentication failed. Check tokenSecret in settings".to_string());
+        }
+        let json: serde_json::Value = response
+            .body_mut()
+            .read_json()
+            .map_err(|_| format!("Server returned HTTP {status}"))?;
+        if let Some(msg) = json.get("error").and_then(serde_json::Value::as_str) {
+            return Err(msg.to_string());
+        }
+        if status >= 400 {
+            return Err(format!("Server returned HTTP {status}"));
+        }
+        Ok(json)
+    }
+
     pub fn trpc_mutate(
         &self,
         procedure: &str,
