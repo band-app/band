@@ -1,4 +1,4 @@
-import { type CDPSession, type Locator, type Page, test } from "@playwright/test";
+import { type CDPSession, expect, type Locator, type Page, test } from "@playwright/test";
 
 /** Scroll state of the tab list, in CSS px. */
 export interface TabStripScroll {
@@ -153,6 +153,9 @@ export class CenterTabStrip {
    *  headless shell CI runs, so it can't stand in for a finger there.) */
   async touchSwipe(startTab: Locator, distance: number): Promise<void> {
     await test.step(`Swipe the tab strip ${distance}px with a finger`, async () => {
+      // The strip can still be moving a tab into view when the test gets here. Start once the
+      // tab the finger lands on has some part inside the strip.
+      await expect.poll(() => this.isTabInStrip(startTab)).toBe(true);
       const { x, y } = await this.touchPoint(startTab);
       await this.dispatchSwipe(x, y, distance);
     });
@@ -179,6 +182,13 @@ export class CenterTabStrip {
       await this.waitForScrollSettled();
       await target.tap();
     });
+  }
+
+  /** Whether any part of `tab` is inside the strip's box. */
+  private async isTabInStrip(tab: Locator): Promise<boolean> {
+    const [box, list] = await Promise.all([tab.boundingBox(), this.list.boundingBox()]);
+    if (!box || !list) return false;
+    return Math.min(box.x + box.width, list.x + list.width) > Math.max(box.x, list.x);
   }
 
   /** The middle of the part of `tab` the strip shows: a tab at the edge can
