@@ -378,7 +378,11 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return this.subscribeStatusStream(handle);
   }
 
-  subscribeFileChanges(worktreeId: string, handler: (path: string) => void): Unsubscribe {
+  subscribeFileChanges(
+    worktreeId: string,
+    handler: (path: string) => void,
+    onResync?: () => void,
+  ): Unsubscribe {
     // The server tears the underlying watcher down (and the subscription
     // completes) when its `fs.watch` hits an unrecoverable error — e.g.
     // the worktree directory was deleted. We reconnect with exponential
@@ -393,12 +397,21 @@ export class WebDashboardAdapter implements DashboardAdapter {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
     const MAX_BACKOFF_MS = 30_000;
+    // A change made while no socket was open sends no event later, so the first
+    // connection after a drop tells the caller to reload.
+    let resyncPending = false;
+    const connected = () => {
+      if (!resyncPending) return;
+      resyncPending = false;
+      onResync?.();
+    };
 
     // Some tRPC transports can fire onStopped after onError (or vice
     // versa) for the same disconnect; the `!reconnectTimer` guard makes
     // the second call a no-op so we don't schedule the reconnect twice.
     const handleDisconnect = () => {
       currentSub = null;
+      resyncPending = true;
       if (active && !reconnectTimer) {
         // 500, 1000, 2000, 4000 … capped at 30 s.
         const delay = Math.min(2 ** attempt * 500, MAX_BACKOFF_MS);
@@ -421,6 +434,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
             attempt = 0;
             handler(data.path);
           },
+          onStarted: connected,
           onStopped: handleDisconnect,
           onError: handleDisconnect,
         },
@@ -450,6 +464,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
       ws.onopen = () => {
         opened = true;
         clearTimeout(timer);
+        connected();
       };
       ws.onmessage = (event) => {
         try {

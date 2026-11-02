@@ -290,6 +290,9 @@ describe("requests from the hub side (S4)", () => {
   }, 60_000);
 
   it("runs a subscription wake-up on the worker", async () => {
+    // The previous test's turn can still be running. The wake-up is what this test is about,
+    // so it starts from a chat with no turn and no queue.
+    await waitQuiet(wt, chatId);
     await w.m("subscriptions.create", {
       source: "timer",
       chatId,

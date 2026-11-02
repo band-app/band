@@ -4,7 +4,7 @@
 // URL it stored (`repos.path` is ""). The remote is a local git HTTP server that needs basic auth.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
@@ -20,6 +20,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { removeTmpHome } from "./helpers/tmp-home";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "git-credentials-no-checkout-secret";
@@ -152,6 +153,11 @@ beforeAll(async () => {
         BAND_HOME: join(workerHome, ".band"),
         // A static worker keeps the machine's helpers, so keep the system gitconfig's keychain helper (macOS) out.
         GIT_CONFIG_NOSYSTEM: "1",
+        // Shells live and die with the worker. A terminal daemon would outlive it, and macOS zsh writes
+        // `~/.zsh_sessions` and its history when a shell exits, into the worker's HOME, while it is deleted.
+        BAND_TERMINAL_DAEMON: "0",
+        SHELL_SESSIONS_DISABLE: "1",
+        HISTFILE: "/dev/null",
       },
       stdio: "ignore",
     },
@@ -171,11 +177,21 @@ beforeAll(async () => {
   worktreeId = toWorktreeId("proj", "feat", hostId);
 }, 120_000);
 
+/** End the worker and wait until it is gone, so nothing writes into its HOME while the test deletes it. */
+async function stopWorker(child: ChildProcess | undefined): Promise<void> {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  const fallback = setTimeout(() => child.kill("SIGKILL"), 5_000);
+  child.kill("SIGTERM");
+  await exited;
+  clearTimeout(fallback);
+}
+
 afterAll(async () => {
-  worker?.kill("SIGKILL");
+  await stopWorker(worker);
   await server?.close();
   await stub?.stop();
-  for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  for (const dir of scratch) removeTmpHome(dir);
 });
 
 describe("a repo the hub has no checkout of", () => {

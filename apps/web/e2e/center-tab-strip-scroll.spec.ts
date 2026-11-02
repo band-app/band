@@ -201,6 +201,8 @@ test.describe("phone", () => {
         return maxScrollLeft - scrollLeft;
       })
       .toBeGreaterThan(100);
+    // The strip scrolls the active tab into view; the swipe starts only once that has happened.
+    await expect.poll(() => strip.isTabFullyShown(worktreePage.fileTab(FILES[0]))).toBe(true);
     await strip.waitForScrollSettled();
     const before = (await strip.readScroll()).scrollLeft;
 

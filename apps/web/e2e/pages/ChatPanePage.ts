@@ -899,6 +899,25 @@ export class ChatPanePage {
     });
   }
 
+  /** Scroll the chat to the top the way a person does: a wheel tick up first,
+   *  then the jump. The list sticks to the bottom until it sees the user
+   *  scroll up, and it learns that from a wheel event at once but from a
+   *  scroll event only after it has handled any pending height change, which
+   *  re-pins the bottom. With the wheel tick first, the write of `scrollTop`
+   *  cannot be undone. `scrollToTop` stays a bare write for the anchor-jump
+   *  test, which does not care. */
+  async scrollToTopByUser(): Promise<void> {
+    await test.step("Scroll chat to top like a user", async () => {
+      const box = await this.scroller.boundingBox();
+      if (!box) throw new Error("chat scroller has no bounding box — not visible");
+      await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await this.page.mouse.wheel(0, -120);
+      await this.scroller.evaluate((el) => {
+        (el as HTMLDivElement).scrollTop = 0;
+      });
+    });
+  }
+
   /** The visible chat transcript's `scrollTop`, in CSS px. */
   async readScrollTop(): Promise<number> {
     return await this.scroller.filter({ visible: true }).evaluate((el) => el.scrollTop);
@@ -959,9 +978,29 @@ export class ChatPanePage {
    *  still reaches the latest message after older pages have prepended. */
   async scrollToBottom(): Promise<void> {
     await test.step("Scroll chat to bottom", async () => {
-      await this.scroller.evaluate((el) => {
-        (el as HTMLDivElement).scrollTop = (el as HTMLDivElement).scrollHeight;
-      });
+      // The list grows while it is scrolled (rows measure, an older page
+      // can still be prepending), so one write of `scrollHeight` can stop
+      // short. Keep pinning to the bottom until the height and the position
+      // hold still for a few frames.
+      await this.scroller.evaluate(
+        (el) =>
+          new Promise<void>((resolve, reject) => {
+            const deadline = performance.now() + 8_000;
+            let still = 0;
+            let lastHeight = -1;
+            const tick = () => {
+              el.scrollTop = el.scrollHeight;
+              const atBottom = el.scrollHeight - el.clientHeight - el.scrollTop < 1;
+              still = atBottom && el.scrollHeight === lastHeight ? still + 1 : 0;
+              lastHeight = el.scrollHeight;
+              if (still >= 10) resolve();
+              else if (performance.now() > deadline) {
+                reject(new Error("chat did not settle at the bottom within 8000 ms"));
+              } else requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          }),
+      );
     });
   }
 

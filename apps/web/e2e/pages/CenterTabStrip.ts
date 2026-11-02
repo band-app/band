@@ -172,8 +172,11 @@ export class CenterTabStrip {
     });
   }
 
+  /** A touch that lands on a strip still flinging after a swipe stops the
+   *  fling and sends no click, so wait for the scroll to end before tapping. */
   async tap(target: Locator): Promise<void> {
     await test.step("Tap a tab strip element", async () => {
+      await this.waitForScrollSettled();
       await target.tap();
     });
   }

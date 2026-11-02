@@ -779,6 +779,13 @@ jobs:
     if: needs.macos-changes.outputs.docker == 'true'
     timeout-minutes: 40
     steps:
+      - name: Free disk space
+        # Both jobs build images of about 2 GB each, and the runner starts with roughly 14 GB free. Runs
+        # 41156461496 (Docker image) and 41338577994 (k8s, kind) ended with "no space left on device".
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -1083,6 +1090,13 @@ jobs:
     if: needs.macos-changes.outputs.docker == 'true'
     timeout-minutes: 25
     steps:
+      - name: Free disk space
+        # Both jobs build images of about 2 GB each, and the runner starts with roughly 14 GB free. Runs
+        # 41156461496 (Docker image) and 41338577994 (k8s, kind) ended with "no space left on device".
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Checkout
         uses: actions/checkout@v6
 

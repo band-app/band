@@ -1,4 +1,4 @@
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 /** Where a dragged tab is dropped on a group. */
 export type DropAt = "tabs-start" | "tabs-end" | "left" | "right" | "top" | "bottom" | "center";
@@ -127,6 +127,18 @@ export class CenterLayout {
     const synced = Promise.all([pushed("dockview-layout-v9"), pushed("center-tabs")]);
     await action();
     await synced;
+    // A push that started before the action also matches the responses above,
+    // so wait for the store to say that nothing is left to send. The id of
+    // every entry changed since its last confirmed write sits in `pending`.
+    await expect
+      .poll(() =>
+        this.page.evaluate(() => {
+          const raw = localStorage.getItem("band:client-state:v1");
+          if (!raw) throw new Error("band:client-state:v1 is missing from localStorage");
+          return (JSON.parse(raw).pending as string[]).length;
+        }),
+      )
+      .toBe(0);
   }
 
   async releaseDrag(): Promise<void> {

@@ -174,6 +174,26 @@ describe("subscriptions api", () => {
       timeoutMs: 20_000,
     });
     await trpc(url, "subscriptions.remove", { id: cron.id });
+    // The cron's turns (it may have fired more than once) end before the one-off is set, so its
+    // delivery is not queued behind them and the 1.5 s below is the only delay it has.
+    await waitFor(
+      async () => {
+        const queue = await trpc<{ messages: unknown[] }>(
+          url,
+          "queue.get",
+          { worktreeId: WORKTREE_ID, chatId },
+          "query",
+        );
+        const running = await trpc<{ task: unknown }>(
+          url,
+          "tasks.get",
+          { worktreeId: WORKTREE_ID, chatId },
+          "query",
+        );
+        return queue.messages.length === 0 && !running.task;
+      },
+      { label: "the cron's turns to end" },
+    );
 
     const oneOff = await trpc<Created>(url, "subscriptions.create", {
       source: "timer",

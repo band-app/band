@@ -285,6 +285,8 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
 
   // The first call starts Chromium. Its launch budget is 44 s, so the test waits longer than that and a
   // failed launch reports the launcher's error with the browser's log instead of a bare timeout.
+  // Every test below that calls `title` can be the one that starts it (when an earlier one failed, or
+  // ran alone), so each gets the same 90 s.
   it("reads the title of a page on the worker's localhost through the hub (S1)", async () => {
     expect(await title(`worktreeId=${encodeURIComponent(worktreeId)}`, origin)).toBe(
       "dev server on the worker",
@@ -301,7 +303,7 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
     expect(await title(`worktreeId=${encodeURIComponent(worktreeId)}`, `${origin}/echo`)).toBe(
       "cookie:band=kept",
     );
-  });
+  }, 90_000);
 
   it("refuses a /cdp upgrade without a valid token", async () => {
     for (const headers of [{}, { Authorization: "Bearer wrong" }]) {
@@ -357,5 +359,5 @@ describe.skipIf(!chromium)("remote CDP for a worktree on a worker", () => {
       label: "chromium exit",
       timeoutMs: 15_000,
     });
-  });
+  }, 90_000);
 });

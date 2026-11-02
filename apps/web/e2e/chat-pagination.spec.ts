@@ -234,16 +234,15 @@ test.describe("Chat scroll-back pagination", () => {
       timeout: 30_000,
     });
 
-    // Page in some older history. First a POSITIVE anchor that the scrolled-up
-    // window actually rendered (the oldest in-window row is now on screen)...
-    await chatPane.scrollToTop();
-    await expect(chatPane.userMessage(userText(OLDEST_WINDOW_TURN))).toBeVisible({
-      timeout: 10_000,
-    });
-    // ...then the negative: the bottom row swapped out, proving the window moved.
+    // Page in some older history. The window has moved once the bottom row is swapped out. A
+    // row that is on screen at one instant is no proof of that: when the older page lands
+    // decides where the view sits, and under load it lands before or after any single check.
+    // Rows still render, so the missing bottom row is not an empty list.
+    await chatPane.scrollToTopByUser();
     await expect
       .poll(() => chatPane.assistantMessage(assistantText(TURNS - 1)).count(), { timeout: 10_000 })
       .toBe(0);
+    await expect.poll(() => chatPane.messageRowCount()).toBeGreaterThan(0);
 
     // Scrolling back to the bottom must still reach the latest message — the
     // load-older growth didn't corrupt the bottom of the list.
