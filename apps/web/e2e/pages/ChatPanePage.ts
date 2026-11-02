@@ -1021,7 +1021,20 @@ export class ChatPanePage {
    *  must be open first — call `openSessionHistory()`. */
   async clickNewSession(): Promise<void> {
     await test.step("Click New session", async () => {
+      // The pane shows its empty state at once, but remounts (dropping any
+      // draft and sent message) only after the setActiveSession call returns.
+      // Wait for both, or a message typed in between is lost.
+      const saved = this.page.waitForResponse((res) =>
+        res.url().includes("chats.setActiveSession"),
+      );
       await this.newSessionMenuItem.click();
+      await saved;
+      await this.page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
     });
   }
 
