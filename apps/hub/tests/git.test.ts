@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getRepoInfo, listWorktrees } from "@band-app/host-local/git/git-client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 const gitEnv = {
   ...process.env,
@@ -17,9 +17,16 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
+const createdDirs: string[] = [];
+// Runs on pass and failure. vitest's worker process does not run `process.on("exit")` handlers.
+afterAll(() => {
+  for (const dir of createdDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+});
+
 function createRepo(): { repoPath: string; tmp: string } {
   // Resolve symlinks (macOS /var -> /private/var) to match git's output
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-git-test-")));
+  createdDirs.push(tmp);
   const repoPath = join(tmp, "repo");
   mkdirSync(repoPath);
   git(repoPath, ["init", "-b", "main"]);
@@ -205,6 +212,7 @@ describe("getRepoInfo", () => {
   it("returns null for a non-git directory", async () => {
     const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-no-git-")));
     tmpDirs.push(tmp);
+    createdDirs.push(tmp);
     const info = await getRepoInfo(tmp);
     expect(info).toBeNull();
   });

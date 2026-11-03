@@ -172,14 +172,13 @@ test.describe("Terminal parking: full-page navigation", () => {
     const secondTerminalId = await worktreePage.waitForNewVisibleTerminalPrompt(WORKTREE_A, [
       firstTerminalId,
     ]);
-    await worktreePage.runInTerminalById(secondTerminalId, "echo SECOND_TERM_MARKER");
-    await expect
-      .poll(
-        async () =>
-          (await worktreePage.readTerminalRenderedText(WORKTREE_A)).includes("SECOND_TERM_MARKER"),
-        { timeout: 20_000 },
-      )
-      .toBe(true);
+    // The marker is split in the typed line, so only the executed output matches.
+    await worktreePage.runInTerminalByIdUntilRendered(
+      WORKTREE_A,
+      secondTerminalId,
+      'echo SECOND_TERM_"MARKER"',
+      /SECOND_TERM_MARKER/,
+    );
 
     // Full page reload — the per-renderer cache is wiped; the layout (2 panels)
     // is restored from the server and the active terminal reconnects + replays.

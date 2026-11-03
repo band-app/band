@@ -6,7 +6,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
@@ -21,9 +21,16 @@ export interface InputProbe {
   logPath: string;
 }
 
+const createdDirs: string[] = [];
+// Runs on pass, failure and throw, so no workdir outlives the process.
+process.on("exit", () => {
+  for (const dir of createdDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+});
+
 /** A temp dir holding a git repo with one empty commit, for a repo root. */
 export function makeGitWorkdir(prefix: string, home: string): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  createdDirs.push(dir);
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
     HOME: home,

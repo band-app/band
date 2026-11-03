@@ -178,12 +178,25 @@ async function start(env = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "band-mobile-verify-")));
   mkdirSync(join(home, ".band"), { recursive: true });
   const adminToken = `band_${randomBytes(24).toString("hex")}`;
-  const { pid, port } = await boot({ home, port: await freePort(), adminToken, env });
-  const url = `http://127.0.0.1:${port}`;
-  const deviceToken = await createDeviceToken(url, adminToken);
-  const state = { url, port, home, pid, adminToken, deviceToken, env };
-  writeState(state);
-  return state;
+  let pid = null;
+  try {
+    const booted = await boot({ home, port: await freePort(), adminToken, env });
+    pid = booted.pid;
+    const url = `http://127.0.0.1:${booted.port}`;
+    const deviceToken = await createDeviceToken(url, adminToken);
+    const state = { url, port: booted.port, home, pid, adminToken, deviceToken, env };
+    writeState(state);
+    return state;
+  } catch (err) {
+    // No state file names this home yet, so `clean` could not find it.
+    if (pid) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {}
+    }
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    throw err;
+  }
 }
 
 async function restart() {
