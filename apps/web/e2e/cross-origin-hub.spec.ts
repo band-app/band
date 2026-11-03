@@ -114,8 +114,11 @@ test("a #hub= link to another hub never receives the token saved for this one", 
     // A link that switches the hub and carries no token of its own.
     const switched = new ChatPanePage(page, ui.url, "", other.url);
     await switched.goto(WORKTREE);
-    await expect.poll(() => other.requests.length).toBeGreaterThan(0);
-    await expect(terminal.wrapper).toHaveCount(0);
+    // The page mounts the layout of the worktree named in its URL whether or not this hub lists it,
+    // so a terminal wrapper appears a moment after load and is no sign of the old hub. The last thing
+    // the page sends is the terminal's WebSocket upgrade; once the stub has it, every request the
+    // page makes without a token has been recorded.
+    await expect.poll(() => other.requests.some((r) => r.url.startsWith("/terminal"))).toBe(true);
     expect(JSON.stringify(other.requests)).not.toContain(TOKEN);
     expect(
       other.requests.filter((r) => r.authorization || r.wsProtocol?.includes("band-token")),
