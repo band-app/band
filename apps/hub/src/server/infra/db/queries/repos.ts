@@ -333,6 +333,8 @@ export class RepoQueries {
             primaryHostId: reposTable.primaryHostId,
             checkpointsEnabled: reposTable.checkpointsEnabled,
             autoContinue: reposTable.autoContinue,
+            remoteUrl: reposTable.remoteUrl,
+            remoteKey: reposTable.remoteKey,
           })
           .from(reposTable)
           .all()
@@ -379,8 +381,10 @@ export class RepoQueries {
           .values({
             name: repo.name,
             path: repo.path,
-            remoteUrl: repo.remoteUrl ?? null,
-            remoteKey: repo.remoteKey ?? null,
+            // `setRemote` writes the remote on its own, so a snapshot read before it ran must not
+            // erase it.
+            remoteUrl: repo.remoteUrl ?? kept.get(repo.name)?.remoteUrl ?? null,
+            remoteKey: repo.remoteKey ?? kept.get(repo.name)?.remoteKey ?? null,
             defaultBranch: repo.defaultBranch,
             sortOrder: i,
             kind: repo.kind,
