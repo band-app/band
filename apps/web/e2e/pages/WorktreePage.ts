@@ -3912,18 +3912,57 @@ export class WorktreePage {
 
   /** `runInTerminal` for one terminal, found by its id. `terminalInput.first()`
    *  is the first input in the DOM, which can belong to a terminal parked
-   *  behind the one on screen, so keys typed there never reach the new tab. */
+   *  behind the one on screen, so keys typed there never reach the new tab.
+   *  Focus is retried: under load a tab switch or a re-render can take it back
+   *  between `focus()` and the keys, and a single `toBeFocused` then times out. */
   async runInTerminalById(terminalId: string, line: string): Promise<void> {
     await test.step(`Run in terminal ${terminalId}: ${line}`, async () => {
       const input = this.page
         .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
         .getByRole("textbox", { name: "Terminal input" });
-      await input.focus();
-      // Keys go to whatever has focus; a tab switch can still take it back.
-      await expect(input).toBeFocused();
+      await expect(async () => {
+        await input.focus();
+        await expect(input).toBeFocused({ timeout: 1_000 });
+      }).toPass({ timeout: 15_000 });
       await this.page.keyboard.press("Enter");
       await this.page.keyboard.type(line);
       await this.page.keyboard.press("Enter");
+    });
+  }
+
+  /** `runInTerminalById`, made self-verifying like `runInTerminalUntilRendered`:
+   *  if `marker` does not render within `renderTimeoutMs`, press Ctrl+C in the
+   *  same terminal and type the line again (up to `attempts` total). Keystrokes
+   *  can be dropped under parallel load. Only use with an idempotent `line`;
+   *  `marker` must not match the typed line's own echo. */
+  async runInTerminalByIdUntilRendered(
+    worktreeId: string,
+    terminalId: string,
+    line: string,
+    marker: RegExp,
+    { attempts = 3, renderTimeoutMs = 8_000 }: { attempts?: number; renderTimeoutMs?: number } = {},
+  ): Promise<void> {
+    await test.step(`Run in terminal ${terminalId} until ${marker} renders: ${line}`, async () => {
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (attempt > 1) {
+          await this.page
+            .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
+            .getByRole("textbox", { name: "Terminal input" })
+            .focus();
+          await this.page.keyboard.press("Control+C");
+        }
+        try {
+          await this.runInTerminalById(terminalId, line);
+          await expect
+            .poll(async () => marker.test(await this.readTerminalRenderedText(worktreeId)), {
+              timeout: renderTimeoutMs,
+            })
+            .toBe(true);
+          return;
+        } catch (error) {
+          if (attempt === attempts) throw error;
+        }
+      }
     });
   }
 
