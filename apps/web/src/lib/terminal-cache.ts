@@ -839,7 +839,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
             lastSentRows = dims.rows;
             attachSent = true;
             awaitingReplay = true;
-            replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
+            replayGuardTimer = setTimeout(expireReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
           }
           sock.send(JSON.stringify(initMsg));
         } else {
@@ -1097,6 +1097,14 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         replayGuardTimer = null;
       }
     };
+    // The guard ran out with no snapshot or ack. Container ticks were ignored while it was up, so
+    // the box may have changed since the fit that went out with the request (a terminal opened
+    // while its pane was still narrow stayed at that width for good). Fit to the box as it is now.
+    const expireReplayGuard = () => {
+      const wasAwaiting = awaitingReplay;
+      clearReplayGuard();
+      if (wasAwaiting) refitToBox();
+    };
     // Fit to the live container and return the resulting dims, or null when
     // not attached to a visible box (so we never capture the parking
     // container's size or a 0×0 pre-layout frame).
@@ -1122,7 +1130,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       awaitingReplay = true;
       sock.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows, flow: true }));
       if (replayGuardTimer !== null) clearTimeout(replayGuardTimer);
-      replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
+      replayGuardTimer = setTimeout(expireReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
     };
     // Once the snapshot (or its ack) lands, lift the refit suppression and
     // reconcile: if the container size drifted during the request→render

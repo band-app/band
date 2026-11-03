@@ -841,9 +841,12 @@ describe("the band CLI through the relay (S2)", () => {
   const cli = findCliBinary();
 
   // The agent's own environment, as the stub recorded it.
+  // The stub appends a line at a time and may still be writing the last one, so only lines
+  // that end in a newline count.
   const agentEnv = () =>
     readFileSync(a.stubLog, "utf8")
       .split("\n")
+      .slice(0, -1)
       .filter(Boolean)
       .map((l) => JSON.parse(l) as { env: { BAND_SERVER_URL?: string; BAND_TOKEN?: string } })
       .find((r) => r.env.BAND_TOKEN)?.env;

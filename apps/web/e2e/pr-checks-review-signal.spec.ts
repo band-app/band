@@ -188,11 +188,13 @@ test("a webhook for another branch makes no lookup for this worktree", async ({ 
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
   await panel.goto(toWorktreeId(REPO, QUIET_BRANCH, "local"));
   // The panel's own startup lookups can land after goto returns; take the baseline once they stop.
+  // Two equal readings of zero mean the first lookup has not arrived yet, not that they stopped
+  // (the plugin activates on the first lookup, which a loaded runner can hold up past 500 ms).
   let last = -1;
   await expect
     .poll(
       () => {
-        const settled = quietLookups === last;
+        const settled = quietLookups > 0 && quietLookups === last;
         last = quietLookups;
         return settled;
       },
