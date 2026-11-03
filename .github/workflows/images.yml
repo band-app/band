@@ -55,7 +55,7 @@ jobs:
           - image: band-worker
             file: docker/worker.Dockerfile
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
@@ -111,7 +111,7 @@ jobs:
   # points at the two single-architecture images.
   manifest:
     name: Publish ${{ matrix.image }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     if: inputs.push
     permissions:

@@ -45,7 +45,7 @@ jobs:
   cancel-superseded:
     name: Cancel superseded queue runs
     if: github.event_name == 'merge_group'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -78,7 +78,7 @@ jobs:
   # queue always run everything, and any git error fails open.
   changes:
     name: Detect code changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     if: >
       github.event_name == 'push' ||
@@ -128,7 +128,7 @@ jobs:
   # saves.
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: changes
     if: >
@@ -167,7 +167,7 @@ jobs:
 
   check:
     name: Lint & Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
 
@@ -265,7 +265,7 @@ jobs:
       # node-pty 1.1.0 ships no linux-x64 prebuild and falls back to
       # `node-gyp rebuild` during `pnpm install`. pnpm/action-setup@v6 no
       # longer surfaces pnpm's bundled node-gyp on PATH, so we install it
-      # explicitly to keep the install step working on ubuntu-latest.
+      # explicitly to keep the install step working on ubuntu-24.04.
       - name: Install node-gyp
         run: npm install -g node-gyp
 
@@ -409,7 +409,7 @@ jobs:
   # dependencies but skip Rust. `check` owns the cache saves.
   test-hub:
     name: Test (hub) ${{ matrix.shard }}/${{ matrix.total }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [changes, build]
     if: >
@@ -450,7 +450,7 @@ jobs:
 
   test-packages:
     name: Test (web unit & packages)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [changes, build]
     if: >
@@ -490,7 +490,7 @@ jobs:
 
   test-e2e:
     name: Test e2e (web) ${{ matrix.shard }}/${{ matrix.total }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [changes, build]
     if: >
@@ -543,7 +543,7 @@ jobs:
   # its bundle, so the packed package is what the hub talks to.
   test-remote-loopback:
     name: Test (remote-loopback) ${{ matrix.shard }}/${{ matrix.total }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -597,7 +597,7 @@ jobs:
   # split jobs are skipped then and `changes` itself must have succeeded.
   lint-test-build:
     name: Lint, Test & Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [changes, build, check, test-hub, test-packages, test-e2e, test-remote-loopback]
     if: >
       always() && (
@@ -622,7 +622,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # macOS jobs.
   #
-  # The `check` job runs everything on ubuntu-latest, but several Band paths
+  # The `check` job runs everything on ubuntu-24.04, but several Band paths
   # behave differently on macOS, and release.yml and nightly.yml run the tests
   # on macos-latest. Two macOS jobs close that gap before merge:
   #
@@ -647,7 +647,7 @@ jobs:
   # ---------------------------------------------------------------------------
   macos-changes:
     name: Detect macOS-relevant changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Mirror the `check` job's cost gate: run on push to main, in the merge
     # queue, on same-repo PRs (collaborators), and on fork PRs a maintainer
     # labelled `ci:approved`.
@@ -774,7 +774,7 @@ jobs:
   # ENOENT on _shell.html. Nothing else in CI builds the image.
   docker:
     name: Docker image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: macos-changes
     if: needs.macos-changes.outputs.docker == 'true'
     timeout-minutes: 40
@@ -1085,7 +1085,7 @@ jobs:
   # destroys it. Pods reach the hub at the gateway of docker's `kind` network.
   k8s:
     name: k8s (kind)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: macos-changes
     if: needs.macos-changes.outputs.docker == 'true'
     timeout-minutes: 25
@@ -1589,7 +1589,7 @@ jobs:
   # waits for.
   all-platforms:
     name: macOS, Docker & k8s
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - macos-changes
       - docker
@@ -1614,7 +1614,7 @@ jobs:
 
   deploy-docs:
     name: Deploy Docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [check, test-hub, test-packages, test-e2e]
 

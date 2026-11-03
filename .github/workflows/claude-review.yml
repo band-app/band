@@ -112,7 +112,7 @@ permissions:
 jobs:
   review:
     name: Claude review
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hard cap so a runaway action doesn't hold the concurrency slot for
     # hours or drain subscription quota. Reviews usually finish in <5 min.
     timeout-minutes: 15

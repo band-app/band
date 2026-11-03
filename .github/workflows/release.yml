@@ -266,7 +266,7 @@ jobs:
       matrix:
         include:
           - target: linux-x64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - target: linux-arm64
             runner: ubuntu-24.04-arm
     env:
@@ -303,7 +303,7 @@ jobs:
   publish:
     name: Publish
     needs: [build, cli-linux]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: production
     outputs:
       version: ${{ needs.build.outputs.version }}
@@ -479,7 +479,7 @@ jobs:
   mobile:
     name: Mobile
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: production
     env:
       VERSION: ${{ needs.publish.outputs.version }}
