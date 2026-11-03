@@ -4,7 +4,6 @@ paths:
   - "**/HostsSettings.tsx"
   - "**/PairingDialog.tsx"
   - "**/dashboard/lib/pairing-options.ts"
-  - "**/settings.json"
   - "**/src/mcp/server.ts"
   - "**/start-server.ts"
   - "apps/hub/src/server/api/pairing/handler.ts"

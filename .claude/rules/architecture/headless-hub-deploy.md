@@ -1,6 +1,5 @@
 ---
 paths:
-  - "**/settings.json"
   - "**/start-server.ts"
   - "apps/hub/tests/headless-hub.test.ts"
   - "deploy/compose/compose.yml"

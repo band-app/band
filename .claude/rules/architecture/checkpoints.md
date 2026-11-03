@@ -3,7 +3,6 @@ paths:
   - "**/_utils/turn-events.ts"
   - "**/checkpoints-retention.test.ts"
   - "**/claude-resume.ts"
-  - "**/sessions.json"
   - "apps/cli/tests/integration.rs"
   - "apps/hub/src/server/services/checkpoint-service.ts"
   - "apps/hub/tests/checkpoints.test.ts"

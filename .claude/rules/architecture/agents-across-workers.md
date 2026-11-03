@@ -1,6 +1,5 @@
 ---
 paths:
-  - "**/desktop-hub.json"
   - "**/hub-choice.ts"
   - "**/relay-scope.ts"
   - "apps/desktop/src/main/services/secret-store.ts"

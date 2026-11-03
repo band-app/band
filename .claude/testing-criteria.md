@@ -95,7 +95,22 @@ For every external service the change touches:
 - **TEST-34** *(blocker)* — Band uses SQLite in `~/.band/band.db`. Tests get a fresh DB via the tmp `HOME` — the server runs migrations on boot. **No DB mocking.** Mocking the data layer is a blocker.
 - **TEST-35** *(blocker)* — For services with Postgres / Redis / MongoDB / S3 (if introduced), follow the testcontainer doctrine: containers per worker, tracked cleanup of inserted records, **never** `TRUNCATE` / `FLUSHDB` (that destroys data from concurrent tests on the same worker).
 
-## 8. Quick-reference — disqualifying mistakes
+## 8. Flake patterns — waiting for the right thing
+
+These rules come from the 15 flaky failures fixed in #1076, #1078 and ae478739. They all passed on an idle machine, and PR CI runs each test once, so they reached main. `pnpm flake-guard` (run on pre-push) repeats every test file a branch changes.
+
+- **TEST-36** *(blocker)* — Wait for the end of the transition your action started, not for something that was already true. Good signals are the action's own response, a store with no pending write, or a settled scroll position. Bad: after `chats.setActiveSession`, typing into the composer as soon as it is visible, when the "New session" remount then wipes the text (8/20 runs). Good: wait for the remount to finish, then type. Bad: `whileSynced` resolving on an earlier save's reply.
+- **TEST-37** *(suggestion)* — Prefer a signal the product exposes (`data-phase`, `aria-busy`, `data-state`, a pending count) over polling geometry. Adding such a data attribute is an allowed production change, like `data-testid` (TEST-1). Bad: polling the tab strip's `scrollLeft` until it stops moving (9/20 runs). Good: wait for the strip's settled attribute.
+- **TEST-38** *(blocker)* — Locate one specific instance by id or inside a scoped container. `.first()` or `.nth()` on a kind that can have several instances (terminals, chats, tabs, cards) is a finding. Bad: `terminalInput.first()` hit the parked terminal (3/20 runs). Good: `terminalPage.input(terminalId)`.
+- **TEST-39** *(blocker)* — Drive input the way a person does (wheel, tap, key presses). Do not write DOM state the app watches. Bad: one `el.scrollTop = el.scrollHeight` that stick-to-bottom overwrote (4/40 runs). Good: `page.mouse.wheel` and wait for the scroll to settle.
+- **TEST-40** *(blocker)* — Each test owns its chats, timers and crons, and ends idle. No agent turn, one-off timer or cron may run into the next test. Bad: a timer fires during the next test while a previous test's agent turn is still running. Good: stop or await every turn and remove every timer before the test ends.
+- **TEST-41** *(blocker)* — Assert invariants, not a snapshot of data that loads on its own schedule, and handle a reply that may be absent. Bad: `expect(labels).toEqual([...])` on the whole Settings label list; a tool call with no reply (`tree.rpc` undefined) that throws. Good: assert the labels the test cares about are present, and treat an undefined reply as a value.
+- **TEST-42** *(blocker)* — A timeout derives from the product's own budget. Import the constant where possible, and add a margin. A bare number that is shorter than the budget it waits for is a blocker. Bad: a 30 s test timeout over Chromium's 44 s launch budget. Good: `timeout: LAUNCH_BUDGET_MS + 30_000`.
+- **TEST-43** *(blocker)* — Stop processes gracefully (SIGTERM, then await exit) before deleting the directories they use. Size hook timeouts to the work they do. Bad: SIGKILL, then delete HOME, which fails with ENOTEMPTY while the process still writes; a simulator `afterAll` that needs more than the 30 s hook default. Good: `startServer`'s `close()` plus `removeTmpHome`; `afterAll(fn, 120_000)`.
+- **TEST-44** *(suggestion)* — When a test flakes, ask whether a fast user would hit the same race. If so, fix the product, not the test. #1078 fixed two such races: AppearanceSettings merged into a value rendered one frame late (7/20 runs), and the file explorer never reloaded after its watch socket reconnected.
+- **TEST-45** *(blocker)* — A flake fix records the failure rate before and after, from a repeat loop (`playwright test --repeat-each 20 --workers 1`, or `pnpm flake-guard --repeat 20`). When idle runs do not reproduce the failure, run the loop under CPU load. Retries, `test.skip`, `test.fixme`, and a longer sleep without a named cause stay banned.
+
+## 9. Quick-reference — disqualifying mistakes
 
 | Mistake | Rule | Severity |
 |---|---|---|
@@ -109,3 +124,12 @@ For every external service the change touches:
 | Importing the route handler from the test and calling it directly | TEST-12 | blocker |
 | Skipping an error-path test "because the fixture doesn't support it" | TEST-13 | blocker |
 | One Express stub shared across all tests via a mutable handler | TEST-28 | blocker |
+| Acting right after the visible state, not after the transition the action started | TEST-36 | blocker |
+| Polling geometry when the product could expose `data-state` or `aria-busy` | TEST-37 | suggestion |
+| `.first()` / `.nth()` on terminals, chats or tabs | TEST-38 | blocker |
+| `el.scrollTop = …` or other DOM writes instead of wheel, tap or typing | TEST-39 | blocker |
+| A turn, timer or cron still running when the test ends | TEST-40 | blocker |
+| `toEqual` on a whole list that loads on its own schedule | TEST-41 | blocker |
+| A bare timeout shorter than the product's own budget | TEST-42 | blocker |
+| SIGKILL then delete the HOME; `afterAll` over the 30 s default | TEST-43 | blocker |
+| Flake fix with no before/after failure rate from a repeat loop | TEST-45 | blocker |

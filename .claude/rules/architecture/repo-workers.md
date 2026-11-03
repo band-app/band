@@ -8,7 +8,6 @@ paths:
   - "apps/hub/tests/repo-allowed-hosts.test.ts"
   - "apps/web/e2e/repo-allowed-hosts.spec.ts"
   - "docs/repo-hosts.md"
-  - "packages/shared/src/repo-workers.ts"
 ---
 
 # Architecture: repo workers

@@ -1,8 +1,7 @@
 ---
 paths:
   - "**/connection.ts"
-  - "**/daemon/endpoint.ts"
-  - "**/dist/terminal-daemon.mjs"
+  - "packages/host-local/src/daemon-kit/endpoint.ts"
   - "**/endpoint.ts"
   - "**/exit-records.ts"
   - "**/launch.ts"

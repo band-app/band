@@ -4,7 +4,7 @@ paths:
   - "**/lib/center-tabs.ts"
   - "**/lib/client-state.ts"
   - "**/lib/last-worktree.ts"
-  - "**/shared/client-state-keys.ts"
+  - "packages/shared/src/client-state-keys.ts"
   - "apps/desktop/src/main/services/window-state.ts"
   - "apps/hub/src/server/services/client-state-service.ts"
 ---

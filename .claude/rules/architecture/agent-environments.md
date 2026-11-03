@@ -19,7 +19,7 @@ paths:
   - "packages/environment/**"
   - "packages/environment/src/image.ts"
   - "packages/environment/tests/**"
-  - "packages/worker-api/src/contract.ts"
+  - "packages/host-api/src/contract.ts"
 ---
 
 # Architecture: agent environments

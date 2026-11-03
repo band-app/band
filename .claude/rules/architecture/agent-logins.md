@@ -4,7 +4,6 @@ paths:
   - "**/ChatLoginMenu.tsx"
   - "**/agent-logins-worker.test.ts"
   - "**/agent-session-service.ts"
-  - "**/auth.json"
   - "**/follow-service.ts"
   - "apps/hub/src/mcp/server.ts"
   - "apps/hub/tests/agent-logins.test.ts"

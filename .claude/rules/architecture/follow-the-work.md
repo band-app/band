@@ -2,7 +2,7 @@
 paths:
   - "**/checkpoint-wins.test.ts"
   - "apps/cli/tests/integration.rs"
-  - "apps/hub/src/server/api/chat-submit.ts"
+  - "apps/hub/src/api/chat-submit.ts"
   - "apps/hub/src/server/api/trpc.ts"
   - "apps/hub/src/server/services/follow-service.ts"
   - "apps/hub/src/server/services/worker-lease-service.ts"

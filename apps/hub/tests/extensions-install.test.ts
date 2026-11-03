@@ -50,6 +50,10 @@ describe("installing editor extensions", () => {
   let stub: Server;
   let stubUrl: string;
   const files = new Map<string, Buffer>();
+  // Built before the server starts. Gzipping 600 MB blocks this process for seconds, and a
+  // keep-alive connection left idle that long is closed by the server (5 s), so the next fetch
+  // writes to a dead socket and fails with ECONNRESET. No real client blocks between requests.
+  let expandingArchive: Buffer;
 
   const install = async (url: string, sha256?: string, token = TOKEN) =>
     trpcMutate(server.url, "extensions.install", { url, sha256 }, token);
@@ -69,6 +73,11 @@ describe("installing editor extensions", () => {
     ((await res.json()) as { error: { message: string } }).error.message;
 
   beforeAll(async () => {
+    // A 600 MB file of zeros compresses to well under the 200 MB archive cap.
+    expandingArchive = makeTarGz([
+      ...goodEntries("keep", "9.0.0"),
+      { name: "keep/zeros.bin", data: Buffer.alloc(600 * 1024 * 1024) },
+    ]);
     tmpHome = createTmpHome("band-ext-install-");
     seedSettings(tmpHome, { tokenSecret: TOKEN });
     server = await startServer({ tmpHome });
@@ -243,13 +252,7 @@ describe("installing editor extensions", () => {
     });
 
     it("an archive that expands past the limit", async () => {
-      // A 600 MB file of zeros compresses to well under the 200 MB archive cap.
-      const archive = makeTarGz([
-        ...goodEntries("keep", "9.0.0"),
-        { name: "keep/zeros.bin", data: Buffer.alloc(600 * 1024 * 1024) },
-      ]);
-
-      const res = await upload(archive);
+      const res = await upload(expandingArchive);
 
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toMatch(/size limit/);

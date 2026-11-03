@@ -17,6 +17,8 @@ This repo uses **integration tests** as the primary testing approach. Do not wri
 
 > **When writing, adding, or modifying tests — backend OR frontend — invoke the [`write-integration-test`](.claude/skills/write-integration-test/SKILL.md) skill FIRST.** It is the canonical reference for this repository: real-server boot, Express stubs for external services, no tRPC mocking, no `page.route()` on own routes, Page Object Model for Playwright, locator priority, the universal checklist, and worked examples for both layers. The rules below are the summary; the skill is the source of truth.
 
+Rules TEST-36 to TEST-45 in `.claude/testing-criteria.md` cover flaky-test patterns (waiting for the wrong thing, `.first()` on multi-instance kinds, bare timeouts, leaking work between tests). Read them before writing or fixing a test.
+
 ### Why Integration Tests
 
 Unit tests with heavy mocking verify that your mocks work, not that your system works. Integration tests exercise the real system through its public interfaces — the same way a client or user would interact with it.
@@ -94,6 +96,8 @@ Use the semantic tokens in `apps/web/src/styles/globals.css` (`bg-selection`, `t
 ## Git Hooks & CI
 
 This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting, and clippy checks. **Never bypass git hooks** — do not use `--no-verify` on `git push` or `git commit`. If a hook fails, fix the underlying issue instead of skipping the check.
+
+The pre-push hook also runs `scripts/flake-guard.mjs`. It repeats each test file the branch added or changed against the merge base with `origin/main`: e2e specs 5 times (`--repeat-each 5 --workers 1`), hub, web and package tests 3 times, and it blocks the push when any run fails. It stops after 15 minutes and lists what it did not cover, which does not block the push, and it skips a file it cannot run here (no browser, a failed build) with a message. `pnpm flake-guard` runs the fuller loop by hand (e2e 20, others 10, no cap); `--files`, `--repeat`, `--base` and `--max-minutes` adjust it.
 
 **Always run `/review-and-apply` before pushing code.** This invokes the `review-and-apply` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
 

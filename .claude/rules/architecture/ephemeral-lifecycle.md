@@ -1,6 +1,5 @@
 ---
 paths:
-  - "**/sessions.json"
   - "apps/hub/src/server/services/ephemeral-lifecycle-service.ts"
   - "apps/hub/tests/ephemeral-lifecycle.test.ts"
   - "apps/web/e2e/sleeping-worktree.spec.ts"

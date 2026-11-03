@@ -4,7 +4,6 @@ paths:
   - "**/SharedFileLeaf.tsx"
   - "**/components/files/video-view.tsx"
   - "**/cross-host-policy.ts"
-  - "**/dist/terminal-daemon.mjs"
   - "**/main.ts"
   - "**/relay-cli-skills-drift.test.ts"
   - "**/worktree-file-serve-remote.test.ts"

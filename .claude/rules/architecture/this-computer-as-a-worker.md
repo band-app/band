@@ -7,7 +7,6 @@ paths:
   - "apps/desktop/tests/this-computer-worker.test.ts"
   - "apps/web/e2e-desktop/desktop-this-computer-worker.spec.ts"
   - "apps/web/e2e-desktop/fixtures/fake-launchctl.mjs"
-  - "apps/worker/dist-desktop/**"
   - "apps/worker/scripts/build-desktop.mjs"
   - "docs/install.md"
 ---

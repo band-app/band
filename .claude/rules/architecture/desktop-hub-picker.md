@@ -7,12 +7,10 @@ paths:
   - "**/ipc/sender-guard.ts"
   - "**/navigation-guard.ts"
   - "**/window.ts"
-  - "apps/desktop/dist-builder/mac-arm64/Band.app/Contents/MacOS/Band/**"
   - "apps/desktop/src/main/app-protocol.ts"
   - "apps/hub/**"
-  - "apps/hub/src/server/services/hub-choice.ts"
-  - "apps/hub/src/server/services/ui-paths.ts"
-  - "apps/web/dist/client/**"
+  - "apps/desktop/src/main/services/hub-choice.ts"
+  - "apps/desktop/src/main/services/ui-paths.ts"
   - "apps/web/e2e-desktop/**"
   - "apps/web/public/manifest.webmanifest"
   - "apps/web/src/lib/hub-config.ts"
@@ -33,3 +31,4 @@ The desktop window loads the bundled UI from `app://<host>/` (`apps/desktop/src/
 - Settings > Hub (`HubSettings.tsx`, desktop only) calls `hub_set_choice`. The main process checks the remote hub with `GET /api/health` and the Bearer token, then `switchHub` in `index.ts` stops or starts the local hub and reloads the window.
 - The PWA manifest is `apps/web/public/manifest.webmanifest`. The hub still answers it before auth, for iOS.
 - `apps/web/e2e-desktop/` drives the real unpackaged Electron app with Playwright's `_electron` (`pnpm --filter @band-app/web test:e2e:desktop`, CI job `desktop-macos`). It needs `pnpm build:web` and `pnpm --filter @band-app/desktop build` first, and runs against a throwaway HOME with a random `webServerPort`: the app kills whatever listens on that port, so never point it at 3456. With `BAND_DESKTOP_EXECUTABLE` set to a packaged `Band` binary (`pnpm --filter @band-app/desktop package:dir --mac --arm64`, output in `apps/desktop/dist-builder/mac-arm64/Band.app/Contents/MacOS/Band`) the same specs run against the electron-builder output, in the CI job `desktop-packaged-macos`. A packaged run has no scripted ACP agent, because the hub starts it as `process.execPath <script>`, which in a packaged app launches a second Band that frees the hub's port. The chat-reply step skips there. The folder picker is tested by stubbing `dialog.showOpenDialog` in the main process and calling the `pick_folder` IPC; the native sheet itself stays untested.
+- The desktop e2e suite is isolated and safe to run while the real Band.app is open. `launchDesktop` refuses a HOME outside the OS temp dir, passes `BAND_DESKTOP_USER_DATA_DIR=<home>/electron-profile`, and after launch, before any hub connection, asserts that `userData`, `sessionData` and the partitions dir resolve under the temp home, killing the app otherwise. The app takes no single-instance lock and registers no protocol client or login item. `global-setup.ts` and `global-teardown.ts` list the real `~/Library/Application Support/Band` (read-only, ignoring Chromium caches and lock files) and fail the run if a file was removed or shrunk to under half (the live app rewrites its own caches and storage, so additions and growth are ignored). The side-effect list is in the header of `apps/web/e2e-desktop/helpers/desktop-app.ts`.

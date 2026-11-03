@@ -46,10 +46,13 @@ const tmp = (prefix: string) => {
 };
 
 function git(cwd: string, ...args: string[]): void {
+  // A git hook (the pre-push flake guard) exports GIT_DIR and GIT_WORK_TREE, which would aim these commands at the
+  // checkout being pushed instead of the scratch repo.
+  const { GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_PREFIX, ...inherited } = process.env;
   execFileSync("git", args, {
     cwd,
     env: {
-      ...process.env,
+      ...inherited,
       GIT_AUTHOR_NAME: "t",
       GIT_AUTHOR_EMAIL: "t@example.com",
       GIT_COMMITTER_NAME: "t",
@@ -96,9 +99,11 @@ async function connectCdp(query: string) {
     headers: { Authorization: `Bearer ${TOKEN}` },
   });
   const pending = new Map<number, (m: Record<string, unknown>) => void>();
+  const listeners = new Set<(m: Record<string, unknown>) => void>();
   ws.on("message", (raw) => {
     const message = JSON.parse(raw.toString()) as Record<string, unknown>;
     if (typeof message.id === "number") pending.get(message.id)?.(message);
+    else for (const listener of listeners) listener(message);
   });
   await new Promise<void>((resolve, reject) => {
     ws.once("open", () => resolve());
@@ -113,6 +118,27 @@ async function connectCdp(query: string) {
   closed.catch(() => undefined);
   return {
     ws,
+    /** Resolves on the next event `method` of `sessionId`. Register it before the call that causes the event. */
+    event(method: string, sessionId: string, timeoutMs: number, what: string) {
+      return new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          listeners.delete(listener);
+          reject(new Error(`${what}: no ${method} within ${timeoutMs}ms`));
+        }, timeoutMs);
+        const listener = (message: Record<string, unknown>) => {
+          if (message.method !== method || message.sessionId !== sessionId) return;
+          clearTimeout(timer);
+          listeners.delete(listener);
+          resolve();
+        };
+        listeners.add(listener);
+        closed.catch((err) => {
+          clearTimeout(timer);
+          listeners.delete(listener);
+          reject(err);
+        });
+      });
+    },
     send(method: string, params: unknown = {}, sessionId?: string) {
       const id = ++nextId;
       const reply = new Promise<Record<string, unknown>>((resolve) => pending.set(id, resolve));
@@ -153,25 +179,74 @@ async function title(query: string, url: string): Promise<string> {
   }
 }
 
-async function readTitle(query: string, url: string): Promise<string> {
-  const cdp = await connectCdp(query);
+// The worker's own Chromium launch budget is 44 s and the connect below includes it, so the test leaves it
+// 50 s. Creating a target and loading a page on the test machine's loopback are local work, but a cold
+// browser on a loaded runner needs seconds for the first one, so the navigation gets 30 s.
+const CONNECT_BUDGET_MS = 50_000;
+const NAVIGATION_BUDGET_MS = 30_000;
+
+/** Runs one step of reading a title and names it when it fails, so a CI log says which step did not finish. */
+async function step<T>(name: string, work: Promise<T>): Promise<T> {
   try {
-    const { targetId } = (await cdp.send("Target.createTarget", { url })) as { targetId: string };
-    const { sessionId } = (await cdp.send("Target.attachToTarget", {
-      targetId,
-      flatten: true,
-    })) as { sessionId: string };
-    return await waitFor(
-      async () => {
-        const res = (await cdp.send(
-          "Runtime.evaluate",
-          { expression: "document.readyState === 'complete' ? document.title : ''" },
-          sessionId,
-        )) as { result: { value: string } };
-        return res.result.value || undefined;
+    return await work;
+  } catch (err) {
+    throw new Error(
+      `remote browser step "${name}" failed: ${err instanceof Error ? err.message : err}`,
+      {
+        cause: err,
       },
-      { label: "page title", timeoutMs: 15_000 },
     );
+  }
+}
+
+async function readTitle(query: string, url: string): Promise<string> {
+  const connecting = connectCdp(query);
+  const cdp = await step(
+    "connect (launches Chromium)",
+    Promise.race([
+      connecting,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`not connected within ${CONNECT_BUDGET_MS}ms`)),
+          CONNECT_BUDGET_MS,
+        ).unref(),
+      ),
+    ]),
+  );
+  try {
+    // Create the target blank and navigate it ourselves, so the load event cannot fire before we listen.
+    const { targetId } = (await step(
+      "create target",
+      cdp.send("Target.createTarget", { url: "about:blank" }),
+    )) as { targetId: string };
+    const { sessionId } = (await step(
+      "attach to target",
+      cdp.send("Target.attachToTarget", { targetId, flatten: true }),
+    )) as { sessionId: string };
+    await step("enable Page events", cdp.send("Page.enable", {}, sessionId));
+    const loaded = cdp.event(
+      "Page.loadEventFired",
+      sessionId,
+      NAVIGATION_BUDGET_MS,
+      `load of ${url}`,
+    );
+    loaded.catch(() => undefined);
+    // Page.navigate answers once the navigation commits, so a URL that hangs holds it too: the budget covers both.
+    await step(
+      "navigation",
+      Promise.race([
+        cdp.send("Page.navigate", { url }, sessionId).then((nav) => {
+          if (nav.errorText) throw new Error(`${nav.errorText} for ${url}`);
+          return loaded;
+        }),
+        loaded,
+      ]),
+    );
+    const res = (await step(
+      "read title",
+      cdp.send("Runtime.evaluate", { expression: "document.title" }, sessionId),
+    )) as { result: { value: string } };
+    return res.result.value;
   } finally {
     cdp.ws.close();
   }

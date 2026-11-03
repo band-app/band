@@ -2,7 +2,6 @@
 paths:
   - "**/acp-agent-process.ts"
   - "**/dashboard/lib/agent-mode.ts"
-  - "apps/hub/src/server/services/_utils/agent-pending-work.ts"
   - "apps/hub/src/server/services/agent-launch-service.ts"
   - "apps/hub/src/server/services/agent-session-registry-service.ts"
   - "apps/hub/src/server/services/agent-session-service.ts"

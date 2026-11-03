@@ -15,7 +15,7 @@ paths:
   - "**/strip-queries.ts"
   - "**/terminal-cache.ts"
   - "**/terminal-socket.ts"
-  - "**/worktree-ops/resolver.ts"
+  - "packages/worktree-ops/src/resolver.ts"
   - "apps/hub/src/server/api/plugins/stream-handler.ts"
   - "apps/hub/src/server/services/direct-access-service.ts"
   - "apps/hub/src/server/services/files-service.ts"

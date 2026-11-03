@@ -18,7 +18,7 @@ paths:
   - "deploy/compose/**"
   - "deploy/compose/compose.yml"
   - "docker/**"
-  - "docker/Dockerfile/**"
+  - "docker/Dockerfile"
   - "docker/worker.Dockerfile"
   - "docs/install.md"
   - "packages/client/**"

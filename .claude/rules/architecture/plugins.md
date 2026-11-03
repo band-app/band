@@ -12,7 +12,6 @@ paths:
   - "**/providers.ts"
   - "**/server.ts"
   - "**/worker.ts"
-  - "apps/*"
   - "apps/hub/src/server/services/bundled-plugins.ts"
   - "apps/hub/src/server/services/review-signal-service.ts"
   - "apps/hub/tests/fixtures/gh-stub-bin.mjs"
@@ -27,7 +26,7 @@ paths:
   - "plugins/github/src/server/branch-query.ts"
   - "plugins/github/src/server/checks-query.ts"
   - "plugins/github/src/server/subscriptions.ts"
-  - "plugins/use-plugin-slot.ts"
+  - "apps/web/src/plugins/use-plugin-slot.ts"
 ---
 
 # Architecture: plugins

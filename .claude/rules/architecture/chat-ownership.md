@@ -13,7 +13,7 @@ paths:
   - "**/store.ts"
   - "**/task-service.ts"
   - "**/turns.ts"
-  - "apps/hub/src/server/api/chat-events.ts"
+  - "apps/hub/src/api/chat-events.ts"
   - "apps/hub/src/server/infra/db/queries/chat-events.ts"
   - "apps/hub/src/server/services/chat-ownership-service.ts"
   - "apps/hub/tests/chat-ownership.test.ts"

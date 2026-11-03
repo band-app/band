@@ -1,6 +1,5 @@
 ---
 paths:
-  - "**/activity-monitor.ts"
   - "**/activity-reporter.ts"
   - "**/globals.css"
   - "**/host-battery-polling.test.ts"
@@ -9,7 +8,7 @@ paths:
   - "**/window-state.test.ts"
   - "apps/desktop/tests/window-power.test.ts"
   - "apps/hub/src/server/services/client-activity-service.ts"
-  - "apps/hub/src/server/services/window-power.ts"
+  - "apps/desktop/src/main/services/window-power.ts"
   - "apps/hub/tests/client-activity.test.ts"
   - "apps/web/e2e/power-saver.spec.ts"
   - "apps/web/src/lib/power-state.ts"

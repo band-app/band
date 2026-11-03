@@ -19,8 +19,6 @@ paths:
   - "docs/glossary.md"
   - "packages/shared/src/remote-url.ts"
   - "packages/shared/tests/remote-url.test.ts"
-  - "packages/worker-api/**"
-  - "packages/worker-local/src/repos/worker-repos.ts"
 ---
 
 # Architecture: repos by remote URL

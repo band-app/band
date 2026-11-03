@@ -4,7 +4,6 @@ paths:
   - "**/adapter-version.ts"
   - "**/agent-session-service.ts"
   - "**/credential-events.ts"
-  - "**/dist/agent-daemon.mjs"
   - "**/holder.ts"
   - "**/start-server.ts"
   - "**/task-service.ts"
