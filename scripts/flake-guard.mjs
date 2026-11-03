@@ -162,6 +162,22 @@ let keepLogs = false;
 const realHome = homedir();
 const guardUrl = new URL("./test-process-guard.mjs", import.meta.url).href;
 const baseEnv = scrubWorkerEnv({ ...process.env });
+// Git exports these to hooks (the guard runs from .husky/pre-push). A test that runs `git init`
+// or `git config` in a scratch folder would otherwise act on the repository being pushed, and
+// once set core.bare=true in the shared config of every worktree. They are removed here, not in
+// scrubWorkerEnv, which the desktop e2e also uses. GIT_CONFIG_* is left alone.
+for (const name of [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_PREFIX",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_QUARANTINE_PATH",
+]) {
+  delete baseEnv[name];
+}
 if (nodeBin) baseEnv.PATH = `${nodeBin}:${baseEnv.PATH}`;
 const cacheHome = baseEnv.XDG_CACHE_HOME ?? join(realHome, ".cache");
 const testEnv = {
