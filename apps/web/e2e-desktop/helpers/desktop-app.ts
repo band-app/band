@@ -8,6 +8,7 @@ import {
   expect,
   type Page,
 } from "@playwright/test";
+import { assertProfileIsolated, isUnderOsTmp } from "./profile-guard";
 
 const DESKTOP_DIR = join(import.meta.dirname, "../../../desktop");
 
@@ -59,6 +60,28 @@ export interface LaunchedDesktop {
 }
 
 /**
+ * Isolation. The suite is safe to run while the real Band.app is open. Electron resolves its
+ * profile from the account home (`~/Library/Application Support/Band`), not `$HOME`, so a temp
+ * HOME alone shares the real profile. Every OS-level side effect, and how it is handled:
+ *
+ * - userData, sessionData (browser-pane cookies and storage), logs, crash dumps: moved to
+ *   `<home>/electron-profile` by `BAND_DESKTOP_USER_DATA_DIR` (`services/test-profile.ts`).
+ *   After launch `assertProfileIsolated` checks that userData, sessionData and the partitions
+ *   dir resolve under the temp home, and kills the app if not. `home` must be under the OS temp dir.
+ * - Single-instance lock: the app never calls `requestSingleInstanceLock`, and Chromium's own
+ *   singleton lives in userData, so a test instance cannot hand off to or quit the real one.
+ * - Protocol handler and login items: the app never calls `setAsDefaultProtocolClient` or
+ *   `setLoginItemSettings`; `app://` and `band-action://` are registered per process only.
+ * - Keychain: `BAND_DESKTOP_SECRET_STORE=test` (fixed-key store).
+ * - launchd: specs point `BAND_LAUNCHCTL_BIN` at a fake.
+ * - Chrome import: reads `homedir()`, which follows `$HOME` (the temp home), never the real Chrome.
+ * - `~/.band`, `desktop.log`, `desktop-hub.enc`, window state: Node's `homedir()`, so under the temp home.
+ * - Dock icon and menu: per process. Notifications: the app sends none.
+ * - Hub port: a random `webServerPort` in the temp `settings.json`, never 3456.
+ * - The real profile is listed before and after the run (`global-setup.ts`, `global-teardown.ts`)
+ *   and the run fails if a file was removed or shrunk to under half. The live app rewrites its own
+ *   caches and storage, so additions and growth are ignored.
+ *
  * Launch the desktop app against a throwaway HOME. Unpackaged, the app spawns
  * the hub bundle from `apps/hub/dist` (local mode) and loads the UI from
  * `apps/web/dist/client` over `app://`. With `BAND_DESKTOP_EXECUTABLE` set it
@@ -80,6 +103,13 @@ export async function launchDesktop(opts: {
    */
   answeredWorkerPrompt?: string[];
 }): Promise<LaunchedDesktop> {
+  if (!isUnderOsTmp(opts.home)) {
+    throw new Error(
+      `Refusing to launch the desktop app: HOME ${opts.home} is not under the OS temp dir`,
+    );
+  }
+  // Electron resolves userData from the account home, not $HOME, so it must be told.
+  const userDataDir = join(opts.home, "electron-profile");
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
@@ -109,9 +139,28 @@ export async function launchDesktop(opts: {
     args: packaged ? [] : [DESKTOP_DIR],
     // The Keychain needs an unlocked login session, which a test run does not have, so the
     // app stores its secrets with a fixed-key stand-in for `safeStorage` (`secret-store.ts`).
-    env: { ...env, HOME: opts.home, BAND_DESKTOP_SECRET_STORE: "test", ...extraEnv },
+    env: {
+      ...env,
+      HOME: opts.home,
+      BAND_DESKTOP_SECRET_STORE: "test",
+      ...extraEnv,
+      BAND_DESKTOP_USER_DATA_DIR: userDataDir,
+    },
     timeout: 60_000,
   });
+
+  // Abort before the window talks to any hub when the profile is not the test one.
+  const paths = await app.evaluate(({ app: electronApp }) => ({
+    userData: electronApp.getPath("userData"),
+    sessionData: electronApp.getPath("sessionData"),
+    partitions: `${electronApp.getPath("sessionData")}/Partitions`,
+  }));
+  try {
+    assertProfileIsolated(paths, opts.home);
+  } catch (err) {
+    app.process().kill("SIGKILL");
+    throw err;
+  }
 
   // Attached before any page loads, so a violation during the first paint is seen.
   const cspViolations: string[] = [];
