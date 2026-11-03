@@ -53,6 +53,7 @@ import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
 import { createTestSecretStore, setSecretStore } from "./services/secret-store.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
+import { applyTestProfile } from "./services/test-profile.js";
 import { resolveWorkerLocation, ThisComputerWorker } from "./services/this-computer-worker.js";
 import { resolveUiDir } from "./services/ui-paths.js";
 import { resolveWebDir } from "./services/web-paths.js";
@@ -61,6 +62,12 @@ import { applyPowerToWindow } from "./services/window-power.js";
 import { isUpdaterEnabled, UpdateController } from "./updater.js";
 import { installWebviewSecurity } from "./webview-security.js";
 import { createMainWindow } from "./window.js";
+
+// Before anything reads a path or the app is ready. `BAND_DESKTOP_USER_DATA_DIR` moves userData,
+// sessionData, logs and crash dumps to a test directory, so a test instance never shares the
+// real app's profile (Electron resolves it from the account home, not `$HOME`). The app does
+// not call `requestSingleInstanceLock`, `setAsDefaultProtocolClient` or `setLoginItemSettings`.
+applyTestProfile(app);
 
 const log = createLogger("desktop");
 
