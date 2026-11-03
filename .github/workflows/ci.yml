@@ -446,7 +446,17 @@ jobs:
         env:
           # The runner's user namespace policy can stop Chromium's sandbox from starting.
           BAND_CHROMIUM_NO_SANDBOX: "1"
+          BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
         run: pnpm --filter @band-app/server test --shard=${{ matrix.shard }}/${{ matrix.total }}
+
+      - name: Upload hub failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hub-failure-logs-${{ matrix.shard }}
+          path: ${{ runner.temp }}/band-test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
 
   test-packages:
     name: Test (web unit & packages)
@@ -587,7 +597,17 @@ jobs:
         run: pnpm --filter @band-app/server exec vitest run --shard=${{ matrix.shard }}/${{ matrix.total }}
         env:
           BAND_CHROMIUM_NO_SANDBOX: "1"
+          BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
+
+      - name: Upload hub failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: remote-loopback-failure-logs-${{ matrix.shard }}
+          path: ${{ runner.temp }}/band-test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # The repo ruleset "Require CI active" requires a status check named exactly
   # "Lint, Test & Build", the name of the job this split replaced. This job
@@ -1355,6 +1375,7 @@ jobs:
       # rebuild both in its `pretest`.
       - name: Test (web)
         env:
+          BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
         run: |
           pnpm --filter @band-app/server exec vitest run --shard=${{ matrix.shard }}/${{ matrix.total }}
@@ -1377,6 +1398,7 @@ jobs:
 
       - name: Test simulator stream (hub)
         env:
+          BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
           BAND_TEST_SIMULATOR: "1"
           BAND_SIMULATOR_MAX_BOOTED: "1"
         run: pnpm --filter @band-app/server exec vitest run tests/simulator-plugin.test.ts -t "stream carries"
@@ -1389,6 +1411,24 @@ jobs:
           BAND_TEST_SIMULATOR: "1"
           BAND_SIMULATOR_MAX_BOOTED: "1"
         run: pnpm --filter @band-app/web exec playwright test e2e/simulator-panel.spec.ts -g "S3, S6"
+
+      - name: Upload hub failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-macos-failure-logs-${{ matrix.shard }}
+          path: ${{ runner.temp }}/band-test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-web-macos-test-results-${{ matrix.shard }}
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Save Cargo registry cache
         if: |

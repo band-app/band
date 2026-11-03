@@ -235,10 +235,18 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
         await worktreePage.activateTabInNarrowWindow("terminal");
       await expect(terminal.input).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
-  await expect(async () => {
-    await terminal.typeLine("echo direct-$((40+2))");
-    expect(await terminal.readScreenText()).toContain("direct-42");
-  }).toPass({ timeout: 30_000 });
+  try {
+    await expect(async () => {
+      await terminal.typeLine("echo direct-$((40+2))");
+      expect(await terminal.readScreenText()).toContain("direct-42");
+    }).toPass({ timeout: 30_000 });
+  } catch (err) {
+    await test.info().attach("terminal-layout.json", {
+      body: await terminal.describeLayout(),
+      contentType: "application/json",
+    });
+    throw err;
+  }
 
   // S1: the terminal socket went to the worker on loopback, not to the hub.
   expect(directSockets().length).toBeGreaterThan(0);

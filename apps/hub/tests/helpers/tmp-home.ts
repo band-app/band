@@ -1,5 +1,6 @@
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { keepHomeLogs } from "./failure-artifacts";
 
 /** Every path under `dir` with its mtime, for failure messages. */
 export function listFiles(dir: string): string {
@@ -25,6 +26,7 @@ export function listFiles(dir: string): string {
  * Stop every process that uses the home before calling this.
  */
 export function removeTmpHome(dir: string): void {
+  keepHomeLogs(dir);
   try {
     rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   } catch (err) {

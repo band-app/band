@@ -27,6 +27,10 @@ export default defineConfig({
   expect: { timeout: 30_000 },
   use: {
     baseURL: "http://127.0.0.1",
+    // A flake that only fails in CI has to carry its own evidence: the trace and the last
+    // screenshot land in test-results/, which ci.yml uploads on failure.
+    trace: "retain-on-failure" as const,
+    screenshot: "only-on-failure" as const,
   },
   projects: [
     { name: "chromium", use: { browserName: "chromium" }, testIgnore: WEBKIT_IPHONE_SPECS },
