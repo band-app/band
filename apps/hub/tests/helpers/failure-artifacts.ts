@@ -1,13 +1,17 @@
 import {
   closeSync,
   copyFileSync,
+  cpSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readdirSync,
   readSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 // When a hub test fails, the temp home it ran in is deleted right after, and with it the logs of
@@ -18,14 +22,23 @@ import { basename, join } from "node:path";
 const MAX_BYTES = 2 * 1024 * 1024;
 let failed = false;
 let counter = 0;
+// vitest runs `onTestFailed` after `afterEach`, and many files stop their server and delete the
+// home in `afterEach`. Until a failure is known, logs are staged in a scratch dir; a failure moves
+// them to the artifacts dir, and the next test or the end of the file drops them.
+const staged: string[] = [];
 
-/** Called from the setup file when any test in this file fails. */
+/** Called from the setup file when a test fails: keep what was staged, and keep later logs directly. */
 export function markTestFailed(): void {
   failed = true;
+  const root = process.env.BAND_TEST_ARTIFACTS_DIR;
+  if (!root) return;
+  mkdirSync(root, { recursive: true });
+  for (const dir of staged.splice(0)) cpSync(dir, join(root, basename(dir)), { recursive: true });
 }
 
-function artifactsDir(): string | undefined {
-  return failed ? process.env.BAND_TEST_ARTIFACTS_DIR || undefined : undefined;
+/** Called before each test and after each file: staged logs of a test that passed are not needed. */
+export function dropStagedLogs(): void {
+  for (const dir of staged.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
 
 function copyTail(src: string, dest: string): void {
@@ -45,13 +58,16 @@ function copyTail(src: string, dest: string): void {
 }
 
 function slot(label: string): string | undefined {
-  const root = artifactsDir();
+  const root = process.env.BAND_TEST_ARTIFACTS_DIR;
   if (!root) return undefined;
-  const dir = join(
-    root,
-    `${basename(process.env.VITEST_POOL_ID ?? "0")}-${Date.now()}-${counter++}-${label}`,
-  );
-  mkdirSync(dir, { recursive: true });
+  const name = `${process.env.VITEST_POOL_ID ?? "0"}-${Date.now()}-${counter++}-${label}`;
+  if (failed) {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+  const dir = mkdtempSync(join(tmpdir(), `${name}-`));
+  staged.push(dir);
   return dir;
 }
 
