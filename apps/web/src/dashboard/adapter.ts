@@ -183,7 +183,13 @@ export interface DashboardAdapter {
    * (create/delete/rename/paste), not on external file-system changes
    * (see issue #384).
    */
-  subscribeFileChanges?(worktreeId: string, handler: (path: string) => void): Unsubscribe;
+  subscribeFileChanges?(
+    worktreeId: string,
+    handler: (path: string) => void,
+    /** Called when the subscription is back after a drop. Changes made while it was down sent no
+     *  event, so the caller reloads what it shows. */
+    onResync?: () => void,
+  ): Unsubscribe;
 
   // CLI
   checkCli(): Promise<CliCheck>;

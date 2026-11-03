@@ -3910,6 +3910,64 @@ export class WorktreePage {
     });
   }
 
+  /** `runInTerminal` for one terminal, found by its id. `terminalInput.first()`
+   *  is the first input in the DOM, which can belong to a terminal parked
+   *  behind the one on screen, so keys typed there never reach the new tab. */
+  async runInTerminalById(terminalId: string, line: string): Promise<void> {
+    await test.step(`Run in terminal ${terminalId}: ${line}`, async () => {
+      const input = this.page
+        .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
+        .getByRole("textbox", { name: "Terminal input" });
+      await input.focus();
+      // Keys go to whatever has focus; a tab switch can still take it back.
+      await expect(input).toBeFocused();
+      await this.page.keyboard.press("Enter");
+      await this.page.keyboard.type(line);
+      await this.page.keyboard.press("Enter");
+    });
+  }
+
+  /** Wait until a terminal other than `previousIds` is the one on screen and
+   *  has drawn its shell prompt. `waitForTerminalReady` and
+   *  `waitForTerminalRenderedPrompt` can pass on the terminal that a new tab
+   *  is about to replace, and keys typed before the switch finishes go to it.
+   *  Returns the id of the terminal now showing. */
+  async waitForNewVisibleTerminalPrompt(
+    worktreeId: string,
+    previousIds: string[],
+    timeoutMs = 20_000,
+  ): Promise<string> {
+    return await test.step(`Wait for a new terminal in ${worktreeId} to draw its prompt`, async () => {
+      let shown = "";
+      await expect
+        .poll(
+          async () => {
+            const state = await this.page.evaluate(
+              ({ id, known }) => {
+                const wrapper = Array.from(
+                  document.querySelectorAll(`[data-worktree-id="${id}"][data-terminal-id]`),
+                ).find((el) => !el.closest('[data-testid="terminal-parking"]'));
+                const terminalId = wrapper?.getAttribute("data-terminal-id") ?? "";
+                const text =
+                  (wrapper?.querySelector(".xterm-rows") as HTMLElement | null)?.textContent ?? "";
+                return {
+                  terminalId,
+                  drawn: text.trim().length > 0,
+                  isNew: !known.includes(terminalId),
+                };
+              },
+              { id: worktreeId, known: previousIds },
+            );
+            shown = state.terminalId;
+            return state.isNew && state.drawn;
+          },
+          { timeout: timeoutMs },
+        )
+        .toBe(true);
+      return shown;
+    });
+  }
+
   /** `runInTerminal`, made self-verifying: type `line`, then wait until
    *  `marker` shows up in the worktree's rendered rows; if it doesn't within
    *  `renderTimeoutMs`, retype (up to `attempts` total). Keystrokes typed into

@@ -161,6 +161,7 @@ test.describe("Terminal parking: full-page navigation", () => {
     await worktreePage.waitForReady();
     await worktreePage.openTerminalTab();
     await worktreePage.waitForTerminalReady(20_000);
+    const firstTerminalId = await worktreePage.readActiveTerminalId(WORKTREE_A);
 
     // Add a 2nd terminal (becomes the active tab) and run a command in it.
     await worktreePage.clickTerminalAddTab(WORKTREE_A);
@@ -168,7 +169,10 @@ test.describe("Terminal parking: full-page navigation", () => {
       .poll(() => worktreePage.countTerminalPanels(WORKTREE_A), { timeout: 20_000 })
       .toBe(2);
     await worktreePage.waitForTerminalReady(20_000);
-    await worktreePage.runInTerminal("echo SECOND_TERM_MARKER");
+    const secondTerminalId = await worktreePage.waitForNewVisibleTerminalPrompt(WORKTREE_A, [
+      firstTerminalId,
+    ]);
+    await worktreePage.runInTerminalById(secondTerminalId, "echo SECOND_TERM_MARKER");
     await expect
       .poll(
         async () =>

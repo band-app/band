@@ -10,7 +10,7 @@ import {
   Switch,
 } from "@band-app/ui";
 import { useEffect, useState } from "react";
-import { resetAppearance, setAppearance, setMode } from "../../../lib/theme/apply";
+import { loadAppearance, resetAppearance, setAppearance, setMode } from "../../../lib/theme/apply";
 import { normalizeHex } from "../../../lib/theme/color";
 import {
   type Appearance,
@@ -161,13 +161,18 @@ export function AppearanceSettings({
   const { appearance, mode, resolvedMode } = useAppearance();
   const colors = effectiveColors(appearance, resolvedMode);
   const custom = isCustomized(appearance);
-  const update = (patch: Partial<Appearance>) => setAppearance({ ...appearance, ...patch });
+  // Merge into the stored value, not the rendered one: `useAppearance` only
+  // re-renders on the next animation frame, so two edits in quick succession
+  // would otherwise start from the same stale object and drop the first.
+  const update = (patch: Partial<Appearance>) => setAppearance({ ...loadAppearance(), ...patch });
 
   const setColor = (key: ColorKey, hex: string) => {
-    update({
+    const stored = loadAppearance();
+    setAppearance({
+      ...stored,
       overrides: {
-        ...appearance.overrides,
-        [resolvedMode]: { ...(appearance.overrides[resolvedMode] ?? {}), [key]: hex },
+        ...stored.overrides,
+        [resolvedMode]: { ...(stored.overrides[resolvedMode] ?? {}), [key]: hex },
       },
     });
   };

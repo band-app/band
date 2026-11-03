@@ -1000,14 +1000,28 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   //    on first expand — no invalidation needed.
   useEffect(() => {
     if (!adapter.subscribeFileChanges) return;
-    const unsubscribe = adapter.subscribeFileChanges(worktreeId, (changedPath) => {
-      // `getCachedContents` is a stable module-level helper (defined at
-      // the top of this file), so it doesn't need to be in the effect's
-      // dependency array.
-      const cache = getCachedContents(worktreeId);
-      if (!cache.has(changedPath)) return;
-      void fetchDir(changedPath, { force: true });
-    });
+    const unsubscribe = adapter.subscribeFileChanges(
+      worktreeId,
+      (changedPath) => {
+        // `getCachedContents` is a stable module-level helper (defined at
+        // the top of this file), so it doesn't need to be in the effect's
+        // dependency array.
+        const cache = getCachedContents(worktreeId);
+        if (!cache.has(changedPath)) return;
+        void fetchDir(changedPath, { force: true });
+      },
+      // The watch was down for a while (a worker restart, say), and what changed meanwhile sent
+      // no event. Reload the root and the expanded folders, and drop the other cached listings
+      // so their next expand reads disk.
+      () => {
+        const cache = getCachedContents(worktreeId);
+        const expanded = getCachedExpanded(worktreeId);
+        for (const key of Array.from(cache.keys())) {
+          if (key !== "" && !expanded.has(key)) cache.delete(key);
+        }
+        for (const dir of new Set(["", ...expanded])) void fetchDir(dir, { force: true });
+      },
+    );
     return unsubscribe;
     // `fetchDir` is wrapped in `useCallback` above with `[adapter,
     // worktreeId]`, so it's stable across renders of this component —
