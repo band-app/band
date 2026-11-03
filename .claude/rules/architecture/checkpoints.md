@@ -1,0 +1,31 @@
+---
+paths:
+  - "**/_utils/turn-events.ts"
+  - "**/checkpoints-retention.test.ts"
+  - "**/claude-resume.ts"
+  - "**/sessions.json"
+  - "apps/cli/tests/integration.rs"
+  - "apps/hub/src/server/services/checkpoint-service.ts"
+  - "apps/hub/tests/checkpoints.test.ts"
+  - "apps/web/e2e/checkpoints-offline.spec.ts"
+  - "apps/web/e2e/settings-repo-checkpoints.spec.ts"
+  - "apps/worker/src/methods-lifecycle.ts"
+  - "docs/checkpoints.md"
+  - "packages/host-api/src/snapshot-git.ts"
+---
+
+# Architecture: checkpoints
+
+The hub keeps recent checkpoints of every worktree on a static worker (`services/checkpoint-service.ts`, `worktree_checkpoints` table, guide: `docs/checkpoints.md`). A checkpoint reuses the sleep snapshot (`packages/host-api/src/snapshot-git.ts`, a commit of the working tree built in a temporary index; the worker uses it too, for the fence snapshot) and lives on the hub only, never on origin: `<BAND_HOME>/checkpoints/<worktree id>/<checkpoint id>/bundle.pack` (a bundle of what the worker's remotes lack, absent when every remote has the snapshot) and `sessions.json` (the agent session files).
+
+- Triggers: `onTurnEnded` (`_utils/turn-events.ts`, emitted by `finishTask`), a sweep every `BAND_CHECKPOINT_POLL_MS` (60 s) that takes one once the files' fingerprint (head, `git status`, `git diff --numstat`) stayed unchanged for `BAND_CHECKPOINT_QUIET_MS` (3 min) and differs from the last checkpoint, the worker's `lifecycle.shutdown` request (sent by `Worker.shutdown` before the link closes, 30 s at most), `move`, and `checkpoints.take`. A checkpoint is skipped when base sha, tree sha and agent session hash match the newest one. Ephemeral workers and the hub's own machine are never checkpointed.
+- Retention: `BAND_CHECKPOINT_KEEP` (5) and `BAND_CHECKPOINT_MAX_BYTES` (200 MB per worktree). A checkpoint above the limit is skipped and `checkpoints.list` returns the warning.
+- The per-repo setting is `repos.checkpoints_enabled` (null for the default, `checkpointsEnabledFor` in `@band-app/shared/repo-hosts`: on for a repo with no allowed-worker list, off for a limited repo). Written only by `RepoQueries.setCheckpointsEnabled` (`repos.update { checkpointsEnabled }`, admin), kept by `saveAll`. Off means nothing is stored, including by `take`; `move` still takes a transient checkpoint and deletes it.
+- Offline views (`changes`, `diff`, `files`, `file`) run git on a bare repo the hub builds under `view.git` from the bundles, after fetching history from the hub's checkout or the remote URL. The chat log is on the hub already.
+- Restore (`checkpoints.restore`) checks that the target is online and allowed (`addHost` adds it, admin; `RepoHostNotAllowedError` otherwise), makes the repo available there (`WorktreeService.ensureCheckoutOn`, `hostRepoPath` for a repo with no remote), fetches the bundle, `checkoutSnapshot`, builds a snapshot of the result and compares its tree with the checkpoint's, imports the agent sessions, then adds the worktree row, calls `RepoQueries.setSupersededBy` on the old one (`worktrees.superseded_by`, kept by `saveAll`, keyed by repo, name and worker), `rekeyWorktreeRows` (panel states, tasks, agent sessions, cron jobs, subscriptions, browser history, usage, client state, origin links) and `ChatService.reassignWorktree`. Nothing is deleted on the old worker. A superseded copy gets no checkpoints, is ignored by the one-worker-per-branch rule and is removed only by a person (`worktrees.remove`).
+- `move` takes a fresh checkpoint, restores, and removes the source with `worktreeService.remove` only after the restore verified the tree. `evacuate` (admin) does it for each worktree of a worker, one after the other, never for a repo's own clone. An offline source worker restores instead.
+- Sessions follow the worktree: `restoreSessions` (checkpoints and the ephemeral wake) passes `fromCwd` and `toCwd` to `lifecycle.importSessions`, and the worker (`apps/worker/src/methods-lifecycle.ts`) moves Claude's file under `claudeProjectSlug(toCwd)` (`@band-app/shared/claude-session`, also used by `claude-resume.ts`) and rewrites `cwd` in Claude and Codex lines. Restoring a default-branch worktree sets the target as the repo's primary worker, and `listedMainHostOf` skips superseded copies while a live one exists. Dockview leaves take the worktree id from `PanelVisibilityContext`, not their saved params.
+- Owner only: `CheckpointService.assertOwner` runs at the start of a take and again before the row is written, and rejects a superseded worktree, one that lives on another worker, or one whose link session changed meanwhile. Restore replaces what the target holds (an older superseded copy, a branch with extra commits, or for the default branch the repo's own checkout) after saving it under `refs/band/backup/<new worktree id>/<time>[-branch]` (`RestoreResult.backupRefs`); the default-branch worktree goes through `resetCheckoutToSnapshot` and `move` takes it too while its worker is up, refusing when it has a running agent, queued message or terminal. The source clone stays, superseded, and is never removed.
+- `checkpoints.*` is left out of the MCP endpoint and the worker relay. CLI: `band worktrees move | restore | checkpoints`, `band workers evacuate`, `band repos set --checkpoints`. UI: Settings > Repos switch, `WorktreeCard` (offline icon with a tooltip, faded row, one "Open on another worker…" item that opens `MoveWorktreeDialog` while the worker is online and `ContinueOnHostDialog` while it is offline, disabled with its reason when there is no checkpoint or the repo is limited to the worker), `OfflineWorktreeNotice` above an offline worktree (worker, last seen, checkpoint age, the Open on another worker button, or the `follow.offer` block reason) with the read-only `CheckpointSidepanel` behind "View checkpoint", `EvacuateHostDialog` in Settings > Workers.
+- Tests: `apps/hub/tests/checkpoints.test.ts` (two real workers, scripted ACP stub; S1 to S6), `checkpoints-retention.test.ts`, `apps/web/e2e/checkpoints-offline.spec.ts`, `apps/web/e2e/settings-repo-checkpoints.spec.ts`, `repos_set_checkpoints_*` in `apps/cli/tests/integration.rs`.
+- Not done yet: restoring on the hub's own machine, checkpoints of worktrees on the hub's machine, ignored files, and a settings field for the limits (they are environment variables).

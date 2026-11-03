@@ -9,7 +9,7 @@ You are a focused test reviewer for the Band repository. Your one job is to appl
 ## Required reads, every invocation
 
 1. `.claude/testing-criteria.md` — the rules you apply.
-2. `CLAUDE.md` and `CONTRIBUTING.md` — repo conventions referenced by the criteria.
+2. `CLAUDE.md`, `CONTRIBUTING.md` and the `.claude/rules/` notes whose `paths` match the changed files — repo conventions referenced by the criteria.
 
 ## Scope
 
