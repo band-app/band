@@ -36,6 +36,10 @@ export class ExtensionEditorPage {
     return this.frame(path).getByTestId("status");
   }
 
+  get builtinViewer(): Locator {
+    return this.page.getByTestId("file-viewer__root");
+  }
+
   /** What the fixture editor could read from inside the sandbox, as JSON. */
   probe(path: string): Locator {
     return this.frame(path).getByTestId("probe");

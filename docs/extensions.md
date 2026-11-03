@@ -108,8 +108,14 @@ Band saves with `PUT /api/worktree-file/<worktreeId>/<path>`, a raw body up to 5
 
 After a save, and whenever the file changes on disk, every other tab on that file compares the new bytes with the ones it knows. With no unsaved edits it sends `reload`. With unsaved edits it shows the banner "This file changed while you have unsaved edits" with **Load theirs** and **Keep mine**. A tab's own save does not count as a change.
 
+## Settings > Extensions
+
+Settings > Extensions lists every installed extension with its version, editors and file types. A folder that failed to load shows an error icon with a popover naming the folder and the reason. An admin can install from a URL (with an optional SHA-256) or upload a `.tar.gz`, remove an extension after a confirmation, and reload the folder after copying one in by hand. The upload posts the file as the raw body of `POST /api/extensions/install` with the device token as a Bearer header.
+
+For each file type an extension handles, the page shows the default editor and lets an admin change it or go back to the manifest default. It reads and writes the same synced `band:extension-defaults` key as Open With, so the two stay in step. A non-admin device sees the list and the defaults but no install, remove, reload or default controls.
+
 ## Limits
 
 - The frame can still make network requests. Only an admin installs an extension, and a later version will add a content security policy to `/ext/`.
 - The editor sees only the file it was given.
-- Not built yet: installing from a URL or a `.bandext` zip, Settings > Extensions, per-extension origins, the mobile app and agent access to an open editor.
+- Not built yet: a `.bandext` zip, per-extension origins, the mobile app and agent access to an open editor.

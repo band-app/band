@@ -43,6 +43,7 @@ import { AppearanceSettings } from "./settings/AppearanceSettings";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
 import { DevicesSettings, useIsAdmin } from "./settings/DevicesSettings";
+import { ExtensionsSettings } from "./settings/ExtensionsSettings";
 import { GroupsSettings } from "./settings/GroupsSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
@@ -90,6 +91,7 @@ type SettingsSectionId =
   | "agent-logins"
   | "voice"
   | "mcp"
+  | "extensions"
   | "agent-hooks"
   | "runners"
   | "groups"
@@ -166,6 +168,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     title: "MCP",
     subtitle:
       "MCP servers the hub proxies to coding agents, with their tools, scope and audit log.",
+    group: "AI capabilities",
+  },
+  {
+    id: "extensions",
+    title: "Extensions",
+    subtitle: "Editor extensions installed on this hub, and the editor each file type opens in.",
     group: "AI capabilities",
   },
   {
@@ -935,6 +943,13 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                   {active === "mcp" ? (
                     <SettingsSection title="MCP">
                       <McpSettings />
+                    </SettingsSection>
+                  ) : null}
+
+                  {/* ── Extensions ─────────────────────────────────── */}
+                  {active === "extensions" ? (
+                    <SettingsSection title="Extensions">
+                      <ExtensionsSettings />
                     </SettingsSection>
                   ) : null}
 
