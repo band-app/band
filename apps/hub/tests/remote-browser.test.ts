@@ -46,10 +46,13 @@ const tmp = (prefix: string) => {
 };
 
 function git(cwd: string, ...args: string[]): void {
+  // A git hook (the pre-push flake guard) exports GIT_DIR and GIT_WORK_TREE, which would aim these commands at the
+  // checkout being pushed instead of the scratch repo.
+  const { GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_PREFIX, ...inherited } = process.env;
   execFileSync("git", args, {
     cwd,
     env: {
-      ...process.env,
+      ...inherited,
       GIT_AUTHOR_NAME: "t",
       GIT_AUTHOR_EMAIL: "t@example.com",
       GIT_COMMITTER_NAME: "t",

@@ -3,8 +3,6 @@
 // GIT_CONFIG_*, and so on). A test that spawns a hub, a band-worker or the CLI
 // inherits those and talks to the real hub, or has the hub refuse its bootstrap
 // token (HTTP 401) because the worker id belongs to another worker.
-// Git also exports GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and GIT_PREFIX to hooks, so a test run from the
-// pre-push flake guard would aim its own git commands at the checkout being pushed.
 // Test configs call this once, before any test process starts, so everything
 // they fork sees a clean environment.
 const AGENT_VARS = new Set([
@@ -20,10 +18,6 @@ const AGENT_VARS = new Set([
   "BAND_HOME",
   "GIT_CONFIG_COUNT",
   "GIT_CONFIG_PARAMETERS",
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_INDEX_FILE",
-  "GIT_PREFIX",
   "GIT_ASKPASS",
   "SSH_ASKPASS",
   "GH_TOKEN",
