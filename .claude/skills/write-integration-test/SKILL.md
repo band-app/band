@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 
 This skill is the operational playbook — *how* to write an integration test against the Band web app. It is NOT the rule list.
 
-- **The reviewer-enforced rules** live in [`.claude/testing-criteria.md`](../../testing-criteria.md) as `TEST-1`…`TEST-35`. Open that file once before you write your first test on this repo. Both CI (`.github/workflows/claude-review.yml`) and the local `review-and-apply` skill apply it verbatim to your diff.
+- **The reviewer-enforced rules** live in [`.claude/testing-criteria.md`](../../testing-criteria.md) as `TEST-1`…`TEST-45`. Open that file once before you write your first test on this repo. Both CI (`.github/workflows/claude-review.yml`) and the local `review-and-apply` skill apply it verbatim to your diff.
 - **The narrative doctrine** — *why* we test this way — lives in [`docs/integration-testing.md`](../../../docs/integration-testing.md).
 
 Throughout this playbook, prescriptions that correspond to a specific rule are cited inline as *(enforces TEST-N)*. If you intentionally deviate from one, fix it before pushing or cite the ID in your PR description with a justification — the reviewer will flag every unjustified deviation.
@@ -467,11 +467,31 @@ Is the change user-observable in the rendered UI?
     └── CLI / binary spawning → see the `integration-tests` skill
 ```
 
+### Flake checklist
+
+Before you ship, confirm the test passes the rules from the flake analysis (the text lives in the criteria file, not here):
+
+- TEST-36: waits for the end of the transition your action started.
+- TEST-37: uses a product-exposed settled signal rather than polling geometry.
+- TEST-38: locates one instance by id or scoped container, with no `.first()` or `.nth()` on a multi-instance kind.
+- TEST-39: drives input like a person (wheel, tap, typing).
+- TEST-40: owns its chats, timers and crons, and ends idle.
+- TEST-41: asserts invariants, and handles an optional reply.
+- TEST-42: derives timeouts from the product's budget.
+- TEST-43: stops processes gracefully and awaits exit before deleting their dirs.
+
+### Fixing a flaky test
+
+1. Reproduce with a repeat loop: `pnpm --filter @band-app/web exec playwright test <spec> --repeat-each 20 --workers 1`, or `pnpm flake-guard --files <path> --repeat 20`. If idle runs pass, run the loop with CPU load (for example `yes > /dev/null` on a few cores).
+2. Find the cause. Ask whether a fast user would hit the same race (TEST-44). If so, fix the product.
+3. Record the failure rate before and after in the PR description (TEST-45). No retries, `skip`, `fixme` or longer sleeps without a cause.
+4. Run `pnpm flake-guard` on your branch. The pre-push hook runs it with 5 repeats for e2e specs and 3 runs for other tests.
+
 ---
 
 ## Before You Ship
 
-Open [`.claude/testing-criteria.md`](../../testing-criteria.md). Scan `TEST-1`…`TEST-35` and confirm every rule that applies to your test is satisfied — the reviewer (CI + `review-and-apply`) will do exactly that. The criteria file's quick-reference table (§8) is the highest-yield place to start; it maps the disqualifying mistakes to their rule IDs.
+Open [`.claude/testing-criteria.md`](../../testing-criteria.md). Scan `TEST-1`…`TEST-45` and confirm every rule that applies to your test is satisfied — the reviewer (CI + `review-and-apply`) will do exactly that. The criteria file's quick-reference table (§9) is the highest-yield place to start; it maps the disqualifying mistakes to their rule IDs.
 
 If you find a rule you don't satisfy: fix it, or cite the ID in the PR description with a justification ("intentional deviation from TEST-X because …"). Silent deviations get flagged.
 
