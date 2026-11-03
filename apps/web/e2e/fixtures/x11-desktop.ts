@@ -103,7 +103,9 @@ function startXvfb(): Promise<{ xvfb: ChildProcess; display: string }> {
     let out = "";
     const timer = setTimeout(() => {
       xvfb.kill("SIGKILL");
-      reject(new Error(`Xvfb did not report a display within 15s\nXvfb stderr: ${stderr || "(empty)"}`));
+      reject(
+        new Error(`Xvfb did not report a display within 15s\nXvfb stderr: ${stderr || "(empty)"}`),
+      );
     }, 15_000);
     xvfb.once("exit", (code) => {
       clearTimeout(timer);

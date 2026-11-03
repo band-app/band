@@ -47,7 +47,10 @@ function copyTail(src: string, dest: string): void {
 function slot(label: string): string | undefined {
   const root = artifactsDir();
   if (!root) return undefined;
-  const dir = join(root, `${basename(process.env.VITEST_POOL_ID ?? "0")}-${Date.now()}-${counter++}-${label}`);
+  const dir = join(
+    root,
+    `${basename(process.env.VITEST_POOL_ID ?? "0")}-${Date.now()}-${counter++}-${label}`,
+  );
   mkdirSync(dir, { recursive: true });
   return dir;
 }
