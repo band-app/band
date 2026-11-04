@@ -356,9 +356,17 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     const terminal = await dashboard.openTerminal(LOCAL_WORKTREE);
     // The sum is computed by the shell, so the result line can't be the echoed command.
     await terminal.typeLine("echo band-e2e-$((40 + 2))");
-    await expect
-      .poll(() => terminal.readScreenText(), { timeout: 30_000 })
-      .toMatch(/^band-e2e-42$/m);
+    try {
+      await expect
+        .poll(() => terminal.readScreenText(), { timeout: 30_000 })
+        .toMatch(/^band-e2e-42$/m);
+    } catch (err) {
+      await test.info().attach("terminal-layout.json", {
+        body: await terminal.describeLayout(),
+        contentType: "application/json",
+      });
+      throw err;
+    }
     expect(app.cspViolations).toEqual([]);
   });
 

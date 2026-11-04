@@ -104,6 +104,45 @@ async function foreground(udid: string): Promise<string> {
   return ((await res.json()) as { bundleId?: string }).bundleId ?? "";
 }
 
+/** Whether the device has `bundleId` running, from the device's own launchd (not serve-sim). */
+function appRunning(udid: string, bundleId: string): boolean {
+  try {
+    const listed = execFileSync("xcrun", ["simctl", "spawn", udid, "launchctl", "list"], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    return listed.includes(`UIKitApplication:${bundleId}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Launches `bundleId` and waits until it is frontmost. A hosted runner's device was seen to
+ * report springboard for 90 s after `simctl launch` had succeeded (run 41634661564). That is
+ * either a launch that died at once (the process is gone) or a stale foreground answer (the
+ * process is running). The first is launched again, once; the second keeps waiting. A failure
+ * names which one it was.
+ */
+async function launchAndWaitForeground(
+  udid: string,
+  bundleId: string,
+  timeout: number,
+): Promise<void> {
+  execFileSync("xcrun", ["simctl", "launch", udid, bundleId]);
+  const settle = 20_000;
+  try {
+    await waitForeground(udid, bundleId, settle);
+    return;
+  } catch {}
+  const running = appRunning(udid, bundleId);
+  console.error(
+    `[simulator foreground] ${bundleId} not frontmost ${settle} ms after launch; process running: ${running}`,
+  );
+  if (!running) execFileSync("xcrun", ["simctl", "launch", udid, bundleId]);
+  await waitForeground(udid, bundleId, timeout - settle);
+}
+
 /**
  * Waits until `bundleId` is frontmost. A hosted CI runner's simulator can answer the foreground
  * query with no bundle id at all (it also sends no frames and no accessibility tree), and then
@@ -315,8 +354,7 @@ test.describe("with a Mac worker", () => {
         { timeout: 90_000, intervals: [1000] },
       )
       .toBe(true);
-    execFileSync("xcrun", ["simctl", "launch", udid, "com.apple.Preferences"]);
-    await waitForeground(udid, "com.apple.Preferences", 90_000);
+    await launchAndWaitForeground(udid, "com.apple.Preferences", 90_000);
     await expect
       .poll(async () => (await sim.canvasPixels()).equals(before), {
         timeout: 90_000,

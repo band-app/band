@@ -92,17 +92,28 @@ function startXvfb(): Promise<{ xvfb: ChildProcess; display: string }> {
       "-nolisten",
       "tcp",
     ],
-    { stdio: ["ignore", "ignore", "ignore", "pipe"] },
+    { stdio: ["ignore", "ignore", "pipe", "pipe"] },
   );
+  // Kept for the error message: Xvfb says why it has no display on stderr.
+  let stderr = "";
+  xvfb.stderr?.on("data", (chunk: Buffer) => {
+    stderr = (stderr + chunk.toString("utf8")).slice(-4000);
+  });
   return new Promise((resolve, reject) => {
     let out = "";
     const timer = setTimeout(() => {
       xvfb.kill("SIGKILL");
-      reject(new Error("Xvfb did not report a display within 15s"));
+      reject(
+        new Error(`Xvfb did not report a display within 15s\nXvfb stderr: ${stderr || "(empty)"}`),
+      );
     }, 15_000);
     xvfb.once("exit", (code) => {
       clearTimeout(timer);
-      reject(new Error(`Xvfb exited with code ${code} before it reported a display`));
+      reject(
+        new Error(
+          `Xvfb exited with code ${code} before it reported a display\nXvfb stderr: ${stderr || "(empty)"}`,
+        ),
+      );
     });
     (xvfb.stdio[3] as NodeJS.ReadableStream).on("data", (chunk: Buffer) => {
       out += chunk.toString("utf8");

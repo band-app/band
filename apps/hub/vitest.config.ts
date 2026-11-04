@@ -26,7 +26,7 @@ export default defineConfig({
     hookTimeout: 30_000,
     fileParallelism: false,
     globalSetup: ["tests/global-setup.ts"],
-    setupFiles: ["tests/setup-process-guard.ts"],
+    setupFiles: ["tests/setup-process-guard.ts", "tests/setup-failure-artifacts.ts"],
     include: ["tests/**/*.test.ts"],
     // Every server a test boots inherits this, so coding agents (including
     // the boot-time model probe) run as the scripted ACP stub rather than
