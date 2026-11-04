@@ -165,4 +165,29 @@ export class HtmlVisualPage {
       await this.commentSend.click();
     });
   }
+
+  /** Count the iframe's `load` events from now on, in a property of the iframe element. */
+  async countLoads(): Promise<void> {
+    await this.frameElement.evaluate((el) => {
+      const holder = el as unknown as { __bandLoads: number };
+      holder.__bandLoads = 0;
+      el.addEventListener("load", () => {
+        holder.__bandLoads += 1;
+      });
+    });
+  }
+
+  async loadCount(): Promise<number> {
+    return this.frameElement.evaluate(
+      (el) => (el as unknown as { __bandLoads: number }).__bandLoads,
+    );
+  }
+
+  async scrollPageTo(y: number): Promise<void> {
+    await this.frame.locator("body").evaluate((_b, top) => window.scrollTo(0, top), y);
+  }
+
+  async pageScrollY(): Promise<number> {
+    return this.frame.locator("body").evaluate(() => window.scrollY);
+  }
 }
