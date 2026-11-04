@@ -15,7 +15,7 @@
  * spec seeded.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 export type SelectionMenuItem =
   | "add-to-chat"
@@ -78,6 +78,17 @@ export class SelectionMenu {
 
   /** The menu's top-left corner in viewport pixels. */
   async cornerOfMenu(): Promise<{ x: number; y: number }> {
+    // The menu animates in: read the corner once it stops moving.
+    let last = "";
+    await expect
+      .poll(async () => {
+        const b = await this.root.boundingBox();
+        const now = b ? `${b.x},${b.y}` : "";
+        const settled = now !== "" && now === last;
+        last = now;
+        return settled;
+      })
+      .toBe(true);
     const box = await this.root.boundingBox();
     if (!box) throw new Error("the selection menu is not open");
     return { x: box.x, y: box.y };
