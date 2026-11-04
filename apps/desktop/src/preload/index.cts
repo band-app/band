@@ -23,7 +23,7 @@
  */
 
 import type { IpcRendererEvent } from "electron";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 // Loud trace so we can confirm the preload actually runs (visible in
 // DevTools console). If you don't see this, Electron isn't even loading
@@ -140,6 +140,19 @@ const api = {
     const handler = (_e: IpcRendererEvent, payload: unknown) => cb(payload);
     ipcRenderer.on(event, handler);
     return () => ipcRenderer.removeListener(event, handler);
+  },
+
+  /**
+   * Absolute path of a file the user dropped onto the window. Electron gives no
+   * `File.path` any more. Takes a `File` object, so it can only name files the
+   * page was handed, and returns "" for a file with no path on disk.
+   */
+  getPathForFile(file: File): string {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
   },
 };
 
