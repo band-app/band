@@ -676,3 +676,17 @@ html[data-power="saver"] .band-browser-loading-bar {
     animation-play-state: paused;
   }
 }
+
+/*
+ * dnd-kit places its overlay with `position: fixed` at the dragged row's viewport rect, then
+ * translates it by the pointer delta, both in viewport pixels. Under the <html> zoom those
+ * CSS pixels scale again, so the preview drifts from the cursor. Counter-zoom the overlay
+ * wrapper so its box and transform apply 1:1, and zoom the content back to the app zoom.
+ */
+.band-drag-overlay {
+  zoom: calc(1 / var(--app-zoom, 1));
+}
+
+.band-drag-overlay > * {
+  zoom: var(--app-zoom, 1);
+}

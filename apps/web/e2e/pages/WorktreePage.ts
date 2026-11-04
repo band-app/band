@@ -566,6 +566,16 @@ export class WorktreePage {
     });
   }
 
+  /** Make every page load in this test start at app zoom `factor`, the way a saved zoom level
+   *  does (`band:zoom-level` in localStorage, applied by the pre-paint script). Call before `goto`. */
+  async startAtZoom(factor: number): Promise<void> {
+    await test.step(`Start the app at zoom ${factor}`, async () => {
+      await this.page.addInitScript((z) => {
+        localStorage.setItem("band:zoom-level", String(z));
+      }, factor);
+    });
+  }
+
   /** Zoom the app in by one step via the real production keyboard shortcut
    *  (Ctrl/Cmd+=). In browser mode `useZoom` (mounted in `__root.tsx`) handles
    *  this keydown and calls `zoomIn()` → `applyZoomLevel()`, which dispatches
@@ -5297,11 +5307,15 @@ export class WorktreePage {
     });
   }
 
+  /** The viewport point of the last terminal link click. */
+  lastTerminalClick: { x: number; y: number } | null = null;
+
   private async clickWithModifiers(
     x: number,
     y: number,
     modifiers: Array<"Meta" | "Control" | "Shift">,
   ): Promise<void> {
+    this.lastTerminalClick = { x, y };
     for (const key of modifiers) await this.page.keyboard.down(key);
     try {
       await this.page.mouse.click(x, y);

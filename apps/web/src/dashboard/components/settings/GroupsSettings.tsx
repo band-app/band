@@ -37,6 +37,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { viewportTransformToCss } from "../../../lib/zoom";
 import { useGroupMutations, useGroups } from "../../hooks/use-groups";
 import { useRepos } from "../../hooks/use-repos";
 import { GROUP_COLOR_PRESETS } from "../../lib/group-colors";
@@ -193,7 +194,7 @@ function GroupRow({
           onMove(1);
         }
       }}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
+      style={{ transform: CSS.Translate.toString(viewportTransformToCss(transform)), transition }}
       className={`flex items-center gap-2 bg-background px-3 py-2 outline-none focus-visible:ring-1 focus-visible:ring-ring ${
         isDragging ? "relative z-10 opacity-70 shadow-lg" : ""
       }`}

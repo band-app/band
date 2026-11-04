@@ -64,6 +64,25 @@ export class SelectionMenu {
     });
   }
 
+  /** Right-click `word` and return the viewport point that was clicked. */
+  async openOnEditorWordAt(editor: Locator, word: string): Promise<{ x: number; y: number }> {
+    return await test.step(`Right-click "${word}" and note where`, async () => {
+      const line = this.line(editor, word);
+      const box = await line.boundingBox();
+      if (!box) throw new Error(`line "${word}" is not rendered`);
+      const at = { x: box.x + 4, y: box.y + 6 };
+      await this.page.mouse.click(at.x, at.y, { button: "right" });
+      return at;
+    });
+  }
+
+  /** The menu's top-left corner in viewport pixels. */
+  async cornerOfMenu(): Promise<{ x: number; y: number }> {
+    const box = await this.root.boundingBox();
+    if (!box) throw new Error("the selection menu is not open");
+    return { x: box.x, y: box.y };
+  }
+
   /** Click the empty space right of `lineText` to drop the selection, then
    *  right-click there. */
   async openOnEditorBlank(editor: Locator, lineText: string): Promise<void> {
