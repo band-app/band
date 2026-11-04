@@ -287,6 +287,9 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
+      - name: Test (CI report scripts)
+        run: node --test scripts/ci/tests/*.test.mjs
+
       - name: Lint (Biome)
         run: pnpm exec biome check .
 
@@ -427,6 +430,7 @@ jobs:
       NODE_OPTIONS: "--max-old-space-size=6144"
       # runner-docker.test.ts needs the worker image, which only the `docker` job builds.
       BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
+      BAND_FLAKY_DIR: ${{ github.workspace }}/flaky-results
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -448,6 +452,16 @@ jobs:
           BAND_CHROMIUM_NO_SANDBOX: "1"
           BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
         run: pnpm --filter @band-app/server test --shard=${{ matrix.shard }}/${{ matrix.total }}
+
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-hub-${{ matrix.shard }}
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload hub failure logs
         if: failure()
@@ -471,6 +485,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      BAND_FLAKY_DIR: ${{ github.workspace }}/flaky-results
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -498,6 +513,16 @@ jobs:
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
 
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-packages
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   test-e2e:
     name: Test e2e (web) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-24.04
@@ -516,6 +541,8 @@ jobs:
         total: [3]
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      # Playwright's JSON reporter (apps/web/playwright.config.ts) writes here.
+      PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/flaky-results/playwright-${{ matrix.shard }}.json
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -534,6 +561,16 @@ jobs:
 
       - name: Test e2e (web)
         run: pnpm --filter @band-app/web test:e2e --shard=${{ matrix.shard }}/${{ matrix.total }}
+
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-e2e-${{ matrix.shard }}
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Playwright writes per-failure error-context.md snapshots (+ any traces)
       # into test-results/. Without this upload a CI-only e2e flake leaves
@@ -572,6 +609,7 @@ jobs:
       BAND_TEST_HOST: remote-loopback
       BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
       BAND_WORKER_USE_DIST: "1"
+      BAND_FLAKY_DIR: ${{ github.workspace }}/flaky-results
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -600,6 +638,16 @@ jobs:
           BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
 
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-loopback-${{ matrix.shard }}
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload hub failure logs
         if: failure()
         uses: actions/upload-artifact@v7
@@ -608,6 +656,103 @@ jobs:
           path: ${{ runner.temp }}/band-test-artifacts/
           if-no-files-found: ignore
           retention-days: 7
+
+  # A test that failed and then passed on the CI retry does not fail its job. This job
+  # collects what the test jobs recorded, prints it in the run summary and, for the merge
+  # queue and main, files or updates one `flaky` issue per test. It is not part of
+  # `lint-test-build`, so it never blocks a merge. `issues: write` is on this job only, and
+  # a pull request run (a fork's too) only prints the summary.
+  flaky-report:
+    name: Flaky report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [test-hub, test-packages, test-e2e, test-remote-loopback]
+    if: always() && !cancelled()
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Download flaky results
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: flaky-*
+          path: flaky-results
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          apply=""
+          if [ "$EVENT_NAME" = "merge_group" ] || [ "$EVENT_NAME" = "push" ]; then apply="--apply"; fi
+          node scripts/ci/report-flaky.mjs --results flaky-results $apply
+
+  # Tests on .github/flaky-quarantine.txt are skipped in the blocking jobs above and run here.
+  # The job never fails the workflow, and nothing waits for it, so a quarantined test keeps
+  # producing results without dropping a PR.
+  test-quarantine:
+    name: Test (quarantine)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    needs: [changes, build]
+    if: >
+      needs.changes.outputs.code == 'true' && (
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+      BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
+      BAND_FLAKY_QUARANTINE: only
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Look for quarantined tests
+        id: list
+        run: |
+          if grep -qE '^[^#[:space:]]' .github/flaky-quarantine.txt; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "The quarantine list is empty." >> "$GITHUB_STEP_SUMMARY"
+            echo "has=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/setup-node-rust
+        if: steps.list.outputs.has == 'true'
+        with:
+          rust: "false"
+
+      - uses: ./.github/actions/use-build
+        if: steps.list.outputs.has == 'true'
+
+      - uses: ./.github/actions/setup-playwright
+        if: steps.list.outputs.has == 'true'
+
+      - name: Test quarantined (hub)
+        if: ${{ !cancelled() && steps.list.outputs.has == 'true' }}
+        env:
+          BAND_CHROMIUM_NO_SANDBOX: "1"
+        run: pnpm --filter @band-app/server test
+
+      - name: Test quarantined (web unit)
+        if: ${{ !cancelled() && steps.list.outputs.has == 'true' }}
+        run: pnpm --filter @band-app/web test
+
+      - name: Test quarantined (web e2e)
+        if: ${{ !cancelled() && steps.list.outputs.has == 'true' }}
+        run: pnpm --filter @band-app/web test:e2e --pass-with-no-tests
 
   # The repo ruleset "Require CI active" requires a status check named exactly
   # "Lint, Test & Build", the name of the job this split replaced. This job
