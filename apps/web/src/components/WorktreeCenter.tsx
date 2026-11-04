@@ -1330,7 +1330,8 @@ function EditorChoiceFileLeaf(props: LayoutPanelProps<FileLeafParams>) {
   // An iframe reloads when its element is detached, so an extension tab stays attached while
   // another tab of its group is selected.
   useEffect(() => {
-    api.setRenderer(resolved ? "always" : "onlyWhenVisible");
+    // The built-in viewer sets its own renderer (WorktreeFileLeaf).
+    if (resolved) api.setRenderer("always");
   }, [api, resolved]);
   if (!untitled && !external && loading) return null;
   if (resolved) {
@@ -1399,6 +1400,15 @@ function WorktreeFileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
   const capabilities = useCapabilities();
   const untitled = params.untitled === true || isUntitledPath(filePathRaw);
   const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
+  // An iframe reloads when its element is detached, so a PDF or the HTML Visual page stays
+  // attached while another tab of its group is selected. Other views detach as before.
+  const keepAttached =
+    !untitled &&
+    (getFilePreviewType(filePathRaw) === "pdf" ||
+      (!external && isHtmlFile(filePathRaw) && viewMode === "preview"));
+  useEffect(() => {
+    api.setRenderer(keepAttached ? "always" : "onlyWhenVisible");
+  }, [api, keepAttached]);
   const lspExtension = useLeafLsp(
     worktreeIdRaw,
     filePathRaw,
