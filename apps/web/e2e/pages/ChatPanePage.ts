@@ -774,6 +774,108 @@ export class ChatPanePage {
     });
   }
 
+  /** The "Drop to attach" overlay over the chat pane while files are dragged over it. */
+  get dropOverlay(): Locator {
+    return this.page.getByTestId("chat-pane__drop-overlay").filter({ visible: true });
+  }
+
+  /** The composer's notice line (a dictation error or a refused drop). */
+  get composerNotice(): Locator {
+    return this.micError;
+  }
+
+  /** The composer's attachment chips. */
+  get attachments(): Locator {
+    return this.page.getByTestId("prompt-input__attachment").filter({ visible: true });
+  }
+
+  /**
+   * Start dragging files. The files come from a throwaway `<input type=file>` filled through
+   * `setInputFiles`, so they are real `File` objects (disk-backed when given as paths).
+   * `text` starts a text drag instead. A real Finder drag cannot be automated, so this is the
+   * test boundary: the drag events are dispatched on the page, the files are real.
+   */
+  async startDrag(
+    source:
+      | { files: (string | { name: string; mimeType: string; buffer: Buffer })[] }
+      | { text: string },
+  ): Promise<void> {
+    await test.step("Start a drag", async () => {
+      if ("text" in source) {
+        await this.page.evaluate((text) => {
+          const dt = new DataTransfer();
+          dt.setData("text/plain", text);
+          (window as unknown as { __testDrag: DataTransfer }).__testDrag = dt;
+        }, source.text);
+        return;
+      }
+      await this.page.evaluate(() => {
+        for (const old of document.querySelectorAll('[data-testid="test-drag-source"]'))
+          old.remove();
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.setAttribute("data-testid", "test-drag-source");
+        input.style.display = "none";
+        document.body.append(input);
+      });
+      const input = this.page.getByTestId("test-drag-source");
+      await input.setInputFiles(source.files);
+      await this.page.evaluate(() => {
+        const input = document.querySelector<HTMLInputElement>('[data-testid="test-drag-source"]');
+        const dt = new DataTransfer();
+        for (const file of Array.from(input?.files ?? [])) dt.items.add(file);
+        (window as unknown as { __testDrag: DataTransfer }).__testDrag = dt;
+      });
+    });
+  }
+
+  /** Dispatch a drag event of the started drag on the chat pane's message list, or on `target`. */
+  async dragEvent(
+    type: "dragenter" | "dragover" | "dragleave" | "drop",
+    target: "messages" | "composer" | "outside" = "messages",
+  ): Promise<void> {
+    await this.page.evaluate(
+      ({ type, target }) => {
+        const dt = (window as unknown as { __testDrag?: DataTransfer }).__testDrag;
+        const pane = Array.from(document.querySelectorAll('[data-testid="chat-pane"]')).find(
+          (el) => (el as HTMLElement).offsetParent !== null,
+        );
+        let el: Element | null | undefined = pane;
+        if (target === "composer") el = pane?.querySelector('[data-testid="chat-pane__composer"]');
+        if (target === "messages") el = pane?.querySelector('[role="log"]') ?? pane;
+        if (target === "outside") el = document.body;
+        el?.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt,
+            relatedTarget: type === "dragleave" && target !== "outside" ? document.body : null,
+          }),
+        );
+      },
+      { type, target },
+    );
+  }
+
+  /** Drop the started drag on the chat pane (a dragover first, as the browser sends one). */
+  async dropOnChat(target: "messages" | "composer" = "messages"): Promise<void> {
+    await test.step("Drop files on the chat", async () => {
+      await this.dragEvent("dragover", target);
+      await this.dragEvent("drop", target);
+    });
+  }
+
+  /** Drop the started drag outside the chat, on the page body. Returns whether the default was prevented. */
+  async dropOutsideChat(): Promise<boolean> {
+    return this.page.evaluate(() => {
+      const dt = (window as unknown as { __testDrag?: DataTransfer }).__testDrag;
+      const event = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt });
+      document.body.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+  }
+
   /** Open the full-screen preview of the first image in a message. */
   async openImagePreview(message: Locator): Promise<void> {
     await test.step("Open the image preview", async () => {
