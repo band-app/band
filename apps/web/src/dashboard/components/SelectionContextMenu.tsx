@@ -116,6 +116,10 @@ export function CodeSelectionContextMenu({ children }: { children: React.ReactEl
   // is resolved when it opens, from whichever of the two events came last.
   const pointerTargetRef = useRef<Element | null>(null);
   const focusAfterClose = useFocusAfterClose();
+  // Whether the menu is open now. A right-click on the next word can open the
+  // menu again before the previous one's close handler runs, and that handler
+  // must not clear the new menu's target.
+  const openRef = useRef(false);
 
   // A right-click inside the selection must keep it: CodeMirror ignores
   // non-left buttons, but the browser's own mousedown would collapse it on
@@ -139,6 +143,7 @@ export function CodeSelectionContextMenu({ children }: { children: React.ReactEl
   };
 
   const onOpenChange = (open: boolean) => {
+    openRef.current = open;
     // Keep the last target while closing so the items don't vanish mid-fade.
     if (!open) return;
     const view = viewAt(pointerTargetRef.current);
@@ -204,7 +209,7 @@ export function CodeSelectionContextMenu({ children }: { children: React.ReactEl
         // copy of the selected text.
         onCloseAutoFocus={(e) => {
           focusAfterClose.flush(e);
-          setTarget(null);
+          if (!openRef.current) setTarget(null);
         }}
       >
         {reference && (
