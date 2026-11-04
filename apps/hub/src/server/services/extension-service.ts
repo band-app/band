@@ -72,7 +72,7 @@ export class ExtensionService {
         return result;
       }
       // A newer scan began meanwhile, so this result may predate the change that caused it.
-      return (await this.loading) ?? result;
+      return (await this.loading) ?? this.loaded ?? result;
     } finally {
       if (this.loading === pending) this.loading = null;
     }
