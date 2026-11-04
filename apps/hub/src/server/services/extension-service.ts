@@ -53,6 +53,8 @@ const ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 export class ExtensionService {
   private loaded: ExtensionList | null = null;
   private loading: Promise<ExtensionList> | null = null;
+  /** Counts scans started. Only the newest scan may replace `loaded`. */
+  private scanSeq = 0;
 
   private root(): string {
     return join(bandHome(), "extensions");
@@ -60,11 +62,17 @@ export class ExtensionService {
 
   /** Reads every manifest again. A manifest that fails validation is skipped and listed as an error. */
   async reload(): Promise<ExtensionList> {
+    const seq = ++this.scanSeq;
     const pending = this.scan();
     this.loading = pending;
     try {
-      this.loaded = await pending;
-      return this.loaded;
+      const result = await pending;
+      if (seq === this.scanSeq) {
+        this.loaded = result;
+        return result;
+      }
+      // A newer scan began meanwhile, so this result may predate the change that caused it.
+      return (await this.loading) ?? this.loaded ?? result;
     } finally {
       if (this.loading === pending) this.loading = null;
     }
