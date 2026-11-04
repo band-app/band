@@ -579,7 +579,8 @@ An admin installs an editor extension as a folder in `<BAND_HOME>/extensions/<id
 - Layout. An iframe reloads when its element is removed, so an extension tab sets its panel renderer to `always` (`PanelApi.setRenderer`) and stays attached while hidden, and `LayoutView` moves a panel element between groups with `moveBefore` when the browser has it, so a tab moved to another group keeps its document. A browser without `moveBefore` reloads the frame on a move and the editor starts from disk.
 - Isolation. The frame is never given `allow-same-origin`. `/ext/` has no network CSP in v1, so a frame can still make requests.
 - Tests: `apps/hub/tests/extensions.test.ts` (real hub), `extensions-remote.test.ts` (real `band-worker`), `apps/web/e2e/extension-editor.spec.ts` and `extension-editor-mobile.spec.ts` with the fixture `apps/web/e2e/fixtures/extensions/text-editor/`, `extensions_*` in `apps/cli/tests/integration.rs`.
-- Not done yet: agent access to an open editor (`editors.register | result`, the `band` MCP tools), install from a URL or `.bandext`, Settings > Extensions, per-extension origins, the mobile app, the direct path for `PUT`, and new files.
+- Settings > Extensions is `ExtensionsSettings.tsx` (list with load errors, install by URL or upload, remove, reload, default editor per selector glob in `band:extension-defaults`; read-only for non-admins). Tests: `apps/web/e2e/settings-extensions.spec.ts`.
+- Not done yet: agent access to an open editor (`editors.register | result`, the `band` MCP tools), install from a `.bandext` zip, per-extension origins, the mobile app, the direct path for `PUT`, and new files.
 
 ## Architecture: HTML visual edit
 

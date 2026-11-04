@@ -91,10 +91,17 @@ export function defaultGlobFor(path: string): string {
   return dot > 0 ? `*${name.slice(dot)}` : name;
 }
 
-export function setDefaultEditor(path: string, ref: string): void {
-  const next = { ...readDefaults(), [defaultGlobFor(path)]: ref };
+/** Sets the default editor for a glob, or clears it with `null`. */
+export function setDefaultForGlob(glob: string, ref: string | null): void {
+  const next = { ...readDefaults() };
+  if (ref === null) delete next[glob];
+  else next[glob] = ref;
   clientStorage.setItem(DEFAULTS_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent(DEFAULTS_EVENT));
+}
+
+export function setDefaultEditor(path: string, ref: string): void {
+  setDefaultForGlob(defaultGlobFor(path), ref);
 }
 
 /**
