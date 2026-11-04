@@ -127,6 +127,9 @@ export class SelectionMenu {
   async choose(name: SelectionMenuItem): Promise<void> {
     await test.step(`Choose "${name}" in the selection menu`, async () => {
       await this.item(name).click();
+      // Wait for the menu to be gone, so the next right-click opens a new menu
+      // and does not race the old one's close.
+      await this.root.waitFor({ state: "hidden" });
     });
   }
 }
