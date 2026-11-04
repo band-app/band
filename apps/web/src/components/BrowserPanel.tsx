@@ -1,7 +1,18 @@
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useBrowserProfiles, useInvalidateBrowserProfiles, useSettingsQuery } from "@/dashboard";
-import { BROWSER_LOAD_EVENT, type BrowserLoadDetail } from "../dashboard/lib/html-preview";
+import {
+  useBrowserProfiles,
+  useInvalidateBrowserProfiles,
+  useRepos,
+  useSettingsQuery,
+} from "@/dashboard";
+import {
+  BROWSER_LOAD_EVENT,
+  type BrowserLoadDetail,
+  findWorktreeForPath,
+  parseLocalFileInput,
+} from "../dashboard/lib/html-preview";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
 import { registerBrowserGuest } from "../lib/browser-guest-retention";
@@ -11,6 +22,7 @@ import {
   registerBrowserWebview,
 } from "../lib/browser-webview";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
+import { hubUrl } from "../lib/hub-config";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
@@ -148,6 +160,12 @@ export function BrowserPaneComponent({
   const [currentUrl, setCurrentUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [inputUrl, setInputUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [loading, setLoading] = useState(false);
+  // Set when the address bar held a local file that no worktree contains.
+  const [localFileError, setLocalFileError] = useState<string | null>(null);
+  const { repos } = useRepos();
+  const navSeqRef = useRef(0);
+  const reposRef = useRef(repos);
+  reposRef.current = repos;
   const browserIdRef = useRef(browserId);
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
@@ -539,6 +557,8 @@ export function BrowserPaneComponent({
   const handleNavigate = useCallback(
     (rawUrl: string) => {
       let normalized = rawUrl.trim();
+      setLocalFileError(null);
+      const navSeq = ++navSeqRef.current;
 
       // Empty input — load a blank page and clear the address bar.
       // The `browser-url-changed` listener filters out `about:blank`,
@@ -548,6 +568,47 @@ export function BrowserPaneComponent({
         setInputUrl("");
         setLoading(false);
         navigateWebview(BLANK_URL);
+        return;
+      }
+
+      const local = parseLocalFileInput(normalized);
+      if (local) {
+        // Local files open through the hub's signed worktree preview route,
+        // never as `file:`; only files inside a worktree on this tab's worker.
+        setInputUrl(rawUrl.trim());
+        const all = reposRef.current.flatMap((repo) =>
+          repo.worktrees.map((wt) => ({
+            id: toWorktreeId(repo.name, wt.name, wt.hostId),
+            path: wt.path,
+            hostId: wt.hostId,
+          })),
+        );
+        const own = all.find((w) => w.id === worktreeIdRef.current);
+        const found = findWorktreeForPath(local.path, own?.hostId || "local", all);
+        if (!found || !found.relPath) {
+          setLoading(false);
+          setLocalFileError(local.path);
+          return;
+        }
+        const { worktree, relPath } = found;
+        const query = local.search ? `?${local.search}` : "";
+        void trpc.worktree.previewUrl
+          .query({ worktreeId: worktree.id, path: relPath })
+          .then(({ url }) => {
+            if (navSeq !== navSeqRef.current) return;
+            const absolute = new URL(hubUrl(url), window.location.href).toString();
+            const target = `${absolute}${query}${local.hash ? `#${local.hash}` : ""}`;
+            setCurrentUrl(target);
+            setInputUrl(rawUrl.trim());
+            setLoading(true);
+            navigateWebview(target);
+            trpc.browsers.navigate
+              .mutate({ browserId: browserIdRef.current, url: target })
+              .catch(() => {});
+          })
+          .catch(() => {
+            if (navSeq === navSeqRef.current) setLocalFileError(local.path);
+          });
         return;
       }
 
@@ -748,6 +809,7 @@ export function BrowserPaneComponent({
           // `input[type='text']`, which would also match the find-bar's
           // search input.
           data-band-address-input=""
+          data-testid="browser-pane__address"
         />
         <BrowserProfileMenu
           profiles={profiles}
@@ -782,7 +844,23 @@ export function BrowserPaneComponent({
        *  find widget sits outside it and keeps the app zoom. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div className="band-browser-guest-host flex min-h-0 flex-1 flex-col">
-          <div ref={hostRef} className="relative min-h-10 flex-1" />
+          <div ref={hostRef} className="relative min-h-10 flex-1">
+            {localFileError ? (
+              <div
+                data-testid="browser-pane__local-file-error"
+                className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center"
+              >
+                <p className="text-sm font-medium text-foreground">Can't open this local file</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  Local files open only from a worktree. Open the file in the Explorer and use
+                  Preview.
+                </p>
+                <code className="max-w-full break-all text-xs text-muted-foreground">
+                  {localFileError}
+                </code>
+              </div>
+            ) : null}
+          </div>
           {devToolsOpen ? (
             <div
               ref={devToolsHostRef}

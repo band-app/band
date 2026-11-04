@@ -122,4 +122,22 @@ export class HtmlPreviewPage {
       await second.close();
     }
   }
+
+  /** The address bar of the shown browser tab. */
+  get addressBar(): Locator {
+    return this.page.getByTestId("browser-pane__address");
+  }
+
+  /** The in-view page for a local file that no worktree holds. */
+  get localFileError(): Locator {
+    return this.page.getByTestId("browser-pane__local-file-error");
+  }
+
+  /** Type a location into the address bar and press Enter. */
+  async submitAddress(text: string): Promise<void> {
+    await test.step(`Enter ${text} in the address bar`, async () => {
+      await this.addressBar.fill(text);
+      await this.addressBar.press("Enter");
+    });
+  }
 }
