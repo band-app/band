@@ -72,6 +72,7 @@ import { provisioningRouter } from "./provisioning/router";
 import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
 import { reposRouter } from "./repos/router";
+import { resourcesRouter } from "./resources/router";
 import { reviewsRouter } from "./reviews/router";
 import { runnersRouter } from "./runners/router";
 import { sessionsRouter } from "./sessions/router";
@@ -110,6 +111,7 @@ export const appRouter = t.router({
   ...terminalsRouters,
   cli: cliRouter,
   accountUsage: accountUsageRouter,
+  resources: resourcesRouter,
   hooks: hooksRouter,
   host: hostRouter,
   workers: hostsRouter,

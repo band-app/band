@@ -8,6 +8,7 @@ import { RpcError } from "@band-app/link";
 import { describeHost, type Registrar, type WorkerContext } from "./context.ts";
 import { PathDeniedError } from "./path-policy.ts";
 import {
+  asParams,
   compact,
   num,
   optBool,
@@ -224,6 +225,20 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     return host.fs.copy(from, to, { recursive, exclusive: optBool(a, "exclusive") });
   });
   r.json("fs.du", async (a) => host.fs.du(await path(a, "path")));
+
+  // Memory and CPU of this machine and its Band processes. The worker reads only its own table.
+  r.json("resources.snapshot", () => host.resources.snapshot());
+  r.json("resources.storage", async (a) => {
+    const raw = a.worktrees;
+    if (!Array.isArray(raw)) throw invalid("worktrees must be an array");
+    const worktrees: { id: string; path: string }[] = [];
+    for (const entry of raw) {
+      const e = asParams(entry);
+      // A folder outside the roots is refused like any other path.
+      worktrees.push({ id: str(e, "id"), path: await path(e, "path") });
+    }
+    return host.resources.storage({ worktrees });
+  });
 
   // ---- scripts ------------------------------------------------------------
 

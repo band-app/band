@@ -1,6 +1,7 @@
 import type { UsageReader } from "@band-app/coding-agent";
 import type { Environment, EnvironmentIssue } from "@band-app/environment";
 import type { TerminalBackend } from "./pty";
+import type { HostResources } from "./resources";
 
 /**
  * A machine that owns worktrees. Every git, file, process, PTY, search, LSP
@@ -34,6 +35,8 @@ export interface Host {
   readonly desktop: HostDesktop;
   /** Speech-to-text calls to a server this host can reach, such as one on its loopback. */
   readonly speech: HostSpeech;
+  /** Memory, CPU and disk use of the machine and of its Band processes. */
+  readonly resources: HostResources;
   /** Same interface the hub's terminal service already uses. */
   readonly pty: TerminalBackend;
   readonly scripts: HostScripts;

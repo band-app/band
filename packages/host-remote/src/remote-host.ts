@@ -28,6 +28,7 @@ import type {
   HostPlugins,
   HostRelay,
   HostRepos,
+  HostResources,
   HostScripts,
   HostSearch,
   HostSpeech,
@@ -240,6 +241,11 @@ export class RemoteHost implements Host {
       const reply = await this.rpc.request<{ chan: number }>("desktop.open", {});
       return duplexOf(this.rpc.channel(reply.chan));
     },
+  };
+
+  readonly resources: HostResources = {
+    snapshot: () => this.rpc.call("resources.snapshot", {}),
+    storage: (request) => this.rpc.call("resources.storage", request),
   };
 
   readonly speech: HostSpeech = {
