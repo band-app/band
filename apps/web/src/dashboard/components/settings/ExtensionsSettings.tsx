@@ -102,7 +102,13 @@ export function ExtensionsSettings() {
   const [installError, setInstallError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: EXTENSIONS_QUERY_KEY });
+  // A list request still in flight when a change finishes carries the list from before it. Invalidating
+  // alone would reuse that request (a query with no data yet is not refetched over a pending fetch),
+  // so cancel it first and fetch again.
+  const refresh = async () => {
+    await queryClient.cancelQueries({ queryKey: EXTENSIONS_QUERY_KEY });
+    await queryClient.invalidateQueries({ queryKey: EXTENSIONS_QUERY_KEY });
+  };
 
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<void>) => {
     setBusy(kind);
