@@ -1,7 +1,7 @@
 import { Button, Popover, PopoverAnchor, PopoverContent } from "@band-app/ui";
 import { Check, ExternalLink, Link, ListEnd } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { writeClipboardText } from "../../lib/clipboard";
+import { isClipboardShim, writeClipboardText } from "../../lib/clipboard";
 import { useCapabilities } from "../context";
 import type { CIState, PullRequestSummary } from "../types";
 
@@ -141,8 +141,9 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
   const tone = pullRequestTone(pr, ciState);
   const label = `Pull request #${pr.number}: ${statusLabel(pr, ciState)}${pr.isDraft ? ", draft" : ""}`;
   const isInside = (node: EventTarget | null) =>
-    node instanceof Node &&
-    (contentRef.current?.contains(node) || triggerRef.current?.contains(node));
+    isClipboardShim(node) ||
+    (node instanceof Node &&
+      (contentRef.current?.contains(node) || triggerRef.current?.contains(node)));
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

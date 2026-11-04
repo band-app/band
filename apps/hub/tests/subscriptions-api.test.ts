@@ -200,9 +200,20 @@ describe("subscriptions api", () => {
       chatId,
       at: Date.now() + 1500,
     });
-    await waitFor(async () => updatePrompts(home, `timer:${oneOff.id}`).length === 1, {
+    // Wait for the first delivery, not for exactly one, so a second delivery fails the
+    // assertion at the end with a count instead of timing out here. On a timeout the label
+    // carries the queue, the running task and the subscription list, which say whether the
+    // timer never fired or the message sat behind a turn.
+    await waitFor(async () => updatePrompts(home, `timer:${oneOff.id}`).length >= 1, {
       label: "one-off timer delivery",
       timeoutMs: 20_000,
+    }).catch(async (err: Error) => {
+      const queue = await trpc(url, "queue.get", { worktreeId: WORKTREE_ID, chatId }, "query");
+      const task = await trpc(url, "tasks.get", { worktreeId: WORKTREE_ID, chatId }, "query");
+      const subs = await trpc(url, "subscriptions.list", { chatId }, "query");
+      throw new Error(
+        `${err.message}; queue=${JSON.stringify(queue)} task=${JSON.stringify(task)} subs=${JSON.stringify(subs)} prompts=${prompts(home).length}`,
+      );
     });
     await waitFor(
       async () =>
@@ -211,6 +222,28 @@ describe("subscriptions api", () => {
         ),
       { label: "one-off timer removed" },
     );
+    // The subscription is gone, so nothing can deliver again. Let the chat's turns end, then count:
+    // a second delivery that was queued behind the first would show up here.
+    await waitFor(
+      async () => {
+        const queue = await trpc<{ messages: unknown[] }>(
+          url,
+          "queue.get",
+          { worktreeId: WORKTREE_ID, chatId },
+          "query",
+        );
+        const running = await trpc<{ task: unknown }>(
+          url,
+          "tasks.get",
+          { worktreeId: WORKTREE_ID, chatId },
+          "query",
+        );
+        return queue.messages.length === 0 && !running.task;
+      },
+      { label: "the one-off's turn to end" },
+    );
+    const remaining = await trpc<Created[]>(url, "subscriptions.list", { chatId }, "query");
+    expect(remaining.map((s) => s.id)).not.toContain(oneOff.id);
     expect(updatePrompts(home, `timer:${oneOff.id}`)).toHaveLength(1);
   });
 

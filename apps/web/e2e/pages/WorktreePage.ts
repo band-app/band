@@ -3910,6 +3910,19 @@ export class WorktreePage {
     });
   }
 
+  /** Focus a terminal's input and wait until it holds focus. A bare `focus()` waits for the
+   *  whole test timeout when the textbox is absent for a moment (a pane being rebuilt), so
+   *  this retries for 15 s and then fails with the locator and the last error. */
+  private async focusTerminalInput(terminalId: string): Promise<void> {
+    const input = this.page
+      .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
+      .getByRole("textbox", { name: "Terminal input" });
+    await expect(async () => {
+      await input.focus({ timeout: 2_000 });
+      await expect(input).toBeFocused({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+  }
+
   /** `runInTerminal` for one terminal, found by its id. `terminalInput.first()`
    *  is the first input in the DOM, which can belong to a terminal parked
    *  behind the one on screen, so keys typed there never reach the new tab.
@@ -3917,13 +3930,7 @@ export class WorktreePage {
    *  between `focus()` and the keys, and a single `toBeFocused` then times out. */
   async runInTerminalById(terminalId: string, line: string): Promise<void> {
     await test.step(`Run in terminal ${terminalId}: ${line}`, async () => {
-      const input = this.page
-        .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
-        .getByRole("textbox", { name: "Terminal input" });
-      await expect(async () => {
-        await input.focus();
-        await expect(input).toBeFocused({ timeout: 1_000 });
-      }).toPass({ timeout: 15_000 });
+      await this.focusTerminalInput(terminalId);
       await this.page.keyboard.press("Enter");
       await this.page.keyboard.type(line);
       await this.page.keyboard.press("Enter");
@@ -3945,10 +3952,7 @@ export class WorktreePage {
     await test.step(`Run in terminal ${terminalId} until ${marker} renders: ${line}`, async () => {
       for (let attempt = 1; attempt <= attempts; attempt++) {
         if (attempt > 1) {
-          await this.page
-            .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
-            .getByRole("textbox", { name: "Terminal input" })
-            .focus();
+          await this.focusTerminalInput(terminalId);
           await this.page.keyboard.press("Control+C");
         }
         try {
