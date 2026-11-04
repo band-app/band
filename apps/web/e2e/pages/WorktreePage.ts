@@ -2338,19 +2338,33 @@ export class WorktreePage {
     }).toPass({ timeout: 15_000 });
   }
 
+  /**
+   * Open the "+" menu and click "New agent". The menu opens from the keyboard (focus + Enter) for
+   * the same sash-overlap reason as `addLeafViaMenu`, and it has the same race: focus can move
+   * (a terminal grabbing it, a chat pane mounting) between `focus()` and Enter, so Enter goes
+   * elsewhere and the menu never opens. A single attempt then waited out the whole test timeout
+   * on an item that never showed. Reopen the menu whenever it is not open instead.
+   */
+  private async openNewAgentSubmenu(worktreeId: string): Promise<void> {
+    const item = this.page
+      .getByTestId("worktree-center__new-tab--agent")
+      .filter({ visible: true })
+      .first();
+    await expect(async () => {
+      if (!(await item.isVisible())) {
+        await this.newTabButton(worktreeId).first().focus();
+        await this.page.keyboard.press("Enter");
+      }
+      await item.click({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
+  }
+
   /** Open the "+" menu and start an agent from its "New agent" submenu: the
    *  given agent, or the first one listed (the default). It opens in this
    *  browser's agent mode (issue #682). */
   async startAgentViaMenu(worktreeId: string, agentId?: string): Promise<void> {
     await test.step(`Start agent ${agentId ?? "(default)"} via "+" menu`, async () => {
-      // Keyboard open, for the same sash-overlap reason as `addLeafViaMenu`.
-      await this.newTabButton(worktreeId).first().focus();
-      await this.page.keyboard.press("Enter");
-      await this.page
-        .getByTestId("worktree-center__new-tab--agent")
-        .filter({ visible: true })
-        .first()
-        .click();
+      await this.openNewAgentSubmenu(worktreeId);
       const menu = this.page.getByTestId("worktree-center__new-agent-menu").filter({
         visible: true,
       });
@@ -2364,13 +2378,7 @@ export class WorktreePage {
   /** Open the "+" menu's "New agent" submenu and return the submenu, without picking an agent. */
   async openNewAgentMenu(worktreeId: string): Promise<Locator> {
     await test.step("Open the New agent menu", async () => {
-      await this.newTabButton(worktreeId).first().focus();
-      await this.page.keyboard.press("Enter");
-      await this.page
-        .getByTestId("worktree-center__new-tab--agent")
-        .filter({ visible: true })
-        .first()
-        .click();
+      await this.openNewAgentSubmenu(worktreeId);
     });
     return this.page.getByTestId("worktree-center__new-agent-menu").filter({ visible: true });
   }
