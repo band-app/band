@@ -19,6 +19,10 @@ This repo uses **integration tests** as the primary testing approach. Do not wri
 
 Rules TEST-36 to TEST-45 in `.claude/testing-criteria.md` cover flaky-test patterns (waiting for the wrong thing, `.first()` on multi-instance kinds, bare timeouts, leaking work between tests). Read them before writing or fixing a test.
 
+CI retries a failed test once, only when `CI` is set (Playwright `retries: 1`, vitest `retry: 1` in the hub and web configs). A test that passes on the retry does not fail the job and is reported as flaky: the `flaky-report` job in `ci.yml` prints it in the run summary and, on `merge_group` and `push`, files or updates one issue per test (`flaky: <file> › <test name>`, label `flaky`, one line per run) through `scripts/ci/report-flaky.mjs`. The producers are Playwright's JSON reporter and `scripts/ci/vitest-flaky-reporter.mjs`, both writing under `BAND_FLAKY_DIR`. A test that fails both attempts fails the job. The node:test suites (`packages/*`, `apps/worker`) have no retry. Local runs and `pnpm flake-guard` never retry.
+
+Quarantine: a test that flaked 3 or more times in 7 days goes on `.github/flaky-quarantine.txt` (`<file> › <describe> › <test>  # <issue>`). `BAND_FLAKY_QUARANTINE` (`exclude` by default in CI, `only`, or `off` by default locally) makes the hub, web unit and web e2e configs skip the listed tests; the `test-quarantine` job sets `only` and has `continue-on-error`, and nothing waits for it. The fix PR removes the line. `scripts/ci/tests/report-flaky.test.mjs` (`node --test scripts/ci/tests/*.test.mjs`) tests the report and the filters.
+
 ### Why Integration Tests
 
 Unit tests with heavy mocking verify that your mocks work, not that your system works. Integration tests exercise the real system through its public interfaces — the same way a client or user would interact with it.

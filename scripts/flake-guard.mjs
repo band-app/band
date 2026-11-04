@@ -186,6 +186,8 @@ const testEnv = {
   XDG_CACHE_HOME: cacheHome,
   COREPACK_HOME: baseEnv.COREPACK_HOME ?? join(cacheHome, "node", "corepack"),
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+  // The guard runs the changed tests whether or not they are on the CI quarantine list.
+  BAND_FLAKY_QUARANTINE: "off",
   CARGO_HOME: baseEnv.CARGO_HOME ?? join(realHome, ".cargo"),
   RUSTUP_HOME: baseEnv.RUSTUP_HOME ?? join(realHome, ".rustup"),
   PLAYWRIGHT_BROWSERS_PATH:
@@ -344,6 +346,9 @@ async function runE2e(specs) {
         ...group.map((f) => relative("apps/web", f)),
         "--repeat-each",
         String(e2eRepeats),
+        // CI retries a failed spec once. The guard must see every failure, so it never does.
+        "--retries",
+        "0",
         "--workers",
         "1",
         "--project",
@@ -435,6 +440,9 @@ async function runVitest(label, filter, group) {
         "vitest",
         "run",
         ...group.map((f) => relative(pkgDir, f)),
+        // CI retries a failed test once. The guard must see every failure, so it never does.
+        "--retry",
+        "0",
         "--reporter=json",
         `--outputFile=${jsonOut}`,
       ],
