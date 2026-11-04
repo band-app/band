@@ -162,6 +162,27 @@ export const CUTOFF_REPLY = [
   "Zato se kaže da se *responsibility* može delegirati, a **accountability** ne može. Poslednja rečenica ovog odgovora mora da se vidi cela, do kraja, bez ikakvog odsecanja.",
 ].join("\n");
 
+/** User messages with markdown lists, for the bubble flow (c9): long bullets, a short list, a one-liner. */
+export const BUBBLE_LONG_LIST = [
+  "Bubble check, please fix these three things in the parser before the release:",
+  "",
+  "- The tokenizer drops the last character of a line when the line ends with an escaped backslash inside a quoted string",
+  "- Error messages from the parser should name the file, the line and the column, and not only say that something is wrong",
+  "- The benchmark in the tests folder takes far too long on the CI machines, so reduce its input size without losing coverage",
+].join("\n");
+export const BUBBLE_SHORT_LIST = ["Bubble short:", "", "- one", "- two"].join("\n");
+export const BUBBLE_ONE_LINE = "Bubble hi";
+/** The assistant's reply with a bulleted and a numbered list. */
+export const BUBBLE_REPLY = [
+  "Here is the plan:",
+  "",
+  "- First, reproduce the tokenizer bug with a failing test and keep it small",
+  "- Then fix it and run the whole suite",
+  "",
+  "1. Add the position to the error type",
+  "2. Print it in the message",
+].join("\n");
+
 /** What the "permit" turn asks: the three kinds of option the web shows. */
 const PERMIT_OPTIONS = [
   { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
@@ -290,6 +311,7 @@ export const SCENARIO = {
     { match: "^showcase", steps: showcaseSteps() },
     { match: "^long", steps: longSteps() },
     { match: "^stream", steps: streamSteps() },
+    { match: "^Bubble", steps: [{ say: BUBBLE_REPLY }] },
     { match: "^Kako", steps: [{ say: CUTOFF_REPLY, chunks: 12, delayMs: 500 }] },
     { steps: [{ say: "Done." }] },
   ],
@@ -335,6 +357,8 @@ export const WORKTREES = {
   GAMMA_HISTORY: "gamma-history",
   /** Long messages with š and ž, bold and italic text, for the text cutoff flow (c8). */
   GAMMA_CUTOFF: "gamma-cutoff",
+  /** User messages with markdown lists, to check the bubble holds all its text (c9). */
+  GAMMA_BUBBLE: "gamma-bubble",
   /** The files, search and changes flows: a repo with a big folder and a dirty working tree (`seed-explorer.mjs`). */
   DELTA_MAIN: "delta-main",
   /** Three chats open as tabs on the "web", with a terminal and a browser tab between them (t1-t4). */
@@ -439,7 +463,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "cutoff", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "two", "permit-allow", "permit-reject", "permit-long", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "cutoff", "bubble", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "two", "permit-allow", "permit-reject", "permit-long", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -478,6 +502,9 @@ export async function seedHub(state) {
     await seedTurn(state, chats, WORKTREES.GAMMA_CUTOFF, CUTOFF_PROMPT);
   }
   await seedTurn(state, chats, WORKTREES.GAMMA_CUTOFF, CUTOFF_SHORT);
+  await seedTurn(state, chats, WORKTREES.GAMMA_BUBBLE, BUBBLE_ONE_LINE);
+  await seedTurn(state, chats, WORKTREES.GAMMA_BUBBLE, BUBBLE_SHORT_LIST);
+  await seedTurn(state, chats, WORKTREES.GAMMA_BUBBLE, BUBBLE_LONG_LIST);
   for (let i = 1; i <= TAB_TURNS; i++) {
     await seedTurn(state, chats, WORKTREES.GAMMA_TABS, `parser turn ${String(i).padStart(2, "0")}`);
   }
