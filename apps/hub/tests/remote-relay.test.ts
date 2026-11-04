@@ -330,6 +330,12 @@ beforeAll(async () => {
           probe("tokens", "/trpc/tokens.list"),
           probe("settings", "/trpc/settings.get"),
           probe("vault-list", "/trpc/vault.list"),
+          // The machine's process table and disk use are a person's page.
+          probe("resources-snapshot", "/trpc/resources.snapshot"),
+          probe(
+            "resources-storage",
+            `/trpc/resources.storage?input=${encodeURIComponent(JSON.stringify({ hostId: "local" }))}`,
+          ),
           probe("agent-logins-list", "/trpc/agentLogins.list"),
           // An agent may not switch its own chat's account.
           post("chat-login-pick", "/trpc/chats.update", { chatId: "any-chat", loginId: "al-x" }),
@@ -602,6 +608,8 @@ describe("the worker relay (S2)", () => {
     expect(by("settings")?.status).toBe(403);
     // The vault, and the OAuth flows it starts, are out of agent reach.
     expect(by("vault-list")?.status).toBe(403);
+    expect(by("resources-snapshot")?.status).toBe(403);
+    expect(by("resources-storage")?.status).toBe(403);
     expect(by("agent-logins-list")?.status).toBe(403);
     expect(by("chat-login-pick")?.status).toBe(403);
     expect(by("chat-login-pick")?.body).toContain("may not change a chat's login");

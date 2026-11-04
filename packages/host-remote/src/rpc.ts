@@ -31,6 +31,8 @@ const SLOW_CALLS: Record<string, number> = {
   "fs.copy": 5 * 60_000,
   "fs.rm": 2 * 60_000,
   "fs.du": 2 * 60_000,
+  // Measures every worktree of a worker, three `du` at a time.
+  "resources.storage": 10 * 60_000,
   "fs.glob": 60_000,
   "search.listFiles": 60_000,
   "scripts.runHidden": 10 * 60_000,

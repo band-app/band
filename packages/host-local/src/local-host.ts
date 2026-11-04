@@ -39,6 +39,7 @@ import type {
   HostInfo,
   HostLsp,
   HostMcp,
+  HostResources,
   HostScripts,
   HostSearch,
   HostSpeech,
@@ -78,6 +79,7 @@ import { prependBinDirs } from "./process/path";
 import { isOnBattery } from "./process/power";
 import { probeTools } from "./process/tools";
 import { browseFolder, defaultReposDir, LocalRepos } from "./repos/host-repos";
+import { LocalResources } from "./resources/resources";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
 import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
@@ -118,6 +120,12 @@ export interface LocalHostOptions {
    * passes one. Without it, agents are this process's children and die with it.
    */
   agentHolder?: AgentHolder;
+  /**
+   * What `host.resources` describes. `selfKind` says whether this process is the hub or a worker,
+   * and `stateDir` is the folder it keeps its state and the terminal daemon's run dir in. A worker
+   * passes its state dir; the default is `<BAND_HOME>` for a worker.
+   */
+  resources?: { selfKind?: "hub" | "worker"; stateDir?: () => string };
 }
 
 /**
@@ -170,6 +178,7 @@ export class LocalHost implements Host {
   };
   readonly desktop: HostDesktop = { open: () => openDesktop() };
   readonly speech: HostSpeech = { transcribe: (req) => transcribeLocally(req) };
+  readonly resources: HostResources;
   readonly scripts: HostScripts = {
     command: (worktree) => scriptCommand(this, worktree),
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
@@ -207,6 +216,10 @@ export class LocalHost implements Host {
     this.repos = new LocalRepos({
       mappingsFile: options.repos?.mappingsFile ?? (() => join(bandHome(), "repo-mappings.json")),
       reposDir: options.repos?.reposDir ?? defaultReposDir,
+    });
+    this.resources = new LocalResources({
+      selfKind: options.resources?.selfKind ?? "worker",
+      stateDir: options.resources?.stateDir ?? bandHome,
     });
     // The first probe takes about half a second (seven processes). Starting it
     // now keeps the first `hosts.list` after boot from waiting on it.

@@ -48,6 +48,8 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.") ||
       path.startsWith("accountUsage.") ||
+      // The machine's process table and disk use are a person's page, not an agent's tool.
+      path.startsWith("resources.") ||
       // The Simulator tab is a person's; an agent uses the simulator_* tools.
       path.startsWith("simulators.") ||
       path.startsWith("voice.") ||

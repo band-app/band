@@ -197,6 +197,7 @@ export class Worker {
     const agentHolder = createWorkerAgentHolder(config.stateDir, options.persistentAgents === true);
     const host = new LocalHost({
       terminalBackend: () => backend,
+      resources: { selfKind: "worker", stateDir: () => config.stateDir },
       ...(agentHolder ? { agentHolder } : {}),
       repos: {
         mappingsFile: () => join(config.stateDir, "repos.json"),

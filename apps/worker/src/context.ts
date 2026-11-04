@@ -67,6 +67,8 @@ const PASSIVE_METHODS = new Set([
   "fs.du",
   "search.listFiles",
   "agentEnv.accountUsage",
+  "resources.snapshot",
+  "resources.storage",
 ]);
 
 type Handler<T> = (params: Params, call: { signal: AbortSignal }) => T | Promise<T>;
