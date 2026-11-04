@@ -220,7 +220,11 @@ test("Storage measures worktrees on the worker and shows its free disk (S3)", as
   const repoRow = resources.repoRow(hostId, REPO);
   await expect(repoRow).toBeVisible();
   await resources.expandRepo(hostId, REPO);
-  await expect(resources.worktreeSizes(hostId).filter({ hasText: "feature" })).toHaveText(/MB|GB/);
+  // The size depends on the file system (a Linux runner reports a few KB for a fresh worktree),
+  // so the check is a measured number with a unit, not a magnitude.
+  await expect(resources.worktreeSizes(hostId).filter({ hasText: "feature" })).toHaveText(
+    /\d+(\.\d+)? (KB|MB|GB)/,
+  );
 });
 
 test("a worker that is offline shows as unavailable and the rest still renders (S4)", async ({
