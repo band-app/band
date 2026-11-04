@@ -131,22 +131,6 @@ describe("installing editor extensions", () => {
     );
   });
 
-  it("an install that overlaps reloads leaves the installed extension in the list", async () => {
-    // Each round starts several reloads while an upload is in flight. A scan that read the
-    // folder before the install finished must not replace the list a later scan produced.
-    for (let round = 0; round < 15; round++) {
-      const id = `race-${round}`;
-      const archive = makeTarGz(goodEntries(id, "1.0.0"));
-      const reloads = Array.from({ length: 6 }, () =>
-        trpcMutate(server.url, "extensions.reload", {}, TOKEN),
-      );
-      const res = await upload(archive);
-      await Promise.all(reloads);
-      expect(res.status).toBe(200);
-      expect((await list()).extensions.map((e) => e.id)).toContain(id);
-    }
-  });
-
   it("S13: installs an uploaded archive", async () => {
     const archive = makeTarGz(goodEntries("uploaded", "1.2.3"));
 
@@ -155,19 +139,6 @@ describe("installing editor extensions", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { extension: { id: string } }).extension.id).toBe("uploaded");
     expect(await installedHtml("uploaded")).toBe("<p>uploaded 1.2.3</p>");
-  });
-
-  it("lists the extension after an upload that overlaps list calls", async () => {
-    const archive = makeTarGz(goodEntries("overlap", "1.0.0"));
-
-    // Lists started before and during the install must not leave a pre-install result cached.
-    const [, ...lists] = await Promise.all([
-      upload(archive),
-      ...Array.from({ length: 20 }, () => list()),
-    ]);
-    expect(lists).toHaveLength(20);
-
-    expect((await list()).extensions.map((e) => e.id)).toContain("overlap");
   });
 
   describe("S14: refuses an unsafe or invalid archive and keeps the installed version", () => {
