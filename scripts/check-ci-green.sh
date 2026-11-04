@@ -12,9 +12,11 @@ SHA="${1:?usage: check-ci-green.sh <sha> [owner/repo]}"
 REPO="${2:-${GITHUB_REPOSITORY:-band-app/band}}"
 
 # pull_request runs test a merge ref, not this commit, so they never count.
+# push runs on main start no test job (the merge queue tested the commit), so
+# they succeed without testing anything and never count either.
 RUNS=$(gh api --paginate \
   "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=100" \
-  --jq '.workflow_runs[] | select(.event != "pull_request") | [.id, .event, .status, (.conclusion // "none"), .html_url] | @tsv')
+  --jq '.workflow_runs[] | select(.event != "pull_request" and .event != "push") | [.id, .event, .status, (.conclusion // "none"), .html_url] | @tsv')
 
 if [ -n "$RUNS" ]; then
   while IFS=$'\t' read -r id event status conclusion url; do
@@ -27,7 +29,7 @@ fi
 
 echo "Refusing to release ${SHA}: no successful ci.yml run on this commit." >&2
 if [ -z "$RUNS" ]; then
-  echo "ci.yml has no push or merge_group run for it." >&2
+  echo "ci.yml has no merge_group run for it." >&2
 else
   echo "ci.yml runs on this commit:" >&2
   while IFS=$'\t' read -r id event status conclusion url; do

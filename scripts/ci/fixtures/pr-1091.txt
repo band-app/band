@@ -1,0 +1,3 @@
+apps/mobile/e2e/c9-bubble-list.yaml
+apps/mobile/scripts/seed.mjs
+apps/mobile/src/components/chat/markdown.tsx
