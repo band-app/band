@@ -51,6 +51,7 @@ worktree-branch-case.test.ts
 worktree-changes.test.ts
 worktree-commit-history.test.ts
 worktree-create-via.test.ts
+worktree-download.test.ts
 worktree-file-serve.test.ts
 worktree-git-ops.test.ts
 worktree-preview-edit.test.ts
