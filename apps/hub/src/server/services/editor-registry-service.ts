@@ -10,6 +10,13 @@ const CALL_TIMEOUT_MS = 60_000;
 /** How long `band_editor_open` waits for a window to open the tab and the editor to be ready. */
 const OPEN_TIMEOUT_MS = 30_000;
 const MAX_TABS_PER_CLIENT = 64;
+const DEFAULT_SELECTION_TTL_MS = 30 * 60_000;
+
+/** How long a selection stays after it was made. Read on every check so a test can shorten it. */
+function selectionTtlMs(): number {
+  const raw = Number(process.env.BAND_EDITOR_SELECTION_TTL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SELECTION_TTL_MS;
+}
 
 export const NO_WINDOW_MESSAGE = "No Band window is open. Ask the person to open Band.";
 
@@ -66,8 +73,9 @@ const tabKey = (t: { clientId: string; worktreeId: string; file: string; extensi
 /**
  * The editor tabs the connected windows have open, the latest selection per worktree, and the
  * calls an agent makes into a tab. A window names itself with the client id it already reports
- * activity under; a window that stops reporting drops out (`ClientActivityService`, 3 minutes).
- * Nothing is persisted: a hub restart forgets the tabs until the windows register again.
+ * activity under; a window that stops reporting drops its tabs (`ClientActivityService`, 3
+ * minutes), but not its selection. Nothing is persisted: a hub restart forgets the tabs until
+ * the windows register again.
  */
 export class EditorRegistryService {
   private readonly tabs = new Map<string, EditorTab>();
@@ -105,12 +113,8 @@ export class EditorRegistryService {
   }
 
   private drop(tab: EditorTab): void {
+    // The selection outlives the tab: the phone closes its editor screen to open the chat.
     this.tabs.delete(tabKey(tab));
-    const stored = this.selections.get(tab.worktreeId);
-    if (stored && stored.clientId === tab.clientId && stored.file === tab.file) {
-      this.selections.delete(tab.worktreeId);
-      emit({ kind: "editor-selection-changed", worktreeId: tab.worktreeId });
-    }
   }
 
   /** Tabs of windows that are still reporting. Tabs of expired windows are forgotten here. */
@@ -158,11 +162,15 @@ export class EditorRegistryService {
     emit({ kind: "editor-selection-changed", worktreeId: tab.worktreeId });
   }
 
-  /** The latest selection in a worktree, or null when none, or when its window is gone. */
+  /**
+   * The latest selection in a worktree, or null when none. It stays after its tab closes or its
+   * window stops reporting, until a new selection replaces it, the editor sends `null`, or
+   * `BAND_EDITOR_SELECTION_TTL_MS` (30 minutes) passes.
+   */
   selection(worktreeId: string): SelectionState | null {
     const stored = this.selections.get(worktreeId);
     if (!stored) return null;
-    if (!clientActivityService.isLive(stored.clientId)) {
+    if (Date.now() - stored.updatedAt > selectionTtlMs()) {
       this.selections.delete(worktreeId);
       emit({ kind: "editor-selection-changed", worktreeId });
       return null;
