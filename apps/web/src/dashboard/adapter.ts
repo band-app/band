@@ -339,6 +339,13 @@ export interface DashboardAdapter {
    */
   getWorktreePreviewUrl?(worktreeId: string, path: string): Promise<string>;
 
+  /**
+   * An absolute, signed URL (5 minutes, one file) that returns the file as an
+   * attachment with no auth header. A drag out of the Explorer hands it to
+   * the target app as `DownloadURL`.
+   */
+  getWorktreeDownloadUrl?(worktreeId: string, path: string): Promise<string>;
+
   // Search (optional)
   searchWorktreeFiles?(
     worktreeId: string,

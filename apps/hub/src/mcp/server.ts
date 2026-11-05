@@ -61,6 +61,8 @@ function discoverProcedures(): ProcedureInfo[] {
       continue;
     // `worktree.previewUrl` returns a bearer URL for a worktree's files.
     if (path === "worktree.previewUrl") continue;
+    // `worktree.downloadUrl` returns a bearer URL for one worktree file.
+    if (path === "worktree.downloadUrl") continue;
     // `worktree.directAccess` mints a bearer token for a worker's loopback listener.
     if (path === "worktree.directAccess") continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.

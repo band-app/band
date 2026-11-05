@@ -92,6 +92,10 @@ import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
 import { parseSharedPath } from "./src/server/services/_utils/shared-dir.ts";
 import {
+  verifyWorktreeDownloadGrant,
+  WORKTREE_DOWNLOAD_PREFIX,
+} from "./src/server/services/_utils/worktree-download-link.ts";
+import {
   verifyWorktreePreviewGrant,
   WORKTREE_PREVIEW_PREFIX,
 } from "./src/server/services/_utils/worktree-preview-link.ts";
@@ -655,6 +659,41 @@ async function handleWorktreePreview(req: IncomingMessage, res: ServerResponse):
   );
 }
 
+/** `GET /api/worktree-download/<worktreeId>/<expiry>.<signature>/<path>`: one file as an attachment behind a signed grant. */
+async function handleWorktreeDownload(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const [rest = ""] = (req.url ?? "").slice(WORKTREE_DOWNLOAD_PREFIX.length).split("?");
+  const [rawId, grant, ...pathParts] = rest.split("/");
+  let wId: string;
+  let filePath: string;
+  try {
+    wId = decodeURIComponent(rawId ?? "");
+    filePath = decodeURIComponent(pathParts.join("/"));
+  } catch {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+  if (!wId || !grant || !filePath) {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+  if (!verifyWorktreeDownloadGrant(wId, grant, filePath)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+  await serveWorktreeFile(
+    res,
+    wId,
+    filePath,
+    { "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" },
+    undefined,
+    true,
+    req.headers.range,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Node IncomingMessage ↔ Web Request adapters.
 //
@@ -1076,6 +1115,14 @@ async function main() {
     // signature is scoped to one worktree and expires.
     if (req.method === "GET" && req.url?.startsWith(WORKTREE_PREVIEW_PREFIX)) {
       await handleWorktreePreview(req, res);
+      return;
+    }
+
+    // Signed one-file download: /api/worktree-download/<worktreeId>/<expiry>.<signature>/<path...>.
+    // Before the device-token check, because a file manager fetching a drag
+    // cannot send it; the signature names one file and expires in 5 minutes.
+    if (req.method === "GET" && req.url?.startsWith(WORKTREE_DOWNLOAD_PREFIX)) {
+      await handleWorktreeDownload(req, res);
       return;
     }
 
