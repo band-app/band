@@ -937,6 +937,17 @@ export class ChatPanePage {
     return this.page.getByTestId("chat-pane__assistant-message").filter({ hasText: text });
   }
 
+  /** KaTeX formulas rendered inside the assistant message carrying `text`. */
+  assistantFormulas(text: string): Locator {
+    return this.assistantMessage(text).locator(".katex");
+  }
+
+  /** Text a user can see in the assistant message carrying `text`: KaTeX's
+   *  hidden MathML copy is excluded, so a formula counts once. */
+  async assistantVisibleText(text: string): Promise<string> {
+    return await this.assistantMessage(text).evaluate((el) => (el as HTMLElement).innerText);
+  }
+
   /** One failure card's parts. */
   failureCard(index = 0) {
     const card = this.failureCards.nth(index);
