@@ -1072,6 +1072,10 @@ export function RepoList({ groupFilter }: RepoListProps) {
         await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
       }
       moveToGroup(plan.worktreeId, plan.groupId);
+      if (plan.order) {
+        await trpc.worktrees.reorder.mutate({ order: plan.order, scope: "siblings" });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
+      }
     } catch (err) {
       setDropNotice(err instanceof Error ? err.message : String(err));
     }
