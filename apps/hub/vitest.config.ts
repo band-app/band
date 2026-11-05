@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
+import {
+  entriesUnder,
+  quarantineMode,
+  readQuarantine,
+  vitestFilter,
+} from "../../scripts/ci/flaky-quarantine.mjs";
 import { scrubWorkerEnv } from "../../scripts/test-env.mjs";
 
 // Runs in the parent of every test process, so each server and worker a test
@@ -27,6 +33,7 @@ const loopbackFiles = loopbackOnly
       .filter((line) => line && !line.startsWith("#"))
       .map((name) => `tests/${name}`)
   : [];
+const quarantine = vitestFilter(entriesUnder(readQuarantine(), "apps/hub/"), quarantineMode());
 
 export default defineConfig({
   resolve: {
@@ -35,6 +42,13 @@ export default defineConfig({
     },
   },
   test: {
+    // CI retries a failed test once and reports a pass on the retry as flaky
+    // (scripts/ci/vitest-flaky-reporter.mjs). Local runs and the flake guard never retry.
+    retry: process.env.CI ? 1 : 0,
+    reporters: process.env.CI
+      ? ["default", resolve(import.meta.dirname, "../../scripts/ci/vitest-flaky-reporter.mjs")]
+      : ["default"],
+    ...quarantine,
     testTimeout: 30_000,
     hookTimeout: 30_000,
     // Files run in parallel in forked processes. Every server, worker and daemon a test starts
@@ -45,7 +59,7 @@ export default defineConfig({
     maxWorkers: Number(process.env.BAND_TEST_WORKERS ?? 3),
     globalSetup: ["tests/global-setup.ts"],
     setupFiles: ["tests/setup-process-guard.ts", "tests/setup-failure-artifacts.ts"],
-    include: loopbackOnly ? loopbackFiles : ["tests/**/*.test.ts"],
+    include: loopbackOnly ? loopbackFiles : (quarantine.include ?? ["tests/**/*.test.ts"]),
     // Every server a test boots inherits this, so coding agents (including
     // the boot-time model probe) run as the scripted ACP stub rather than
     // the real Claude Code / Codex adapters (issue #648).

@@ -201,7 +201,7 @@ test.describe("phone", () => {
     for (const file of FILES) await worktreePage.openFileViaQuickOpen(file);
     await expect.poll(() => fileTabs(layout, 0)).toEqual(FILES.map(ID));
 
-    await layout.dragTab(ID(FILES[2]), 0, "left", { release: false });
+    await layout.dragTab(ID(FILES[2]), 0, "left", { release: false, expectDrop: false });
     await expect(layout.dropIndicator).toHaveCount(0);
     await layout.releaseDrag();
 

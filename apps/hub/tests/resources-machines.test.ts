@@ -77,13 +77,16 @@ describe("resources.snapshot", () => {
     expect(JSON.stringify(report)).not.toContain('"command"');
     const procs = machineOf(report, worker.hostId)?.snapshot?.processes ?? [];
     expect(procs.some((p) => p.kind === "worker")).toBe(true);
-    const terminal = procs.find((p) => p.kind === "terminal");
-    expect(terminal?.rssBytes).toBeGreaterThan(0);
-    expect(terminal?.worktree?.id).toBe(worktreeId);
-    const agent = procs.find((p) => p.kind === "agent");
-    expect(agent?.rssBytes).toBeGreaterThan(0);
-    expect(agent?.worktree?.id).toBe(worktreeId);
-    expect(agent?.chat?.id).toBe(chatId);
+    // The wait above ends once some terminal has a worktree. The report can hold another terminal
+    // root that has none yet (macOS CI failed on the first one), so pick the one the wait saw.
+    const all = JSON.stringify(procs);
+    const terminal = procs.find((p) => p.kind === "terminal" && p.worktree);
+    expect(terminal?.rssBytes, all).toBeGreaterThan(0);
+    expect(terminal?.worktree?.id, all).toBe(worktreeId);
+    const agent = procs.find((p) => p.kind === "agent" && p.chat);
+    expect(agent?.rssBytes, all).toBeGreaterThan(0);
+    expect(agent?.worktree?.id, all).toBe(worktreeId);
+    expect(agent?.chat?.id, all).toBe(chatId);
   });
 
   it("ranks a busy loop in the terminal first by CPU (S2)", async () => {

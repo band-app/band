@@ -20,6 +20,7 @@ import {
   reviewRequestNode,
   reviewThreadNode,
   FAKE_REPO,
+  mergeQueueFields,
   pullRequestNode,
   reviewQueryData,
 } from "../../hub/tests/fixtures/github-review-data.ts";
@@ -37,6 +38,8 @@ export const CHECKS_BRANCHES = {
   MERGE_REBASE: "feat/merge-rebase",
   MERGE_BLOCKED: "feat/merge-blocked",
   MERGE_REFUSED: "feat/merge-refused",
+  QUEUED: "feat/queued",
+  AUTO_MERGE: "feat/automerge",
 };
 
 /** A bot comment with GitHub-only HTML: hidden state blocks, an image, a heading and `<details>`. */
@@ -310,7 +313,47 @@ export async function startGhStub() {
       merges.push({ number: 54, method });
     },
   });
-  stub.setBranchStatusQuery(repo, () => null);
+  // The home screen's badge reads the branch-status poller's PR, so the queue branches answer it too.
+  const queuedFields = {
+    mergeQueue: { state: "AWAITING_CHECKS", position: 2, total: 3, estimatedTimeToMerge: 300 },
+  };
+  stub.setReviewQuery(
+    repo,
+    CHECKS_BRANCHES.QUEUED,
+    reviewQueryData({
+      pullRequests: [pullRequestNode({ number: 61, title: "Queued change", ...queuedFields })],
+    }),
+  );
+  stub.setReviewQuery(
+    repo,
+    CHECKS_BRANCHES.AUTO_MERGE,
+    reviewQueryData({
+      pullRequests: [pullRequestNode({ number: 62, title: "Auto-merge armed", autoMerge: true })],
+    }),
+  );
+  /** The branch-status poller's `repository` object for one pull request. */
+  const branchPr = (number, title, fields) => ({
+    owner: { login: FAKE_REPO.owner },
+    pullRequests: {
+      nodes: [
+        {
+          number,
+          title,
+          state: "OPEN",
+          url: `https://github.com/${FAKE_REPO.owner}/${FAKE_REPO.name}/pull/${number}`,
+          isDraft: false,
+          headRepositoryOwner: { login: FAKE_REPO.owner },
+          ...mergeQueueFields(fields),
+        },
+      ],
+    },
+    ref: { target: { checkSuites: { nodes: [] } } },
+  });
+  const branchStatuses = {
+    [CHECKS_BRANCHES.QUEUED]: branchPr(61, "Queued change", queuedFields),
+    [CHECKS_BRANCHES.AUTO_MERGE]: branchPr(62, "Auto-merge armed", { autoMerge: true }),
+  };
+  stub.setBranchStatusQuery(repo, (branch) => branchStatuses[branch] ?? null);
   // `gh run rerun <run> --job <id>` restarts that job; `--failed` restarts every failed one of the run.
   for (const runId of [600, 700, 701]) {
     stub.setRunRerun(runId, {

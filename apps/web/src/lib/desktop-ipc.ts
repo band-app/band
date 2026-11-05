@@ -18,6 +18,8 @@ interface ElectronBridge {
   version: number;
   invoke(channel: string, args?: unknown): Promise<unknown>;
   on(event: string, cb: (payload: unknown) => void): Unlisten;
+  /** Absolute path of a dropped file ("" when it has none). */
+  getPathForFile?(file: File): string;
 }
 
 /**
@@ -65,4 +67,13 @@ export async function listen<T = unknown>(
     return bridge.on(event, (payload) => cb({ payload: payload as T }));
   }
   throw new Error(`listen('${event}') called outside the desktop shell`);
+}
+
+/**
+ * Absolute path of a file the user dropped onto the window, from Electron's
+ * `webUtils.getPathForFile`. Null in a browser, where no path exists.
+ */
+export function pathForDroppedFile(file: File): string | null {
+  const path = getElectronBridge()?.getPathForFile?.(file);
+  return path ? path : null;
 }

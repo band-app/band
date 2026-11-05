@@ -46,6 +46,18 @@ export async function writeClipboardText(text: string): Promise<boolean> {
   return legacyCopy(text);
 }
 
+const CLIPBOARD_SHIM_ATTR = "data-clipboard-shim";
+
+/**
+ * True for the temporary textarea `writeClipboardText` focuses in its legacy path. A popover that
+ * closes when focus leaves it should ignore this node: the copy is done in a moment and focus
+ * returns to the button that was clicked. Closing would unmount that button first, so the focus
+ * could not go back to it.
+ */
+export function isClipboardShim(node: EventTarget | null): boolean {
+  return node instanceof Element && node.hasAttribute(CLIPBOARD_SHIM_ATTR);
+}
+
 /**
  * Legacy fallback: create an invisible textarea, select its contents, run
  * `document.execCommand('copy')`, and clean up. Works in non-secure
@@ -66,6 +78,7 @@ function legacyCopy(text: string): boolean {
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "");
+  textarea.setAttribute(CLIPBOARD_SHIM_ATTR, "");
   textarea.style.position = "fixed";
   textarea.style.top = "0";
   textarea.style.left = "0";

@@ -80,6 +80,7 @@ import {
   zoomOut,
   zoomReset,
 } from "../lib/zoom";
+import "katex/dist/katex.min.css";
 import "../styles/globals.css";
 
 const adapter = isDesktop ? new DesktopDashboardAdapter() : new WebDashboardAdapter();

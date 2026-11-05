@@ -9,7 +9,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readdirSync } from "node:fs";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BrowserCdp, BrowserInfo, BrowserOpenSpec } from "@band-app/host-api";
@@ -18,10 +18,14 @@ import type { BrowserCdp, BrowserInfo, BrowserOpenSpec } from "@band-app/host-ap
 // The first attempt gets 20 s: the CI failure of #837 showed a cold start on a loaded runner outlasting the
 // 7 s #830 allowed, and a healthy start takes well under a second, so 20 s only costs time on a real hang.
 // Retries get 60% of that (12 s each, the browser is warm in the page cache by then), so three attempts
-// total 44 s. `BAND_CHROMIUM_START_TIMEOUT_MS` replaces the first attempt's budget (tests shorten it).
+// total 44 s when nothing progresses. `BAND_CHROMIUM_START_TIMEOUT_MS` replaces the first attempt's budget (tests shorten it).
 const FIRST_ATTEMPT_TIMEOUT_MS = 20_000;
 const RETRY_TIMEOUT_FRACTION = 0.6;
 const START_ATTEMPTS = 3;
+// An attempt that is still writing files (profile entries, log lines) is slow, not stuck. Killing it
+// restarts the same work from nothing, which is how a CI runner failed all three attempts while each
+// one was making progress. Progress pushes the deadline out, up to this many times the attempt's budget.
+const PROGRESS_CAP_FACTOR = 3;
 const SINGLETON_FILES = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
 const PROCESS_GROUP_GONE_TIMEOUT_MS = 5_000;
 const CLOSE_GRACE_MS = 4_000;
@@ -88,6 +92,14 @@ export function findChromium(): string | undefined {
   return candidates.find((c) => existsSync(c));
 }
 
+async function fileSize(path: string): Promise<number> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return 0;
+  }
+}
+
 class StartTimeoutError extends Error {}
 
 async function readDevToolsPort(
@@ -97,7 +109,10 @@ async function readDevToolsPort(
   timeoutMs: number,
 ): Promise<{ port: number; path: string }> {
   const file = join(profileDir, "DevToolsActivePort");
-  const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
+  const hardDeadline = startedAt + timeoutMs * PROGRESS_CAP_FACTOR;
+  let deadline = startedAt + timeoutMs;
+  let lastProgress = "";
   while (Date.now() < deadline) {
     if (proc.exitCode !== null || proc.signalCode !== null) {
       throw new Error("Chromium exited before it opened a DevTools port");
@@ -112,6 +127,17 @@ async function readDevToolsPort(
       if (port && path) return { port: Number(port), path: path.trim() };
     } catch {
       // not written yet
+    }
+    let entries = 0;
+    try {
+      entries = readdirSync(profileDir).length;
+    } catch {
+      // profile dir not readable yet
+    }
+    const progress = `${entries}:${await fileSize(logPath)}`;
+    if (progress !== lastProgress) {
+      lastProgress = progress;
+      deadline = Math.min(Date.now() + timeoutMs, hardDeadline);
     }
     await sleep(50);
   }

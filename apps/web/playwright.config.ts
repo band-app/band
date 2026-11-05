@@ -1,5 +1,11 @@
 import { existsSync } from "node:fs";
 import { defineConfig, devices, webkit } from "@playwright/test";
+import {
+  entriesUnder,
+  playwrightFilter,
+  quarantineMode,
+  readQuarantine,
+} from "../../scripts/ci/flaky-quarantine.mjs";
 import { scrubWorkerEnv } from "../../scripts/test-env.mjs";
 
 // Runs in the parent of every spec, so each hub and band-worker a spec starts
@@ -18,8 +24,23 @@ if (!hasWebkit) {
 // Specs that run in WebKit with an iPhone profile instead of Chromium.
 const WEBKIT_IPHONE_SPECS = /mobile-document-scroll\.spec\.ts/;
 
+const quarantine = playwrightFilter(
+  entriesUnder(readQuarantine(), "apps/web/e2e/"),
+  quarantineMode(),
+);
+
 export default defineConfig({
   testDir: "./e2e",
+  ...quarantine,
+  // CI retries a failed spec once. The JSON reporter marks a spec that passed on the retry
+  // `flaky`, and scripts/ci/report-flaky.mjs files an issue for it. Local runs never retry.
+  retries: process.env.CI ? 1 : 0,
+  reporter:
+    process.env.CI && process.env.PLAYWRIGHT_JSON_OUTPUT_NAME
+      ? [["dot"], ["json"]]
+      : process.env.CI
+        ? "dot"
+        : "list",
   timeout: 30_000,
   // A spec that starts a real band-worker waits for it to say hello. It runs from TypeScript
   // source through tsx, which takes longer than the 5 s default on a cold start. The wait only

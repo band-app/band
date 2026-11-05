@@ -37,21 +37,69 @@ function ExternalLink({
 /** Shared Streamdown component overrides. */
 export const streamdownComponents = { a: ExternalLink };
 
+/** Minimal mdast shape the currency filter reads and rewrites. */
+interface MdNode {
+  type: string;
+  value?: string;
+  children?: MdNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
+}
+
+/**
+ * Turns inline math back into plain text when its closing `$` is directly
+ * followed by a digit. This is Pandoc's rule: `$100 a month and Ultra gets $200`
+ * is two prices, not a formula, while `$x^2$` still renders. The offsets come
+ * from the parser, so the original source (dollar signs included) is restored.
+ */
+function restoreCurrencyText(node: MdNode, source: string): void {
+  const children = node.children;
+  if (!children) return;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child.type === "inlineMath") {
+      const start = child.position?.start.offset;
+      const end = child.position?.end.offset;
+      if (start !== undefined && end !== undefined && /\d/.test(source[end] ?? "")) {
+        children[i] = { type: "text", value: source.slice(start, end) };
+      }
+    } else {
+      restoreCurrencyText(child, source);
+    }
+  }
+}
+
+const baseMath = createMathPlugin({ singleDollarTextMath: true });
+const [baseRemarkMath, baseRemarkMathOptions] = baseMath.remarkPlugin as [
+  (this: unknown, options: unknown) => void,
+  unknown,
+];
+
+/**
+ * remark-math registered as usual, plus a transformer that applies the currency
+ * rule above. A message that is still streaming re-parses on every update, so a
+ * trailing `$` flips to text as soon as the digit after it arrives.
+ */
+function remarkMathWithCurrency(this: unknown) {
+  baseRemarkMath.call(this, baseRemarkMathOptions);
+  return (tree: MdNode, file: { value?: unknown }) => {
+    if (typeof file.value === "string") restoreCurrencyText(tree, file.value);
+  };
+}
+
 /**
  * Shared Streamdown plugin set used by both the chat message renderer and the
- * markdown file preview. Single source of truth so a config change (e.g.
- * enabling single-dollar inline math) lands in one place instead of drifting
- * across call sites.
+ * markdown file preview. Single source of truth so a config change lands in one
+ * place instead of drifting across call sites.
  *
  * `singleDollarTextMath: true` opts into `remark-math`'s `$…$` inline syntax.
- * `remark-math` won't open a math span when the character after `$` is
- * whitespace, and won't close one when the character before `$` is whitespace,
- * so prose like `costs $5 and $10` is not parsed as math. Authors who want to
- * be extra defensive can still escape with `\$`.
+ * `remark-math` only rejects a span when the character after the opening `$` or
+ * before the closing `$` is whitespace, so `costs $5 and $10` would still parse
+ * as math (`5 and `). `remarkMathWithCurrency` adds the Pandoc rule: a closing
+ * `$` followed by a digit is not a closing `$`. Authors can still escape with `\$`.
  */
 export const streamdownPlugins = {
   cjk,
   code: createCodePlugin({ themes: BAND_SHIKI_THEMES }),
-  math: createMathPlugin({ singleDollarTextMath: true }),
+  math: { ...baseMath, remarkPlugin: remarkMathWithCurrency },
   mermaid,
 };

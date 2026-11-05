@@ -81,11 +81,19 @@ export function hostLabel(hostId: string | undefined, hosts: readonly HostLike[]
   return hosts.find((h) => h.id === id)?.name?.trim() || id;
 }
 
-export type PullRequestTone = "failure" | "pending" | "success" | "neutral" | "merged" | "closed";
+export type PullRequestTone =
+  | "queued"
+  | "failure"
+  | "pending"
+  | "success"
+  | "neutral"
+  | "merged"
+  | "closed";
 
 export function pullRequestTone(pr: PullRequestLike, ciState: string): PullRequestTone {
   if (pr.state === "merged") return "merged";
   if (pr.state === "closed") return "closed";
+  if (pr.mergeQueue) return "queued";
   switch (ciState) {
     case "failure":
       return "failure";
