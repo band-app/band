@@ -29,7 +29,37 @@ runs:
     # the iPhone-profile specs (`e2e/mobile-document-scroll.spec.ts`).
     - name: Install Playwright browsers
       shell: bash
-      run: pnpm --filter @band-app/web exec playwright install --with-deps ${{ inputs.browsers }}
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+        # Seconds one attempt may run, attempts, and the pause before attempt N+1 (N * backoff).
+        INSTALL_TIMEOUT_SECONDS: "300"
+        INSTALL_ATTEMPTS: "3"
+        INSTALL_BACKOFF_SECONDS: "10"
+      run: |
+        # A stalled download or apt call prints nothing and held three jobs for
+        # their whole 45 minute limit. Each attempt is killed after the limit
+        # (with-timeout.mjs works on Linux and macOS) and the install runs again;
+        # it resumes from the cache directory, so a retry downloads only what is missing.
+        install_cmd=${INSTALL_CMD:-"pnpm --filter @band-app/web exec playwright install --with-deps $BROWSERS"}
+        timeout_script=${WITH_TIMEOUT_SCRIPT:-scripts/with-timeout.mjs}
+        for attempt in $(seq 1 "$INSTALL_ATTEMPTS"); do
+          echo "Playwright install attempt $attempt of $INSTALL_ATTEMPTS (limit ${INSTALL_TIMEOUT_SECONDS}s): $install_cmd"
+          status=0
+          # shellcheck disable=SC2086
+          node "$timeout_script" "$INSTALL_TIMEOUT_SECONDS" $install_cmd || status=$?
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          elif [ "$status" -eq 124 ]; then
+            echo "::warning::Playwright install attempt $attempt stalled and was stopped after ${INSTALL_TIMEOUT_SECONDS}s"
+          else
+            echo "::warning::Playwright install attempt $attempt failed with exit code $status"
+          fi
+          if [ "$attempt" -lt "$INSTALL_ATTEMPTS" ]; then
+            sleep $((attempt * INSTALL_BACKOFF_SECONDS))
+          fi
+        done
+        echo "::error::Playwright install failed after $INSTALL_ATTEMPTS attempts (last exit code $status; 124 means it stalled)"
+        exit 1
 
     # Same trust gate as the cache saves in ci.yml.
     - name: Save Playwright browsers cache
