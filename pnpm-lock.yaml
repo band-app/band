@@ -648,6 +648,9 @@ importers:
       '@band-app/chat-runtime':
         specifier: workspace:^
         version: link:../../packages/chat-runtime
+      '@band-app/extension-worker-sdk':
+        specifier: workspace:^
+        version: link:../../packages/extension-worker-sdk
       '@band-app/host-api':
         specifier: workspace:^
         version: link:../../packages/host-api
@@ -752,6 +755,15 @@ importers:
       zod:
         specifier: ^3.25.67
         version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/extension-worker-sdk:
     devDependencies:
       '@types/node':
         specifier: ^22.19.13

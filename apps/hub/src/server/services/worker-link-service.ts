@@ -41,6 +41,7 @@ import { chatOwnershipService } from "./chat-ownership-service";
 import { checkpointService } from "./checkpoint-service";
 import { seedCodingAgentsFromTypes } from "./coding-agent-seed";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { extensionWorkerService } from "./extension-worker-service";
 import { followService } from "./follow-service";
 import { gitCredentialService } from "./git-credential-service";
 import { placementService } from "./placement-service";
@@ -92,6 +93,7 @@ export class WorkerLinkService {
     this.server = new LinkServer({ authenticate: (hello) => this.authenticate(hello) });
     this.server.on("session", (session: ServerSession) => this.onSession(session));
     this.server.on("connected", (session: ServerSession) => void this.onConnected(session));
+    extensionWorkerService.useConnected(() => this.server.connectedWorkerIds());
     this.server.on("disconnected", (session: ServerSession) => {
       const close = session.lastClose;
       if (close) {
@@ -252,6 +254,7 @@ export class WorkerLinkService {
     ephemeralLifecycleService.attach(session);
     checkpointService.attach(session);
     workerLeaseService.attach(session);
+    extensionWorkerService.attach(session);
     chatOwnershipService.attach(session);
   }
 
@@ -296,6 +299,7 @@ export class WorkerLinkService {
     workerUpdateService.onConnected(workerId, version);
     log.info(`worker ${workerId} is online`);
     workerLeaseService.onConnected(session);
+    extensionWorkerService.onConnected(workerId);
     try {
       seedCodingAgentsFromTypes(hello.agents);
     } catch (err) {

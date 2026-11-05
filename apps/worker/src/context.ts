@@ -5,6 +5,7 @@ import { type LinkSession, RPC_METHOD_NOT_FOUND, RpcError } from "@band-app/link
 import type { Logger } from "@band-app/logger";
 import type { ActivityTracker } from "./activity.ts";
 import type { WorkerCli } from "./cli.ts";
+import type { ExtensionHost } from "./extensions.ts";
 import type { LeaseGuard } from "./lease.ts";
 import type { PathPolicy } from "./path-policy.ts";
 import type { WorkerPlugins } from "./plugins.ts";
@@ -29,6 +30,8 @@ export interface WorkerContext {
   ownsChats?: boolean;
   /** The worker halves of the bundled plugins. */
   plugins?: WorkerPlugins;
+  /** The worker services of installed extensions, one process each. */
+  extensions?: ExtensionHost;
   /** The agent daemon connection, when agents persist across worker restarts (`agents.ts`). */
   agentHolder?: AgentHolder;
 }
@@ -41,7 +44,11 @@ export async function describeHost(ctx: WorkerContext): Promise<HostInfo> {
     capabilities: {
       ...info.capabilities,
       ...(ctx.ownsChats ? { chatOwnership: true } : {}),
-      ...Object.fromEntries((ctx.plugins?.capabilities() ?? []).map((id) => [id, true])),
+      ...Object.fromEntries(
+        [...(ctx.plugins?.capabilities() ?? []), ...(ctx.extensions?.capabilities() ?? [])].map(
+          (id) => [id, true],
+        ),
+      ),
     },
     labels: Object.entries(ctx.labels).map(([k, v]) => `${k}=${v}`),
     roots: ctx.policy.rootPaths,
