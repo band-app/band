@@ -1,0 +1,26 @@
+# mq2 (S2, S4): the Checks screen of a queued PR shows the entry state, position and estimate, and
+# the merge control says "In merge queue" with no Merge button.
+appId: app.getband.mobile
+name: mq2 the merge queue on the Checks screen
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-checks.yaml
+    env:
+      WT: widgets-feat-queued
+- extendedWaitUntil:
+    visible:
+      id: checks__merge-queue-text
+      text: "In merge queue, position 2 of 3 \\(awaiting checks\\)"
+    timeout: 20000
+- assertVisible:
+    id: checks__merge-queue-eta
+    text: "Estimated time to merge: about 5 min"
+- assertVisible:
+    id: checks__merge-label
+    text: "In merge queue"
+- assertNotVisible:
+    id: checks__merge
+- assertNotVisible:
+    id: checks__merge-menu
+- takeScreenshot: mq2-checks-queued

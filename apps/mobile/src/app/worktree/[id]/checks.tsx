@@ -8,6 +8,7 @@ import {
   countChecks,
   isCountingUp,
 } from "@band-app/client/checks";
+import { AUTO_MERGE_LINE, queueEstimate, queueLine } from "@band-app/client/merge";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import {
   Ban,
@@ -52,6 +53,41 @@ export default function ChecksRoute() {
       <ChecksScreen worktreeId={id} branch={branch ?? id} />
     </SessionGate>
   );
+}
+
+/** Where the pull request is in the merge queue, or that auto-merge is on. Nothing otherwise. */
+function MergeQueueLine({
+  review,
+}: {
+  review: NonNullable<ReturnType<typeof useWorktreeChecks>["data"]>["review"];
+}) {
+  if (!review) return null;
+  const queue = review.mergeQueue;
+  if (queue) {
+    const eta = queueEstimate(queue.estimatedTimeToMerge);
+    return (
+      <View style={styles.queueLine} testID="checks__merge-queue">
+        <Text style={styles.queueText} testID="checks__merge-queue-text">
+          {queueLine(queue)}
+        </Text>
+        {eta ? (
+          <Text style={styles.queueText} testID="checks__merge-queue-eta">
+            Estimated time to merge: {eta}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
+  if (review.autoMerge && review.state === "open") {
+    return (
+      <View style={styles.queueLine}>
+        <Text style={styles.queueText} testID="checks__auto-merge">
+          {AUTO_MERGE_LINE}
+        </Text>
+      </View>
+    );
+  }
+  return null;
 }
 
 const STATE_TONE: Record<CheckState, string | typeof colors.mutedForeground> = {
@@ -196,6 +232,7 @@ function ChecksScreen({ worktreeId, branch }: { worktreeId: string; branch: stri
         testID="checks__list"
       >
         <View>
+          {review ? <MergeQueueLine review={review} /> : null}
           {review ? <MergeControl review={review} onMerge={checks.mergeReview} /> : null}
           {review?.reviewers && showsReviewers(review) ? (
             <ReviewersSection reviewers={review.reviewers} />
@@ -387,6 +424,8 @@ function Detail({ label, value, testID }: { label: string; value: string; testID
 }
 
 const styles = StyleSheet.create({
+  queueLine: { gap: 2, paddingHorizontal: 12, paddingTop: 8 },
+  queueText: { color: colors.mutedForeground, fontSize: 13 },
   screen: { backgroundColor: colors.background, flex: 1 },
   header: {
     alignItems: "center",

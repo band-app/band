@@ -1,3 +1,4 @@
+import { queueBadgeLabel } from "@band-app/client/merge";
 import {
   ArrowUp,
   CircleAlert,
@@ -15,6 +16,7 @@ import { Icon as GlyphIcon } from "./icon";
 import { SHOWN_LABEL, StateIcon } from "./state-icon";
 
 const PR_COLOR: Record<PullRequestTone, { fg: typeof tones.failure; bg: typeof tints.failure }> = {
+  queued: { fg: tones.pending, bg: tints.pending },
   failure: { fg: tones.failure, bg: tints.failure },
   pending: { fg: tones.pending, bg: tints.pending },
   success: { fg: tones.success, bg: tints.success },
@@ -42,6 +44,7 @@ export function rowLabel(row: WorktreeRow): string {
   const parts = [rowTitle(row), row.branch, row.hostTag, SHOWN_LABEL[row.shown]];
   if (row.unread && row.shown === "idle") parts.push("unread");
   if (row.pr) parts.push(`PR ${row.pr.number}`);
+  if (row.pr?.mergeQueue) parts.push(queueBadgeLabel(row.pr.mergeQueue));
   return parts.join(", ");
 }
 
@@ -49,14 +52,20 @@ export function rowLabel(row: WorktreeRow): string {
 export function PullRequestTag({ row }: { row: WorktreeRow }) {
   if (!row.pr || !row.prTone) return null;
   const { fg, bg } = PR_COLOR[row.prTone];
+  const queue = row.prTone === "queued" ? row.pr.mergeQueue : null;
   return (
-    <View style={[styles.pr, { backgroundColor: bg }]}>
+    <View style={[styles.pr, styles.prRow, { backgroundColor: bg }]}>
       <Text
         style={[styles.prText, { color: fg }, row.prTone === "closed" && styles.struck]}
         testID={`worktree__pr-${row.id}`}
       >
         #{row.pr.number}
       </Text>
+      {queue ? (
+        <Text style={[styles.prText, { color: fg }]} testID={`worktree__queue-${row.id}`}>
+          {" · "}queue {queue.position}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -260,6 +269,7 @@ const styles = StyleSheet.create({
   metaText: { color: colors.mutedForeground, fontSize: 12.5 },
   dirty: { width: 6, height: 6, borderRadius: 3, backgroundColor: tones.pending },
   pr: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
+  prRow: { alignItems: "center", flexDirection: "row" },
   prText: { fontSize: 12.5, fontWeight: "600" },
   struck: { textDecorationLine: "line-through" },
   ciDot: { width: 9, height: 9, borderRadius: 5 },
