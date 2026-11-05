@@ -120,7 +120,7 @@ selection = { address, kind, label, text?, rect? }
 - `text` is the selected content as text (tab-separated for a cell range). The hub keeps at most 4 KB and ends a longer one with `…`.
 - `rect` is optional, in the editor's own document units.
 
-The tab sends it to the hub with `editors.setSelection`. The hub keeps the latest selection per worktree and forgets it when that tab closes or its window stops reporting. A collapsed selection (`null`) clears it.
+The tab sends it to the hub with `editors.setSelection`. The hub keeps the latest selection per worktree. It stays after the tab closes or the window stops reporting, because the phone closes its editor screen to open the chat. It goes when a new selection replaces it, when the editor sends `null` (a collapsed selection), or after 30 minutes (`BAND_EDITOR_SELECTION_TTL_MS`, read on every check).
 
 Keyboard focus inside the frame does not reach Band, so the editor handles Cmd+S itself and sends `save`.
 

@@ -13,7 +13,7 @@
  * once.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
 import { seedExplorer } from "./seed-explorer.mjs";
@@ -334,6 +334,8 @@ export const WORKTREES = {
   GAMMA_RESUME: "gamma-resume",
   /** Empty chats for the composer flows: send, queue, attach, suggestions, model and keyboard. */
   GAMMA_COMPOSE: "gamma-compose",
+  /** Holds `notes.band-test` (opens in the fixture extension editor) and `README.md` (no editor), for the editor flows. */
+  GAMMA_EDITOR: "gamma-editor",
   GAMMA_QUEUE: "gamma-queue",
   GAMMA_ATTACH: "gamma-attach",
   GAMMA_PASTE: "gamma-paste",
@@ -466,7 +468,7 @@ export async function seedHub(state) {
   await trpc(state, "worktrees.create", { repo: "alpha", branch: "feat/mobile" });
   // The home screen's Pinned section (w1).
   await trpc(state, "worktrees.setPinned", { repo: "alpha", name: "feat/mobile", pinned: true });
-  for (const branch of ["long", "stream", "resume", "history", "cutoff", "bubble", "compose", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "two", "permit-allow", "permit-reject", "permit-long", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
+  for (const branch of ["long", "stream", "resume", "history", "cutoff", "bubble", "compose", "editor", "queue", "attach", "paste", "suggest", "session", "sessions", "no-sessions", "drawer", "keyboard", "tabs", "two", "permit-allow", "permit-reject", "permit-long", "form", "plan", "listen", "term", "term-new", "term-bg", "term-scroll"]) {
     await trpc(state, "worktrees.create", { repo: "gamma", branch });
   }
   // gamma-tabs: the chat `worktrees.create` opened makes way for three named ones.
@@ -513,6 +515,7 @@ export async function seedHub(state) {
   }
   await seedTabs(state);
   await seedExplorer(state, root, { trpc, png: pngBytes() });
+  await seedEditors(state);
   return chats;
 }
 
@@ -783,4 +786,30 @@ export async function makePlainRepo(state, name) {
 export async function findWorktree(state, repo, name) {
   const { repos } = await trpcQuery(state, "repos.list", {});
   return repos.find((r) => r.name === repo)?.worktrees.find((w) => w.name === name) ?? null;
+}
+
+/** The text the editor flows open and the extension that edits it. */
+export const EDITOR_FILE = "notes.band-test";
+export const EDITOR_FILE_TEXT = "alpha beta gamma\n";
+
+/**
+ * Installs the web suite's fixture extension (`apps/web/e2e/fixtures/extensions/text-editor`,
+ * selector `*.band-test`) into the hub's extensions folder and puts a file it edits, and a
+ * markdown file no editor matches, into `gamma-editor`.
+ */
+async function seedEditors(state) {
+  const source = join(import.meta.dirname, "../../web/e2e/fixtures/extensions/text-editor");
+  const target = join(state.home, ".band", "extensions", "text-editor");
+  mkdirSync(target, { recursive: true });
+  cpSync(source, target, { recursive: true });
+  await trpc(state, "extensions.reload", {});
+  const path = (await findWorktree(state, "gamma", "editor"))?.path;
+  if (!path) throw new Error(`${WORKTREES.GAMMA_EDITOR} is not in repos.list`);
+  writeFileSync(join(path, EDITOR_FILE), EDITOR_FILE_TEXT);
+  writeFileSync(join(path, "README.md"), "# Editor notes\n\nNo extension edits this.\n");
+}
+
+/** The hub's editor selection for a worktree (`editors.selection`), or null. */
+export async function editorSelection(state, worktreeId) {
+  return trpcQuery(state, "editors.selection", { worktreeId });
 }

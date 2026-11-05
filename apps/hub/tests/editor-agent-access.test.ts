@@ -15,6 +15,8 @@ import { type ServerHandle, startServer, trpcData, trpcMutate, trpcQuery } from 
 import { waitFor } from "./helpers/wait-for";
 
 const FIXTURE = join(import.meta.dirname, "../../web/e2e/fixtures/extensions/text-editor");
+/** Short so the expiry case runs in seconds; the other cases finish well inside it. */
+const SELECTION_TTL_MS = 8000;
 const FILE = "doc.band-test";
 const OTHER = "other.band-test";
 const OTHER_WORKTREE = toWorktreeId("otherrepo", "main", "local");
@@ -260,6 +262,7 @@ describe("agent access to editor tabs", () => {
       tmpHome: home,
       remoteHost: false,
       env: {
+        BAND_EDITOR_SELECTION_TTL_MS: String(SELECTION_TTL_MS),
         BAND_SERVE_UI: "false",
         BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
         BAND_TEST_ACP_STATE: join(home, "acp-stub-state"),
@@ -398,17 +401,20 @@ describe("agent access to editor tabs", () => {
     expect(textOf(res.body)).not.toContain("secret");
   }, 60_000);
 
-  it("forgets a window's tabs and selection when it stops reporting", async () => {
+  it("keeps the selection after its tab closes, until a new one or the time limit", async () => {
+    const query = async () =>
+      trpcData<{ selection: { address: string } } | null>(
+        await trpcQuery(server.url, "editors.selection", { worktreeId: WORKTREE_ID }, TEST_TOKEN),
+      );
     await win.select(WORKTREE_ID, FILE, { address: "a", kind: "text", label: "a", text: "a" });
     await win.close(WORKTREE_ID, FILE);
-    const res = await trpcQuery(
-      server.url,
-      "editors.selection",
-      { worktreeId: WORKTREE_ID },
-      TEST_TOKEN,
-    );
-    expect(await trpcData(res)).toBeNull();
-  });
+    expect((await query())?.selection.address).toBe("a");
+    // A new selection replaces it, from any window.
+    await win.select(WORKTREE_ID, FILE, { address: "b", kind: "text", label: "b", text: "b" });
+    expect((await query())?.selection.address).toBe("b");
+    // The test hub sets BAND_EDITOR_SELECTION_TTL_MS to SELECTION_TTL_MS.
+    await expect.poll(query, { timeout: SELECTION_TTL_MS * 3, interval: 500 }).toBeNull();
+  }, 60_000);
 
   it("S5: an agent cannot call editors.* through the MCP endpoint", async () => {
     const res = await fetch(`${server.url}/mcp`, {

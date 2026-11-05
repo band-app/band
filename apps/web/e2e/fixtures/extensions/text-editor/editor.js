@@ -72,6 +72,10 @@ function reportSelection() {
 for (const type of ["select", "keyup", "mouseup", "input"]) {
   text.addEventListener(type, reportSelection);
 }
+// A touch selection (iOS long press, drag handles) fires `selectionchange` and no mouse event.
+document.addEventListener("selectionchange", () => {
+  if (document.activeElement === text) reportSelection();
+});
 
 text.addEventListener("input", setDirty);
 text.addEventListener("keydown", (e) => {

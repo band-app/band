@@ -1,0 +1,82 @@
+# E2: a word selected in the phone's own editor shows as a chip above the worktree's chat
+# composer after Back, and goes to the agent after the user's text. Removing the chip sends the
+# next message without it.
+appId: app.getband.mobile
+name: E2 editor selection reaches the agent
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-editor-file.yaml
+    env:
+      FILE: notes.band-test
+- extendedWaitUntil:
+    visible: "ready"
+    timeout: 30000
+# A long press selects the word under it. The page reports the selection after 250 ms.
+- longPressOn:
+    point: 8%,19%
+- takeScreenshot: e2-selected
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: sleep?ms=1500
+# The editor reported it to the hub.
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-selection?wt=gamma-editor
+      VALUE: "chars:0-5"
+# Back to the Explorer, then to the worktree's chat. The hub keeps the selection.
+- tapOn:
+    id: file__back
+- tapOn:
+    id: explorer__back
+- extendedWaitUntil:
+    visible:
+      id: composer__selection
+    timeout: 15000
+- assertVisible:
+    id: composer__selection-label
+    text: ".*notes.band-test.*"
+- takeScreenshot: e2-chip
+- tapOn:
+    id: composer__input
+- inputText: "rewrite this"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      text: "Done."
+    timeout: 20000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt
+      VALUE: "Selected in notes.band-test (text-editor/text): chars 0-5"
+# Remove the chip: the next message carries no block.
+- tapOn:
+    id: composer__input
+- assertVisible:
+    id: composer__selection
+- tapOn:
+    id: composer__selection-remove
+- assertNotVisible:
+    id: composer__selection
+- inputText: "plain follow up"
+- tapOn:
+    id: composer__send
+- extendedWaitUntil:
+    visible:
+      text: "plain follow up"
+    timeout: 20000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-prompt
+      VALUE: "plain follow up"
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: expect-no-prompt
+      VALUE: "plain follow up\n\nSelected in"
+- takeScreenshot: e2-chip-removed

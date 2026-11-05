@@ -1,0 +1,54 @@
+# E3: a file no extension edits opens in the built-in viewer and offers no Open with. A file an
+# extension edits can switch to the built-in viewer and back, and the choice is kept.
+appId: app.getband.mobile
+name: E3 Open with switches between the viewer and the extension editor
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-editor-file.yaml
+    env:
+      FILE: README.md
+- extendedWaitUntil:
+    visible:
+      id: file__markdown
+    timeout: 15000
+- assertNotVisible:
+    id: file__open-with
+- takeScreenshot: e3-markdown-no-open-with
+- tapOn:
+    id: file__back
+# The extension's file opens in its editor, and Open with offers the built-in viewer.
+- tapOn:
+    id: explorer__row-notes.band-test
+- extendedWaitUntil:
+    visible:
+      id: file__editor-webview
+    timeout: 20000
+- tapOn:
+    id: file__open-with
+- takeScreenshot: e3-open-with-menu
+- tapOn: "Built-in viewer"
+- extendedWaitUntil:
+    visible:
+      id: file__code
+    timeout: 15000
+- assertNotVisible:
+    id: file__editor-webview
+- takeScreenshot: e3-built-in
+# The choice is the file's, so opening it again shows the viewer.
+- tapOn:
+    id: file__back
+- tapOn:
+    id: explorer__row-notes.band-test
+- extendedWaitUntil:
+    visible:
+      id: file__code
+    timeout: 15000
+- tapOn:
+    id: file__open-with
+- tapOn: "Test text editor: Test text editor"
+- extendedWaitUntil:
+    visible:
+      id: file__editor-webview
+    timeout: 20000
+- takeScreenshot: e3-extension-again
