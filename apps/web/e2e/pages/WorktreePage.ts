@@ -2338,19 +2338,33 @@ export class WorktreePage {
     }).toPass({ timeout: 15_000 });
   }
 
+  /**
+   * Open the "+" menu and click "New agent". The menu opens from the keyboard (focus + Enter) for
+   * the same sash-overlap reason as `addLeafViaMenu`, and it has the same race: focus can move
+   * (a terminal grabbing it, a chat pane mounting) between `focus()` and Enter, so Enter goes
+   * elsewhere and the menu never opens. A single attempt then waited out the whole test timeout
+   * on an item that never showed. Reopen the menu whenever it is not open instead.
+   */
+  private async openNewAgentSubmenu(worktreeId: string): Promise<void> {
+    const item = this.page
+      .getByTestId("worktree-center__new-tab--agent")
+      .filter({ visible: true })
+      .first();
+    await expect(async () => {
+      if (!(await item.isVisible())) {
+        await this.newTabButton(worktreeId).first().focus();
+        await this.page.keyboard.press("Enter");
+      }
+      await item.click({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
+  }
+
   /** Open the "+" menu and start an agent from its "New agent" submenu: the
    *  given agent, or the first one listed (the default). It opens in this
    *  browser's agent mode (issue #682). */
   async startAgentViaMenu(worktreeId: string, agentId?: string): Promise<void> {
     await test.step(`Start agent ${agentId ?? "(default)"} via "+" menu`, async () => {
-      // Keyboard open, for the same sash-overlap reason as `addLeafViaMenu`.
-      await this.newTabButton(worktreeId).first().focus();
-      await this.page.keyboard.press("Enter");
-      await this.page
-        .getByTestId("worktree-center__new-tab--agent")
-        .filter({ visible: true })
-        .first()
-        .click();
+      await this.openNewAgentSubmenu(worktreeId);
       const menu = this.page.getByTestId("worktree-center__new-agent-menu").filter({
         visible: true,
       });
@@ -2364,13 +2378,7 @@ export class WorktreePage {
   /** Open the "+" menu's "New agent" submenu and return the submenu, without picking an agent. */
   async openNewAgentMenu(worktreeId: string): Promise<Locator> {
     await test.step("Open the New agent menu", async () => {
-      await this.newTabButton(worktreeId).first().focus();
-      await this.page.keyboard.press("Enter");
-      await this.page
-        .getByTestId("worktree-center__new-tab--agent")
-        .filter({ visible: true })
-        .first()
-        .click();
+      await this.openNewAgentSubmenu(worktreeId);
     });
     return this.page.getByTestId("worktree-center__new-agent-menu").filter({ visible: true });
   }
@@ -3910,6 +3918,19 @@ export class WorktreePage {
     });
   }
 
+  /** Focus a terminal's input and wait until it holds focus. A bare `focus()` waits for the
+   *  whole test timeout when the textbox is absent for a moment (a pane being rebuilt), so
+   *  this retries for 15 s and then fails with the locator and the last error. */
+  private async focusTerminalInput(terminalId: string): Promise<void> {
+    const input = this.page
+      .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
+      .getByRole("textbox", { name: "Terminal input" });
+    await expect(async () => {
+      await input.focus({ timeout: 2_000 });
+      await expect(input).toBeFocused({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+  }
+
   /** `runInTerminal` for one terminal, found by its id. `terminalInput.first()`
    *  is the first input in the DOM, which can belong to a terminal parked
    *  behind the one on screen, so keys typed there never reach the new tab.
@@ -3917,13 +3938,7 @@ export class WorktreePage {
    *  between `focus()` and the keys, and a single `toBeFocused` then times out. */
   async runInTerminalById(terminalId: string, line: string): Promise<void> {
     await test.step(`Run in terminal ${terminalId}: ${line}`, async () => {
-      const input = this.page
-        .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
-        .getByRole("textbox", { name: "Terminal input" });
-      await expect(async () => {
-        await input.focus();
-        await expect(input).toBeFocused({ timeout: 1_000 });
-      }).toPass({ timeout: 15_000 });
+      await this.focusTerminalInput(terminalId);
       await this.page.keyboard.press("Enter");
       await this.page.keyboard.type(line);
       await this.page.keyboard.press("Enter");
@@ -3945,10 +3960,7 @@ export class WorktreePage {
     await test.step(`Run in terminal ${terminalId} until ${marker} renders: ${line}`, async () => {
       for (let attempt = 1; attempt <= attempts; attempt++) {
         if (attempt > 1) {
-          await this.page
-            .locator(`[data-testid="terminal-wrapper"][data-terminal-id="${terminalId}"]`)
-            .getByRole("textbox", { name: "Terminal input" })
-            .focus();
+          await this.focusTerminalInput(terminalId);
           await this.page.keyboard.press("Control+C");
         }
         try {
