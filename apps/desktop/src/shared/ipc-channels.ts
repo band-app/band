@@ -124,6 +124,8 @@ export const Events = {
   systemResumed: "system-resumed",
   /** Pushed with `{ onBattery }` when the Mac moves between AC and battery power. */
   powerStateChanged: "power-state-changed",
+  /** Pushed with the swipe direction when macOS reports a swipe gesture on the window. */
+  windowSwipe: "window-swipe",
   /** Pushed when the OS hands Band a file to open. The renderer then calls `take_open_files`. */
   openFilesRequested: "open-files-requested",
   browserUrlChanged: "browser-url-changed",

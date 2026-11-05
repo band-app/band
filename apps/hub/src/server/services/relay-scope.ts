@@ -121,6 +121,7 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure.startsWith("vault.") ||
   procedure.startsWith("provisioning.") ||
   procedure.startsWith("extensions.") ||
+  procedure.startsWith("editors.") ||
   procedure.startsWith("agentLogins.") ||
   procedure === "hosts.setTrust" ||
   procedure === "hosts.audit" ||

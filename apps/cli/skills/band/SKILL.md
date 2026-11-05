@@ -400,6 +400,8 @@ band extensions remove <id>
 
 An extension is a folder in `<BAND_HOME>/extensions/<id>/` on the hub with a `band-extension.json`. It adds an editor for some files (for example spreadsheets) that opens in a center tab. `list` shows each extension and its editors, and an `error:` line for a folder that failed to load, with the reason. `reload` rereads the folder after you copy an extension in and needs an admin token. `install` takes a release archive (a `.tar.gz` with one folder named by the extension id) from an https URL or a local file, and checks its sha256 when given or when `<url>.sha256` exists. `remove` deletes an extension. These commands need an admin token. Run `reload`, `install` and `remove` only when the user asks.
 
+The `band` MCP server also gives a chat access to the editor tabs open in its own worktree: `band_editor_list`, `band_editor_open { file }`, `band_editor_selection` (what the user selected), and each editor's own tools as `<extension id>_<tool>` with a `file` argument. Edits stay unsaved in the tab and the user saves. When the user says "this" or "the selection", call `band_editor_selection` first.
+
 ### Proxy an MCP server through the hub
 
 ```sh

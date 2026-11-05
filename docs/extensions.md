@@ -69,7 +69,7 @@ The folder name must equal the manifest's `id`.
 | `default` | When true, a matching file opens in this editor without a choice. A person's own default wins. |
 | `entry` | The page the tab frames, relative to the folder. |
 | `binary` | The editor reads and writes bytes, not text. |
-| `tools` | A JSON file with the editor's MCP `tools/list` answer. Agents do not use it yet. |
+| `tools` | A JSON file with the editor's MCP `tools/list` answer. Agents get these tools (see Agent access). A tool entry with `"agent": false` is left out. |
 
 ## Serving
 
@@ -91,14 +91,36 @@ The editor listens for it, keeps `event.ports[0]` and ignores every other `windo
 
 | Direction | Message |
 | --- | --- |
-| Band to editor | `init { file: { name, path, mime, bytes, readOnly }, theme }` right after the hello |
+| Band to editor | `init { file: { name, path, mime, bytes, readOnly }, theme, layout }` right after the hello. `layout` is optional. |
 | Editor to Band | `ready` once the document is loaded |
 | Editor to Band | `dirty { dirty }` when unsaved edits start or end. The tab shows its dirty dot. |
 | Editor to Band | `save { bytes }`. Band writes the file and answers `saved` or `saveFailed { error }`. |
 | Band to editor | `requestSave` when the person presses Cmd+S while focus is on the tab, outside the frame |
 | Band to editor | `theme { mode, tokens }` when Band's theme changes. `tokens` holds the semantic colors by name, such as `background` and `foreground`. |
 | Band to editor | `reload { bytes }` when the file changed on disk and the tab has no unsaved edits |
+| Band to editor | `layout { layout }` whenever the layout changes. `layout` is `"compact"` or `"regular"`. |
+| Editor to Band | `selection { selection }` when the selection changes, debounced to about 250 ms. `selection` is `null` when nothing is selected. |
 | Both | `mcp { message }`, one MCP JSON-RPC message. Band sends a request and the editor answers with the same `id`. |
+
+`layout` and `selection` are optional, so an editor that ignores them keeps working, and Band ignores messages it does not know.
+
+### Layout
+
+`compact` means a phone-width window (under 1024 px) or the iOS app. The editor hides its ribbon, toolbars and side panels, sizes its controls for touch, and favours viewing and selecting over editing chrome. `regular` restores the normal interface. In the compact layout the tab shows a bar under the editor with the file name, an "unsaved changes" note and a **Save** button, which sends `requestSave`.
+
+### Selection
+
+```js
+selection = { address, kind, label, text?, rect? }
+```
+
+- `address` is the format's own address, which the editor's tools accept: `Sheet1!B2:C4` for a spreadsheet cell range, a shape id for a slide.
+- `kind` is `cell`, `range`, `shape`, `text`, `paragraph`, `node` or `element`.
+- `label` is short text for a person, such as `Sheet1!B2:C4`.
+- `text` is the selected content as text (tab-separated for a cell range). The hub keeps at most 4 KB and ends a longer one with `…`.
+- `rect` is optional, in the editor's own document units.
+
+The tab sends it to the hub with `editors.setSelection`. The hub keeps the latest selection per worktree and forgets it when that tab closes or its window stops reporting. A collapsed selection (`null`) clears it.
 
 Keyboard focus inside the frame does not reach Band, so the editor handles Cmd+S itself and sends `save`.
 
@@ -194,6 +216,40 @@ defineWorkerService({
 
 - Panels, agent tools and the browser-side stream viewer come in a later change. Today `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) reach a service.
 - A service's scopes (the worktrees it served) are kept in memory, so `worktree.release { reason: "removed" }` does not reach a worktree the service last served before a restart.
+||||||| 766a2bef
+
+## Agent access
+
+An agent in a chat can list, open, read and edit the document of an editor tab in its own worktree. It never saves: the edit shows in the tab as unsaved changes, and the person saves.
+
+The built-in `band` MCP server lists these tools:
+
+| Tool | What it does |
+| --- | --- |
+| `band_editor_list` | The editor tabs open in this worktree: file, editor, window and whether the tab has unsaved edits. |
+| `band_editor_open` | Opens a file in its editor in the person's window, or reuses the open tab, and waits until the editor is ready. |
+| `band_editor_selection` | What the person selected: file, editor, address, label and text. Says "Nothing is selected in an open editor." otherwise. |
+| `<extension id>_<tool>` | Each tool from the editors' `tools.json`, with a required `file` argument (a path in the worktree) added to its schema. A tool marked `"agent": false` is not listed. |
+
+The tool list comes from the manifests, not from open tabs. A tool call for a file with no open tab answers that it is not open and says to call `band_editor_open`. With no Band window connected, `band_editor_open` answers "No Band window is open. Ask the person to open Band."
+
+How a call reaches the editor: each window registers its open editor tabs with the hub (`editors.register`, `editors.unregister`, repeated every minute) under the client id it already reports activity with. The hub sends the call to the window that most recently had focus, as an `editor-call` status event addressed to that client. The tab passes it to the editor as an `mcp` message and the window posts the answer with `editors.result`. A call that gets no answer fails after 60 seconds. `band_editor_open` sends `editor-open` to the most recently focused window of any worktree and waits up to 30 seconds for the tab to register.
+
+A chat reaches only the editor tabs of its own worktree. All `editors.*` procedures are for device tokens: the worker relay and the MCP endpoint refuse them, so an agent cannot register a tab, forge a selection or answer a call.
+
+### Selection in the chat
+
+When the worktree has a selection, the chat composer shows a chip, "<label> · <file name>". The **X** removes it for one message only. A message sent with the chip carries this block after the person's text:
+
+```
+Selected in <path> (<extensionId>/<editorId>): <label>
+Address: <address>
+<text>
+```
+
+## Embedding an editor
+
+`/embed/editor?worktreeId=<id>&path=<path>&editor=<extensionId/editorId>` renders only the editor tab for that file, full screen, in the compact layout with the Save bar. The iOS app loads it in a web view. It signs in like the rest of the web app, with the `band_token` cookie that a `?token=` link sets. The page registers its tab and reports selections like a normal tab. A missing file or an editor that is not installed shows an error message in place of the editor.
 
 ## Settings > Extensions
 
@@ -205,4 +261,4 @@ For each file type an extension handles, the page shows the default editor and l
 
 - The frame can still make network requests. Only an admin installs an extension, and a later version will add a content security policy to `/ext/`.
 - The editor sees only the file it was given.
-- Not built yet: a `.bandext` zip, per-extension origins, the mobile app and agent access to an open editor.
+- Not built yet: a `.bandext` zip, per-extension origins, an agent path for an editor with no open window, and opening an editor from `band_editor_open` in the phone-width layout.

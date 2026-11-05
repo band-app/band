@@ -18,6 +18,7 @@ import { crossHostRefusal, restrictedHostRefusal } from "../../services/cross-ho
 import { hostTrustService } from "../../services/host-trust-service";
 import { pluginHost } from "../../services/plugin-host-service";
 import { worktreeService } from "../../services/worktree-service";
+import { registerEditorTools } from "./editor-tools";
 
 const createInput = z.object({
   repo: z.string().describe("Name of a repo registered with Band"),
@@ -51,7 +52,7 @@ function jsonText(value: unknown, isError = false) {
   };
 }
 
-function createServer(chatId: string): McpServer {
+async function createServer(chatId: string): Promise<McpServer> {
   const server = new McpServer({ name: "band", version: "1.0.0" });
   server.registerTool(
     "worktrees_create",
@@ -123,6 +124,7 @@ function createServer(chatId: string): McpServer {
     },
   );
   registerPluginTools(server, chatId);
+  await registerEditorTools(server, chatId);
   return server;
 }
 
@@ -172,14 +174,14 @@ export async function handleBandTools(
   res: ServerResponse,
   chatId: string,
 ): Promise<void> {
-  const server = createServer(chatId);
   try {
+    const created = await createServer(chatId);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
       transport.close().catch(() => {});
-      server.close().catch(() => {});
+      created.close().catch(() => {});
     });
-    await server.connect(transport);
+    await created.connect(transport);
     await transport.handleRequest(req, res);
   } catch {
     if (!res.headersSent) {

@@ -100,6 +100,48 @@ export class WorktreePicker {
     );
   }
 
+  /** The row cmdk marks as highlighted. */
+  get highlightedOption(): Locator {
+    return this.dialog.locator('[role="option"][data-selected="true"]');
+  }
+
+  /** The switcher modifier for the page's platform: Cmd on macOS, Alt elsewhere. */
+  private async modifier(): Promise<"Meta" | "Alt"> {
+    const mac = await this.page.evaluate(() => {
+      const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+      return nav.userAgentData?.platform
+        ? nav.userAgentData.platform === "macOS"
+        : /Mac|iPhone|iPad/.test(navigator.platform);
+    });
+    return mac ? "Meta" : "Alt";
+  }
+
+  async holdModifier(): Promise<void> {
+    await this.page.keyboard.down(await this.modifier());
+  }
+
+  async releaseModifier(): Promise<void> {
+    await this.page.keyboard.up(await this.modifier());
+  }
+
+  /** One wheel event over the middle of the page. */
+  async wheel(deltaY: number): Promise<void> {
+    const size = this.page.viewportSize();
+    await this.page.mouse.move((size?.width ?? 1280) / 2, (size?.height ?? 800) / 2);
+    await this.page.mouse.wheel(0, deltaY);
+  }
+
+  /** One wheel event with the pointer over `target`. */
+  async wheelOver(target: Locator, deltaY: number): Promise<void> {
+    await target.hover();
+    await this.page.mouse.wheel(0, deltaY);
+  }
+
+  /** The window losing focus, as when the user switches to another app. */
+  async blurWindow(): Promise<void> {
+    await this.page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  }
+
   async waitVisible(): Promise<void> {
     await test.step("Wait for the worktree picker to open", async () => {
       await this.dialog.waitFor({ state: "visible", timeout: 15_000 });

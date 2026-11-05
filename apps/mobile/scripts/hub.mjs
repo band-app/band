@@ -16,6 +16,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -63,12 +64,42 @@ function alive(pid) {
 }
 
 /** The caller's environment without `BAND_*`, so a BAND_HOME or token in the shell can't leak in. */
-function cleanEnv() {
+export function cleanEnv(env = process.env) {
   // CLAUDE_CONFIG_DIR and CODEX_HOME would point the hub's usage readers at a real login.
-  const drop = new Set(["CLAUDE_CONFIG_DIR", "CODEX_HOME"]);
+  // The GIT_CONFIG_* entries, askpass helpers and credential socket are a Band worker's git
+  // credential helper: a test hub must never run the real worker's helper.
+  const drop = new Set([
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GH_TOKEN",
+  ]);
   return Object.fromEntries(
-    Object.entries(process.env).filter(([k]) => !k.startsWith("BAND_") && !drop.has(k)),
+    Object.entries(env).filter(
+      ([k]) => !k.startsWith("BAND_") && !drop.has(k) && !/^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(k),
+    ),
   );
+}
+
+/** Pids named by the `*.pid` files in the hub's run dir (its terminal daemon), never found by pattern. */
+function homePids(home) {
+  const dir = join(home, ".band", "run");
+  let names = [];
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith(".pid"));
+  } catch {}
+  const pids = [];
+  for (const name of names) {
+    try {
+      const raw = readFileSync(join(dir, name), "utf8").trim();
+      const pid = Number.parseInt(raw.startsWith("{") ? JSON.parse(raw).pid : raw, 10);
+      if (Number.isInteger(pid) && pid > 1 && alive(pid)) pids.push(pid);
+    } catch {}
+  }
+  return pids;
 }
 
 /** The scripted agent's turns (`seed.mjs`), written into the home so a restart keeps them. */
@@ -217,6 +248,11 @@ function view(state) {
 /** Stops the hub and deletes its temp home and the state file. */
 async function clean() {
   const state = await stop();
+  for (const pid of state?.home ? homePids(state.home) : []) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {}
+  }
   // The hub's terminal daemon can still be writing its run dir as the hub stops (ENOTEMPTY).
   if (state?.home) rmSync(state.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   rmSync(STATE_FILE, { force: true });

@@ -17,7 +17,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChatEvent } from "@band-app/shared/chat-events";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
-import { maxId, openStream, STUB_AGENT_PATH, TEST_TOKEN, turnEnded } from "./acp-chat";
+import {
+  completeLines,
+  maxId,
+  openStream,
+  STUB_AGENT_PATH,
+  TEST_TOKEN,
+  turnEnded,
+} from "./acp-chat";
 import { seedSettings, seedState } from "./seed-state";
 import {
   createTmpHome,
@@ -355,9 +362,8 @@ export async function startWorld(opts: WorldOptions): Promise<World> {
     checkpoints: (worktreeId) => q("checkpoints.list", { worktreeId }),
     stubRequests(w, method) {
       if (!existsSync(w.stubLog)) return [];
-      return readFileSync(w.stubLog, "utf8")
-        .split("\n")
-        .filter(Boolean)
+      // The stub appends to this log while the test reads it; a half-written last line is not a line yet.
+      return completeLines(readFileSync(w.stubLog, "utf8"))
         .map((l) => JSON.parse(l) as { method: string; params: { sessionId?: string } })
         .filter((r) => r.method === method);
     },

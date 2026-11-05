@@ -100,6 +100,24 @@ export class ClientActivityService {
     return level === "active" ? 1 : 5;
   }
 
+  /** Whether the client reported within the TTL. */
+  isLive(clientId: string, now = Date.now()): boolean {
+    const entry = this.clients.get(clientId);
+    return entry !== undefined && now - entry.reportedAt < ttlMs();
+  }
+
+  /**
+   * The live clients, the one that most recently had focus first: `active` before `idle` before
+   * `background`, then the latest report. Used to pick the window an editor call goes to.
+   */
+  clientsByFocus(now = Date.now()): string[] {
+    const ttl = ttlMs();
+    return [...this.clients.entries()]
+      .filter(([, entry]) => now - entry.reportedAt < ttl)
+      .sort(([, a], [, b]) => RANK[b.activity] - RANK[a.activity] || b.reportedAt - a.reportedAt)
+      .map(([id]) => id);
+  }
+
   /** Forget everything (tests, shutdown). */
   reset(): void {
     this.clients.clear();

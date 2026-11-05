@@ -35,6 +35,14 @@ export interface ExtensionList {
   errors: ExtensionProblem[];
 }
 
+/** One tool of an editor, as its `tools.json` lists it. */
+export interface EditorToolDef {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+}
+
 export interface ExtensionFile {
   stream: ReadStream;
   size: number;
@@ -160,6 +168,41 @@ export class ExtensionService {
 
   async get(id: string): Promise<ExtensionManifest | undefined> {
     return (await this.list()).extensions.find((e) => e.id === id);
+  }
+
+  /**
+   * The tools an editor declares in its `tools` file (an MCP `tools/list` answer), minus the ones
+   * marked `"agent": false`. A missing or malformed file gives none.
+   */
+  async agentTools(extensionId: string, editorId: string): Promise<EditorToolDef[]> {
+    const manifest = await this.get(extensionId);
+    const editor = manifest?.contributes.fileEditors.find((e) => e.id === editorId);
+    if (!manifest || !editor?.tools) return [];
+    try {
+      const raw = await readFile(join(this.root(), manifest.id, editor.tools), "utf8");
+      const parsed = JSON.parse(raw) as { tools?: unknown };
+      if (!Array.isArray(parsed.tools)) return [];
+      const out: EditorToolDef[] = [];
+      for (const t of parsed.tools) {
+        if (!t || typeof t !== "object") continue;
+        const tool = t as Record<string, unknown>;
+        if (typeof tool.name !== "string" || tool.agent === false) continue;
+        out.push({
+          name: tool.name,
+          description: typeof tool.description === "string" ? tool.description : "",
+          inputSchema:
+            tool.inputSchema && typeof tool.inputSchema === "object"
+              ? (tool.inputSchema as Record<string, unknown>)
+              : { type: "object", properties: {} },
+          ...(tool.annotations && typeof tool.annotations === "object"
+            ? { annotations: tool.annotations as Record<string, unknown> }
+            : {}),
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
   }
 
   private async scan(): Promise<ExtensionList> {

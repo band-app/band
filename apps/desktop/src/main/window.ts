@@ -192,6 +192,12 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     win.webContents.setZoomLevel(0);
   });
 
+  // macOS fires `swipe` only when System Settings > Trackpad > "Swipe between
+  // pages" includes three fingers. The renderer maps it to worktree history.
+  win.on("swipe", (_event, direction) => {
+    if (!win.isDestroyed()) win.webContents.send("window-swipe", direction);
+  });
+
   win.once("ready-to-show", () => {
     win.show();
     if (saved?.maximized) win.maximize();

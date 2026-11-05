@@ -714,6 +714,14 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return hubUrl(url);
   }
 
+  async getWorktreeDownloadUrl(worktreeId: string, path: string): Promise<string> {
+    const { url } = (await this.trpc.worktree.downloadUrl.query({ worktreeId, path })) as {
+      url: string;
+    };
+    // A file manager needs an absolute URL, also when the hub config is relative.
+    return new URL(hubUrl(url), window.location.href).toString();
+  }
+
   async searchWorktreeFiles(
     worktreeId: string,
     query: string,
