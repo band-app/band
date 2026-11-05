@@ -52,6 +52,7 @@ import { KeepAwakeController } from "./services/keep-awake.js";
 import { createLogger } from "./services/log.js";
 import { OpenFileQueue } from "./services/open-file-queue.js";
 import { killPort } from "./services/port.js";
+import { scriptLaunchRefusal } from "./services/script-launch-guard.js";
 import { createTestSecretStore, setSecretStore } from "./services/secret-store.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
 import { applyTestProfile } from "./services/test-profile.js";
@@ -68,6 +69,15 @@ import { createMainWindow } from "./window.js";
 // sessionData, logs and crash dumps to a test directory, so a test instance never shares the
 // real app's profile (Electron resolves it from the account home, not `$HOME`). The app does
 // not call `requestSingleInstanceLock`, `setAsDefaultProtocolClient` or `setLoginItemSettings`.
+{
+  // Before anything else starts: a script argument without ELECTRON_RUN_AS_NODE must not boot the app.
+  const refusal = scriptLaunchRefusal(process.argv, app.isPackaged);
+  if (refusal) {
+    process.stderr.write(refusal);
+    process.exit(64);
+  }
+}
+
 applyTestProfile(app);
 
 const log = createLogger("desktop");
