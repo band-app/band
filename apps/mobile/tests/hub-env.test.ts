@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-// @ts-expect-error plain .mjs script
 import { cleanEnv } from "../scripts/hub.mjs";
 
 test("a test hub inherits none of a worker's git credential helper", () => {
