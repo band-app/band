@@ -238,6 +238,44 @@ describe("extension worker services", () => {
     assert.notEqual(await rpc("pid"), pid);
   });
 
+  it("starts nothing while the lease is not valid, and starts the service once the hub renews", async () => {
+    await renew(120_000);
+    await sync();
+    await renew(1000);
+    await waitFor(async () => {
+      const r = await call<ExtensionsSyncReply>(w.session, "extensions.status");
+      return r.services.length === 0;
+    }, 5000);
+    // The lease runs out, then the hub syncs a new extension version: it is unpacked but not started.
+    await new Promise((r) => setTimeout(r, 2500));
+    const a = add({ version: "6.0.0" });
+    let reply: ExtensionsSyncReply | undefined;
+    for (let attempt = 0; attempt < 20 && !reply; attempt++) {
+      try {
+        reply = await sync(item(a));
+      } catch (err) {
+        if (!/link dropped|link closed/i.test(String(err))) throw err;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    assert.equal(reply?.services[0]?.state, "stopped");
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(
+      (await call<ExtensionsSyncReply>(w.session, "extensions.status")).services[0]?.state,
+      "stopped",
+    );
+    // A renewal starts it without any call asking for it.
+    await renew(60_000);
+    await waitFor(
+      async () =>
+        (await call<ExtensionsSyncReply>(w.session, "extensions.status")).services[0]?.state ===
+        "running",
+      10_000,
+      "the service to start after the renewal",
+    );
+    assert.deepEqual(await rpc("echo", { ok: 1 }), { ok: 1 });
+  });
+
   it("kills the process when the worker shuts down", async () => {
     const pid = await rpc<number>("pid");
     await w.worker.stop();

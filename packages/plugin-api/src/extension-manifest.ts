@@ -63,7 +63,9 @@ export const extensionManifestSchema = z
   .object({
     id: idSchema,
     name: z.string().min(1),
-    version: z.string().min(1),
+    version: z
+      .string()
+      .regex(/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/, "The version is letters, digits, . _ + -"),
     extensionApi: z.literal(EXTENSION_API_VERSION),
     contributes: z
       .object({

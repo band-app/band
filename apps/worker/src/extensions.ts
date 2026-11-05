@@ -37,6 +37,19 @@ const INIT_TIMEOUT_MS = 20_000;
 const CALL_TIMEOUT_MS = 5 * 60_000;
 const STOP_GRACE_MS = 3000;
 const MAX_CRASHES = 3;
+/** Capability names the worker reports itself. A service may not claim them. */
+const RESERVED_CAPABILITIES = new Set([
+  "git",
+  "gh",
+  "fsWatch",
+  "search",
+  "lsp",
+  "pty",
+  "acp",
+  "desktop",
+  "direct",
+  "chatOwnership",
+]);
 const CRASH_WINDOW_MS = 5 * 60_000;
 
 /** Variables a service inherits. Nothing else, so no `BAND_*` or `GIT_CONFIG_*` reaches it. */
@@ -307,6 +320,8 @@ export interface ExtensionHostOptions {
   log: Logger;
   /** Gets an extension's `.tar.gz` from the hub. */
   fetchArchive: (id: string, version: string) => Promise<{ sha256: string; bytes: Buffer }>;
+  /** Whether the lease allows new work. Services do not start or restart while it is false. */
+  mayRun?: () => boolean;
   /** Whether a bundled plugin has this id, so it wins over an extension's service. */
   bundledHas?: (capability: string) => boolean;
   /** Called when the set of states changes without a sync (a crash, a restart, a failure). */
@@ -329,6 +344,11 @@ export class ExtensionHost {
   private readonly problems = new Map<string, string>();
   private chain: Promise<unknown> = Promise.resolve();
   private fenced = false;
+
+  /** True while the lease does not allow new work: nothing starts or restarts. */
+  private get blocked(): boolean {
+    return this.fenced || this.options.mayRun?.() === false;
+  }
   private closed = false;
 
   constructor(private readonly options: ExtensionHostOptions) {}
@@ -405,11 +425,18 @@ export class ExtensionHost {
       }
     }
     for (const item of params.items) {
-      if (
-        [...this.services.values()].some(
-          (s) => s.extensionId === item.id && s.version === item.version,
-        )
-      ) {
+      const existing = [...this.services.values()].filter(
+        (s) => s.extensionId === item.id && s.version === item.version,
+      );
+      if (existing.length > 0) {
+        // A failed service gets a fresh start with every sync.
+        for (const s of existing) {
+          if (s.state === "failed" && !this.blocked) {
+            s.crashes = [];
+            s.reason = undefined;
+            await this.start(s);
+          }
+        }
         continue;
       }
       try {
@@ -453,6 +480,14 @@ export class ExtensionHost {
   }
 
   private ineligible(def: WorkerServiceManifest): string | null {
+    if (RESERVED_CAPABILITIES.has(def.capability)) {
+      return `${def.capability} is a built-in worker capability`;
+    }
+    for (const s of this.services.values()) {
+      if (s.def !== def && s.def.capability === def.capability && s.state !== "not-eligible") {
+        return `another extension service already provides ${def.capability}`;
+      }
+    }
     if (this.options.bundledHas?.(def.capability)) {
       return `a bundled plugin named ${def.capability} runs here and takes precedence`;
     }
@@ -515,6 +550,12 @@ export class ExtensionHost {
 
   private async doStart(service: Service): Promise<void> {
     const { log, workerId } = this.options;
+    // Like acp.spawn: nothing starts while the lease is not valid. The next renewal starts it.
+    if (this.blocked) {
+      service.state = "stopped";
+      service.reason = undefined;
+      return;
+    }
     const entry = join(service.dir, service.def.entry);
     const spec = this.options.spawnSpec?.(entry) ?? serviceSpawnSpec(entry);
     service.state = "starting";
@@ -553,6 +594,8 @@ export class ExtensionHost {
       await proc.exit;
       service.stopping = false;
       service.proc = undefined;
+      if (service.restartTimer) clearTimeout(service.restartTimer);
+      service.restartTimer = undefined;
       this.fail(
         service,
         `did not start: ${err instanceof Error ? err.message : String(err)}${detail}`,
@@ -608,8 +651,10 @@ export class ExtensionHost {
     const delay = (this.options.restartBackoffMs ?? 1000) * 2 ** (service.crashes.length - 1);
     service.restartTimer = setTimeout(() => {
       service.restartTimer = undefined;
-      if (this.closed || service.stopping || this.fenced) {
-        if (this.fenced) service.state = "stopped";
+      if (this.closed || service.stopping) return;
+      if (this.blocked) {
+        service.state = "stopped";
+        service.reason = undefined;
         return;
       }
       void this.start(service);
@@ -642,10 +687,7 @@ export class ExtensionHost {
   private async running(capability: string): Promise<{ service: Service; proc: ServiceProcess }> {
     const service = this.find(capability);
     // A fence stopped the process. The lease check came first, so the worker may run again.
-    if (service.state === "stopped") {
-      this.fenced = false;
-      await this.start(service);
-    }
+    if (service.state === "stopped" && !this.blocked) await this.start(service);
     if (service.state === "starting") await service.starting?.catch(() => undefined);
     if (service.state !== "running" || !service.proc) {
       const why = service.reason ? `: ${service.reason}` : "";
@@ -699,7 +741,16 @@ export class ExtensionHost {
     }
   }
 
-  /** The lease ran out: every process is stopped. A later call starts them again. */
+  /** The hub renewed the lease: services the fence (or a lapsed lease) held back start now. */
+  async resume(): Promise<void> {
+    if (this.options.mayRun?.() === false || this.closed) return;
+    this.fenced = false;
+    for (const s of this.services.values()) {
+      if (s.state === "stopped") await this.start(s);
+    }
+  }
+
+  /** The lease ran out: every process is stopped. The next renewal starts them again. */
   async fence(): Promise<void> {
     this.fenced = true;
     for (const s of this.services.values()) {
@@ -756,6 +807,7 @@ export function createExtensionHost(
     workerVersion: options.workerVersion,
     log: ctx.log,
     bundledHas: options.bundledHas,
+    mayRun: () => !ctx.lease.isFenced(),
     ...(options.restartBackoffMs ? { restartBackoffMs: options.restartBackoffMs } : {}),
     ...(options.spawnSpec ? { spawnSpec: options.spawnSpec } : {}),
     onChanged: () => ctx.session.notify(METHOD_EXTENSIONS_CHANGED),
@@ -790,7 +842,7 @@ export function registerExtensionMethods(r: Registrar, ctx: WorkerContext): void
           typeof i?.id !== "string" ||
           !/^[a-z][a-z0-9-]{0,63}$/.test(i.id) ||
           typeof i.version !== "string" ||
-          !/^[A-Za-z0-9._+-]{1,64}$/.test(i.version) ||
+          !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(i.version) ||
           typeof i.sha256 !== "string" ||
           !/^[0-9a-f]{64}$/i.test(i.sha256)
         ) {

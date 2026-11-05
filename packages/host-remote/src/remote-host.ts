@@ -385,7 +385,7 @@ export class RemoteHost implements Host {
   };
 
   readonly extensions: HostExtensions = {
-    sync: (items) => this.rpc.call(METHOD_EXTENSIONS_SYNC, { items }),
+    sync: (items) => this.rpc.call(METHOD_EXTENSIONS_SYNC, { items }, { timeoutMs: 180_000 }),
     status: () => this.rpc.call(METHOD_EXTENSIONS_STATUS),
   };
 

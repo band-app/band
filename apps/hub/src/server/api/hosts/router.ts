@@ -98,7 +98,14 @@ export const hostsRouter = t.router({
           hosts.map(async (h) => ({
             ...h,
             sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
-            extensionServices: await extensionWorkerService.viewFor(h.id, h.status === "online"),
+            // The reason can hold the service's stderr, so it is admin detail.
+            extensionServices: (
+              await extensionWorkerService.viewFor(h.id, h.status === "online")
+            ).map((v) =>
+              ctx.admin || v.state === "running" || v.state === "not-eligible"
+                ? v
+                : { ...v, reason: "see an admin for details" },
+            ),
             ...describeHostVersion(h, HUB_VERSION, latest),
             update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
             // Command names and paths are admin detail, like the update error above.

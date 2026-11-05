@@ -155,6 +155,18 @@ Control messages are NDJSON on the service's stdin (worker to service) and stdou
 
 The service sends the notification `stream.end { streamId }` to end a stream. Stream data does not use stdio. It goes over file descriptor 3, a pipe the worker opens beside stdio, as binary frames: a 4-byte big-endian length, a 4-byte stream id, a kind byte (0 text, 1 bytes) and the payload, in both directions. The hub reaches a service with the same `plugin.call` and `plugin.stream` link methods as a bundled worker plugin.
 
+### Who can reach a service
+
+Same rule as a bundled worker plugin's stream. `GET /api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) accepts any device token, admin or not. The viewer is view-only until the person sends `{"type":"control","enabled":true}`, and the hub drops every other message from a view-only viewer before it reaches the service. An agent never reaches a service: the worker relay lists no such route (WebSocket routes are not relayed), `extensions.callService` is admin only, and `extensions.*` is left out of the MCP endpoint and the relay.
+
+### Keeping a worker in step
+
+The hub sends `extensions.sync` when a worker connects and after every install, update, removal and trust change. It also remembers the set each worker acknowledged and, with every lease renewal, sends it again when the worker has not acknowledged the current set. A sync that failed (the link was down, the worker was busy) therefore repeats until it succeeds, so a worker lowered to `restricted` stops its services even if the first sync never arrived. The call is idempotent.
+
+### Lease
+
+A service does not start or restart while the worker's lease is not valid, like `acp.spawn`. A service stopped by the fence, or a service synced while the lease is out, shows `stopped` and starts at the next renewal.
+
 ### The SDK
 
 `packages/extension-worker-sdk` implements the service side. It is plain JavaScript with no dependencies, so an author copies `src/` next to the entry file or bundles it:
@@ -180,7 +192,7 @@ defineWorkerService({
 
 ### Limits
 
-- Panels, agent tools and the stream bridge to the browser come in a later change. Today `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) reach a service.
+- Panels, agent tools and the browser-side stream viewer come in a later change. Today `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) reach a service.
 - A service's scopes (the worktrees it served) are kept in memory, so `worktree.release { reason: "removed" }` does not reach a worktree the service last served before a restart.
 
 ## Settings > Extensions

@@ -296,6 +296,9 @@ export function registerPluginMethods(r: Registrar, ctx: WorkerContext): () => P
     );
     return { chan: ch.id };
   });
+  ctx.lease.onRenewed(() => {
+    void extensions?.resume();
+  });
   ctx.lease.onFence(async () => {
     await bundled.releaseAll("fenced");
     await extensions?.fence();

@@ -10,6 +10,7 @@ import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { TEST_TOKEN } from "./helpers/acp-chat";
+import { startCuttableProxy } from "./helpers/cuttable-proxy";
 import { echoArchive } from "./helpers/extension-archive";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -110,7 +111,7 @@ const alive = (pid: number) => {
   }
 };
 
-async function startWorker(label: string): Promise<Worker> {
+async function startWorker(label: string, hubUrl = server.url): Promise<Worker> {
   const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
     hostName: `worker-${label}`,
     labels: [],
@@ -121,17 +122,7 @@ async function startWorker(label: string): Promise<Worker> {
   initRepo(join(root, "proj"));
   const child = spawn(
     process.execPath,
-    [
-      WORKER_BIN,
-      "--hub",
-      server.url,
-      "--token",
-      issued.token,
-      "--root",
-      root,
-      "--state-dir",
-      state,
-    ],
+    [WORKER_BIN, "--hub", hubUrl, "--token", issued.token, "--root", root, "--state-dir", state],
     {
       env: {
         ...process.env,
@@ -221,6 +212,26 @@ describe("extension worker services", () => {
     await expect(call(b, "echo")).rejects.toThrow();
   });
 
+  it("refuses callService and install without a token", async () => {
+    const call401 = await trpcMutate(
+      server.url,
+      "extensions.callService",
+      {
+        worktreeId: a.worktreeId,
+        capability: "echo",
+        method: "echo",
+        params: {},
+      },
+      "",
+    );
+    expect(call401.status).toBe(401);
+    const up = await fetch(`${server.url}/api/extensions/install`, {
+      method: "POST",
+      body: Buffer.from("x"),
+    });
+    expect(up.status).toBe(401);
+  });
+
   it("S2: lowering a standard worker to restricted stops its service, and raising it starts it again", async () => {
     const pid = await call<number>(a, "pid");
     await m("hosts.setTrust", { hostId: a.hostId, trust: "restricted" });
@@ -238,6 +249,40 @@ describe("extension worker services", () => {
     });
     expect(await call(a, "echo", { n: 1 })).toEqual({ n: 1 });
   });
+
+  it("a sync that fails still wins: a worker lowered to restricted while its link is down stops the service when it returns", async () => {
+    const proxy = await startCuttableProxy(server.url);
+    const c = await startWorker("c", proxy.url);
+    try {
+      await waitFor(async () => ((await stateOf(c)) === "running" ? true : undefined), {
+        label: "service running on C",
+        timeoutMs: 30_000,
+      });
+      const pid = await call<number>(c, "pid");
+      // The link is down, so the hub's sync for the new level fails.
+      await proxy.cut();
+      await waitFor(
+        async () => {
+          const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
+          return hosts.find((h) => h.id === c.hostId)?.status !== "online" ? true : undefined;
+        },
+        { label: "C offline", timeoutMs: 30_000 },
+      );
+      await m("hosts.setTrust", { hostId: c.hostId, trust: "restricted" });
+      expect(alive(pid)).toBe(true);
+      // The worker returns. The hub sends the desired set again, and the service stops.
+      await proxy.restore();
+      await waitFor(async () => (!alive(pid) ? true : undefined), {
+        label: "service stopped after the worker returned",
+        timeoutMs: 60_000,
+      });
+      expect(await servicesOf(c)).toMatchObject([{ state: "not-eligible", reason: "restricted" }]);
+      expect(existsSync(join(c.state, "extensions", "echo-service"))).toBe(false);
+    } finally {
+      c.child.kill("SIGKILL");
+      await proxy.close();
+    }
+  }, 180_000);
 
   it("S6: a stream delivers its frames in order and closing it ends the stream in the process", async () => {
     const url = `${server.url.replace("http", "ws")}/api/plugins/echo/worktrees/${encodeURIComponent(a.worktreeId)}/stream`;

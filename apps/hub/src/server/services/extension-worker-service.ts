@@ -46,6 +46,9 @@ export class ExtensionWorkerService {
   /** The last states each worker reported. */
   private readonly states = new Map<string, Cached>();
   private readonly chains = new Map<string, Promise<unknown>>();
+  /** The set each worker last acknowledged, as a signature. The desired set must match it. */
+  private readonly acked = new Map<string, string>();
+  private readonly pending = new Set<string>();
 
   constructor() {
     extensionService.onChange(() => void this.syncAll());
@@ -116,6 +119,7 @@ export class ExtensionWorkerService {
     try {
       const items = await this.desiredFor(hostId);
       const reply = await host.extensions.sync(items);
+      this.acked.set(hostId, signatureOf(items));
       this.states.set(hostId, reply);
       emit({ kind: "host-status-changed", hostId });
     } catch (err) {
@@ -139,7 +143,7 @@ export class ExtensionWorkerService {
 
   /** Every connected worker. For an install, update or removal. */
   async syncAll(): Promise<void> {
-    for (const id of this.connectedIds()) await this.syncHost(id).catch(() => undefined);
+    await Promise.allSettled(this.connectedIds().map((id) => this.syncHost(id)));
   }
 
   private connectedIds: () => string[] = () => [];
@@ -149,12 +153,30 @@ export class ExtensionWorkerService {
     this.connectedIds = fn;
   }
 
+  /** A worker connected. It may have restarted, so the set is sent again whatever it acknowledged. */
   onConnected(hostId: string): void {
+    this.acked.delete(hostId);
     void this.syncHost(hostId);
   }
 
-  forget(hostId: string): void {
-    this.states.delete(hostId);
+  /**
+   * The hub renewed a worker's lease. The desired set wins eventually: when the worker has not
+   * acknowledged the current one (a sync failed, or the trust level changed meanwhile), send it
+   * again. Idempotent, and a no-op once acknowledged.
+   */
+  onRenewed(hostId: string): void {
+    if (hostId === "local" || this.pending.has(hostId)) return;
+    this.pending.add(hostId);
+    void (async () => {
+      try {
+        const sig = signatureOf(await this.desiredFor(hostId));
+        if (this.acked.get(hostId) !== sig) await this.syncHost(hostId);
+      } catch (err) {
+        log.debug(`extension resync on ${hostId}: ${err instanceof Error ? err.message : err}`);
+      } finally {
+        this.pending.delete(hostId);
+      }
+    })();
   }
 
   /**
@@ -202,6 +224,10 @@ export class ExtensionWorkerService {
     }
     return out;
   }
+}
+
+function signatureOf(items: HostExtensionItem[]): string {
+  return JSON.stringify([...items].sort((a, b) => a.id.localeCompare(b.id)));
 }
 
 export const extensionWorkerService = new ExtensionWorkerService();
