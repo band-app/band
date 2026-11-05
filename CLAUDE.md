@@ -81,7 +81,7 @@ An agent session runs in a Band worker, so its environment carries the worker's 
 
 ### Where tests run
 
-Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request.
+Pull requests run the Linux jobs only: lint, the hub suite in 2 shards, the web unit and package suites, the web e2e suite, the remote-loopback job (one shard, listed files only), Docker and k8s (kind). No macOS job runs on a pull request.
 
 The web e2e job on a pull request runs only the specs the change affects, plus a smoke set (`scripts/ci/affected-e2e.mjs`, tested by `scripts/ci/affected-e2e.test.mjs` against the changed-file lists of real PRs). A changed spec runs. A changed page object, fixture or helper under `apps/web/e2e/` runs every spec that imports it, directly or through another page object. A changed `.ts` or `.tsx` file under `apps/web/src/` runs the specs whose page objects or specs mention one of its `data-testid`s (a file with none borrows the ids of what imports it, two levels up). A change to the hub, workers, the CLI, `packages/`, `plugins/`, `apps/web/package.json`, the e2e config, the lockfile or the CI files, a source file the mapping cannot place, or an error in the script runs every spec. Changes under `apps/mobile`, `apps/desktop`, `docs/` and the hub's own tests run only the smoke set. A selection of more than 40 specs runs in 3 shards, a smaller one in one. Pushes to main and the merge queue always run every spec (the nightly run starts only macOS jobs), so a mapping the script missed fails in the queue and not on the PR.
 
@@ -98,6 +98,10 @@ A change to `ci.yml` or the filter script starts every job, the full-suite jobs 
 The nightly run (`schedule` in `ci.yml` at 02:30 UTC, also `workflow_dispatch`) runs every macOS job in full: the whole hub suite on macOS in 2 shards with the web unit and package suites in shard 1 (`web-macos`), the whole packaged desktop e2e, the CLI suite and the simulator tests. A macOS-only break outside the filtered paths first shows up there. Look at the Actions tab, workflow CI, event "schedule". A test that needs macOS to fail is still written as an ordinary test, with no list to join.
 
 In the nightly run each `web-macos` shard runs its half of the hub suite with `vitest run --shard=N/2` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+
+Hub test files run in parallel: `apps/hub/vitest.config.ts` uses the `forks` pool with 3 workers (`BAND_TEST_WORKERS` overrides it), because every server, worker and daemon a test starts has a random port and its own temp HOME. No file opts out. A new test must not use a fixed port, a path outside its temp HOME, or the real `~/.band`; run it with `--no-file-parallelism` to find a collision.
+
+The remote-loopback job runs only the files in `apps/hub/tests/loopback-files.txt`, the ones that import `helpers/test-host` (their behaviour depends on where the worktree lives). `scripts/check-loopback-files.sh` runs in `pnpm lint` and fails when a file that imports `helpers/test-host` is missing from the list, or the list names a file that does not exist. A test that should run on a loopback worker imports from `test-host` and goes in the list.
 
 ### Exceptions
 
