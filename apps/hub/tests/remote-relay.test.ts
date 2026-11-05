@@ -337,6 +337,23 @@ beforeAll(async () => {
             `/trpc/resources.storage?input=${encodeURIComponent(JSON.stringify({ hostId: "local" }))}`,
           ),
           probe("agent-logins-list", "/trpc/agentLogins.list"),
+          // Editor tabs and the person's selection belong to the windows, not to an agent.
+          probe(
+            "editors-selection",
+            `/trpc/editors.selection?input=${encodeURIComponent(JSON.stringify({ worktreeId: WT_A }))}`,
+          ),
+          post("editors-register", "/trpc/editors.register", {
+            clientId: "fake",
+            worktreeId: WT_A,
+            file: "a.band-test",
+            extensionId: "text-editor",
+            editorId: "text",
+          }),
+          post("editors-result", "/trpc/editors.result", {
+            clientId: "fake",
+            callId: "x",
+            message: {},
+          }),
           // An agent may not switch its own chat's account.
           post("chat-login-pick", "/trpc/chats.update", { chatId: "any-chat", loginId: "al-x" }),
           // A direct-path token would let the agent call the worker's loopback listener.
@@ -624,6 +641,9 @@ describe("the worker relay (S2)", () => {
     // The vault, and the OAuth flows it starts, are out of agent reach.
     expect(by("vault-list")?.status).toBe(403);
     expect(by("resources-snapshot")?.status).toBe(403);
+    for (const name of ["editors-selection", "editors-register", "editors-result"]) {
+      expect(by(name)?.status, name).toBe(403);
+    }
     expect(by("resources-storage")?.status).toBe(403);
     expect(by("agent-logins-list")?.status).toBe(403);
     expect(by("chat-login-pick")?.status).toBe(403);

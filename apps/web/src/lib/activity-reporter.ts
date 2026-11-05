@@ -26,15 +26,27 @@ export function computeActivity(s: PowerState): ActivityLevel {
 }
 
 let started = false;
+let cachedClientId: string | null = null;
+
+/**
+ * This page's id: the one it reports activity under, and the one the hub uses to address an
+ * editor call to this window (`editors.*`). Random per page load.
+ */
+export function getClientId(): string {
+  if (cachedClientId === null) {
+    // `crypto.randomUUID` is missing on a plain-http page that is not localhost (a phone on a LAN URL).
+    cachedClientId =
+      typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `c${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  }
+  return cachedClientId;
+}
 
 export function startActivityReporter(): void {
   if (started || typeof window === "undefined") return;
   started = true;
-  // `crypto.randomUUID` is missing on a plain-http page that is not localhost (a phone on a LAN URL).
-  const clientId =
-    typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `c${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const clientId = getClientId();
   let debounce: ReturnType<typeof setTimeout> | null = null;
 
   const send = () => {

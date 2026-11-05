@@ -41,11 +41,12 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTitleBarOffset } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
-import { startActivityReporter } from "../lib/activity-reporter";
+import { getClientId, startActivityReporter } from "../lib/activity-reporter";
 import { activateBrowserGuestWorktree } from "../lib/browser-guest-retention";
 import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../lib/browser-webview";
 import { HYDRATE_WAIT_MS, hydrateGlobal, startClientStateSync } from "../lib/client-state";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
+import { setFileEditorChoice } from "../lib/extensions";
 import { isDesktop } from "../lib/is-desktop";
 import { keepLastWorktreeOnce, pickStartWorktree, recordLastWorktree } from "../lib/last-worktree";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
@@ -479,6 +480,23 @@ function AppShell() {
     // `adapter` (module-level singleton) and `crossPanelHandlers`
     // (module-level mutable registry) are intentionally omitted from
     // deps — see the comment on the setActiveWorktree effect above.
+  }, []);
+
+  // An agent asked for an editor tab (`band_editor_open`) and this window is the one the hub
+  // picked: choose the editor for the file, then open it like any file. The tab registers with the
+  // hub once its editor is ready, which is what the agent's call waits for.
+  useEffect(() => {
+    return adapter.subscribeStatusEvents((event) => {
+      if (event.kind !== "editor-open" || event.clientId !== getClientId()) return;
+      const request = event.editorRequest as
+        | { file?: string; extensionId?: string; editorId?: string }
+        | undefined;
+      const worktreeId = typeof event.worktreeId === "string" ? event.worktreeId : undefined;
+      if (!worktreeId || !request?.file || !request.extensionId || !request.editorId) return;
+      setFileEditorChoice(worktreeId, request.file, `${request.extensionId}/${request.editorId}`);
+      crossPanelHandlers.onOpenFile(worktreeId, request.file);
+    });
+    // `adapter` and `crossPanelHandlers` are module-level singletons, as in the open-file effect.
   }, []);
 
   // Copy the worktree path to clipboard
@@ -1006,6 +1024,19 @@ function RootDocument({ children }: { children: ReactNode }) {
 }
 
 function RootLayout() {
+  // `/embed/*` pages (the iOS app's editor web view) render alone, with no sidebar or layout.
+  const embedded = useRouterState({ select: (s) => s.location.pathname.startsWith("/embed/") });
+  if (embedded) {
+    return (
+      <DashboardProvider adapter={adapter} capabilities={capabilities}>
+        <ThemeSync />
+        <PowerSync />
+        <TooltipProvider>
+          <Outlet />
+        </TooltipProvider>
+      </DashboardProvider>
+    );
+  }
   return (
     <DashboardProvider adapter={adapter} capabilities={capabilities}>
       <ThemeSync />

@@ -87,3 +87,27 @@ test("S7: the file opens in the extension tab on a phone and saves", async ({ pa
   await expect(editor.dirtyDot(NOTE)).toHaveCount(0);
   expect(readFileSync(join(repoPath, NOTE), "utf8")).toBe("edited on the phone\n");
 });
+
+test("S6: the editor is told the layout, and the Save button saves", async ({ page }) => {
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const trees = new FileTreesPage(page, worktree);
+  const editor = new ExtensionEditorPage(page, worktree, trees);
+  await worktree.goto(worktreeId);
+  await worktree.waitForMobileReady();
+  await new MobileLayoutPage(page, server.url, TOKEN).openSheet("explorer");
+  await trees.openFileInMobileSheet("dir", NOTE);
+  await expect(editor.editor(NOTE)).toHaveAttribute("data-ready", "true");
+  await expect(editor.layout(NOTE)).toHaveText("compact");
+
+  await expect(editor.saveButton(NOTE)).toBeDisabled();
+  await editor.replaceText(NOTE, "saved with the button\n");
+  await expect(editor.saveButton(NOTE)).toBeEnabled();
+  await editor.saveButton(NOTE).click();
+  await expect(editor.saveButton(NOTE)).toBeDisabled();
+  expect(readFileSync(join(repoPath, NOTE), "utf8")).toBe("saved with the button\n");
+
+  // A wide window is the regular layout: the editor hears it, and the Save button is gone.
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await expect(editor.layout(NOTE)).toHaveText("regular");
+  await expect(editor.saveButton(NOTE)).toHaveCount(0);
+});
