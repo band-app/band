@@ -73,6 +73,7 @@ import {
   TRANSLUCENT_SIDEBAR_INIT_SCRIPT,
 } from "../lib/translucent-sidebar";
 import { setActiveWorktree } from "../lib/worktree-cold-park";
+import { useWorktreeMouseNav } from "../lib/worktree-mouse-nav";
 import {
   applyZoomLevel,
   applyZoomLevelToDom,
@@ -393,6 +394,8 @@ function AppShell() {
   // Orca's worktree history keys. ⌘[ / ⌘] belong to pane cycling. The command
   // palette's Previous / Next Worktree dispatch the events.
   const { goBack, goForward } = navigationHistory;
+  // Mouse side buttons and the macOS swipe gesture step the same history.
+  useWorktreeMouseNav(goBack, goForward);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
