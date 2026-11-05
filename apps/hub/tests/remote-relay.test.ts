@@ -847,7 +847,7 @@ describe("what an agent may call, and which ids it may take", () => {
     expect(call("h-a", "repos.addByUrl", { remoteUrl: "https://example.com/o/r.git" }).ok).toBe(
       true,
     );
-    // Adding from another host is fine. Widening its roots needs a person, so addRoot is refused.
+    // Adding from another host is fine. Widening its roots needs a person (or an admin worker on its own folder), so addRoot is refused here.
     expect(call("h-a", "repos.addFromWorker", { hostId: "h-b", path: "/x" }).ok).toBe(true);
     expect(
       call("h-a", "repos.addFromWorker", { hostId: "h-b", path: "/x", addRoot: true }).ok,
@@ -1225,7 +1225,7 @@ describe("the band CLI through the relay (S2)", () => {
       makeRepo(outside);
       const widened = await run("repos", "add", "--from", a.hostId, outside, "--add-root");
       expect(widened.code, widened.out).not.toBe(0);
-      expect(widened.out).toContain("needs a person's confirmation");
+      expect(widened.out).toContain("needs a person, or admin trust");
       const after = (await q<{ repos: Array<{ name: string }> }>("repos.list")).repos.map(
         (r) => r.name,
       );

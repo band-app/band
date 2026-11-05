@@ -60,7 +60,7 @@ A repo is identified by its remote URL and default branch. The hub keeps no path
 
 - `<path>` registers a git repository on the hub's machine and reads its `origin` URL and default branch. Returns the repo name.
 - `--url` registers a repo by its remote URL. A worker clones it to `~/band/repos/<owner>/<name>` the first time a worktree for it lands there. Without `--branch` the hub asks the remote for its default branch.
-- `--from <worker> <path>` registers the repo that a folder on a worker holds (worker ids are in `band workers list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
+- `--from <worker> <path>` registers the repo that a folder on a worker holds (worker ids are in `band workers list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token. An agent can use `--add-root` only when its own worker has admin trust and `<worker>` is that worker; otherwise it is refused.
 
 A folder with no remote is registered without a URL and can only run on the worker that holds it.
 
