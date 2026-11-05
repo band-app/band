@@ -261,7 +261,7 @@ export function ElicitationForm({
                 <p
                   data-testid="chat-pane__elicitation-question"
                   aria-live="polite"
-                  className="text-lg leading-snug font-medium text-foreground"
+                  className="text-sm leading-snug font-normal text-foreground"
                 >
                   {question}
                 </p>

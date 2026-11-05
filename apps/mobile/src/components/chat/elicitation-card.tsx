@@ -346,7 +346,7 @@ function StepBody({
 const styles = StyleSheet.create({
   header: { flexDirection: "row", gap: 8, justifyContent: "space-between" },
   headerText: { flex: 1, gap: 4 },
-  question: { color: colors.foreground, fontSize: 17, fontWeight: "600", lineHeight: 23 },
+  question: { color: colors.foreground, fontSize: 15, fontWeight: "400", lineHeight: 20 },
   muted: { color: colors.mutedForeground, fontSize: 14 },
   pager: { alignItems: "center", flexDirection: "row", gap: 4 },
   pagerButton: { alignItems: "center", height: 32, justifyContent: "center", width: 28 },
