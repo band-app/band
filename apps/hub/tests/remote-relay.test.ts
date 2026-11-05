@@ -351,6 +351,16 @@ beforeAll(async () => {
           probe("hub-interruptions", "/trpc/workers.hubInterruptions"),
           // Unread is a person's reading state; an agent may not set it, even on its own worktree.
           post("set-unread", "/trpc/worktrees.setUnread", { worktreeId: WT_A, unread: true }),
+          // External files are for a person's device token: a relay token reads or writes none.
+          post("read-external", "/trpc/worktree.readExternalFile", {
+            worktreeId: WT_A,
+            absolutePath: "/etc/hosts",
+          }),
+          post("save-external", "/trpc/worktree.saveExternalFile", {
+            worktreeId: WT_A,
+            absolutePath: "/etc/hosts",
+            content: "x",
+          }),
           post("vault-oauth", "/trpc/vault.startOAuth", {
             name: "x",
             serverUrl: "http://127.0.0.1:1/mcp",
@@ -621,6 +631,8 @@ describe("the worker relay (S2)", () => {
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);
     expect(by("set-unread")?.status).toBe(403);
+    expect(by("read-external")?.status).toBe(403);
+    expect(by("save-external")?.status).toBe(403);
     expect(by("other-route")?.status).toBe(403);
     expect(by("file-download")?.status).toBe(403);
     expect(by("file-range")?.status).toBe(403);

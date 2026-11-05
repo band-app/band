@@ -5,13 +5,19 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CenterTabStrip } from "../../e2e/pages/CenterTabStrip";
 import { ChatPanePage } from "../../e2e/pages/ChatPanePage";
+import { FileViewerPage } from "../../e2e/pages/FileViewerPage";
 import { TerminalSurface } from "../../e2e/pages/TerminalSurface";
 
 export class DesktopDashboardPage {
   readonly chat: ChatPanePage;
+  readonly tabStrip: CenterTabStrip;
+  readonly fileViewer: FileViewerPage;
 
   constructor(private readonly page: Page) {
+    this.tabStrip = new CenterTabStrip(page);
+    this.fileViewer = new FileViewerPage(page);
     // Cross-origin hub auth comes from the preload, so no token is passed.
     this.chat = new ChatPanePage(page, "app://placeholder", "");
   }
@@ -47,6 +53,21 @@ export class DesktopDashboardPage {
     await test.step("Wait for the simulator screen to go live", async () => {
       await expect(this.remoteScreen).toHaveAttribute("data-phase", "live", { timeout });
     });
+  }
+
+  /** The tab of a file inside the open worktree, by its worktree-relative path. */
+  fileTab(path: string): Locator {
+    return this.page.getByTestId(`center-file-tab--${path}`);
+  }
+
+  /** The tab of a file on this Mac that is outside every worktree (read and saved by the app). */
+  localFileTab(absolutePath: string): Locator {
+    return this.page.getByTestId(`center-file-tab--desktop:${absolutePath}`);
+  }
+
+  /** The notice line the dashboard shows for a message such as a refused folder drop. */
+  noticeContaining(text: string): Locator {
+    return this.page.getByTestId("toast-host__notice--info").filter({ hasText: text });
   }
 
   /** The window's current `app://` URL. */

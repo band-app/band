@@ -44,7 +44,7 @@
 import { accountUsageRouter } from "./account-usage/router";
 import { agentLoginsRouter } from "./agent-logins/router";
 import { agentSessionsRouter } from "./agent-sessions/router";
-import { browserHostRouter, hostRouter } from "./browser-host/router";
+import { browserHostRouter } from "./browser-host/router";
 import { browserProfilesRouter } from "./browser-profiles/router";
 import { browsersRouter } from "./browsers/router";
 import { chatRouter } from "./chat/router";
@@ -113,7 +113,6 @@ export const appRouter = t.router({
   accountUsage: accountUsageRouter,
   resources: resourcesRouter,
   hooks: hooksRouter,
-  host: hostRouter,
   workers: hostsRouter,
   // Old name, kept for desktop, mobile and CLI builds that still call it.
   hosts: hostsRouter,

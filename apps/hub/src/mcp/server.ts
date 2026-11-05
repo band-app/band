@@ -63,6 +63,8 @@ function discoverProcedures(): ProcedureInfo[] {
     if (path === "worktree.previewUrl") continue;
     // `worktree.directAccess` mints a bearer token for a worker's loopback listener.
     if (path === "worktree.directAccess") continue;
+    // These read and write any file a worker's path policy allows, outside the worktree.
+    if (path === "worktree.readExternalFile" || path === "worktree.saveExternalFile") continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.
     if (path === "environment.validate") continue;
     // `repos.addFromWorker` reads folders on a worker the caller names.

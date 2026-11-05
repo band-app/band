@@ -6144,6 +6144,37 @@ fn open_falls_back_to_active_worktree() {
 }
 
 #[test]
+fn open_uses_the_terminals_worktree_over_the_dashboards_active_one() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/mine"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let worktree_path = stdout(&create_out);
+    fs::write(Path::new(&worktree_path).join("README.md"), "# Hi\n").unwrap();
+
+    // The dashboard has another worktree focused.
+    set_active_worktree(&env.band_dir, Some("my-repo-main"));
+
+    // A Band terminal in `feat/mine` sets BAND_WORKTREE_ID, so `band open` follows it.
+    let readme = Path::new(&worktree_path).join("README.md");
+    let output = env.band_with_env(
+        &["--output", "json", "open", readme.to_str().unwrap()],
+        &[("BAND_WORKTREE_ID", "my-repo-feat-mine")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(
+        json["worktreeId"].as_str(),
+        Some("my-repo-feat-mine"),
+        "json: {json}",
+    );
+}
+
+#[test]
 fn open_without_active_worktree_errors_clearly() {
     let env = TestEnv::new();
     // Explicitly clear any leftover active-worktree state from previous

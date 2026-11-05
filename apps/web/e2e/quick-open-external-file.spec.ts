@@ -7,7 +7,7 @@
  * chat link dispatches via `band:open-file` — the dialog resolves it against
  * the worktree (`worktree.resolvePath`) and offers to open it. A path
  * INSIDE the worktree opens as a normal worktree-relative tab; a path
- * OUTSIDE opens as an *external* tab (contents read via `host.readFile`,
+ * OUTSIDE opens as an *external* tab (contents read via `worktree.readExternalFile`,
  * same pipeline the CLI's `band open <abs>` uses). See `QuickOpenDialog.tsx`,
  * `worktree.resolvePath` / `editorService.resolvePath`, and
  * `SharedWorktreeLayout.handleOpenExternalFile`.
@@ -30,7 +30,7 @@
  *     page objects.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
@@ -68,6 +68,7 @@ let worktreePath!: string;
 // is by absolute path, which is exactly the external-open case under test.
 let externalTsPath!: string;
 let externalMdPath!: string;
+let externalEditPath!: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -88,6 +89,8 @@ test.beforeAll(async () => {
   // they can only be opened by absolute path.
   externalTsPath = join(tmpHome, "band-external-note.ts");
   writeFileSync(externalTsPath, `export const marker = "${TS_MARKER}";\n`);
+  externalEditPath = join(tmpHome, "band-external-edit.ts");
+  writeFileSync(externalEditPath, "export const edited = false;\n");
   externalMdPath = join(tmpHome, "band-terminal-repair-task.md");
   writeFileSync(externalMdPath, "# task\n\nrepair the terminal\n");
 
@@ -164,6 +167,27 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
 
     const fileViewer = new FileViewerPage(page);
     await fileViewer.expectContent(TS_MARKER);
+  });
+
+  test("an external tab is editable and Cmd+S writes the file on the worktree's machine", async ({
+    page,
+  }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    await worktreePage.goto(WORKTREE);
+    await worktreePage.waitForReady();
+
+    await worktreePage.dispatchOpenFileEvent({ filename: externalEditPath, worktreeId: WORKTREE });
+    await expect(worktreePage.fileTab(externalEditPath)).toBeAttached({ timeout: 15_000 });
+
+    const fileViewer = new FileViewerPage(page);
+    await fileViewer.expectContent("edited = false");
+    await fileViewer.typeAtStart("// edited in Band\n");
+    await fileViewer.saveWithShortcut();
+    await fileViewer.expectSaved();
+
+    await expect
+      .poll(() => readFileSync(externalEditPath, "utf-8"))
+      .toBe("// edited in Band\nexport const edited = false;\n");
   });
 
   test("a band:open-file event with an absolute .md path auto-opens it as an external tab (link path)", async ({

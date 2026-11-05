@@ -466,22 +466,21 @@ band cronjobs trigger <key> <id>
 band open <file_path> [--worktree <string>] [--no-focus]
 ```
 
-Opens the file in the dashboard's currently focused worktree. When `--worktree` is omitted, the server uses the worktree most recently focused in the Band dashboard — exits non-zero if no worktree is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / "Open File…"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.
+Opens the file in a worktree. When `--worktree` is omitted, a Band terminal or agent opens it in its own worktree (`$BAND_WORKTREE_ID`); anywhere else the server uses the worktree most recently focused in the Band dashboard, and the command exits non-zero if none is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / "Open File…"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.
 
 Example:
 ```sh
-# Open the file in whichever worktree the dashboard is currently focused on
+# Open the file in this terminal's worktree ($BAND_WORKTREE_ID), else the focused one
 band open src/main.rs
 
 # Jump to line 42, column 5
 band open src/main.rs:42:5
 
-# Override the active-worktree fallback
+# Override the worktree ($BAND_WORKTREE_ID or the focused one)
 band open src/main.rs --worktree my-app/feat/auth
 
-# An out-of-worktree file opens as an external tab (worktree-relative
-# routing is bypassed; the FileViewer reads via the server's
-# readExternalFile capability).
+# An out-of-worktree file opens as an editable external tab, read and
+# saved on the machine the worktree runs on.
 band open ~/Downloads/v3.js
 ```
 
@@ -536,31 +535,32 @@ band worktrees list --output json | jq '.worktrees[] | select(.repo == "my-app")
 
 ### Open a file in the dashboard
 
-`band open <file>` routes a file to whichever worktree is currently
-focused in the Band dashboard (the most recently active one). Use it
+`band open <file>` opens a file in the worktree of the Band terminal or
+agent that runs it (`$BAND_WORKTREE_ID`). Outside Band it uses the worktree
+most recently focused in the dashboard. Use it
 from grep / stack-trace output to drop yourself straight into the
 editor without naming the worktree.
 
 ```sh
-# Open the file in whichever worktree the dashboard is currently focused on
+# Open the file in this terminal's worktree ($BAND_WORKTREE_ID), else the focused one
 band open src/main.rs
 
 # Jump to line 42, column 5
 band open src/main.rs:42:5
 
-# Override the active-worktree fallback
+# Override the worktree
 band open src/main.rs --worktree my-app/feat/auth
 
-# Open an arbitrary file from outside any worktree — opens as an
-# external editor tab (the same surface as desktop Cmd+O / "Open File…")
+# Open an arbitrary file from outside any worktree. It opens as an
+# editable external tab, read and saved on the worktree's machine.
 band open ~/Downloads/v3.js
 ```
 
 Files inside the target worktree open as normal editor tabs.
-Files outside any worktree root open as external tabs, hosted in
-the active worktree's editor pane. Errors when no worktree is
-active in the dashboard and no `--worktree` is supplied, or when
-the file doesn't exist on disk.
+Files outside any worktree root open as external tabs in that
+worktree's editor pane. Errors when no worktree can be chosen (no
+`--worktree`, no `$BAND_WORKTREE_ID`, none focused in the dashboard),
+or when the file doesn't exist on disk.
 
 ### Drive a coding agent
 

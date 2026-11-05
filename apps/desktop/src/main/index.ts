@@ -50,6 +50,7 @@ import {
 } from "./services/hub-choice.js";
 import { KeepAwakeController } from "./services/keep-awake.js";
 import { createLogger } from "./services/log.js";
+import { OpenFileQueue } from "./services/open-file-queue.js";
 import { killPort } from "./services/port.js";
 import { createTestSecretStore, setSecretStore } from "./services/secret-store.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
@@ -102,6 +103,14 @@ interface AppState {
 
 /** One per process: the blocker outlives the window and is released on quit. */
 const keepAwake = new KeepAwakeController(powerSaveBlocker);
+
+// Finder's Open With and `open -a Band <file>` deliver paths here, possibly before the app is
+// ready or any window exists. They wait in the queue until the renderer drains them.
+const openFiles = new OpenFileQueue();
+app.on("open-file", (event, path) => {
+  event.preventDefault();
+  openFiles.push(path);
+});
 
 /** powerMonitor listeners survive window close; wire them at most once. */
 let powerEventsWired = false;
@@ -630,8 +639,19 @@ async function bootstrap(): Promise<void> {
     },
     updates,
     keepAwake,
+    openFiles,
+  });
+  // Tell the page when a path arrives. A path queued earlier is drained by the page on start.
+  const stopOpenFileEvents = openFiles.onPush(() => {
+    const win = state.mainWindow;
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send(Events.openFilesRequested);
   });
   state.unregisterIpc = () => {
+    stopOpenFileEvents();
     unregisterIpc();
     unregisterHubConfig();
   };

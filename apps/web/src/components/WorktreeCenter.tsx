@@ -93,6 +93,7 @@ import {
   toLspServerLang,
   useAdapter,
   useCapabilities,
+  useDashboardStore,
   useSearch,
   useSettingsQuery,
   useWorktreePath,
@@ -135,6 +136,7 @@ import {
   useExtensions,
   useFileEditorChoice,
 } from "../lib/extensions";
+import { desktopFilePath, ioPathOf, isDesktopFilePath } from "../lib/external-source";
 import { hubUrl } from "../lib/hub-config";
 import { isDesktop } from "../lib/is-desktop";
 import {
@@ -176,6 +178,7 @@ import {
   unregisterPaneOwner,
 } from "../lib/terminal-split-registry";
 import { trpc } from "../lib/trpc-client";
+import { useFileDropTarget } from "../lib/use-file-drop-target";
 import { clientPluginHost } from "../plugins/client-plugin-host";
 import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
 import {
@@ -1321,7 +1324,9 @@ function EditorChoiceFileLeaf(props: LayoutPanelProps<FileLeafParams>) {
   const worktreeId = hostWorktreeId ?? props.params.worktreeId ?? "";
   const filePath = props.params.filePath ?? "";
   const untitled = props.params.untitled === true || isUntitledPath(filePath);
-  const external = untitled ? false : (props.params.external ?? filePath.startsWith("/"));
+  const external = untitled
+    ? false
+    : isDesktopFilePath(filePath) || (props.params.external ?? filePath.startsWith("/"));
   const { list, loading } = useExtensions();
   const defaults = useExtensionDefaults();
   const choice = useFileEditorChoice(worktreeId, filePath);
@@ -1399,7 +1404,9 @@ function WorktreeFileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
   useActiveFileTracking(api, worktreeIdRaw, filePathRaw, visible);
   const capabilities = useCapabilities();
   const untitled = params.untitled === true || isUntitledPath(filePathRaw);
-  const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
+  const external = untitled
+    ? false
+    : isDesktopFilePath(filePathRaw) || (params.external ?? filePathRaw.startsWith("/"));
   // An iframe reloads when its element is detached, so a PDF or the HTML Visual page stays
   // attached while another tab of its group is selected. Other views detach as before.
   const keepAttached =
@@ -1788,7 +1795,8 @@ function WorktreeFileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
       <FileViewer
         key={bufferKey}
         worktreeId={worktreeId}
-        filePath={filePath}
+        filePath={ioPathOf(filePath)}
+        externalSource={isDesktopFilePath(filePath) ? "desktop" : "worker"}
         line={params.line}
         column={params.column}
         editable
@@ -2332,6 +2340,7 @@ interface LeafActions {
       line?: number;
       column?: number;
       external?: boolean;
+      source?: "desktop";
       preview?: boolean;
       untitled?: boolean;
       fromHistory?: boolean;
@@ -3516,6 +3525,12 @@ export const WorktreeCenter = memo(function WorktreeCenter({
   // what to open next.
   const [isEmpty, setIsEmpty] = useState(false);
 
+  // Files dragged from the file manager open as tabs (desktop app): on any tab strip
+  // (through the layout) and on the empty state.
+  const notify = useDashboardStore((s) => s.notify);
+  const notifyDrop = useCallback((message: string) => notify("info", message), [notify]);
+  const emptyDrop = useFileDropTarget(notifyDrop);
+
   const { data: initialData } = useQuery<CenterLayoutData>({
     queryKey: centerLayoutKey(worktreeId),
     queryFn: async () => {
@@ -3825,11 +3840,13 @@ export const WorktreeCenter = memo(function WorktreeCenter({
   // ---- open a per-path file / diff leaf (driven by the right sidepanel) ----
   const handleOpenFile = useCallback(
     (
-      filePath: string,
+      rawPath: string,
       opts?: {
         line?: number;
         column?: number;
         external?: boolean;
+        /** `desktop`: a file on this Mac, read and saved by the desktop app. */
+        source?: "desktop";
         preview?: boolean;
         untitled?: boolean;
         // Set when the open is a Go Back/Forward history step, so it doesn't
@@ -3839,6 +3856,10 @@ export const WorktreeCenter = memo(function WorktreeCenter({
     ) => {
       const api = apiRef.current;
       if (!api) return;
+      // Only the desktop opener may name a desktop file. A `desktop:` path from a hub event or a
+      // link (an agent can create such a file name) must not reach the desktop read channel.
+      if (opts?.source !== "desktop" && isDesktopFilePath(rawPath)) return;
+      const filePath = opts?.source === "desktop" ? desktopFilePath(rawPath) : rawPath;
       // Record forward navigations on the editor history stack (skip history
       // steps + no-op re-opens of the current file).
       if (!opts?.fromHistory) {
@@ -3887,13 +3908,13 @@ export const WorktreeCenter = memo(function WorktreeCenter({
         id,
         component: "file",
         tabComponent: "file",
-        title: basename(filePath),
+        title: basename(ioPathOf(filePath)),
         params: {
           worktreeId,
           filePath,
           line: opts?.line,
           column: opts?.column,
-          external: opts?.external,
+          external: opts?.external || opts?.source === "desktop" || undefined,
           untitled: opts?.untitled,
           preview,
         },
@@ -4999,6 +5020,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
           rightHeaderActionsComponent={RightHeaderActions}
           // Mobile: no drag→split. Every leaf stays a tab in a single group.
           disableDnd={mobile}
+          fileDropNotify={mobile ? undefined : notifyDrop}
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
@@ -5015,6 +5037,8 @@ export const WorktreeCenter = memo(function WorktreeCenter({
         <div
           className="absolute inset-0 z-10 flex items-center justify-center"
           data-testid="worktree-center__empty-state"
+          data-file-drop-over={emptyDrop.over ? "" : undefined}
+          {...(mobile ? {} : emptyDrop.handlers)}
         >
           {/* Closing the last tab removes the tab strip, which is the
               window's top row on desktop; the drag bar keeps the window

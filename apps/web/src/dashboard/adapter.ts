@@ -42,6 +42,18 @@ export interface UpdateRelease {
   releaseUrl: string;
 }
 
+/**
+ * Which machine an external tab (a file outside the worktree) lives on.
+ * `worker` is the worktree's own worker, read through the hub. `desktop` is
+ * this Mac, read and saved by the desktop app's main process.
+ */
+export type ExternalFileSource = "worker" | "desktop";
+
+export interface ExternalFileContext {
+  worktreeId: string;
+  source: ExternalFileSource;
+}
+
 export interface DashboardAdapter {
   // Repos
   listRepos(): Promise<RepoInfo[]>;
@@ -237,7 +249,7 @@ export interface DashboardAdapter {
    * containment check; authentication still flows through the same
    * band_token cookie used by every other tRPC call.
    */
-  readExternalFile?(absolutePath: string): Promise<FileContentResult>;
+  readExternalFile?(absolutePath: string, ctx: ExternalFileContext): Promise<FileContentResult>;
 
   /**
    * Resolve an absolute (or worktree-relative) path against a worktree:
@@ -261,7 +273,7 @@ export interface DashboardAdapter {
 
   /** Write a file by absolute filesystem path. Mirror of `saveWorktreeFile`
    *  for external files. */
-  saveExternalFile?(absolutePath: string, content: string): Promise<void>;
+  saveExternalFile?(absolutePath: string, content: string, ctx: ExternalFileContext): Promise<void>;
 
   /**
    * Format `content` using Prettier as if it were the file at `filePath`

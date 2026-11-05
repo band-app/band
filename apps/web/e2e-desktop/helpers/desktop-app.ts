@@ -48,6 +48,11 @@ export interface LaunchedDesktop {
    * `pick_folder` IPC resolves with `paths` instead of waiting for a person.
    */
   stubOpenDialog: (paths: string[]) => Promise<void>;
+  /**
+   * Hand the app a file the way macOS does for Finder's Open With: the `open-file` event on the
+   * app object. The Finder menu entry itself is a LaunchServices UI that cannot be automated.
+   */
+  emitOpenFile: (path: string) => Promise<void>;
   /** How many windows the app has open. */
   windowCount: () => number;
   /**
@@ -102,6 +107,11 @@ export async function launchDesktop(opts: {
    * cover the page when a spec that is not about the prompt connects to that remote hub.
    */
   answeredWorkerPrompt?: string[];
+  /**
+   * Paths handed to the app with the `open-file` event right after it starts, before its window
+   * has loaded the UI: a cold start from Finder.
+   */
+  openFilesBeforeUi?: string[];
 }): Promise<LaunchedDesktop> {
   if (!isUnderOsTmp(opts.home)) {
     throw new Error(
@@ -162,6 +172,12 @@ export async function launchDesktop(opts: {
     throw err;
   }
 
+  const emit = (path: string) =>
+    app.evaluate(({ app: electronApp }, filePath) => {
+      electronApp.emit("open-file", { preventDefault() {} }, filePath);
+    }, path);
+  for (const path of opts.openFilesBeforeUi ?? []) await emit(path);
+
   // Attached before any page loads, so a violation during the first paint is seen.
   const cspViolations: string[] = [];
   app.context().on("console", (msg) => {
@@ -190,6 +206,7 @@ export async function launchDesktop(opts: {
         dialog.showOpenDialog = (async () => ({ canceled: false, filePaths })) as never;
       }, paths);
     },
+    emitOpenFile: emit,
     windowCount: () => app.windows().length,
     closeDevTools: async () => {
       // The app opens them on `ready-to-show`, which may come after the window is found.
