@@ -22,6 +22,12 @@ export interface Host {
   readonly git: HostGit;
   readonly worktree: HostWorktree;
   readonly fs: HostFs;
+  /**
+   * Single files anywhere on the machine, for a person's `band open` and external
+   * tabs. Unlike `fs` it is not limited to the worker's folders, so only a call
+   * made for a device token may reach it (the relay and the direct path do not).
+   */
+  readonly external: HostExternalFiles;
   /** Which folder holds each repo on this host, and how a repo gets there. */
   readonly repos: HostRepos;
   readonly search: HostSearch;
@@ -310,6 +316,34 @@ export interface FsStat {
   size: number;
   /** Epoch milliseconds. */
   mtimeMs: number;
+}
+
+/** What {@link HostExternalFiles.stat} found at a path. */
+export type ExternalFileStat =
+  | { outcome: "missing" }
+  | { outcome: "denied" }
+  | {
+      outcome: "ok";
+      /** The path with every symlink resolved. */
+      canonicalPath: string;
+      /** The kind of entry the path points at, links followed. */
+      kind: FsEntryKind;
+      /** True when the path itself is a symbolic link. */
+      symlink: boolean;
+      size: number;
+      /** Whether the worker's user may read it. */
+      readable: boolean;
+      /** Whether the worker's user may write it. */
+      writable: boolean;
+    };
+
+export interface HostExternalFiles {
+  /** Never rejects for a missing path or a permission problem; those are outcomes. */
+  stat(path: string): Promise<ExternalFileStat>;
+  /** Reads a regular file, not a link. Rejects with the OS error code (`EACCES`). */
+  readFile(path: string): Promise<Uint8Array>;
+  /** Replaces an existing regular file, not a link. Never creates one. */
+  writeFile(path: string, data: string | Uint8Array): Promise<void>;
 }
 
 export interface FsEntry {
