@@ -19,10 +19,13 @@ import { CircleAlert, RefreshCcw, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import {
   BUILTIN_EDITOR,
+  type CatalogEntryView,
+  EXTENSION_CATALOG_QUERY_KEY,
   EXTENSIONS_QUERY_KEY,
   type ExtensionList,
   editorRef,
   setDefaultForGlob,
+  useExtensionCatalog,
   useExtensionDefaults,
   useExtensions,
 } from "../../../lib/extensions";
@@ -64,6 +67,21 @@ function ErrorIcon({
   );
 }
 
+function sourceKind(list: ExtensionList | null, id: string): "official" | "url" | "file" | "hand" {
+  const entry = list?.sources?.find((s) => s.id === id);
+  if (entry?.official) return "official";
+  if (entry?.source === "url") return "url";
+  if (entry?.source === "file") return "file";
+  return "hand";
+}
+
+const SOURCE_LABELS = {
+  official: "Official",
+  url: "Installed from URL",
+  file: "Installed from file",
+  hand: "Installed by hand",
+} as const;
+
 /** Every distinct selector glob the installed extensions handle. */
 function selectorsOf(list: ExtensionList | null): string[] {
   const seen = new Set<string>();
@@ -94,11 +112,15 @@ export function ExtensionsSettings() {
   const queryClient = useQueryClient();
   const isAdmin = useIsAdmin();
   const { list, loading } = useExtensions();
+  const { catalog } = useExtensionCatalog();
   const defaults = useExtensionDefaults();
+  const [confirmOfficial, setConfirmOfficial] = useState<CatalogEntryView | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
   const [sha256, setSha256] = useState("");
-  const [busy, setBusy] = useState<"url" | "upload" | "reload" | "remove" | null>(null);
+  const [busy, setBusy] = useState<"url" | "upload" | "reload" | "remove" | "official" | null>(
+    null,
+  );
   const [installError, setInstallError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
 
@@ -108,6 +130,7 @@ export function ExtensionsSettings() {
   const refresh = async () => {
     await queryClient.cancelQueries({ queryKey: EXTENSIONS_QUERY_KEY });
     await queryClient.invalidateQueries({ queryKey: EXTENSIONS_QUERY_KEY });
+    await queryClient.invalidateQueries({ queryKey: EXTENSION_CATALOG_QUERY_KEY });
   };
 
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<void>) => {
@@ -151,7 +174,17 @@ export function ExtensionsSettings() {
   const reload = () =>
     run("reload", async () => {
       await trpc.extensions.reload.mutate();
+      await trpc.extensions.refreshCatalog.mutate();
     });
+
+  const installOfficial = () => {
+    const target = confirmOfficial;
+    if (!target) return;
+    setConfirmOfficial(null);
+    void run("official", async () => {
+      await trpc.extensions.installOfficial.mutate({ id: target.id });
+    });
+  };
 
   const confirmRemove = () => {
     const target = removing;
@@ -168,6 +201,73 @@ export function ExtensionsSettings() {
 
   return (
     <>
+      <div data-testid="settings-extensions__official">
+        {catalog && !catalog.available ? (
+          <SettingsRow
+            variant="inline"
+            label="Official extensions"
+            description={
+              <span data-testid="settings-extensions__catalog-unavailable">
+                Catalog unavailable
+              </span>
+            }
+          />
+        ) : null}
+        {(catalog?.entries ?? []).map((entry) => (
+          <SettingsRow
+            key={entry.id}
+            variant="responsive"
+            label={
+              <span data-testid={`settings-extensions__official-row--${entry.id}`}>
+                {entry.name}{" "}
+                <span className="font-normal text-muted-foreground">
+                  v{entry.version} · Official
+                </span>
+              </span>
+            }
+            description={entry.description}
+          >
+            {!entry.compatible ? (
+              <span
+                className="text-xs text-muted-foreground"
+                data-testid={`settings-extensions__official-state--${entry.id}`}
+                data-state="incompatible"
+              >
+                Not compatible with this Band version
+              </span>
+            ) : entry.installed !== null && !entry.updateAvailable ? (
+              <span
+                className="text-xs text-muted-foreground"
+                data-testid={`settings-extensions__official-state--${entry.id}`}
+                data-state="installed"
+              >
+                Installed
+              </span>
+            ) : isAdmin ? (
+              <Button
+                size="sm"
+                data-testid={`settings-extensions__official-install--${entry.id}`}
+                data-state={entry.installed !== null ? "update" : "install"}
+                disabled={busy !== null}
+                onClick={() => setConfirmOfficial(entry)}
+              >
+                {entry.installed !== null ? `Update to v${entry.version}` : "Install"}
+              </Button>
+            ) : (
+              <span
+                className="text-xs text-muted-foreground"
+                data-testid={`settings-extensions__official-state--${entry.id}`}
+                data-state={entry.installed !== null ? "update-available" : "not-installed"}
+              >
+                {entry.installed !== null
+                  ? `Update to v${entry.version} available`
+                  : "Not installed"}
+              </span>
+            )}
+          </SettingsRow>
+        ))}
+      </div>
+
       {isAdmin ? (
         <>
           <SettingsRow
@@ -260,6 +360,13 @@ export function ExtensionsSettings() {
                 {extension.id} · v
                 <span data-testid={`settings-extensions__version--${extension.id}`}>
                   {extension.version}
+                </span>
+                {" · "}
+                <span
+                  data-testid={`settings-extensions__source--${extension.id}`}
+                  data-source={sourceKind(list, extension.id)}
+                >
+                  {SOURCE_LABELS[sourceKind(list, extension.id)]}
                 </span>
               </span>
             </span>
@@ -395,6 +502,33 @@ export function ExtensionsSettings() {
           </SettingsRow>
         );
       })}
+
+      <Dialog
+        open={confirmOfficial !== null}
+        onOpenChange={(open) => !open && setConfirmOfficial(null)}
+      >
+        <DialogContent data-testid="settings-extensions__official-dialog">
+          <DialogTitle>
+            {confirmOfficial?.installed !== null ? "Update" : "Install"} {confirmOfficial?.name}?
+          </DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            The archive comes from the official catalog and is checked against its SHA-256.
+          </p>
+          {confirmOfficial?.worker ? (
+            <p className="text-sm" data-testid="settings-extensions__official-worker-note">
+              Runs code on workers (standard and admin workers only).
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOfficial(null)}>
+              Cancel
+            </Button>
+            <Button data-testid="settings-extensions__official-confirm" onClick={installOfficial}>
+              {confirmOfficial?.installed !== null ? "Update" : "Install"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
         <DialogContent data-testid="settings-extensions__remove-dialog">

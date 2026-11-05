@@ -1018,7 +1018,7 @@
           "description": "An https URL (or http on loopback) or a local .tar.gz file, which is uploaded to the hub",
           "name": "source",
           "positional": true,
-          "required": true,
+          "required": false,
           "type": "string"
         },
         {
@@ -1026,8 +1026,20 @@
           "name": "sha256",
           "required": false,
           "type": "string"
+        },
+        {
+          "description": "Install or update an extension from the official catalog by id",
+          "name": "official",
+          "required": false,
+          "type": "string"
         }
       ]
+    },
+    {
+      "description": "List the official extensions in the catalog with their install status",
+      "name": "extensions catalog",
+      "notes": "Text output: `ID  NAME  VERSION  STATUS`, and `Catalog unavailable` when the hub could not read the catalog.\nJSON output: `{\"available\": true, \"entries\": [{\"id\": \"...\", \"version\": \"...\", \"installed\": null, \"updateAvailable\": false, \"compatible\": true}]}`.",
+      "parameters": []
     },
     {
       "description": "Delete an installed editor extension",

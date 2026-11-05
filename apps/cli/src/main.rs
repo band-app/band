@@ -957,11 +957,17 @@ enum ExtensionsCmd {
     /// Install an extension from a release archive (admin token)
     Install {
         /// An https URL (or http on loopback) or a local `.tar.gz` file, which is uploaded to the hub
-        source: String,
+        #[arg(required_unless_present = "official", conflicts_with = "official")]
+        source: Option<String>,
         /// Expected sha256 of the archive. Without it the hub checks `<url>.sha256` when that exists.
         #[arg(long)]
         sha256: Option<String>,
+        /// Install or update an extension from the official catalog (see `band extensions catalog`)
+        #[arg(long, value_name = "ID")]
+        official: Option<String>,
     },
+    /// List the official extensions in the catalog
+    Catalog,
     /// Delete an installed extension (admin token)
     Remove {
         /// Extension id (from `band extensions list`)
@@ -1457,9 +1463,16 @@ fn main() {
         Commands::Extensions { cmd } => match cmd {
             ExtensionsCmd::List => cmd_extensions("extensions.list", false),
             ExtensionsCmd::Reload => cmd_extensions("extensions.reload", true),
-            ExtensionsCmd::Install { source, sha256 } => {
-                cmd_extensions_install(&source, sha256.as_deref())
-            }
+            ExtensionsCmd::Install {
+                source,
+                sha256,
+                official,
+            } => match (official, source) {
+                (Some(id), _) => cmd_extensions_install_official(&id),
+                (None, Some(source)) => cmd_extensions_install(&source, sha256.as_deref()),
+                (None, None) => Err("Give a URL or file, or --official <id>".to_string()),
+            },
+            ExtensionsCmd::Catalog => cmd_extensions_catalog(),
             ExtensionsCmd::Remove { id } => cmd_extensions_remove(&id),
         },
         Commands::Settings => cmd_settings(json_output),
@@ -5317,6 +5330,66 @@ fn cmd_extensions_install(source: &str, sha256: Option<&str>) -> Result<CommandR
     })
 }
 
+fn cmd_extensions_install_official(id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("extensions.installOfficial", &serde_json::json!({"id": id}))?;
+    let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    Ok(CommandResult {
+        text: format!("Installed extension {} {}\n", text("id"), text("version")),
+        json: serde_json::json!({"extension": data}),
+    })
+}
+
+fn cmd_extensions_catalog() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("extensions.catalog", &serde_json::json!({}))?;
+    let entries = data
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 4]> = entries
+        .iter()
+        .map(|entry| {
+            let text = |key: &str| entry.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let compatible = entry
+                .get("compatible")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            let update = entry
+                .get("updateAvailable")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let status = if !compatible {
+                format!("needs Band {}", text("minBand"))
+            } else if update {
+                format!("update from {}", text("installed"))
+            } else if entry
+                .get("installed")
+                .is_some_and(serde_json::Value::is_string)
+            {
+                "installed".to_string()
+            } else {
+                "not installed".to_string()
+            };
+            [
+                text("id").to_string(),
+                text("name").to_string(),
+                text("version").to_string(),
+                status,
+            ]
+        })
+        .collect();
+    let mut out = format_table(&["ID", "NAME", "VERSION", "STATUS"], &rows);
+    if data.get("available").and_then(serde_json::Value::as_bool) == Some(false) {
+        out.push_str("Catalog unavailable\n");
+    }
+    Ok(CommandResult {
+        text: out,
+        json: data,
+    })
+}
+
 fn cmd_extensions_remove(id: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     client.trpc_mutate("extensions.remove", &serde_json::json!({"id": id}))?;
@@ -6379,10 +6452,17 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "extensions install",
             "description": "Install an editor extension from a release archive (.tar.gz with one folder named by the extension id)",
             "parameters": [
-                {"name": "source", "type": "string", "required": true, "positional": true, "description": "An https URL (or http on loopback) or a local .tar.gz file, which is uploaded to the hub"},
-                {"name": "sha256", "type": "string", "required": false, "description": "Expected sha256 of the archive. Without it the hub checks <url>.sha256 when that file exists."}
+                {"name": "source", "type": "string", "required": false, "positional": true, "description": "An https URL (or http on loopback) or a local .tar.gz file, which is uploaded to the hub"},
+                {"name": "sha256", "type": "string", "required": false, "description": "Expected sha256 of the archive. Without it the hub checks <url>.sha256 when that file exists."},
+                {"name": "official", "type": "string", "required": false, "description": "Install or update an extension from the official catalog by id"}
             ],
             "notes": "Needs an admin token. The old version stays until the new one passes every check. Prints `Installed extension <id> <version>`."
+        }),
+        serde_json::json!({
+            "name": "extensions catalog",
+            "description": "List the official extensions in the catalog with their install status",
+            "parameters": [],
+            "notes": "Text output: `ID  NAME  VERSION  STATUS`, and `Catalog unavailable` when the hub could not read the catalog.\nJSON output: `{\"available\": true, \"entries\": [{\"id\": \"...\", \"version\": \"...\", \"installed\": null, \"updateAvailable\": false, \"compatible\": true}]}`."
         }),
         serde_json::json!({
             "name": "extensions remove",
