@@ -28,7 +28,7 @@ function formatElapsed(seconds: number): string {
  * the message. Hidden until the hub has voice set up and this browser can record.
  */
 export function PromptInputMic({ className }: { className?: string }) {
-  const { textareaRef, setNotice } = usePromptInputContext();
+  const { textareaRef, setNotice, setMicRecording } = usePromptInputContext();
   const status = useQuery({
     queryKey: VOICE_STATUS_KEY,
     queryFn: () => trpc.voice.status.query(),
@@ -123,12 +123,18 @@ export function PromptInputMic({ className }: { className?: string }) {
     };
   }, [setNotice]);
 
+  const isRecording = phase === "recording";
+  useEffect(() => {
+    setMicRecording(isRecording);
+    return () => setMicRecording(false);
+  }, [isRecording, setMicRecording]);
+
   if (!status.data?.available || !voiceRecordingSupported()) return null;
 
   const recording = phase === "recording";
   const busy = phase === "starting" || phase === "transcribing";
   return (
-    <div className="flex min-w-0 items-center gap-0.5">
+    <div className="relative flex min-w-0 items-center gap-0.5">
       <button
         type="button"
         data-testid="prompt-input__mic"
@@ -138,7 +144,7 @@ export function PromptInputMic({ className }: { className?: string }) {
         disabled={busy}
         onClick={() => (recording ? void stop() : void start())}
         className={cn(
-          "inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60",
+          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60",
           recording && "bg-destructive/10 text-destructive hover:bg-destructive/20",
           className,
         )}
@@ -154,7 +160,7 @@ export function PromptInputMic({ className }: { className?: string }) {
       {recording ? (
         <div
           data-testid="prompt-input__mic-listening"
-          className="flex items-center gap-1.5 pl-1 text-xs text-muted-foreground"
+          className="absolute right-full top-1/2 mr-1 flex -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-md bg-muted px-1.5 py-1 text-xs text-muted-foreground"
         >
           <span className="size-2 animate-pulse rounded-full bg-destructive" aria-hidden="true" />
           <span>Listening</span>

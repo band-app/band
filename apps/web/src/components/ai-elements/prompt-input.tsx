@@ -87,6 +87,7 @@ export const PromptInput = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [micRecording, setMicRecording] = useState(false);
   const draftStorageKey = draftKey ? `band-draft:${draftKey}` : null;
   const [hasText, setHasText] = useState(() => readDraft(draftStorageKey).trim().length > 0);
   const [inputValue, setInputValue] = useState(() => readDraft(draftStorageKey));
@@ -381,6 +382,8 @@ export const PromptInput = ({
           setCommandHint,
           notice,
           setNotice,
+          micRecording,
+          setMicRecording,
         }}
       >
         {children}
@@ -415,6 +418,9 @@ interface PromptInputContextValue {
   /** A line shown full width between the field and the settings row (a dictation error). */
   notice: string | null;
   setNotice: (notice: string | null) => void;
+  /** The mic is recording; Send hides and the listening group takes its place. */
+  micRecording: boolean;
+  setMicRecording: (recording: boolean) => void;
 }
 
 const PromptInputContext = createContext<PromptInputContextValue>({
@@ -431,6 +437,8 @@ const PromptInputContext = createContext<PromptInputContextValue>({
   setCommandHint: () => {},
   notice: null,
   setNotice: () => {},
+  micRecording: false,
+  setMicRecording: () => {},
 });
 
 export function usePromptInputContext() {
@@ -576,7 +584,7 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
         className={cn(
           // Match the icon-button shell used by SessionHistoryMenu / ModeMenu /
           // AgentModelMenu in the action row so all affordances line up.
-          "inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
           className,
         )}
         aria-label="Attach files"
@@ -718,16 +726,18 @@ export const PromptInputSubmit = ({
   onStop,
   ...props
 }: PromptInputSubmitProps) => {
-  const { hasContent } = useContext(PromptInputContext);
+  const { hasContent, micRecording } = useContext(PromptInputContext);
   const isSubmitting = status === "submitted";
   const isStreaming = status === "streaming";
-  const isBusy = isSubmitting || isStreaming;
 
   // One button at a time. Typed text or an attachment always gets Send, even
   // while a turn runs (the server queues it); an empty input during a turn
   // gets Stop.
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div
+      className={cn("flex shrink-0 items-center gap-1", micRecording && "invisible")}
+      aria-hidden={micRecording || undefined}
+    >
       {isStreaming && !hasContent ? (
         <button
           type="button"
@@ -758,12 +768,7 @@ export const PromptInputSubmit = ({
           disabled={!hasContent}
           className={cn(
             "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md transition-colors",
-            hasContent
-              ? cn(
-                  "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
-                  isBusy ? "text-primary" : "text-foreground",
-                )
-              : "text-muted-foreground",
+            hasContent ? "text-foreground hover:bg-accent" : "text-muted-foreground",
             className,
           )}
           {...props}

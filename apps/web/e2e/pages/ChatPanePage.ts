@@ -671,6 +671,35 @@ export class ChatPanePage {
     return box?.height ?? 0;
   }
 
+  /** Bounding boxes of the composer's input-row controls (null when absent). */
+  async composerRow(): Promise<{
+    attach: Box | null;
+    textarea: Box | null;
+    submit: Box | null;
+    mic: Box | null;
+  }> {
+    const box = async (l: Locator) => ((await l.count()) ? await l.first().boundingBox() : null);
+    const v = (id: string) => this.page.getByTestId(id).filter({ visible: true });
+    return {
+      attach: await box(this.page.getByLabel("Attach files").filter({ visible: true })),
+      textarea: await box(this.promptInput),
+      submit: await box(v("prompt-input__submit-button")),
+      mic: await box(v("prompt-input__mic")),
+    };
+  }
+
+  /** Computed `color` of the Send button next to the foreground token's resolved color. */
+  async sendColors(): Promise<{ icon: string; foreground: string }> {
+    return this.submitButton.evaluate((el) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--foreground)";
+      document.body.appendChild(probe);
+      const foreground = getComputedStyle(probe).color;
+      probe.remove();
+      return { icon: getComputedStyle(el).color, foreground };
+    });
+  }
+
   /** Width of the dictation error line, in CSS px. */
   async micErrorWidth(): Promise<number> {
     return (await this.micError.boundingBox())?.width ?? 0;

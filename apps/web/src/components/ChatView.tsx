@@ -772,6 +772,7 @@ export function ChatView({
             <SlashCommandSuggestions skills={skills} />
             <FileMentionSuggestions worktreeId={worktreeId} />
             <PromptInputBody>
+              <PromptInputAttach />
               <PromptInputTextarea
                 placeholder={
                   questionPending ? "Answer the questions above to continue" : "Type a message..."
@@ -790,14 +791,13 @@ export function ChatView({
                 }
                 onStop={handleStop}
               />
+              <PromptInputMic />
             </PromptInputBody>
             <PromptInputNotice />
             <PromptInputActions>
               {/* min-w-0 lets the picker labels truncate on a narrow screen
                   instead of pushing the settings out of the composer. */}
               <div className="flex min-w-0 items-center gap-0.5">
-                <PromptInputAttach />
-                <PromptInputMic />
                 <SessionHistoryMenu
                   worktreeId={worktreeId}
                   chatId={chatId}
