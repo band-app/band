@@ -72,7 +72,10 @@ export interface LaunchedDesktop {
  *   singleton lives in userData, so a test instance cannot hand off to or quit the real one.
  * - Protocol handler and login items: the app never calls `setAsDefaultProtocolClient` or
  *   `setLoginItemSettings`; `app://` and `band-action://` are registered per process only.
- * - Keychain: `BAND_DESKTOP_SECRET_STORE=test` (fixed-key store).
+ * - Keychain: `BAND_DESKTOP_SECRET_STORE=test` (fixed-key store) for the app's own secrets, and
+ *   Chromium's `--use-mock-keychain` for its cookie key ("Band Key"). Without the switch, Chromium
+ *   asks the Keychain under the temp HOME, which has no keychain, and macOS opens a "Keychain Not
+ *   Found" dialog in the middle of the screen on every launch.
  * - launchd: specs point `BAND_LAUNCHCTL_BIN` at a fake.
  * - Chrome import: reads `homedir()`, which follows `$HOME` (the temp home), never the real Chrome.
  * - `~/.band`, `desktop.log`, `desktop-hub.enc`, window state: Node's `homedir()`, so under the temp home.
@@ -136,7 +139,9 @@ export async function launchDesktop(opts: {
   const app = await electron.launch({
     executablePath: packaged ?? electronBinary(),
     // A packaged app has its own entry point; the dev tree needs the directory.
-    args: packaged ? [] : [DESKTOP_DIR],
+    // `--use-mock-keychain` keeps Chromium's cookie encryption key off the Keychain (see the
+    // isolation notes above).
+    args: [...(packaged ? [] : [DESKTOP_DIR]), "--use-mock-keychain"],
     // The Keychain needs an unlocked login session, which a test run does not have, so the
     // app stores its secrets with a fixed-key stand-in for `safeStorage` (`secret-store.ts`).
     env: {
