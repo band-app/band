@@ -108,6 +108,8 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "system-resumed",
   // Mac moved between AC and battery power; payload `{ onBattery }`.
   "power-state-changed",
+  // Trackpad swipe on macOS; payload "left" | "right" | "up" | "down".
+  "window-swipe",
 ]);
 
 type Unlisten = () => void;

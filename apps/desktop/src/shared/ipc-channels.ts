@@ -119,6 +119,8 @@ export const Events = {
   systemResumed: "system-resumed",
   /** Pushed with `{ onBattery }` when the Mac moves between AC and battery power. */
   powerStateChanged: "power-state-changed",
+  /** Pushed with the swipe direction when macOS reports a swipe gesture on the window. */
+  windowSwipe: "window-swipe",
   browserUrlChanged: "browser-url-changed",
   browserTitleChanged: "browser-title-changed",
   /** Emitted when a tab's page WebContents goes away (its `<webview>` was

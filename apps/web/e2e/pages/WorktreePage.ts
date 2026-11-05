@@ -1772,6 +1772,11 @@ export class WorktreePage {
     return await this.page.evaluate(() => window.getSelection()?.toString() ?? "");
   }
 
+  /** The visible file leaf's CodeMirror scroller, for aiming the pointer. */
+  fileEditor(): Locator {
+    return this.fileLeafVisibilityMarker(true).first().locator(".cm-scroller").first();
+  }
+
   /** The scroll offset of the visible file leaf's CodeMirror scroller. 0 means
    *  the editor is at the top; a restored scroll position reads > 0. */
   async editorScrollTop(): Promise<number> {
@@ -3015,6 +3020,17 @@ export class WorktreePage {
       const x = viewport ? viewport.width - 10 : 780;
       const y = viewport ? Math.floor(viewport.height / 2) : 400;
       await this.page.mouse.click(x, y);
+    });
+  }
+
+  /** Press a mouse side button ("back" is button 4, "forward" is button 5) over the page, as a CDP mouse event. */
+  async pressMouseSideButton(button: "back" | "forward"): Promise<void> {
+    await test.step(`Press the mouse ${button} button`, async () => {
+      const cdp = await this.page.context().newCDPSession(this.page);
+      const point = { x: 400, y: 300, button, clickCount: 1 };
+      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...point });
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point });
+      await cdp.detach();
     });
   }
 

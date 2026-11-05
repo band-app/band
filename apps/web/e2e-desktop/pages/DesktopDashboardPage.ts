@@ -128,6 +128,15 @@ export class DesktopDashboardPage {
     });
   }
 
+  /** Click a worktree's card in the sidebar, an in-app navigation that adds to worktree history. */
+  async switchWorktree(repoName: string, worktreeId: string): Promise<void> {
+    await test.step(`Switch to worktree ${worktreeId}`, async () => {
+      const card = this.page.getByTestId(`repo-list__worktree-card--${worktreeId}`);
+      if (!(await card.isVisible())) await this.repoHeader(repoName).click();
+      await card.dispatchEvent("click");
+    });
+  }
+
   /** Load a worktree route as a fresh navigation, the way a deep link does. */
   async gotoDeepLink(worktreeId: string): Promise<void> {
     await test.step(`Deep link to /worktree/${worktreeId}`, async () => {

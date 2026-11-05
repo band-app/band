@@ -23,6 +23,8 @@ export interface PaletteCommand {
    * Examples: `"Cmd+P"`, `"Cmd+Shift+F"`, `"Shift+Tab"`.
    */
   shortcut?: string;
+  /** Extra plain-text hint shown beside the label, for gestures that are not key shortcuts. */
+  hint?: string;
   /** Callback executed when the command is selected. */
   action: () => void;
 }
@@ -353,6 +355,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       id: "switch-worktree",
       label: "Switch Worktree…",
       shortcut: "Cmd+K",
+      hint: isMacPlatform() ? "or hold ⌘ and scroll" : "or hold Alt and scroll",
       action: () => deps.openWorktreePicker(),
     },
     {
@@ -361,12 +364,14 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       id: "worktree-go-back",
       label: "Previous Worktree",
       shortcut: "Cmd+Alt+←",
+      hint: "or mouse back button",
       action: () => window.dispatchEvent(new CustomEvent("band:worktree-go-back")),
     },
     {
       id: "worktree-go-forward",
       label: "Next Worktree",
       shortcut: "Cmd+Alt+→",
+      hint: "or mouse forward button",
       action: () => window.dispatchEvent(new CustomEvent("band:worktree-go-forward")),
     },
     {
