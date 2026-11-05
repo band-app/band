@@ -93,6 +93,9 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'ci:approved')
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      e2e_mode: ${{ steps.e2e.outputs.mode }}
+      e2e_specs: ${{ steps.e2e.outputs.specs }}
+      e2e_matrix: ${{ steps.e2e.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -133,6 +136,32 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
             echo "Only docs changed, so the test jobs are skipped:"
             echo "$CHANGED"
+          fi
+
+      - name: Test the e2e selection script
+        run: node --test scripts/ci/affected-e2e.test.mjs
+
+      # Which web e2e specs run. A pull request runs the specs its change affects plus a
+      # smoke set; a push and the merge queue run every spec. Any failure of the selection
+      # (script error, shallow history, missing output) runs every spec.
+      - name: Select e2e specs
+        id: e2e
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch --no-tags origin "$PR_BASE" 2>/dev/null || true
+          fi
+          if ! node scripts/ci/affected-e2e.mjs --event "$EVENT_NAME" --base "$PR_BASE" --head "$PR_HEAD" --github-output; then
+            echo "The selection failed, so every spec runs."
+            {
+              echo "mode=all"
+              echo "specs="
+              echo 'matrix={"shard":[1,2,3],"total":[3]}'
+            } >> "$GITHUB_OUTPUT"
           fi
 
   # Builds the web client, the hub bundle, the worker bundle and the release
@@ -550,9 +579,8 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     strategy:
       fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-        total: [3]
+      # One shard for a small pull-request selection, three for the full suite.
+      matrix: ${{ fromJSON(needs.changes.outputs.e2e_matrix || '{"shard":[1,2,3],"total":[3]}') }}
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
       # Playwright's JSON reporter (apps/web/playwright.config.ts) writes here.
@@ -574,7 +602,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb x11vnc x11-utils
 
       - name: Test e2e (web)
-        run: pnpm --filter @band-app/web test:e2e --shard=${{ matrix.shard }}/${{ matrix.total }}
+        env:
+          E2E_MODE: ${{ needs.changes.outputs.e2e_mode }}
+          E2E_SPECS: ${{ needs.changes.outputs.e2e_specs }}
+        run: |
+          if [ "$E2E_MODE" = "subset" ] && [ -n "$E2E_SPECS" ]; then
+            echo "Pull request selection: $E2E_SPECS"
+            # shellcheck disable=SC2086
+            pnpm --filter @band-app/web test:e2e --shard=${{ matrix.shard }}/${{ matrix.total }} $E2E_SPECS
+          else
+            pnpm --filter @band-app/web test:e2e --shard=${{ matrix.shard }}/${{ matrix.total }}
+          fi
 
       # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
       - name: Upload flaky results
