@@ -586,18 +586,70 @@ describe("trust levels", () => {
       }
     });
 
-    it("refuses a folder root added from a worker, at every level", async () => {
-      for (const level of ["standard", "admin"] as const) {
+    it("adds a folder root on its own worker only with admin trust", async () => {
+      const outside = join(a.home, "addroot-folder");
+      initRepo(outside);
+      // Another worker is refused even for an admin.
+      await setTrust(a.hostId, "admin");
+      const other = await shell.call("trpc", "/trpc/repos.addFromWorker", {
+        hostId: b.hostId,
+        path: join(b.root, "proj"),
+        addRoot: true,
+      });
+      expect(other.status).toBe(403);
+      expect(message(other)).toContain("needs a person");
+      // Standard and restricted workers are refused with the fix named.
+      for (const level of ["standard"] as const) {
         await setTrust(a.hostId, level);
         const res = await shell.call("trpc", "/trpc/repos.addFromWorker", {
-          hostId: b.hostId,
-          path: join(b.root, "proj"),
+          hostId: a.hostId,
+          path: outside,
           addRoot: true,
         });
         expect(res.status, level).toBe(403);
-        expect(message(res)).toContain("person");
+        expect(message(res)).toContain("admin trust for this worker");
       }
       await setTrust(a.hostId, "admin");
+      // Restricted workers have no repo writes at all.
+      await setTrust(a.hostId, "restricted");
+      const restricted = await shell.call("trpc", "/trpc/repos.addFromWorker", {
+        hostId: a.hostId,
+        path: outside,
+        addRoot: true,
+      });
+      expect(restricted.status).toBe(403);
+      await setTrust(a.hostId, "admin");
+      // Own worker, admin trust: the root is added and the repo is registered.
+      const own = await shell.call("trpc", "/trpc/repos.addFromWorker", {
+        hostId: a.hostId,
+        path: outside,
+        addRoot: true,
+      });
+      expect(own.status, own.body).toBe(200);
+      const { repos } = await q<{
+        repos: Array<{ name: string; clones?: Array<{ hostId: string; path: string }> }>;
+      }>("repos.list");
+      const added = repos.find((r) => r.name === "addroot-folder");
+      expect(added?.clones).toEqual([{ hostId: a.hostId, path: outside }]);
+      // The root now covers the folder: a repo inside it is added without addRoot.
+      const inner = join(outside, "inner");
+      initRepo(inner);
+      const second = await shell.call("trpc", "/trpc/repos.addFromWorker", {
+        hostId: a.hostId,
+        path: inner,
+      });
+      expect(second.status, second.body).toBe(200);
+      const { entries } = await q<{
+        entries: Array<{ callerHostId: string; procedure: string; target: string | null }>;
+      }>("hosts.audit", { limit: 100 });
+      expect(
+        entries.some(
+          (e) =>
+            e.callerHostId === a.hostId &&
+            e.procedure === "repos.addFromWorker" &&
+            e.target === `addRoot ${outside}`,
+        ),
+      ).toBe(true);
     });
 
     it("takes effect when lowered, on the next call", async () => {

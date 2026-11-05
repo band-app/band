@@ -574,7 +574,14 @@ function checkRepoCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdic
       ctx.audit.push({
         procedure,
         targetHostId: hostArg,
-        target: typeof record.name === "string" ? record.name : null,
+        target:
+          procedure === "repos.addFromWorker" &&
+          record.addRoot === true &&
+          typeof record.path === "string"
+            ? `addRoot ${record.path}`
+            : typeof record.name === "string"
+              ? record.name
+              : null,
       });
     }
     return { ok: true };
@@ -587,10 +594,17 @@ function checkRepoCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdic
   }
   if (procedure === "repos.addFromWorker") {
     const { hostId, name, allowedHostIds, addRoot } = record;
-    if (addRoot === true) {
-      return deny(403, `${procedure}: Adding a folder root needs a person's confirmation`);
-    }
     if (typeof hostId !== "string") return deny(400, `${procedure} needs a hostId`);
+    if (addRoot === true) {
+      // Widening a worker's roots is a person's call, unless the worker is admin-trusted and the
+      // folder is on that same worker.
+      if (ctx.viaMcp || !admin || hostId !== workerId) {
+        return deny(
+          403,
+          `${procedure}: Adding a folder outside this worker's roots needs a person, or admin trust for this worker (Settings > Workers).`,
+        );
+      }
+    }
     if (Array.isArray(allowedHostIds) && !allowedHostIds.includes(hostId)) {
       return deny(
         403,
