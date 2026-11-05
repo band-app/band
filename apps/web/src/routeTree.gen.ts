@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorktreeWorktreeIdRouteImport } from './routes/worktree.$worktreeId'
+import { Route as EmbedEditorRouteImport } from './routes/embed.editor'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,30 +23,39 @@ const WorktreeWorktreeIdRoute = WorktreeWorktreeIdRouteImport.update({
   path: '/worktree/$worktreeId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EmbedEditorRoute = EmbedEditorRouteImport.update({
+  id: '/embed/editor',
+  path: '/embed/editor',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/embed/editor': typeof EmbedEditorRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/embed/editor': typeof EmbedEditorRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/embed/editor': typeof EmbedEditorRoute
   '/worktree/$worktreeId': typeof WorktreeWorktreeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/worktree/$worktreeId'
+  fullPaths: '/' | '/embed/editor' | '/worktree/$worktreeId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/worktree/$worktreeId'
-  id: '__root__' | '/' | '/worktree/$worktreeId'
+  to: '/' | '/embed/editor' | '/worktree/$worktreeId'
+  id: '__root__' | '/' | '/embed/editor' | '/worktree/$worktreeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  EmbedEditorRoute: typeof EmbedEditorRoute
   WorktreeWorktreeIdRoute: typeof WorktreeWorktreeIdRoute
 }
 
@@ -65,11 +75,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorktreeWorktreeIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/embed/editor': {
+      id: '/embed/editor'
+      path: '/embed/editor'
+      fullPath: '/embed/editor'
+      preLoaderRoute: typeof EmbedEditorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  EmbedEditorRoute: EmbedEditorRoute,
   WorktreeWorktreeIdRoute: WorktreeWorktreeIdRoute,
 }
 export const routeTree = rootRouteImport

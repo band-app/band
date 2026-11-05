@@ -54,6 +54,7 @@ import { cliRouter } from "./cli/router";
 import { clientStateRouter } from "./client-state/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
+import { editorsRouter } from "./editors/router";
 import { environmentRouter } from "./environment/router";
 import { extensionsRouter } from "./extensions/router";
 import { followRouter } from "./follow/router";
@@ -126,6 +127,7 @@ export const appRouter = t.router({
   provisioning: provisioningRouter,
   agentLogins: agentLoginsRouter,
   voice: voiceRouter,
+  editors: editorsRouter,
   extensions: extensionsRouter,
   mcp: mcpServersRouter,
   browserHost: browserHostRouter,

@@ -647,6 +647,28 @@ export class ChatPanePage {
     });
   }
 
+  /** Brings the chat tab to the front, after another tab of its group (an editor) was opened. */
+  async showChat(): Promise<void> {
+    await test.step("Show the chat tab", async () => {
+      await this.page
+        .getByTestId(/^center-chat-tab--/)
+        .first()
+        .click();
+      await expect(this.promptInput).toBeVisible();
+    });
+  }
+
+  /** The chip for what the person selected in an editor tab. */
+  get selectionChip(): Locator {
+    return this.page.getByTestId("chat__selection-chip").filter({ visible: true });
+  }
+
+  async removeSelectionChip(): Promise<void> {
+    await test.step("Remove the selection chip", async () => {
+      await this.page.getByTestId("chat__selection-chip-remove").filter({ visible: true }).click();
+    });
+  }
+
   /** Type into the prompt textarea. Doesn't submit. */
   async typeMessage(text: string): Promise<void> {
     await test.step(`Type "${text}" into the prompt`, async () => {

@@ -36,8 +36,15 @@ const MAX_SOCKET_PATH_BYTES = 103;
 const shellQuote = (text: string) => `'${text.replace(/'/g, "'\\''")}'`;
 
 /** The `credential.helper` value that runs this worker's helper, as git's `!` shell form. */
-export function helperCommand(nodePath: string, scriptPath: string): string {
-  return `!${shellQuote(nodePath)} ${shellQuote(scriptPath)} ${GIT_CREDENTIAL_SUBCOMMAND}`;
+export function helperCommand(
+  nodePath: string,
+  scriptPath: string,
+  underElectron: boolean = Boolean(process.versions.electron),
+): string {
+  // Under Electron the binary is the desktop app. Without ELECTRON_RUN_AS_NODE it ignores the
+  // script and boots the app, so the command sets the variable itself, whatever env git passes.
+  const prefix = underElectron ? "ELECTRON_RUN_AS_NODE=1 " : "";
+  return `!${prefix}${shellQuote(nodePath)} ${shellQuote(scriptPath)} ${GIT_CREDENTIAL_SUBCOMMAND}`;
 }
 
 /**

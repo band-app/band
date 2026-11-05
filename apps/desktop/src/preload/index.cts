@@ -111,6 +111,8 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "system-resumed",
   // Mac moved between AC and battery power; payload `{ onBattery }`.
   "power-state-changed",
+  // Trackpad swipe on macOS; payload "left" | "right" | "up" | "down".
+  "window-swipe",
   // The OS handed Band a file to open (Finder Open With); drain with take_open_files
   "open-files-requested",
 ]);

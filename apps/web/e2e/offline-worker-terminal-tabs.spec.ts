@@ -126,9 +126,12 @@ test("terminal tabs survive a reload while the worktree's worker is offline", as
 
   // A new worktree opens on a chat; open two terminals on the worker beside it.
   await expect(app.chatTabs()).toHaveCount(1, { timeout: 20_000 });
-  await app.pressNewTerminalShortcut();
+  // The "+" menu, not Ctrl+T: off macOS the app leaves Ctrl chords to the shell while a terminal
+  // has focus, and a new terminal takes focus when its socket connects. On a loaded runner that
+  // lands before the second key press, which then opens nothing.
+  await app.clickTerminalAddTab(worktreeId);
   await expect(app.terminalTabs()).toHaveCount(1);
-  await app.pressNewTerminalShortcut();
+  await app.clickTerminalAddTab(worktreeId);
   await expect(app.terminalTabs()).toHaveCount(2);
 
   await worker.kill();

@@ -3,7 +3,33 @@
     {
       "name": "get_text",
       "description": "Returns the text in the editor",
-      "inputSchema": { "type": "object", "properties": {} }
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "set_text",
+      "description": "Replaces the text in the editor. The edit stays unsaved until the person saves.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The new text"
+          }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "save_text",
+      "description": "Saves the document (not for agents)",
+      "agent": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ]
 }
