@@ -58,6 +58,9 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "pick_folder",
   "pick_file",
   "pick_save_file",
+  "read_local_file",
+  "save_local_file",
+  "take_open_files",
   "reveal_in_finder",
   "check_app_exists",
   "open_with_app",
@@ -108,6 +111,8 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "system-resumed",
   // Mac moved between AC and battery power; payload `{ onBattery }`.
   "power-state-changed",
+  // The OS handed Band a file to open (Finder Open With); drain with take_open_files
+  "open-files-requested",
 ]);
 
 type Unlisten = () => void;

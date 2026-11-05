@@ -127,6 +127,25 @@ mac:
   # without this key macOS refuses the microphone and shows no prompt.
   extendInfo:
     NSMicrophoneUsageDescription: Band records your voice when you dictate into the chat composer. The audio goes to the speech-to-text service you set up in Settings > Voice.
+    # Finder's "Open With" lists Band for text and source files and opens them as tabs
+    # (apps/desktop/src/main/services/open-file-queue.ts). Alternate rank keeps Band out of the
+    # default-app choice for every one of these types.
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: Text and source files
+        CFBundleTypeRole: Editor
+        LSHandlerRank: Alternate
+        LSItemContentTypes:
+          - public.text
+          - public.plain-text
+          - public.source-code
+          - public.script
+          - public.shell-script
+          - public.json
+          - public.xml
+          - public.yaml
+          - public.html
+          - public.css
+          - net.daringfireball.markdown
   # Notarization is wired via the afterSign hook (scripts/notarize.mjs) so
   # the build falls through cleanly when the App Store Connect API key is
   # absent (local dev builds). Setting `notarize: false` disables

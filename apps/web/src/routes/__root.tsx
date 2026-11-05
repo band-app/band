@@ -32,6 +32,7 @@ import {
   SidebarTitleBar,
   WorktreeChromeContext,
 } from "../components/DesktopTitleBar";
+import { LocalFileOpener } from "../components/LocalFileOpener";
 import { MobileWorktreeShell } from "../components/MobileWorktreeShell";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedWorktreeLayout } from "../components/SharedWorktreeLayout";
@@ -828,6 +829,7 @@ function AppShell() {
   return (
     <ToolbarOverflowProvider>
       <WorktreeChromeContext.Provider value={worktreeChrome}>
+        <LocalFileOpener activeWorktreeId={activeWorktreeId} />
         {/* With the translucent sidebar on, this root is transparent so the
           window's vibrancy layer reaches the sidebar column; the main panel
           below paints its own solid background. */}

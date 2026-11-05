@@ -60,8 +60,8 @@ export interface FileTab {
   /**
    * True when `filePath` is an absolute path to a file outside the
    * current worktree root, opened via the "Open File…" action. The
-   * editor uses the host file IO surface (`host.readFile` /
-   * `host.saveFile`) instead of the worktree one, and the tab is
+   * editor uses the host file IO surface (`worktree.readExternalFile` /
+   * `worktree.saveExternalFile`) instead of the worktree one, and the tab is
    * rendered with an "external" marker so the user can tell at a
    * glance that edits write to an out-of-worktree path.
    */

@@ -128,8 +128,8 @@ enum Commands {
         /// Path to the file (absolute, or relative to cwd). Optionally
         /// suffixed with `:line` / `:line:col` / `:line-lineEnd`.
         file_path: String,
-        /// Worktree ID (overrides the dashboard's active worktree)
-        #[arg(long)]
+        /// Worktree ID (defaults to `$BAND_WORKTREE_ID`, then the dashboard's active worktree)
+        #[arg(long, env = "BAND_WORKTREE_ID")]
         worktree: Option<String>,
         /// Don't raise the dashboard window to the foreground after opening
         #[arg(long = "no-focus")]
@@ -6661,10 +6661,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Open a file in the active Band worktree's editor pane",
             "parameters": [
                 {"name": "file_path", "type": "string", "required": true, "positional": true, "description": "Path to the file (absolute, or relative to cwd). Optionally suffixed with ':line', ':line:col', or ':line-lineEnd'."},
-                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID (overrides the dashboard's active worktree)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID (defaults to $BAND_WORKTREE_ID, then the dashboard's active worktree)"},
                 {"name": "--no-focus", "type": "boolean", "required": false, "description": "Don't raise the dashboard window to the foreground after opening"},
             ],
-            "notes": "Opens the file in the dashboard's currently focused worktree. When `--worktree` is omitted, the server uses the worktree most recently focused in the Band dashboard — exits non-zero if no worktree is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever worktree the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the active-worktree fallback\nband open src/main.rs --worktree my-app/feat/auth\n\n# An out-of-worktree file opens as an external tab (worktree-relative\n# routing is bypassed; the FileViewer reads via the server's\n# readExternalFile capability).\nband open ~/Downloads/v3.js\n```"
+            "notes": "Opens the file in a worktree. When `--worktree` is omitted, a Band terminal or agent opens it in its own worktree (`$BAND_WORKTREE_ID`); anywhere else the server uses the worktree most recently focused in the Band dashboard, and the command exits non-zero if none is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever worktree the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the worktree ($BAND_WORKTREE_ID or the focused one)\nband open src/main.rs --worktree my-app/feat/auth\n\n# An out-of-worktree file opens as an editable external tab, read and\n# saved on the machine the worktree runs on.\nband open ~/Downloads/v3.js\n```"
         }),
         serde_json::json!({
             "name": "notify",

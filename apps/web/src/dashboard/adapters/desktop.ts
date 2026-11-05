@@ -1,5 +1,11 @@
 import { crossOriginHub } from "../../lib/hub-config";
-import type { PlatformCapabilities, Unsubscribe, UpdateStatus } from "../adapter";
+import type {
+  ExternalFileContext,
+  PlatformCapabilities,
+  Unsubscribe,
+  UpdateStatus,
+} from "../adapter";
+import type { FileContentResult } from "../types";
 import { WebCapabilities, WebDashboardAdapter } from "./web";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +72,24 @@ async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
  * it can show the dialog reliably; the web server cannot.
  */
 export class DesktopDashboardAdapter extends WebDashboardAdapter {
+  /** A desktop-source tab is read by the main process from this Mac's disk. */
+  override async readExternalFile(
+    absolutePath: string,
+    ctx: ExternalFileContext,
+  ): Promise<FileContentResult> {
+    if (ctx.source !== "desktop") return super.readExternalFile(absolutePath, ctx);
+    return desktopInvoke<FileContentResult>("read_local_file", { path: absolutePath });
+  }
+
+  override async saveExternalFile(
+    absolutePath: string,
+    content: string,
+    ctx: ExternalFileContext,
+  ): Promise<void> {
+    if (ctx.source !== "desktop") return super.saveExternalFile(absolutePath, content, ctx);
+    await desktopInvoke("save_local_file", { path: absolutePath, content });
+  }
+
   /**
    * Delete the profile on the server, then wipe its session partition
    * (cookies, storage, cache) on this Mac so no signed-in session is left

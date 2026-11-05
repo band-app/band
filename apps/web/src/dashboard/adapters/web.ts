@@ -10,7 +10,12 @@ import {
   markDirectDown,
 } from "../../lib/direct-worker";
 import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
-import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
+import type {
+  DashboardAdapter,
+  ExternalFileContext,
+  PlatformCapabilities,
+  Unsubscribe,
+} from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
   BrowserProfileInfo,
@@ -577,13 +582,20 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.worktree.saveFile.mutate({ worktreeId, path, content });
   }
 
-  async readExternalFile(absolutePath: string): Promise<FileContentResult> {
+  async readExternalFile(
+    absolutePath: string,
+    ctx: ExternalFileContext,
+  ): Promise<FileContentResult> {
+    if (ctx.source === "desktop") throw new Error("Open this file in the desktop app");
     // tRPC infers a discriminated union (`{ tooLarge } | { binary } | { content }`)
     // for the procedure's return. `FileContentResult` widens those into a single
     // shape with all variants as optional fields — same pattern `getWorktreeFile`
     // uses (and the downstream `FileViewer` consumer already keys off the flags
     // before reading `.content`).
-    return (await this.trpc.host.readFile.query({ absolutePath })) as FileContentResult;
+    return (await this.trpc.worktree.readExternalFile.query({
+      worktreeId: ctx.worktreeId,
+      absolutePath,
+    })) as FileContentResult;
   }
 
   async resolveWorktreePath(
@@ -598,8 +610,17 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return await this.trpc.worktree.resolvePath.query({ worktreeId, path });
   }
 
-  async saveExternalFile(absolutePath: string, content: string): Promise<void> {
-    await this.trpc.host.saveFile.mutate({ absolutePath, content });
+  async saveExternalFile(
+    absolutePath: string,
+    content: string,
+    ctx: ExternalFileContext,
+  ): Promise<void> {
+    if (ctx.source === "desktop") throw new Error("Open this file in the desktop app");
+    await this.trpc.worktree.saveExternalFile.mutate({
+      worktreeId: ctx.worktreeId,
+      absolutePath,
+      content,
+    });
   }
 
   async formatWorktreeFile(
