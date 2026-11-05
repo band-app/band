@@ -54,6 +54,7 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("simulators.") ||
       path.startsWith("voice.") ||
       path.startsWith("extensions.") ||
+      path.startsWith("editors.") ||
       path.startsWith("provisioning.") ||
       // Writes ~/.claude/settings.json on a host; only a person's click may.
       path.startsWith("hooks.")

@@ -74,6 +74,8 @@ The tab creates a `MessageChannel`, posts `{ type: "band:hello", extensionApi: 1
 | Editor → Band | `save { bytes }`. Band answers `saved` or `saveFailed { error }` |
 | Band → editor | `requestSave` (Cmd+S on the tab), `theme { tokens }` |
 | Band → editor | `reload { bytes }`, the file changed on disk and the tab has no unsaved edits |
+| Band → editor | `layout { layout }`, `compact` or `regular`; `init` carries it too |
+| Editor → Band | `selection { selection }`, `null` when nothing is selected (`{ address, kind, label, text?, rect? }`) |
 | Band → editor | `mcp { message }`, one MCP JSON-RPC request. The editor answers `mcp { message }` with the same `id` |
 
 `mcp` carries MCP as it is, so an editor with an MCP server (GridCraft's `gridcraft-mcp`) answers `tools/list` and `tools/call` with no translation. Image content passes through as MCP image content.
@@ -86,6 +88,8 @@ The tab creates a `MessageChannel`, posts `{ type: "band:hello", extensionApi: 1
 - After a save, and whenever the file changes on disk (the file watch), every other tab on that file gets `reload` when it has no unsaved edits. A tab with unsaved edits shows the existing "load theirs or keep yours" banner instead.
 
 ## Agent access
+
+Status: built (PR 3). The hub holds the registry and the latest selection per worktree in `services/editor-registry-service.ts`, the `editors.*` router is `api/editors/router.ts`, and the tools are in `api/mcp-proxy/editor-tools.ts`. Beyond the original design it adds `editors.setSelection`, `editors.selection`, the `editor-selection-changed` event and `band_editor_selection`. `docs/extensions.md` is the user-facing description.
 
 ### Tools
 
@@ -123,10 +127,10 @@ agent ← /mcp-proxy/band ← hub ← editors.result (tRPC) ← window ← mcp a
 
 1. **Extension host (band).** `/ext/<id>/` serving, `extensions.list | reload`, `band extensions list | reload`, the binary `PUT`, the editor registry, Open With, the `ExtensionEditor` tab with the protocol, reload on save and on file change. Tests use a small fixture extension (an HTML page that speaks the protocol and edits a text file), not GridCraft.
 2. **GridCraft extension (band-extension-gridcraft).** A port bridge in place of the same-origin `?host=parent` bridge, `band-extension.json`, `tools.json` generated at build, `scripts/install.sh`.
-3. **Agent access (band).** `editors.register | unregister | result`, the `editor-call` and `editor-open` status events, the tools from manifests in the `band` MCP server, `band_editor_open | list`. Depends on 1. Proven end to end with the fixture extension, then by hand with GridCraft.
+3. **Agent access (band), built.** `editors.register | unregister | result`, the `editor-call` and `editor-open` status events, the tools from manifests in the `band` MCP server, `band_editor_open | list`. Depends on 1. Proven end to end with the fixture extension, then by hand with GridCraft.
 
 1 and 2 run in parallel. 3 starts when 1 merges.
 
 ## Not in v1
 
-Install from a URL or `.bandext`, Settings > Extensions, per-extension origins, a network CSP, the mobile app, the direct path for the `PUT` route, editors with no file (a new document), and running an editor without a window.
+Install from a `.bandext`, per-extension origins, a network CSP, the direct path for the `PUT` route, editors with no file (a new document), and running an editor without a window.

@@ -106,7 +106,10 @@ export interface StatusEvent {
     | "subscription-removed"
     | "worktree-origin-changed"
     | "review-changed"
-    | "open-file";
+    | "open-file"
+    | "editor-selection-changed"
+    | "editor-call"
+    | "editor-open";
   status?: WorktreeStatusSnapshot;
   statuses?: WorktreeStatusSnapshot[];
   worktreeId?: string;
@@ -167,6 +170,18 @@ export interface StatusEvent {
    * external tab (same surface as desktop Cmd+O / "Open File…").
    */
   external?: boolean;
+  /**
+   * For `kind: "editor-call"` and `"editor-open"`: the request for the window named by `clientId`.
+   * Every other window ignores it. The payload is the file and editor, and for a call the MCP
+   * message to pass to the tab.
+   */
+  editorRequest?: {
+    callId: string;
+    file: string;
+    extensionId: string;
+    editorId?: string;
+    message?: Record<string, unknown>;
+  };
 }
 
 export type StatusListener = (event: StatusEvent) => void;
