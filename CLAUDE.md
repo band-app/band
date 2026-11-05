@@ -77,9 +77,13 @@ An agent session runs in a Band worker, so its environment carries the worker's 
 
 ### Where tests run
 
-Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite in 2 shards, with the web unit and package suites in shard 1 (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
+Pull requests run the Linux jobs only: lint, the hub suite in 2 shards, the web unit and package suites, the web e2e suite, the remote-loopback job (one shard, listed files only), Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite in 2 shards, with the web unit and package suites in shard 1 (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
 
 Each `web-macos` shard runs its half of the hub suite with `vitest run --shard=N/2` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+
+Hub test files run in parallel: `apps/hub/vitest.config.ts` uses the `forks` pool with 3 workers (`BAND_TEST_WORKERS` overrides it), because every server, worker and daemon a test starts has a random port and its own temp HOME. No file opts out. A new test must not use a fixed port, a path outside its temp HOME, or the real `~/.band`; run it with `--no-file-parallelism` to find a collision.
+
+The remote-loopback job runs only the files in `apps/hub/tests/loopback-files.txt`, the ones that import `helpers/test-host` (their behaviour depends on where the worktree lives). `scripts/check-loopback-files.sh` runs in `pnpm lint` and fails when a file that imports `helpers/test-host` is missing from the list, or the list names a file that does not exist. A test that should run on a loopback worker imports from `test-host` and goes in the list.
 
 ### Exceptions
 

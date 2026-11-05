@@ -421,8 +421,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
-        total: [3]
+        shard: [1, 2]
+        total: [2]
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
       # runner-docker.test.ts needs the worker image, which only the `docker` job builds.
@@ -558,8 +558,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
-        total: [3]
+        shard: [1]
+        total: [1]
     needs: [changes, build]
     if: >
       needs.changes.outputs.code == 'true' && (
