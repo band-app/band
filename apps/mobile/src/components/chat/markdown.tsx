@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   listItem: { flexDirection: "row", gap: 8 },
   markerBox: { alignItems: "flex-end", minWidth: 18, paddingTop: 3 },
   marker: { minWidth: 18, textAlign: "right", color: colors.mutedForeground },
-  listBody: { flex: 1, gap: 6 },
+  listBody: { flexGrow: 1, flexShrink: 1, gap: 6 },
   quote: {
     borderLeftColor: colors.border,
     borderLeftWidth: 3,
@@ -347,7 +347,7 @@ const styles = StyleSheet.create({
   cellText: { fontSize: 14, lineHeight: 20 },
   details: { gap: 8 },
   detailsHeader: { alignItems: "center", flexDirection: "row", gap: 6 },
-  detailsTitle: { flex: 1 },
+  detailsTitle: { flexGrow: 1, flexShrink: 1 },
   detailsBody: { gap: 10, paddingLeft: 22 },
   rule: { backgroundColor: colors.border, height: StyleSheet.hairlineWidth },
 });

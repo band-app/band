@@ -1,5 +1,7 @@
-// Integration tests for the host file IO procedures (`host.readFile`,
-// `host.saveFile`) that back the editor's "Open File…" action.
+// Integration tests for the external file procedures
+// (`worktree.readExternalFile`, `worktree.saveExternalFile`) that back the
+// editor's "Open File…" action and `band open <path outside the worktree>`.
+// They read the machine the worktree runs on, never the hub's disk.
 //
 // We exercise the real server pipeline: spawn the production server in a
 // child process, then call the tRPC procedures over HTTP against an actual
@@ -9,6 +11,7 @@
 // the integration-test suite.
 
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -18,6 +21,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
@@ -25,6 +29,8 @@ import { removeTmpHome } from "./helpers/tmp-home";
 
 const _PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "host-file-test-token";
+const REPO = "host-file-repo";
+const WORKTREE_ID = toWorktreeId(REPO, "main", "local");
 
 // ---------------------------------------------------------------------------
 // Server helpers (mirror the patterns in trpc.test.ts so the suite stays
@@ -60,10 +66,10 @@ async function trpcData<T>(res: Response): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// host.readFile / host.saveFile — round-trip
+// worktree.readExternalFile / worktree.saveExternalFile — round-trip
 // ---------------------------------------------------------------------------
 
-describe("tRPC — host.readFile / host.saveFile (external files)", () => {
+describe("tRPC — worktree.readExternalFile / worktree.saveExternalFile (external files)", () => {
   let server: ServerHandle;
   let tmpHome: string;
   // The "outside" dir lives next to (not inside) the user's home, to model
@@ -78,7 +84,18 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     externalPath = join(outsideDir, "scratch.md");
     writeFileSync(externalPath, "# external file\n\noriginal contents\n", "utf-8");
 
-    seedState(tmpHome, { repos: [] });
+    const repoPath = join(tmpHome, REPO);
+    mkdirSync(repoPath);
+    seedState(tmpHome, {
+      repos: [
+        {
+          name: REPO,
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
@@ -89,8 +106,11 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     rmSync(outsideDir, { recursive: true, force: true });
   });
 
-  it("host.readFile returns the contents of a file outside any worktree", async () => {
-    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: externalPath });
+  it("worktree.readExternalFile returns the contents of a file outside any worktree", async () => {
+    const res = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: WORKTREE_ID,
+      absolutePath: externalPath,
+    });
     expect(res.status).toBe(200);
     const data = await trpcData<{ content: string; size: number; language?: string }>(res);
     expect(data.content).toBe("# external file\n\noriginal contents\n");
@@ -100,23 +120,30 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(data.language).toBe("markdown");
   });
 
-  it("host.readFile rejects a non-absolute path", async () => {
-    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: "relative/path.txt" });
+  it("worktree.readExternalFile rejects a non-absolute path", async () => {
+    const res = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: WORKTREE_ID,
+      absolutePath: "relative/path.txt",
+    });
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error.message).toContain("Absolute path required");
   });
 
-  it("host.readFile rejects a path that is a directory", async () => {
-    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: outsideDir });
+  it("worktree.readExternalFile rejects a path that is a directory", async () => {
+    const res = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: WORKTREE_ID,
+      absolutePath: outsideDir,
+    });
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error.message).toMatch(/directory|regular file/);
   });
 
-  it("host.saveFile writes new contents to the on-disk file", async () => {
+  it("worktree.saveExternalFile writes new contents to the on-disk file", async () => {
     const newContent = "# external file\n\nedited via Band\n";
-    const res = await trpcMutate(server.url, "host.saveFile", {
+    const res = await trpcMutate(server.url, "worktree.saveExternalFile", {
+      worktreeId: WORKTREE_ID,
       absolutePath: externalPath,
       content: newContent,
     });
@@ -127,14 +154,18 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     const onDisk = readFileSync(externalPath, "utf-8");
     expect(onDisk).toBe(newContent);
 
-    // And reading via host.readFile should return the new contents too.
-    const readRes = await trpcQuery(server.url, "host.readFile", { absolutePath: externalPath });
+    // And reading via worktree.readExternalFile should return the new contents too.
+    const readRes = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: WORKTREE_ID,
+      absolutePath: externalPath,
+    });
     const readData = await trpcData<{ content: string }>(readRes);
     expect(readData.content).toBe(newContent);
   });
 
-  it("host.saveFile rejects a non-absolute path", async () => {
-    const res = await trpcMutate(server.url, "host.saveFile", {
+  it("worktree.saveExternalFile rejects a non-absolute path", async () => {
+    const res = await trpcMutate(server.url, "worktree.saveExternalFile", {
+      worktreeId: WORKTREE_ID,
       absolutePath: "still/relative.txt",
       content: "hi",
     });
@@ -143,8 +174,9 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(body.error.message).toContain("Absolute path required");
   });
 
-  it("host.saveFile rejects writing to a directory", async () => {
-    const res = await trpcMutate(server.url, "host.saveFile", {
+  it("worktree.saveExternalFile rejects writing to a directory", async () => {
+    const res = await trpcMutate(server.url, "worktree.saveExternalFile", {
+      worktreeId: WORKTREE_ID,
       absolutePath: outsideDir,
       content: "should not work",
     });
@@ -153,12 +185,13 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(body.error.message).toMatch(/directory|regular file/);
   });
 
-  it("host.saveFile returns a descriptive error for a non-existent file", async () => {
+  it("worktree.saveExternalFile returns a descriptive error for a non-existent file", async () => {
     // The endpoint refuses to create files — it's a save, not a create.
     // We want a clean "File not found" message instead of a raw ENOENT
     // bubbling up as an opaque 500.
     const missing = join(outsideDir, "definitely-does-not-exist.txt");
-    const res = await trpcMutate(server.url, "host.saveFile", {
+    const res = await trpcMutate(server.url, "worktree.saveExternalFile", {
+      worktreeId: WORKTREE_ID,
       absolutePath: missing,
       content: "anything",
     });
@@ -167,7 +200,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(body.error.message).toContain("File not found");
   });
 
-  it("host.readFile rejects symbolic links", async () => {
+  it("worktree.readExternalFile rejects symbolic links", async () => {
     // The OS picker can return a symlink, but the host endpoints must
     // not silently follow it — a symlink to /etc/passwd would otherwise
     // pass the `isFile()` check after stat(). lstat()-based detection
@@ -177,19 +210,23 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     const link = join(outsideDir, "link.txt");
     symlinkSync(target, link);
 
-    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: link });
+    const res = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: WORKTREE_ID,
+      absolutePath: link,
+    });
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error.message).toContain("Symbolic link");
   });
 
-  it("host.saveFile rejects symbolic links", async () => {
+  it("worktree.saveExternalFile rejects symbolic links", async () => {
     const target = join(outsideDir, "real-save.txt");
     writeFileSync(target, "real content\n", "utf-8");
     const link = join(outsideDir, "link-save.txt");
     symlinkSync(target, link);
 
-    const res = await trpcMutate(server.url, "host.saveFile", {
+    const res = await trpcMutate(server.url, "worktree.saveExternalFile", {
+      worktreeId: WORKTREE_ID,
       absolutePath: link,
       content: "should not write through symlink",
     });
@@ -201,14 +238,17 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(readFileSync(target, "utf-8")).toBe("real content\n");
   });
 
-  it("host.readFile returns { tooLarge: true } for files larger than MAX_FILE_SIZE", async () => {
+  it("worktree.readExternalFile returns { tooLarge: true } for files larger than MAX_FILE_SIZE", async () => {
     // MAX_FILE_SIZE is 1MB server-side; write something just past the
     // threshold so the boundary is exercised without bloating the test.
     const bigPath = join(outsideDir, "big.bin");
     const big = Buffer.alloc(1024 * 1024 + 1, 65); // 1MB + 1 byte of "A"
     writeFileSync(bigPath, big);
 
-    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: bigPath });
+    const res = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: WORKTREE_ID,
+      absolutePath: bigPath,
+    });
     expect(res.status).toBe(200);
     const data = await trpcData<{ tooLarge?: true; size: number; content?: string }>(res);
     expect(data.tooLarge).toBe(true);
@@ -217,7 +257,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(data.content).toBeUndefined();
   });
 
-  it("host.readFile returns { binary: true } for files containing NUL bytes", async () => {
+  it("worktree.readExternalFile returns { binary: true } for files containing NUL bytes", async () => {
     // The detection samples the first 8KB for null bytes — the cheapest
     // signal that a file is binary. We don't want raw binary content
     // streamed back into a text editor.
@@ -225,7 +265,10 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     const bin = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
     writeFileSync(binPath, bin);
 
-    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: binPath });
+    const res = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: WORKTREE_ID,
+      absolutePath: binPath,
+    });
     expect(res.status).toBe(200);
     const data = await trpcData<{ binary?: true; size: number; content?: string }>(res);
     expect(data.binary).toBe(true);
@@ -233,7 +276,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(data.content).toBeUndefined();
   });
 
-  it("host.readFile / host.saveFile reject unauthenticated callers", async () => {
+  it("worktree.readExternalFile / worktree.saveExternalFile reject unauthenticated callers", async () => {
     // The host procedures bypass the worktree containment guard, so
     // the transport-layer band_token cookie is the only thing standing
     // between an unauthenticated caller and arbitrary FS access. The
@@ -242,21 +285,44 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     // pass even if the auth gate were broken and the server returned a
     // crash 500.
     const readRes = await fetch(
-      `${server.url}/trpc/host.readFile?input=${encodeURIComponent(
-        JSON.stringify({ absolutePath: externalPath }),
+      `${server.url}/trpc/worktree.readExternalFile?input=${encodeURIComponent(
+        JSON.stringify({ worktreeId: WORKTREE_ID, absolutePath: externalPath }),
       )}`,
     );
     expect(readRes.status).toBe(401);
 
-    const saveRes = await fetch(`${server.url}/trpc/host.saveFile`, {
+    const saveRes = await fetch(`${server.url}/trpc/worktree.saveExternalFile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ absolutePath: externalPath, content: "evil" }),
+      body: JSON.stringify({
+        worktreeId: WORKTREE_ID,
+        absolutePath: externalPath,
+        content: "evil",
+      }),
     });
     expect(saveRes.status).toBe(401);
 
     // And the file on disk must be untouched (still the previous test's content).
     const onDisk = readFileSync(externalPath, "utf-8");
     expect(onDisk).not.toBe("evil");
+  });
+
+  it("the old host.readFile and host.saveFile routes, which read the hub's disk, are gone", async () => {
+    const read = await trpcQuery(server.url, "host.readFile", { absolutePath: externalPath });
+    expect(read.status).toBe(404);
+    const save = await trpcMutate(server.url, "host.saveFile", {
+      absolutePath: externalPath,
+      content: "evil",
+    });
+    expect(save.status).toBe(404);
+    expect(readFileSync(externalPath, "utf-8")).not.toBe("evil");
+  });
+
+  it("refuses a worktree that does not exist, so no path is read for it", async () => {
+    const res = await trpcQuery(server.url, "worktree.readExternalFile", {
+      worktreeId: "nope-main",
+      absolutePath: externalPath,
+    });
+    expect(res.status).not.toBe(200);
   });
 });

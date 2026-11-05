@@ -58,6 +58,7 @@ import {
   useState,
 } from "react";
 import { trpc } from "../../lib/trpc-client";
+import { viewportTransformToCss } from "../../lib/zoom";
 import { useAdapter, useCapabilities } from "../context";
 import {
   GROUPS_COLLAPSE_KEY,
@@ -242,7 +243,7 @@ function SortableRepo({
   const { active } = useDndContext();
 
   const style = {
-    transform: CSS.Translate.toString(transform),
+    transform: CSS.Translate.toString(viewportTransformToCss(transform)),
     transition: active ? transition : undefined,
     opacity: isDragging ? 0.5 : undefined,
   };
@@ -1352,7 +1353,7 @@ export function RepoList({ groupFilter }: RepoListProps) {
             {/* dropAnimation={null} disables dnd-kit's default snap-back. The reorder
             mutations run an optimistic update in onMutate, so when the user releases we want
             the overlay to disappear instantly and the list to look like the new order. */}
-            <DragOverlay dropAnimation={null}>
+            <DragOverlay dropAnimation={null} className="band-drag-overlay">
               {activeWorktreeDrag ? (
                 // The same card as the list row, so the preview looks like what is being moved.
                 <div

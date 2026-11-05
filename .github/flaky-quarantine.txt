@@ -1,0 +1,8 @@
+# Tests that flaked 3 or more times in 7 days. They are skipped in the blocking CI jobs and
+# run in the non-blocking `test-quarantine` job instead. One test per line:
+#
+#   apps/web/e2e/some.spec.ts › describe title › test title  # <flaky issue number>
+#   apps/hub/tests/some.test.ts › describe title › test title  # <flaky issue number>
+#
+# The id is the text after "flaky: " in the issue title. The fix PR removes the line.
+# Rules: docs in .claude/testing-criteria.md (section 8) and CLAUDE.md (Testing Strategy).

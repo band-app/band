@@ -7,6 +7,7 @@ import { worktreePreviewUrl } from "../../services/_utils/worktree-preview-link"
 import { diffService } from "../../services/diff-service";
 import { directAccessService } from "../../services/direct-access-service";
 import { editorService } from "../../services/editor-service";
+import { externalFileService } from "../../services/external-file-service";
 import { filesService } from "../../services/files-service";
 import { FormatterError } from "../../services/formatter";
 import { gitGraphService } from "../../services/git-graph-service";
@@ -323,6 +324,26 @@ export const worktreeRouter = t.router({
     .input(directOps["worktree.saveFile"].input)
     .mutation(({ input }) => directOps["worktree.saveFile"].run(worktreeOps, input)),
 
+  /**
+   * A file outside the worktree, read on the worktree's own worker (never the
+   * hub's disk). Left out of the relay and the direct path: device tokens only.
+   */
+  readExternalFile: publicProcedure
+    .input(z.object({ worktreeId: z.string().min(1), absolutePath: z.string().min(1) }))
+    .query(({ input }) => externalFileService.read(input.worktreeId, input.absolutePath)),
+
+  saveExternalFile: publicProcedure
+    .input(
+      z.object({
+        worktreeId: z.string().min(1),
+        absolutePath: z.string().min(1),
+        content: z.string(),
+      }),
+    )
+    .mutation(({ input }) =>
+      externalFileService.save(input.worktreeId, input.absolutePath, input.content),
+    ),
+
   createFile: publicProcedure
     .input(directOps["worktree.createFile"].input)
     .mutation(({ input }) => directOps["worktree.createFile"].run(worktreeOps, input)),
@@ -368,7 +389,7 @@ export const worktreeRouter = t.router({
   // path an authenticated caller supplies (not just in-worktree ones), so it
   // is a filesystem-existence oracle. That is acceptable under Band's threat
   // model — the same auth scope already reads arbitrary absolute paths via
-  // `host.readFile` — and the `external` flag is load-bearing, not dead code:
+  // `worktree.readExternalFile` — and the `external` flag is load-bearing, not dead code:
   // it's how the client decides between a worktree-relative and an external
   // tab. Do not "harden" this by dropping the out-of-worktree classification.
   resolvePath: publicProcedure

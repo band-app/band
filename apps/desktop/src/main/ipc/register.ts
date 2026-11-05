@@ -35,7 +35,9 @@ import type {
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
 import type { KeepAwakeController } from "../services/keep-awake.js";
+import { readLocalFile, saveLocalFile } from "../services/local-files.js";
 import { createLogger } from "../services/log.js";
+import type { OpenFileQueue } from "../services/open-file-queue.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
 import type { UpdateController } from "../updater.js";
 import { getAppMetrics } from "./app-metrics.js";
@@ -80,6 +82,8 @@ export interface RegisterOptions {
   /** The bootstrap's auto-update controller, which the update toast drives. */
   updates: UpdateController;
   keepAwake: KeepAwakeController;
+  /** Paths the OS asked the app to open, drained by the renderer. */
+  openFiles: OpenFileQueue;
 }
 
 /**
@@ -140,6 +144,11 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.pickFolder, () => pickFolder(opts.mainWindow));
   handle(Channels.pickFile, () => pickFile(opts.mainWindow));
   handle(Channels.pickSaveFile, (args: PickSaveFileArgs) => pickSaveFile(opts.mainWindow, args));
+  handle(Channels.readLocalFile, (args: { path?: unknown }) => readLocalFile(args?.path));
+  handle(Channels.saveLocalFile, (args: { path?: unknown; content?: unknown }) =>
+    saveLocalFile(args?.path, args?.content),
+  );
+  handle(Channels.takeOpenFiles, () => opts.openFiles.take());
   handle(Channels.revealInFinder, (args: RevealInFinderArgs) => revealInFinder(args.path));
   handle(Channels.revealSimulator, (args: RevealSimulatorArgs) => revealSimulator(args.udid));
   handle(Channels.checkAppExists, (args: CheckAppExistsArgs) => checkAppExists(args.appName));

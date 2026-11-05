@@ -15,6 +15,7 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDirectAssetUrl } from "../../lib/use-direct-asset-url";
+import type { ExternalFileSource } from "../adapter";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
 import { isHtmlFile } from "../lib/html-preview";
@@ -115,6 +116,8 @@ interface FileViewerProps {
    * are intentionally not wired for external files.
    */
   external?: boolean;
+  /** Where an external file lives. Defaults to the worktree's worker. */
+  externalSource?: ExternalFileSource;
   /**
    * When true, the viewer renders an untitled (scratch) buffer that
    * has no backing file. `filePath` carries the synthetic `untitled:N`
@@ -290,6 +293,7 @@ export function FileViewer({
   savedScrollTop,
   onEditedContentChange,
   external,
+  externalSource,
   untitled,
   languageOverride,
   onLanguageOverrideChange,
@@ -469,7 +473,7 @@ export function FileViewer({
     setData(null);
 
     const promise = external
-      ? adapter.readExternalFile!(filePath)
+      ? adapter.readExternalFile!(filePath, { worktreeId, source: externalSource ?? "worker" })
       : adapter.getWorktreeFile!(worktreeId, filePath);
     promise
       .then((result) => {
@@ -493,7 +497,7 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [adapter, worktreeId, filePath, previewType, external, untitled]);
+  }, [adapter, worktreeId, filePath, previewType, external, externalSource, untitled]);
 
   // The user's explicit choice from the language picker always wins over
   // file-extension detection (issue #434: "manual override sticks for the
@@ -592,7 +596,12 @@ export function FileViewer({
     }
     if (editedContentRef.current === null) return true;
     const save = external
-      ? adapter.saveExternalFile && ((c: string) => adapter.saveExternalFile!(filePath, c))
+      ? adapter.saveExternalFile &&
+        ((c: string) =>
+          adapter.saveExternalFile!(filePath, c, {
+            worktreeId,
+            source: externalSource ?? "worker",
+          }))
       : adapter.saveWorktreeFile &&
         ((c: string) => adapter.saveWorktreeFile!(worktreeId, filePath, c));
     if (!save) return false;
@@ -616,7 +625,7 @@ export function FileViewer({
     } finally {
       setSaving(false);
     }
-  }, [adapter, worktreeId, filePath, external, untitled, onSaveAs]);
+  }, [adapter, worktreeId, filePath, external, externalSource, untitled, onSaveAs]);
 
   // What a Visual mode edit is checked against: unsaved text if any, else a
   // fresh read of the file, so an edit never lands on a file that has changed

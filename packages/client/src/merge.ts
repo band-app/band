@@ -11,21 +11,71 @@ export const MERGE_METHODS: ReadonlyArray<{ method: MergeMethod; label: string }
   { method: "rebase", label: "Rebase and merge" },
 ];
 
+/** A pull request's place in the forge's merge queue (a structural copy of `MergeQueueInfo`). */
+export interface MergeQueueLike {
+  state: "queued" | "awaiting_checks" | "mergeable" | "locked" | "unmergeable";
+  position: number;
+  total?: number | null;
+  estimatedTimeToMerge?: number | null;
+}
+
 export interface MergeStatusInput {
   state: string;
   mergeState: string;
+  mergeQueue?: MergeQueueLike | null;
 }
 
 export interface MergeStatus {
   label: string;
   canMerge: boolean;
   hint: string;
+  /** The pull request is in the merge queue, so the main button gives way to a note. */
+  queued?: boolean;
 }
+
+/** GitHub's entry state for a queued pull request, as the web's Checks panel words it. */
+export const QUEUE_STATE_LABEL = {
+  queued: "queued",
+  awaiting_checks: "awaiting checks",
+  mergeable: "ready to merge",
+  locked: "locked",
+  unmergeable: "has conflicts",
+} as const;
+
+/** "In merge queue · position 2", the text of the web's worktree badge. */
+export function queueBadgeLabel(queue: Pick<MergeQueueLike, "position">): string {
+  return `In merge queue · position ${queue.position}`;
+}
+
+/** "In merge queue, position 2 of 3 (awaiting checks)", the web's Checks panel line. */
+export function queueLine(queue: MergeQueueLike): string {
+  const position = queue.total
+    ? `position ${queue.position} of ${queue.total}`
+    : `position ${queue.position}`;
+  return `In merge queue, ${position} (${QUEUE_STATE_LABEL[queue.state]})`;
+}
+
+/** "about 5 min" for GitHub's estimate in seconds, or null when there is none. */
+export function queueEstimate(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 60) return "less than a minute";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `about ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `about ${hours} h ${rest} min` : `about ${hours} h`;
+}
+
+/** The Checks line for auto-merge armed before the pull request is queued. */
+export const AUTO_MERGE_LINE = "Auto-merge on, waiting for checks";
 
 /** The main button's label and whether it can merge, from the PR's state. */
 export function mergeStatus(review: MergeStatusInput): MergeStatus {
   if (review.state === "merged") return { label: "Merged", canMerge: false, hint: "" };
   if (review.state === "closed") return { label: "Closed", canMerge: false, hint: "" };
+  if (review.mergeQueue) {
+    return { label: "In merge queue", canMerge: false, hint: "", queued: true };
+  }
   switch (review.mergeState) {
     case "clean":
     case "has_hooks":

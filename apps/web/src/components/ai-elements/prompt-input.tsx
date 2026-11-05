@@ -3,7 +3,6 @@ import { cn } from "@band-app/ui";
 import { CircleStop, CornerDownLeft, FileIcon, Loader2, Plus, X } from "lucide-react";
 import type {
   ComponentProps,
-  DragEvent,
   FormEvent,
   FormEventHandler,
   HTMLAttributes,
@@ -11,7 +10,9 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { buildLineReference, type ChatInsertDetail } from "@/dashboard";
+import { dragHasFiles, planDrop } from "../../lib/chat-file-drop";
 import { clientStorage } from "../../lib/client-state";
 
 let fileIdCounter = 0;
@@ -170,26 +171,82 @@ export const PromptInput = ({
     [onSubmit, fileEntries, draftStorageKey],
   );
 
-  const handleDragOver = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
+  /** Inserts text at the textarea's cursor, on its own line(s). */
+  const insertAtCursor = useCallback((text: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const lead = before === "" || before.endsWith("\n") ? "" : "\n";
+    const tail = after === "" || after.startsWith("\n") ? "" : "\n";
+    const inserted = `${lead}${text}${tail}`;
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    nativeSetter?.call(textarea, before + inserted + after);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = before.length + inserted.length;
   }, []);
 
-  const handleDragLeave = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
+  // The whole chat pane is the drop target, not just the composer. A native
+  // listener on the pane (the form's closest `[data-chat-pane]`) sees drags
+  // over the message list too.
+  const [paneEl, setPaneEl] = useState<HTMLElement | null>(null);
+  const [paneDragging, setPaneDragging] = useState(false);
+  useEffect(() => {
+    setPaneEl((formRef.current?.closest("[data-chat-pane]") as HTMLElement | null) ?? null);
   }, []);
 
-  const handleDrop = useCallback(
-    (e: DragEvent) => {
+  useEffect(() => {
+    const target: HTMLElement | null = paneEl ?? formRef.current;
+    if (!target) return;
+    const onOver = (e: globalThis.DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
+      setIsDragging(true);
+      setPaneDragging(true);
+    };
+    const onLeave = (e: globalThis.DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      if (e.relatedTarget instanceof Node && target.contains(e.relatedTarget)) return;
       setIsDragging(false);
-      if (e.dataTransfer.files.length > 0) {
-        addFiles(e.dataTransfer.files);
-      }
-    },
-    [addFiles],
-  );
+      setPaneDragging(false);
+    };
+    const onDropEvent = (e: globalThis.DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      setPaneDragging(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length === 0) return;
+      void planDrop(files, worktreeIdRef.current).then((plan) => {
+        if (plan.attach.length > 0) addFiles(plan.attach);
+        if (plan.paths.length > 0) insertAtCursor(plan.paths.join("\n"));
+        setNotice(plan.notice);
+      });
+    };
+    const reset = () => {
+      setIsDragging(false);
+      setPaneDragging(false);
+    };
+    target.addEventListener("dragenter", onOver);
+    target.addEventListener("dragover", onOver);
+    target.addEventListener("dragleave", onLeave);
+    target.addEventListener("drop", onDropEvent);
+    window.addEventListener("dragend", reset);
+    return () => {
+      target.removeEventListener("dragenter", onOver);
+      target.removeEventListener("dragover", onOver);
+      target.removeEventListener("dragleave", onLeave);
+      target.removeEventListener("drop", onDropEvent);
+      window.removeEventListener("dragend", reset);
+    };
+  }, [paneEl, addFiles, insertAtCursor]);
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
@@ -305,9 +362,6 @@ export const PromptInput = ({
       data-testid="prompt-input__form"
       className={cn("relative flex w-full flex-col gap-1", className)}
       onSubmit={handleSubmit}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
       onPaste={handlePaste}
       ref={formRef}
       {...props}
@@ -330,6 +384,17 @@ export const PromptInput = ({
         }}
       >
         {children}
+        {paneDragging &&
+          paneEl &&
+          createPortal(
+            <div
+              data-testid="chat-pane__drop-overlay"
+              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/60 bg-background/80 text-sm font-medium text-primary"
+            >
+              Drop to attach
+            </div>,
+            paneEl,
+          )}
       </PromptInputContext.Provider>
     </form>
   );
@@ -420,7 +485,11 @@ function FilePreview({ file, onRemove }: { file: File; onRemove: () => void }) {
   const isImage = file.type.startsWith("image/");
 
   return (
-    <div className="group/file relative flex items-center gap-2 rounded-md border border-border/50 bg-muted/50 px-2 py-1.5">
+    <div
+      data-testid="prompt-input__attachment"
+      data-file-name={file.name}
+      className="group/file relative flex items-center gap-2 rounded-md border border-border/50 bg-muted/50 px-2 py-1.5"
+    >
       {isImage ? (
         <img
           src={URL.createObjectURL(file)}

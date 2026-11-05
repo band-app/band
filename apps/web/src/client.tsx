@@ -8,4 +8,12 @@ import { startBrowserWebviewDomBridge } from "./lib/browser-webview-dom-bridge";
 // without webviews.
 startBrowserWebviewDomBridge();
 
+// A file dropped outside a drop target would make the browser (or Electron)
+// open it and navigate away from the app. Cancel the default for file drags.
+for (const type of ["dragover", "drop"] as const) {
+  window.addEventListener(type, (e) => {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
+  });
+}
+
 hydrateRoot(document, <StartClient />);

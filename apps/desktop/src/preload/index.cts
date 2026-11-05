@@ -23,7 +23,7 @@
  */
 
 import type { IpcRendererEvent } from "electron";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 // Loud trace so we can confirm the preload actually runs (visible in
 // DevTools console). If you don't see this, Electron isn't even loading
@@ -58,6 +58,9 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "pick_folder",
   "pick_file",
   "pick_save_file",
+  "read_local_file",
+  "save_local_file",
+  "take_open_files",
   "reveal_in_finder",
   "check_app_exists",
   "open_with_app",
@@ -110,6 +113,8 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "power-state-changed",
   // Trackpad swipe on macOS; payload "left" | "right" | "up" | "down".
   "window-swipe",
+  // The OS handed Band a file to open (Finder Open With); drain with take_open_files
+  "open-files-requested",
 ]);
 
 type Unlisten = () => void;
@@ -142,6 +147,19 @@ const api = {
     const handler = (_e: IpcRendererEvent, payload: unknown) => cb(payload);
     ipcRenderer.on(event, handler);
     return () => ipcRenderer.removeListener(event, handler);
+  },
+
+  /**
+   * Absolute path of a file the user dropped onto the window. Electron gives no
+   * `File.path` any more. Takes a `File` object, so it can only name files the
+   * page was handed, and returns "" for a file with no path on disk.
+   */
+  getPathForFile(file: File): string {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
   },
 };
 

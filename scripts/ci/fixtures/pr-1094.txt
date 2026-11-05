@@ -1,0 +1,8 @@
+apps/desktop/src/preload/index.cts
+apps/web/e2e-desktop/desktop-chat-file-drop.spec.ts
+apps/web/e2e/chat-file-drop.spec.ts
+apps/web/e2e/pages/ChatPanePage.ts
+apps/web/src/client.tsx
+apps/web/src/components/ai-elements/prompt-input.tsx
+apps/web/src/lib/chat-file-drop.ts
+apps/web/src/lib/desktop-ipc.ts
