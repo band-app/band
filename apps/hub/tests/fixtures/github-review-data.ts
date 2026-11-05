@@ -145,6 +145,8 @@ export interface MergeQueueInput {
   position: number;
   /** Entries in the base branch's queue. */
   total?: number;
+  /** GitHub's estimate in seconds. */
+  estimatedTimeToMerge?: number;
 }
 
 /** The merge queue fields of a PR node: in the queue, auto-merge on, or neither. */
@@ -156,7 +158,7 @@ export function mergeQueueFields(input: { mergeQueue?: MergeQueueInput; autoMerg
           state: input.mergeQueue.state ?? "QUEUED",
           position: input.mergeQueue.position,
           enqueuedAt: "2026-01-02T09:00:00Z",
-          estimatedTimeToMerge: null,
+          estimatedTimeToMerge: input.mergeQueue.estimatedTimeToMerge ?? null,
           mergeQueue: { entries: { totalCount: input.mergeQueue.total ?? 0 } },
         }
       : null,

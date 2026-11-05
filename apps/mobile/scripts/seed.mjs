@@ -351,6 +351,9 @@ export const WORKTREES = {
   WIDGETS_RERUN: "widgets-feat-rerun",
   WIDGETS_NO_CHECKS: "widgets-feat-nochecks",
   WIDGETS_NO_PR: "widgets-feat-nopr",
+  /** PR 61 at position 2 of 3 in the merge queue; PR 62 with auto-merge on and no queue entry. */
+  WIDGETS_QUEUED: "widgets-feat-queued",
+  WIDGETS_AUTO_MERGE: "widgets-feat-automerge",
 };
 
 /** The chats of `gamma-tabs`, in the shared tab order; the second is the active tab. */

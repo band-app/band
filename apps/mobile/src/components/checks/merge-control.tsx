@@ -5,10 +5,10 @@ import {
   mergeMethodLabel,
   mergeStatus,
 } from "@band-app/client/merge";
-import { ChevronDown, GitMerge } from "lucide-react-native";
+import { ChevronDown, GitMerge, ListEnd } from "lucide-react-native";
 import { useState } from "react";
 import { Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, tones } from "../../theme";
+import { colors, tints, tones } from "../../theme";
 
 /**
  * The merge button, its method menu and the confirm step, as in the web's pull request panel.
@@ -43,6 +43,28 @@ export function MergeControl({
   };
 
   const fill = merged ? tones.merged : tones.success;
+  if (status.queued) {
+    // A queued pull request is merged by GitHub's queue, so there is nothing to press.
+    return (
+      <View style={styles.wrap} testID="checks__merge-control">
+        <View style={styles.queued} testID="checks__merge-queued">
+          <ListEnd size={16} color={tones.pending} />
+          <Text style={styles.queuedText} testID="checks__merge-label">
+            {status.label}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="link"
+          onPress={() => {
+            if (/^https?:\/\//.test(review.url)) void Linking.openURL(review.url).catch(() => {});
+          }}
+          testID="checks__merge-open"
+        >
+          <Text style={styles.hint}>Open on GitHub</Text>
+        </Pressable>
+      </View>
+    );
+  }
   return (
     <View style={styles.wrap} testID="checks__merge-control">
       <View style={styles.bar}>
@@ -178,6 +200,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 44,
   },
+  queued: {
+    alignItems: "center",
+    backgroundColor: tints.pending,
+    borderRadius: 12,
+    flexDirection: "row",
+    gap: 8,
+    height: 44,
+    justifyContent: "center",
+  },
+  queuedText: { color: tones.pending, fontSize: 15, fontWeight: "600" },
   dim: { opacity: 0.5 },
   hint: { color: colors.mutedForeground, fontSize: 13 },
   confirm: {
