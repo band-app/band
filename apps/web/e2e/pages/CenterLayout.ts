@@ -52,13 +52,14 @@ export class CenterLayout {
    * steps so the drag starts (it needs a few pixels of movement) and the drop
    * indicator follows. The mouse is released over the spot; call
    * `dropIndicator` before this returns control to read it, or pass
-   * `release: false` and release with `releaseDrag`.
+   * `release: false` and release with `releaseDrag`. Pass `expectDrop: false` when the layout
+   * must not accept a drag (the phone layout), so the call does not wait for an indicator.
    */
   async dragTab(
     panelId: string,
     toGroup: number,
     at: DropAt,
-    options: { release?: boolean } = {},
+    options: { release?: boolean; expectDrop?: boolean } = {},
   ): Promise<void> {
     await test.step(`Drag tab ${panelId} to ${at} of group ${toGroup}`, async () => {
       const tab = await this.tab(panelId).boundingBox();
@@ -109,6 +110,11 @@ export class CenterLayout {
       await this.page.mouse.down();
       await this.page.mouse.move(startX + 12, startY + 12, { steps: 4 });
       await this.page.mouse.move(x, y, { steps: 12 });
+      // The layout reads its drop target from the last drag-move event, and dnd-kit delivers
+      // that event in an effect after the render. A mouse-up sent right after the final move
+      // can run first and drop on the previous target (the tab stayed last in CI). Wait until
+      // the indicator shows the spot the pointer is over, then release.
+      if (options.expectDrop !== false) await this.waitForDropTarget(toGroup, at);
       if (options.release !== false) await this.page.mouse.up();
     });
   }
@@ -139,6 +145,28 @@ export class CenterLayout {
         }),
       )
       .toBe(0);
+  }
+
+  /** Wait until the drop indicator shows where a pointer at `at` of group `toGroup` would drop. */
+  private async waitForDropTarget(toGroup: number, at: DropAt): Promise<void> {
+    if (at === "tabs-start" || at === "tabs-end") {
+      const tabs = this.groups.nth(toGroup).locator("[data-panel-id]");
+      await expect
+        .poll(async () => {
+          if ((await this.dropIndicator.getAttribute("data-zone")) !== "tabs") return false;
+          const line = await this.dropIndicator.boundingBox();
+          const edge =
+            at === "tabs-start"
+              ? await tabs.first().boundingBox()
+              : await tabs.last().boundingBox();
+          if (!line || !edge) return false;
+          const edgeX = at === "tabs-start" ? edge.x : edge.x + edge.width;
+          return Math.abs(line.x + line.width / 2 - edgeX) <= 2;
+        })
+        .toBe(true);
+    } else {
+      await expect(this.dropIndicator).toHaveAttribute("data-zone", at);
+    }
   }
 
   async releaseDrag(): Promise<void> {

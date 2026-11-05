@@ -18,6 +18,12 @@ on:
   # onto main (and onto the PRs queued ahead of it) before it lands.
   merge_group:
     types: [checks_requested]
+  # Every macOS job in full, on main. A pull request or merge-queue run starts
+  # only the macOS jobs whose paths changed (scripts/ci/macos-changes.sh), so
+  # the nightly run is what catches a macOS-only break outside those paths.
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
 
 # Checkout: every job uses actions/checkout's default ref. For a pull request
 # that is refs/pull/N/merge, the PR merged onto main's current tip, so a PR is
@@ -104,6 +110,14 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          # A push to main lands a commit the merge queue already tested, so
+          # the test jobs do not run again. The release gate accepts the
+          # merge_group run of the same commit (scripts/check-ci-green.sh).
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "Push to main: the merge queue tested this commit, so the test jobs are skipped."
+            exit 0
+          fi
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -316,6 +330,9 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
+      - name: Test (CI report scripts)
+        run: node --test scripts/ci/tests/*.test.mjs
+
       - name: Lint (Biome)
         run: pnpm exec biome check .
 
@@ -456,6 +473,7 @@ jobs:
       NODE_OPTIONS: "--max-old-space-size=6144"
       # runner-docker.test.ts needs the worker image, which only the `docker` job builds.
       BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
+      BAND_FLAKY_DIR: ${{ github.workspace }}/flaky-results
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -477,6 +495,16 @@ jobs:
           BAND_CHROMIUM_NO_SANDBOX: "1"
           BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
         run: pnpm --filter @band-app/server test --shard=${{ matrix.shard }}/${{ matrix.total }}
+
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-hub-${{ matrix.shard }}
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload hub failure logs
         if: failure()
@@ -500,6 +528,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      BAND_FLAKY_DIR: ${{ github.workspace }}/flaky-results
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -527,6 +556,16 @@ jobs:
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
 
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-packages
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   test-e2e:
     name: Test e2e (web) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-24.04
@@ -544,6 +583,8 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.e2e_matrix || '{"shard":[1,2,3],"total":[3]}') }}
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      # Playwright's JSON reporter (apps/web/playwright.config.ts) writes here.
+      PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/flaky-results/playwright-${{ matrix.shard }}.json
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -572,6 +613,16 @@ jobs:
           else
             pnpm --filter @band-app/web test:e2e --shard=${{ matrix.shard }}/${{ matrix.total }}
           fi
+
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-e2e-${{ matrix.shard }}
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Playwright writes per-failure error-context.md snapshots (+ any traces)
       # into test-results/. Without this upload a CI-only e2e flake leaves
@@ -610,6 +661,7 @@ jobs:
       BAND_TEST_HOST: remote-loopback
       BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
       BAND_WORKER_USE_DIST: "1"
+      BAND_FLAKY_DIR: ${{ github.workspace }}/flaky-results
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -638,6 +690,16 @@ jobs:
           BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
           NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
 
+      # Tests that failed and then passed on the CI retry (scripts/ci/report-flaky.mjs reads these).
+      - name: Upload flaky results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-loopback-${{ matrix.shard }}
+          path: ${{ github.workspace }}/flaky-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload hub failure logs
         if: failure()
         uses: actions/upload-artifact@v7
@@ -646,6 +708,103 @@ jobs:
           path: ${{ runner.temp }}/band-test-artifacts/
           if-no-files-found: ignore
           retention-days: 7
+
+  # A test that failed and then passed on the CI retry does not fail its job. This job
+  # collects what the test jobs recorded, prints it in the run summary and, for the merge
+  # queue and main, files or updates one `flaky` issue per test. It is not part of
+  # `lint-test-build`, so it never blocks a merge. `issues: write` is on this job only, and
+  # a pull request run (a fork's too) only prints the summary.
+  flaky-report:
+    name: Flaky report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [test-hub, test-packages, test-e2e, test-remote-loopback]
+    if: always() && !cancelled()
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Download flaky results
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: flaky-*
+          path: flaky-results
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          apply=""
+          if [ "$EVENT_NAME" = "merge_group" ] || [ "$EVENT_NAME" = "push" ]; then apply="--apply"; fi
+          node scripts/ci/report-flaky.mjs --results flaky-results $apply
+
+  # Tests on .github/flaky-quarantine.txt are skipped in the blocking jobs above and run here.
+  # The job never fails the workflow, and nothing waits for it, so a quarantined test keeps
+  # producing results without dropping a PR.
+  test-quarantine:
+    name: Test (quarantine)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    needs: [changes, build]
+    if: >
+      needs.changes.outputs.code == 'true' && (
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved'))
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+      BAND_DOCKER_TEST_RUNS_IN_DOCKER_JOB: "1"
+      BAND_FLAKY_QUARANTINE: only
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Look for quarantined tests
+        id: list
+        run: |
+          if grep -qE '^[^#[:space:]]' .github/flaky-quarantine.txt; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "The quarantine list is empty." >> "$GITHUB_STEP_SUMMARY"
+            echo "has=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/setup-node-rust
+        if: steps.list.outputs.has == 'true'
+        with:
+          rust: "false"
+
+      - uses: ./.github/actions/use-build
+        if: steps.list.outputs.has == 'true'
+
+      - uses: ./.github/actions/setup-playwright
+        if: steps.list.outputs.has == 'true'
+
+      - name: Test quarantined (hub)
+        if: ${{ !cancelled() && steps.list.outputs.has == 'true' }}
+        env:
+          BAND_CHROMIUM_NO_SANDBOX: "1"
+        run: pnpm --filter @band-app/server test
+
+      - name: Test quarantined (web unit)
+        if: ${{ !cancelled() && steps.list.outputs.has == 'true' }}
+        run: pnpm --filter @band-app/web test
+
+      - name: Test quarantined (web e2e)
+        if: ${{ !cancelled() && steps.list.outputs.has == 'true' }}
+        run: pnpm --filter @band-app/web test:e2e --pass-with-no-tests
 
   # The repo ruleset "Require CI active" requires a status check named exactly
   # "Lint, Test & Build", the name of the job this split replaced. This job
@@ -681,57 +840,62 @@ jobs:
   # macOS jobs.
   #
   # The `check` job runs everything on ubuntu-24.04, but several Band paths
-  # behave differently on macOS, and release.yml and nightly.yml run the tests
-  # on macos-latest. Two macOS jobs close that gap before merge:
+  # behave differently on macOS. macOS runners are slow, and GitHub Free allows
+  # 5 macOS jobs at a time, so a pull request or merge-queue run starts only
+  # the jobs whose paths changed (scripts/ci/macos-changes.sh):
   #
-  #   - `cli-macos` runs the CLI integration tests. The `/var/folders` →
-  #     `/private/var/folders` symlink that canonicalize() and git resolve but
-  #     a raw temp path does not silently dropped seeded worktrees during
-  #     path-string reconciliation (the server reconciles worktrees by path
-  #     equality since #606) and broke four CLI integration tests. That passed
-  #     on every Linux PR and only surfaced on the macos-latest release runner
-  #     for v0.24.0 (harness fix: #608).
-  #   - `web-macos` runs the web server's vitest suite in 2 shards, the same step as
-  #     release.yml and nightly.yml. Before it existed, macOS-only failures in
-  #     those tests first showed up in a release or a nightly run.
+  #   - `cli-macos`: the CLI integration tests (`cli`).
+  #   - `machine-macos`: the hub tests listed in scripts/ci/macos-hub-tests.txt
+  #     plus the host-local and worker package tests (`macos-machine`).
+  #   - `simulator-macos`: the two iOS simulator tests (`simulator`).
+  #   - `desktop-macos`: the Electron e2e (`desktop`), and
+  #     `desktop-packaged-macos`: a smoke run of the packaged app when its
+  #     packaging inputs changed (`desktop-package`).
+  #   - `mobile-ios`: the iOS simulator build (`mobile`).
   #
-  # They are not macOS clones of `check`: macOS runners are slower and
-  # costlier, so each runs only the suite with a macOS-specific failure mode
-  # (no lint, no e2e), and `macos-changes` below skips each one on PRs that
-  # don't touch its code. A skipped job counts as passed for a required check,
-  # so both job names can be required. Pull requests run none of the macOS jobs
-  # (every one has `github.event_name != 'pull_request'`); the merge queue and
-  # pushes to main run them all.
+  # A scheduled (nightly) or manual run starts every one of them in full, and
+  # `web-macos` runs the whole hub suite on macOS. A push to main starts none:
+  # the merge queue tested that commit. A macOS-only break outside the filtered
+  # paths therefore shows up in the nightly run (Actions tab, workflow CI,
+  # event "schedule"), not in the queue.
+  #
+  # A skipped job counts as passed for a required check, so the job names can be
+  # required. Pull requests run none of the macOS jobs (every one has
+  # `github.event_name != 'pull_request'`).
   # ---------------------------------------------------------------------------
   macos-changes:
     name: Detect macOS-relevant changes
     runs-on: ubuntu-24.04
-    # Mirror the `check` job's cost gate: run on push to main, in the merge
-    # queue, on same-repo PRs (collaborators), and on fork PRs a maintainer
-    # labelled `ci:approved`.
+    # Mirror the `check` job's cost gate: run in the merge queue, on same-repo
+    # PRs (collaborators), on fork PRs a maintainer labelled `ci:approved`, and
+    # on push to main (where it turns every job off) and the nightly run.
     if: >
       github.event_name == 'push' ||
       github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
       contains(github.event.pull_request.labels.*.name, 'ci:approved')
     outputs:
       cli: ${{ steps.filter.outputs.cli }}
-      web: ${{ steps.filter.outputs.web }}
+      macos-machine: ${{ steps.filter.outputs.macos-machine }}
+      simulator: ${{ steps.filter.outputs.simulator }}
       docker: ${{ steps.filter.outputs.docker }}
       desktop: ${{ steps.filter.outputs.desktop }}
+      desktop-package: ${{ steps.filter.outputs.desktop-package }}
       mobile: ${{ steps.filter.outputs.mobile }}
+      full-suite: ${{ steps.filter.outputs.full-suite }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          # Full history so the base commit is reachable for the diff below.
+          # Full history so the base commit is reachable for the diff.
           fetch-depth: 0
 
-      # Native git-diff path gate — same idiom as the "Check for docs changes"
-      # step in deploy-docs, so we don't add a third-party action to a workflow
-      # this security-conscious repo deliberately runs under `pull_request`
-      # (no secrets, PR-scoped cache). Fails OPEN: any ambiguity about the base
-      # runs the macOS jobs rather than risk skipping a real regression.
+      # The path lists live in scripts/ci/macos-changes.sh, which
+      # scripts/ci/macos-changes.test.mjs covers. Native git diff, no
+      # third-party action, in a workflow this repo runs under `pull_request`.
+      # Fails OPEN: any ambiguity about the base turns the jobs on.
       - name: Detect macOS-relevant changes
         id: filter
         env:
@@ -740,91 +904,13 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
           QUEUE_HEAD: ${{ github.event.merge_group.head_sha }}
-          PUSH_BASE: ${{ github.event.before }}
-          PUSH_HEAD: ${{ github.sha }}
         run: |
           set -euo pipefail
           case "$EVENT_NAME" in
-            pull_request) BASE="$PR_BASE"; HEAD="$PR_HEAD" ;;
-            merge_group) BASE="$QUEUE_BASE"; HEAD="$QUEUE_HEAD" ;;
-            *) BASE="$PUSH_BASE"; HEAD="$PUSH_HEAD" ;;
+            pull_request) export BASE="$PR_BASE" HEAD="$PR_HEAD" ;;
+            merge_group) export BASE="$QUEUE_BASE" HEAD="$QUEUE_HEAD" ;;
           esac
-
-          run_all() {
-            echo "cli=true" >> "$GITHUB_OUTPUT"
-            echo "web=true" >> "$GITHUB_OUTPUT"
-            echo "docker=true" >> "$GITHUB_OUTPUT"
-            echo "desktop=true" >> "$GITHUB_OUTPUT"
-            echo "mobile=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          }
-
-          # No usable base (first push, force-push, all-zero SHA): fail open.
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            run_all
-          fi
-          # `fetch-depth: 0` above already pulls full history, so $BASE is
-          # normally present. This shallow fetch is a belt-and-suspenders net
-          # for the edge case where the base branch was force-pushed and $BASE
-          # (recorded at PR-creation time) is orphaned from the fetched refs —
-          # GitHub still serves the loose commit. Then diff against the merge
-          # base (three-dot) so we only see what THIS branch changed, not
-          # unrelated commits that landed on main. Any git error → fail open.
-          git fetch --no-tags --depth=1 origin "$BASE" 2>/dev/null || true
-          if ! CHANGED=$(git diff --name-only "$BASE...$HEAD" 2>/dev/null); then
-            run_all
-          fi
-
-          # CLI: the surface that can trigger the macOS-only worktree
-          # path-reconciliation bug: the CLI + its test harness, the server
-          # sync/worktree services, the worktrees query layer, and this
-          # workflow file itself.
-          if grep -qE '^(apps/cli/|apps/hub/src/server/services/(sync-service|worktree-service)\.ts$|apps/hub/src/server/infra/db/queries/worktrees\.ts$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
-            echo "cli=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "cli=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Web: what the vitest suite exercises beyond the React UI: the
-          # server (terminals, the terminal daemon, worktrees and git live
-          # under apps/hub/src/server/), the code it shares with the client (packages/shared), the tests
-          # and their build, the workspace packages and plugins the server
-          # loads, the CLI the tests shell out to, the lockfile and Node
-          # version, and this workflow file. A change only to the React UI
-          # (components, dashboard, routes) or to e2e specs stays Linux-only.
-          # Pushes to main always run it. (A here-string, not a pipe: under
-          # pipefail, `grep -q` exiting early would fail the pipe on a big diff.)
-          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/hub/|apps/web/(src/lib/|tests/|scripts/|package\.json$|vitest\.config\.ts$)|packages/|plugins/|apps/cli/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
-            echo "web=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "web=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Desktop: the Electron app, the UI it loads over app://, the hub it
-          # spawns or talks to, and what they share.
-          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/desktop/|apps/worker/|apps/web/(src/|e2e-desktop/|public/|scripts/|package\.json$|playwright\.desktop\.config\.ts$)|apps/hub/|packages/|plugins/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
-            echo "desktop=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "desktop=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Mobile: the Expo app, the packages it imports, its dependencies and
-          # this workflow file. Path-filtered on pushes too: the simulator build
-          # takes minutes and nothing outside these paths reaches the app.
-          if grep -qE '^(apps/mobile/|packages/client/|packages/shared/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
-            echo "mobile=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "mobile=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Docker: the image builds the Rust CLI, the hub and the UI, so it
-          # depends on the Dockerfile, the build scripts, every app, the
-          # packages and plugins, the lockfile and this workflow file.
-          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(docker/|deploy/|runners/|\.dockerignore$|apps/|packages/|plugins/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
-            echo "docker=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "docker=false" >> "$GITHUB_OUTPUT"
-          fi
+          scripts/ci/macos-changes.sh | tee -a "$GITHUB_OUTPUT"
 
   # Builds docker/Dockerfile and starts the image. #743 turned the UI into a
   # static SPA whose shell is prerendered at build time. The prerender failed
@@ -1312,11 +1398,12 @@ jobs:
   web-macos:
     name: Web Tests (macOS) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: macos-latest
-    # A hung test must not hold the job for the 6 hour default. The simulator steps below add a
-    # cold device boot each (about 3 to 6 minutes on a runner).
-    timeout-minutes: 60
+    # A hung test must not hold the job for the 6 hour default.
+    timeout-minutes: 45
     needs: macos-changes
-    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.web == 'true'
+    # The whole hub suite on macOS: nightly, manual runs and edits to this
+    # workflow only. A merge starts `machine-macos` instead.
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.full-suite == 'true'
     # Two shards of the hub suite (vitest splits by file) halve the wall time of
     # the merge queue's longest job. Both shards use the same cache keys. Do not
     # add a third: macOS allows 5 concurrent jobs.
@@ -1427,6 +1514,283 @@ jobs:
           pnpm --filter @band-app/host-local test
           pnpm --filter @band-app/worker test
 
+      - name: Upload hub failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-macos-failure-logs-${{ matrix.shard }}
+          path: ${{ runner.temp }}/band-test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Save Cargo registry cache
+        if: |
+          always() &&
+          steps.cache-cargo-registry.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Save CLI release target cache
+        if: |
+          steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+
+  machine-macos:
+    name: Machine Tests (macOS)
+    runs-on: macos-latest
+    # A hung test must not hold the job for the 6 hour default.
+    timeout-minutes: 45
+    needs: macos-changes
+    # Terminals, PTYs, daemons and the worker's service code. The nightly run
+    # (`web-macos`) covers these files in the whole hub suite.
+    if: >
+      github.event_name != 'pull_request' &&
+      needs.macos-changes.outputs.macos-machine == 'true' &&
+      needs.macos-changes.outputs.full-suite != 'true'
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Same restore/save split and trust gate as the `check` job; keep each
+      # Restore/Save pair's path & key in lock-step. The CLI target cache has
+      # its own key: this job release-builds the CLI while `cli-macos` fills
+      # `cargo-cli-macOS-*` with a test-profile build, and whichever saved
+      # first would leave the other compiling from scratch every run. The
+      # fallback restore-key still reuses that cache's dependencies.
+      - name: Restore Cargo registry cache
+        id: cache-cargo-registry
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Restore CLI release target cache
+        id: cache-cargo-cli
+        uses: actions/cache/restore@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: |
+            cargo-cli-release-${{ runner.os }}-
+            cargo-cli-${{ runner.os }}-
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store cache
+        id: cache-pnpm-store
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      # macos-latest ships node-pty's darwin prebuild, so (unlike the ubuntu
+      # job) no explicit `node-gyp` install is needed — matches release.yml.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Save pnpm store cache
+        if: |
+          steps.cache-pnpm-store.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Some web tests (e.g. `cli-skills.test.ts`) shell out to a real `band`
+      # binary, so build it first, as `check`, release.yml and nightly.yml do.
+      - name: Build CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+      - name: Build web (needed by tests)
+        run: pnpm build:web
+
+      # The hub test files that cover what differs on macOS. The list is
+      # scripts/ci/macos-hub-tests.txt. `pnpm build:web` above already built the
+      # hub bundle, so vitest runs directly (`pnpm --filter @band-app/server test`
+      # would build again in its `pretest`).
+      - name: Test (hub, macOS-specific files)
+        env:
+          BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
+          NODE_OPTIONS: "--max-old-space-size=6144 --no-warnings=ExperimentalWarning"
+        run: |
+          FILES=$(grep -vE '^(#|$)' scripts/ci/macos-hub-tests.txt)
+          # shellcheck disable=SC2086
+          pnpm --filter @band-app/server exec vitest run $FILES
+
+      - name: Test (host-local and worker packages)
+        run: |
+          pnpm --filter @band-app/link test
+          pnpm --filter @band-app/host-local test
+          pnpm --filter @band-app/worker test
+
+      - name: Upload hub failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: machine-macos-failure-logs
+          path: ${{ runner.temp }}/band-test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Save Cargo registry cache
+        if: |
+          always() &&
+          steps.cache-cargo-registry.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Save CLI release target cache
+        if: |
+          steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+
+  simulator-macos:
+    name: Simulator Tests (macOS)
+    runs-on: macos-latest
+    # A hung test must not hold the job for the 6 hour default. Each test adds a
+    # cold device boot (about 3 to 6 minutes on a runner).
+    timeout-minutes: 45
+    needs: macos-changes
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.simulator == 'true'
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Same restore/save split and trust gate as the `check` job; keep each
+      # Restore/Save pair's path & key in lock-step. The CLI target cache has
+      # its own key: this job release-builds the CLI while `cli-macos` fills
+      # `cargo-cli-macOS-*` with a test-profile build, and whichever saved
+      # first would leave the other compiling from scratch every run. The
+      # fallback restore-key still reuses that cache's dependencies.
+      - name: Restore Cargo registry cache
+        id: cache-cargo-registry
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Restore CLI release target cache
+        id: cache-cargo-cli
+        uses: actions/cache/restore@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: |
+            cargo-cli-release-${{ runner.os }}-
+            cargo-cli-${{ runner.os }}-
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store cache
+        id: cache-pnpm-store
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      # macos-latest ships node-pty's darwin prebuild, so (unlike the ubuntu
+      # job) no explicit `node-gyp` install is needed — matches release.yml.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Save pnpm store cache
+        if: |
+          steps.cache-pnpm-store.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Some web tests (e.g. `cli-skills.test.ts`) shell out to a real `band`
+      # binary, so build it first, as `check`, release.yml and nightly.yml do.
+      - name: Build CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+      - name: Build web (needed by tests)
+        run: pnpm build:web
+
       # The simulator tests boot real iOS simulators and skip on CI unless BAND_TEST_SIMULATOR=1.
       # Only two cases run here, one device each at a time (BAND_SIMULATOR_MAX_BOOTED=1): the hub
       # test that the stream carries frames and stays view-only until control (S4), and the e2e
@@ -1454,7 +1818,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: web-macos-failure-logs-${{ matrix.shard }}
+          name: simulator-macos-failure-logs
           path: ${{ runner.temp }}/band-test-artifacts/
           if-no-files-found: ignore
           retention-days: 7
@@ -1463,7 +1827,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-web-macos-test-results-${{ matrix.shard }}
+          name: playwright-simulator-macos-test-results
           path: apps/web/test-results/
           if-no-files-found: ignore
           retention-days: 7
@@ -1591,13 +1955,16 @@ jobs:
   # output instead of the dev tree: it proves the packaged app starts, loads
   # the bundled UI from app://, spawns the hub from its Resources/ and shows
   # the dashboard. Unsigned and unnotarised, no DMG, nothing published.
+  # On a merge it runs only when the packaging inputs changed, and only as a
+  # smoke check: the app starts from the bundle and connects to a hub, and the
+  # bundled worker installs. The nightly run (`full-suite`) runs every spec.
   desktop-packaged-macos:
     name: Desktop e2e, packaged app (macOS)
     runs-on: macos-latest
     # A hung test must not hold the job for the 6 hour default.
     timeout-minutes: 45
     needs: macos-changes
-    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.desktop == 'true'
+    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.desktop-package == 'true'
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 
@@ -1648,7 +2015,16 @@ jobs:
         run: |
           EXE="$PWD/apps/desktop/dist-builder/mac-arm64/Band.app/Contents/MacOS/Band"
           test -x "$EXE"
-          BAND_DESKTOP_EXECUTABLE="$EXE" pnpm --filter @band-app/web test:e2e:desktop
+          if [ "$FULL_SUITE" = "true" ]; then
+            BAND_DESKTOP_EXECUTABLE="$EXE" pnpm --filter @band-app/web test:e2e:desktop
+          else
+            # Smoke: the app starts from the bundle, spawns its hub and loads the UI,
+            # and the bundled worker installs and goes online on a remote hub.
+            BAND_DESKTOP_EXECUTABLE="$EXE" pnpm --filter @band-app/web test:e2e:desktop \
+              -g "local hub: loads app://|S1: connecting to a remote hub"
+          fi
+        env:
+          FULL_SUITE: ${{ needs.macos-changes.outputs.full-suite }}
 
       - name: Upload Playwright failure artifacts
         if: failure()
@@ -1661,7 +2037,7 @@ jobs:
 
   # Second required check for the merge queue. The macOS jobs, the Docker image
   # and the k8s (kind) job are path-filtered, so they are skipped on PRs that do
-  # not touch what they cover. Unlike `lint-test-build`, a skipped needed job
+  # not touch what they cover, and on a push to main. Unlike `lint-test-build`, a skipped needed job
   # passes here and only a failed or cancelled one fails the check. `deploy-docs`
   # is left out: it runs on push to main only. Same fork gate as the jobs it
   # waits for.
@@ -1674,12 +2050,16 @@ jobs:
       - k8s
       - cli-macos
       - web-macos
+      - machine-macos
+      - simulator-macos
       - mobile-ios
       - desktop-macos
       - desktop-packaged-macos
     if: >
       always() && (
       github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
       contains(github.event.pull_request.labels.*.name, 'ci:approved'))
     steps:
@@ -1693,8 +2073,9 @@ jobs:
   deploy-docs:
     name: Deploy Docs
     runs-on: ubuntu-24.04
+    # The merge queue tested this commit before it landed, so no test job
+    # gates the deploy.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [check, test-hub, test-packages, test-e2e]
 
     steps:
       - name: Checkout

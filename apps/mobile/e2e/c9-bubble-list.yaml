@@ -1,0 +1,24 @@
+# User bubbles with markdown lists hold all of their text; short bubbles still shrink to fit.
+# (Maestro sees the text, not the overflow: the screenshots are the check.)
+appId: app.getband.mobile
+name: C9 user bubbles fit their lists
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-bubble
+- extendedWaitUntil:
+    visible:
+      id: chat__list
+    timeout: 15000
+- assertVisible:
+    text: ".*benchmark in the tests folder.*"
+- takeScreenshot: c9-long-list
+- scrollUntilVisible:
+    element:
+      text: "Bubble short.*"
+    direction: UP
+    speed: 40
+    timeout: 30000
+- takeScreenshot: c9-short-list

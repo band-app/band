@@ -322,7 +322,7 @@ export class RemoteHost implements Host {
   // The worker keeps the browser. `browser.connect` opens one channel of length-prefixed CDP
   // messages, and resetting it drops the connection but not the browser.
   readonly browser: HostBrowser = {
-    open: (spec) => this.rpc.call("browser.open", spec, { timeoutMs: 60_000 }),
+    open: (spec) => this.rpc.call("browser.open", spec, { timeoutMs: 150_000 }),
     connect: async (worktreeId) => {
       const reply = await this.rpc.request<{ chan: number }>("browser.connect", { worktreeId });
       const ch = this.rpc.channel(reply.chan);
