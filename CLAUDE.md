@@ -81,9 +81,21 @@ An agent session runs in a Band worker, so its environment carries the worker's 
 
 ### Where tests run
 
-Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite in 2 shards, with the web unit and package suites in shard 1 (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
+Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request.
 
-Each `web-macos` shard runs its half of the hub suite with `vitest run --shard=N/2` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+The merge queue starts a macOS job only when the change touches code that behaves differently there. `scripts/ci/macos-changes.sh` holds the path lists (`scripts/ci/macos-changes.test.mjs` tests them, run it with `node --test scripts/ci/macos-changes.test.mjs`):
+
+- `cli-macos` (CLI integration tests): `apps/cli/`, and the worktree sync files behind the `/var/folders` path bug.
+- `machine-macos`: `packages/host-local/`, `packages/link/`, the worker's service, terminal, agent, update and lease code, and the hub test files listed in `scripts/ci/macos-hub-tests.txt`. It runs those hub files and the host-local, link and worker package tests, not the whole hub suite.
+- `simulator-macos`: `plugins/simulator/`, the remote screen pane and the worker plugin host. It runs the two simulator tests once.
+- `desktop-macos`: `apps/desktop/`, the bundled worker, the direct path and `apps/web/e2e-desktop/`. `desktop-packaged-macos` runs two specs of the packaged app as a smoke check, only when `electron-builder.yml`, `apps/desktop/`, `apps/worker/scripts/` or the lockfile changed.
+- `mobile-ios`: `apps/mobile/` and the packages it imports.
+
+A change to `ci.yml` or the filter script starts every job, the full-suite jobs included. A push to main starts none, because the merge queue tested that commit. `scripts/check-ci-green.sh` accepts the queue's `merge_group` run of the same SHA for the release gate.
+
+The nightly run (`schedule` in `ci.yml` at 02:30 UTC, also `workflow_dispatch`) runs every macOS job in full: the whole hub suite on macOS in 2 shards with the web unit and package suites in shard 1 (`web-macos`), the whole packaged desktop e2e, the CLI suite and the simulator tests. A macOS-only break outside the filtered paths first shows up there. Look at the Actions tab, workflow CI, event "schedule". A test that needs macOS to fail is still written as an ordinary test, with no list to join.
+
+In the nightly run each `web-macos` shard runs its half of the hub suite with `vitest run --shard=N/2` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
 
 ### Exceptions
 
@@ -205,7 +217,7 @@ The pre-push hook also runs `scripts/flake-guard.mjs`. It repeats each test file
 
 **Always run `/review-and-apply` before pushing code.** This invokes the `review-and-apply` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
 
-PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a skip counts as a pass) on that branch before it squash-merges. Pull requests run Linux jobs, Docker and k8s (kind) only: every macOS job has `github.event_name != 'pull_request'`, so the macOS jobs first run in the merge queue, and a macOS-only failure surfaces there. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
+PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a skip counts as a pass) on that branch before it squash-merges. Pull requests run Linux jobs, Docker and k8s (kind) only: every macOS job has `github.event_name != 'pull_request'`, so the macOS jobs first run in the merge queue, and only for the paths they cover (see Where tests run). A macOS-only failure elsewhere surfaces in the nightly run. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
 
 ## Issue tracking
 
