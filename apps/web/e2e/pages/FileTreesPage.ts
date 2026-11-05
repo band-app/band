@@ -26,7 +26,7 @@
  * here.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { FILE_VIEWER_ROOT_TESTID } from "./FileViewerPage";
 import type { WorktreePage } from "./WorktreePage";
 
@@ -333,6 +333,33 @@ export class FileTreesPage {
         if (opts?.copy) await this.page.keyboard.up("Alt");
       }
     });
+  }
+
+  /**
+   * Start a drag on a row and return what it put on the DataTransfer. A row
+   * mints its download grant on hover, so this hovers first and retries the
+   * dragstart until `DownloadURL` appears (`expectGrant: false` reads once).
+   */
+  async dragData(
+    path: string,
+    opts?: { expectGrant?: boolean },
+  ): Promise<{ downloadUrl: string; plainText: string; internal: string }> {
+    const row = this.fileTreeRow(path);
+    await row.hover();
+    const read = () =>
+      row.evaluate((el) => {
+        const dt = new DataTransfer();
+        el.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+        return {
+          downloadUrl: dt.getData("DownloadURL"),
+          plainText: dt.getData("text/plain"),
+          internal: dt.getData("application/x-band-tree-entry"),
+        };
+      });
+    // A folder never gets a grant, so there is nothing to wait for.
+    if (opts?.expectGrant === false) return read();
+    await expect.poll(async () => (await read()).downloadUrl).not.toBe("");
+    return read();
   }
 
   /** Drag a Files-tree row onto the empty area below the rows (the root). */

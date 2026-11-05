@@ -112,3 +112,32 @@ test("a folder row has no Download item", async ({ page }) => {
   await expect(trees.menuItem("new-file")).toBeVisible();
   await expect(trees.menuItem("download")).toHaveCount(0);
 });
+
+test("a file drag carries a signed DownloadURL beside the internal data and the path", async ({
+  page,
+}) => {
+  const trees = await openExplorer(page);
+
+  const drag = await trees.dragData("dl/notes.txt");
+
+  expect(drag.plainText).toBe("dl/notes.txt");
+  expect(JSON.parse(drag.internal)).toEqual({ path: "dl/notes.txt", kind: "file" });
+  const [mime, name, ...rest] = drag.downloadUrl.split(":");
+  expect(mime).toBe("text/plain");
+  expect(name).toBe("notes.txt");
+  const url = rest.join(":");
+  expect(url).toMatch(/^http:\/\/.+\/api\/worktree-download\//);
+  // Another app fetches it with no auth header or cookie.
+  const res = await fetch(url);
+  expect(res.status).toBe(200);
+  expect(await res.text()).toBe(TEXT);
+});
+
+test("a folder drag carries no DownloadURL", async ({ page }) => {
+  const trees = await openExplorer(page);
+
+  const drag = await trees.dragData("dl/sub", { expectGrant: false });
+
+  expect(drag.downloadUrl).toBe("");
+  expect(drag.plainText).toBe("dl/sub");
+});
