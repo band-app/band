@@ -52,9 +52,20 @@ export class LeaseGuard {
   private timer: NodeJS.Timeout | null = null;
   private ttlMs = 0;
   private readonly stoppers: Array<() => void | Promise<void>> = [];
+  private readonly renewListeners: Array<() => void | Promise<void>> = [];
   private readonly blockListeners: Array<(blocked: string[]) => void | Promise<void>> = [];
 
   constructor(private readonly options: LeaseGuardOptions) {}
+
+  /** Whether the lease ran out and nothing may start until the hub renews. */
+  isFenced(): boolean {
+    return this.fenced;
+  }
+
+  /** Registers what runs after each renewal, such as services the fence held back. */
+  onRenewed(fn: () => void | Promise<void>): void {
+    this.renewListeners.push(fn);
+  }
 
   /** Registers what the fence stops, such as the running agents. */
   onFence(stop: () => void | Promise<void>): void {
@@ -96,6 +107,14 @@ export class LeaseGuard {
       this.fenced = false;
     }
     this.arm();
+    for (const fn of this.renewListeners) {
+      await Promise.resolve(fn()).catch((err) =>
+        this.options.log.warn(
+          { message: err instanceof Error ? err.message : String(err) },
+          "renewal listener",
+        ),
+      );
+    }
     return reply;
   }
 

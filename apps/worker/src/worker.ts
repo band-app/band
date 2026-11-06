@@ -35,6 +35,7 @@ import { WorkerCli } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerDirectMethods } from "./direct.ts";
+import { createExtensionHost, registerExtensionMethods } from "./extensions.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
 import { LeaseGuard } from "./lease.ts";
 import { registerAgentMethods } from "./methods-agents.ts";
@@ -101,6 +102,8 @@ export interface WorkerOptions {
   serviceManager?: ServiceManager | null;
   /** How long a worker the hub refused for its version waits before it gives up. Default 5 minutes. */
   versionRetryMs?: number;
+  /** Extension service host settings to override, such as a faster restart for a test. */
+  extensions?: { restartBackoffMs?: number };
 }
 
 /** The hub refused this worker's version. It waits, so a service manager's restart does not redial every few seconds. */
@@ -282,7 +285,14 @@ export class Worker {
       plugins: runningPlugins,
       ...(agentHolder ? { agentHolder } : {}),
     };
+    ctx.extensions = createExtensionHost(ctx, {
+      workerId,
+      workerVersion: WORKER_VERSION,
+      bundledHas: (id) => runningPlugins.has(id),
+      ...options.extensions,
+    });
     const registrar = new Registrar(ctx);
+    registerExtensionMethods(registrar, ctx);
     registrar.json(METHOD_LEASE_RENEW, (a) => {
       const p = a as unknown as LeaseRenewParams;
       if (typeof p.ttlMs !== "number" || !Number.isFinite(p.ttlMs) || p.ttlMs <= 0) {

@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { ExtensionInstallError, extensionService } from "../../services/extension-service";
+import { pluginHost } from "../../services/plugin-host-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 
 /**
@@ -29,6 +30,36 @@ export const extensionsRouter = t.router({
       return { ok: true as const };
     }),
   ),
+  /**
+   * Calls a worker service of an installed extension, on the worker that holds a worktree. Admin
+   * only, and left out of the MCP endpoint and the relay: agents reach a service through the tools
+   * an extension registers. `capability` is the name the service's manifest entry gives.
+   */
+  callService: adminProcedure
+    .input(
+      z.object({
+        worktreeId: z.string().min(1),
+        capability: z.string().min(1).max(64),
+        method: z.string().min(1).max(100),
+        params: z.unknown().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        const result = await pluginHost.callForWorktree(
+          input.capability,
+          input.worktreeId,
+          input.method,
+          input.params ?? {},
+        );
+        return { result: result ?? null };
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }),
   list: publicProcedure.query(() => extensionService.list()),
   reload: adminProcedure.mutation(() => extensionService.reload()),
 });

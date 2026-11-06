@@ -51,6 +51,7 @@
   },
   "devDependencies": {
     "@band-app/chat-runtime": "workspace:^",
+    "@band-app/extension-worker-sdk": "workspace:^",
     "@band-app/host-api": "workspace:^",
     "@band-app/host-local": "workspace:^",
     "@band-app/host-remote": "workspace:^",

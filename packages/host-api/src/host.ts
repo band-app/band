@@ -66,6 +66,11 @@ export interface Host {
    * no worker plugins.
    */
   readonly plugins?: HostPlugins;
+  /**
+   * The worker services of installed extensions. Only a remote host has it: the hub's own machine
+   * runs none.
+   */
+  readonly extensions?: HostExtensions;
 }
 
 // ---------------------------------------------------------------------------
@@ -910,6 +915,37 @@ export interface DirectGrant {
   token: string;
   /** Epoch ms after which the listener refuses the token. */
   expiresAt: number;
+}
+
+/** One extension the worker should run (`extensions.sync`). */
+export interface HostExtensionItem {
+  id: string;
+  version: string;
+  /** SHA-256 of the extension's `.tar.gz`, hex. */
+  sha256: string;
+}
+
+/** One worker service of an extension and where it stands on a worker. */
+export interface HostExtensionServiceState {
+  extensionId: string;
+  serviceId: string;
+  capability: string;
+  version: string;
+  state: "running" | "restarting" | "stopped" | "failed" | "not-eligible";
+  reason?: string;
+}
+
+export interface HostExtensionStates {
+  services: HostExtensionServiceState[];
+  /** Extensions the worker could not set up at all, with the reason. */
+  problems: Array<{ extensionId: string; reason: string }>;
+}
+
+export interface HostExtensions {
+  /** Makes the worker's running set equal `items` and returns the states. */
+  sync(items: HostExtensionItem[]): Promise<HostExtensionStates>;
+  /** The states now, without changing anything. */
+  status(): Promise<HostExtensionStates>;
 }
 
 export interface HostPlugins {

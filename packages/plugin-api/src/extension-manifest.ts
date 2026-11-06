@@ -33,6 +33,28 @@ export const fileEditorSchema = z
   })
   .strict();
 
+/** One requirement of a worker service: a worker fact such as `os=darwin`, or a binary name. */
+const requirementSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z0-9._+@=-]+$/, "A requirement is `key=value` or a binary name");
+
+/**
+ * A process the worker runs for the extension. `entry` is a `.mjs` file in the extension folder.
+ * The worker starts it on every eligible worker (standard or admin trust, `requires` met) and
+ * reports `capability` once it runs.
+ */
+export const workerServiceSchema = z
+  .object({
+    id: idSchema,
+    entry: entrySchema.refine((p) => p.endsWith(".mjs"), "A service entry is a .mjs file"),
+    requires: z.array(requirementSchema).default([]),
+    /** What the worker reports in its capabilities while the service runs. The hub's `plugin.call` names it. */
+    capability: idSchema,
+  })
+  .strict();
+
 /**
  * `band-extension.json`. The hub validates the manifest with this schema before it serves the
  * extension's files. An unknown key is an error.
@@ -41,11 +63,14 @@ export const extensionManifestSchema = z
   .object({
     id: idSchema,
     name: z.string().min(1),
-    version: z.string().min(1),
+    version: z
+      .string()
+      .regex(/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/, "The version is letters, digits, . _ + -"),
     extensionApi: z.literal(EXTENSION_API_VERSION),
     contributes: z
       .object({
         fileEditors: z.array(fileEditorSchema).default([]),
+        workerServices: z.array(workerServiceSchema).default([]),
       })
       .strict()
       .default({}),
@@ -53,6 +78,7 @@ export const extensionManifestSchema = z
   .strict();
 
 export type FileEditorManifest = z.infer<typeof fileEditorSchema>;
+export type WorkerServiceManifest = z.infer<typeof workerServiceSchema>;
 export type ExtensionManifest = z.infer<typeof extensionManifestSchema>;
 
 /** Whether a file name matches a selector glob (`*` any run, `?` one character, case-insensitive). */

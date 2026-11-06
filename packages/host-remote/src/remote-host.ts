@@ -20,6 +20,7 @@ import type {
   HostBrowser,
   HostDesktop,
   HostDirect,
+  HostExtensions,
   HostExternalFiles,
   HostFs,
   HostGit,
@@ -53,6 +54,8 @@ import {
   encodeMessageFrame,
   type LinkSession,
   METHOD_DIRECT_REGISTER,
+  METHOD_EXTENSIONS_STATUS,
+  METHOD_EXTENSIONS_SYNC,
   METHOD_PLUGIN_CALL,
   METHOD_PLUGIN_STREAM,
   METHOD_RELAY_REGISTER,
@@ -385,6 +388,11 @@ export class RemoteHost implements Host {
       // The worker's clock decides, and it is the clock of the client that renews the token.
       return { port: reply.port, token, expiresAt: reply.expiresAt };
     },
+  };
+
+  readonly extensions: HostExtensions = {
+    sync: (items) => this.rpc.call(METHOD_EXTENSIONS_SYNC, { items }, { timeoutMs: 180_000 }),
+    status: () => this.rpc.call(METHOD_EXTENSIONS_STATUS),
   };
 
   readonly plugins: HostPlugins = {

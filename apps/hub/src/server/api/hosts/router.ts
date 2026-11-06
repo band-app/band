@@ -13,6 +13,7 @@ import { describeHostVersion } from "../../services/_utils/host-version";
 import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";
 import { agentLoginService } from "../../services/agent-login-service";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
+import { extensionWorkerService } from "../../services/extension-worker-service";
 import {
   AgentCommandError,
   hostAgentCommandService,
@@ -97,6 +98,14 @@ export const hostsRouter = t.router({
           hosts.map(async (h) => ({
             ...h,
             sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+            // The reason can hold the service's stderr, so it is admin detail.
+            extensionServices: (
+              await extensionWorkerService.viewFor(h.id, h.status === "online")
+            ).map((v) =>
+              ctx.admin || v.state === "running" || v.state === "not-eligible"
+                ? v
+                : { ...v, reason: "see an admin for details" },
+            ),
             ...describeHostVersion(h, HUB_VERSION, latest),
             update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
             // Command names and paths are admin detail, like the update error above.
@@ -286,6 +295,8 @@ export const hostsRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: `No worker "${input.hostId}"` });
       }
       emit({ kind: "host-status-changed", hostId: input.hostId });
+      // A worker that drops to restricted stops its extension services, and one raised starts them.
+      void extensionWorkerService.syncHost(input.hostId);
       return { hostId: input.hostId, trust: input.trust };
     }),
 
