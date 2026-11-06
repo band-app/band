@@ -1849,6 +1849,19 @@ export class ChatPanePage {
         ).__flickerSamples ?? [],
     );
   }
+
+  /** Brightness (0 black to 255 white) of a message label in a rendered
+   *  mermaid sequence diagram in the chat. */
+  async mermaidTextBrightness(): Promise<number> {
+    const label = this.page.locator("svg .messageText").first();
+    await expect(label).toBeVisible({ timeout: 30_000 });
+    return await label.evaluate((el) => {
+      const [r, g, b] = getComputedStyle(el)
+        .fill.match(/\d+(\.\d+)?/g)
+        ?.map(Number) ?? [0, 0, 0];
+      return (r + g + b) / 3;
+    });
+  }
 }
 
 function escapeRegExp(text: string): string {

@@ -10,19 +10,29 @@
 import { createRoot } from "react-dom/client";
 import { Streamdown } from "streamdown";
 import type { RenderMarkdownBlock } from "@/dashboard";
-import { streamdownComponents, streamdownPlugins } from "./streamdown-components";
+import {
+  streamdownComponents,
+  streamdownPlugins,
+  useStreamdownMermaid,
+} from "./streamdown-components";
 
-export const renderMarkdownBlock: RenderMarkdownBlock = ({ source }, container) => {
-  const root = createRoot(container);
-  root.render(
+function MarkdownBlock({ source }: { source: string }) {
+  const mermaid = useStreamdownMermaid();
+  return (
     <Streamdown
       className="size-full break-words leading-relaxed [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       plugins={streamdownPlugins}
+      mermaid={mermaid}
       components={streamdownComponents}
     >
       {source}
-    </Streamdown>,
+    </Streamdown>
   );
+}
+
+export const renderMarkdownBlock: RenderMarkdownBlock = ({ source }, container) => {
+  const root = createRoot(container);
+  root.render(<MarkdownBlock source={source} />);
   // CodeMirror destroys widgets while it updates the view; unmounting React
   // synchronously from there can land inside a React render, so defer it.
   return () => queueMicrotask(() => root.unmount());

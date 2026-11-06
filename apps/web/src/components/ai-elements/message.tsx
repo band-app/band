@@ -7,7 +7,7 @@ import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdo
 import { hubAssetUrl } from "../../lib/hub-config";
 import { parseSharedFileUrl, sharedFilePath } from "../../lib/shared-file";
 import { useDirectAssetUrl } from "../../lib/use-direct-asset-url";
-import { streamdownPlugins } from "../streamdown-components";
+import { streamdownPlugins, useStreamdownMermaid } from "../streamdown-components";
 import { getWorktreeLeafActions } from "../WorktreeCenter";
 import {
   fileLinkComponents,
@@ -60,24 +60,29 @@ export const MessageContent = ({ children, className, ...props }: MessageContent
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full break-words leading-relaxed [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className,
-      )}
-      plugins={streamdownPlugins}
-      components={fileLinkComponents}
-      remarkPlugins={[
-        ...Object.values(defaultRemarkPlugins),
-        remarkBreaks,
-        ...fileLinkRemarkPlugins,
-      ]}
-      rehypePlugins={[...Object.values(defaultRehypePlugins), ...fileLinkRehypePlugins]}
-      urlTransform={fileLinkUrlTransform}
-      {...props}
-    />
-  ),
+  ({ className, ...props }: MessageResponseProps) => {
+    const mermaid = useStreamdownMermaid();
+    return (
+      <Streamdown
+        key={mermaid.config.theme}
+        className={cn(
+          "size-full break-words leading-relaxed [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className,
+        )}
+        plugins={streamdownPlugins}
+        mermaid={mermaid}
+        components={fileLinkComponents}
+        remarkPlugins={[
+          ...Object.values(defaultRemarkPlugins),
+          remarkBreaks,
+          ...fileLinkRemarkPlugins,
+        ]}
+        rehypePlugins={[...Object.values(defaultRehypePlugins), ...fileLinkRehypePlugins]}
+        urlTransform={fileLinkUrlTransform}
+        {...props}
+      />
+    );
+  },
   (prevProps, nextProps) => prevProps.children === nextProps.children,
 );
 

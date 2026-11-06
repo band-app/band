@@ -2,7 +2,8 @@ import { cjk } from "@streamdown/cjk";
 import { createCodePlugin } from "@streamdown/code";
 import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
-import type { AnchorHTMLAttributes } from "react";
+import { type AnchorHTMLAttributes, useMemo } from "react";
+import { useIsDark } from "../dashboard/hooks/use-is-dark";
 import { openExternalUrl } from "../lib/open-external-url";
 import { BAND_SHIKI_THEMES } from "./shiki-band-theme";
 
@@ -161,3 +162,16 @@ export const streamdownPlugins = {
   math: { ...baseMath, remarkPlugin: remarkMathWithCurrency },
   mermaid,
 };
+
+/**
+ * Mermaid config for the current light/dark mode, for Streamdown's `mermaid`
+ * prop. The object changes only when the mode flips, which makes open diagrams
+ * re-render. Every Streamdown call site passes it, because `mermaid.initialize`
+ * is global and a diagram rendered without it would reset the theme. Streamdown
+ * does not redraw an open diagram when only the config changes, so call sites
+ * also set `key={mermaid.config.theme}` to remount it.
+ */
+export function useStreamdownMermaid() {
+  const isDark = useIsDark();
+  return useMemo(() => ({ config: { theme: isDark ? "dark" : "default" } }) as const, [isDark]);
+}
