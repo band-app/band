@@ -146,7 +146,7 @@ async function launchLocal(): Promise<{ app: LaunchedDesktop; hub: HubHome }> {
 }
 
 test.describe("Desktop app: bundled UI and hub picker", () => {
-  test("local hub: loads app://, spawns the hub, streams a chat reply, keeps the route on reload", async () => {
+  test("local hub: loads app://, starts the hub service, streams a chat reply, keeps the route on reload", async () => {
     const { app, hub } = await launchLocal();
     const dashboard = new DesktopDashboardPage(app.window);
 
@@ -297,14 +297,14 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     expect(dashboard.url()).toBe(localUrl);
 
     // The right one reloads the window on the remote hub's own host.
-    await picker.chooseRemote(remote.url, REMOTE_TOKEN);
+    await picker.chooseRemote(remote.url, REMOTE_TOKEN, { localHub: "stop" });
     await expect
       .poll(() => dashboard.url(), { timeout: 30_000 })
       .toMatch(/^app:\/\/h-[0-9a-f]{12}\//);
     await dashboard.expectRepoListed("remoteproj");
     // The other hub's storage is not visible here.
     expect(await dashboard.readStorage("e2e-marker")).toBeNull();
-    // The local hub was stopped.
+    // The local hub was stopped, because the picker was told to stop it.
     await expect
       .poll(() => localHubAnswers(hub.port, LOCAL_TOKEN), { timeout: 30_000 })
       .toBe(false);
