@@ -25,6 +25,8 @@ export interface HubChoiceView {
   mode: "local" | "remote";
   url: string;
   hasToken: boolean;
+  /** The local hub runs as a service on this Mac (set by the IPC handler, not by the choice). */
+  localService?: boolean;
 }
 
 /** A token must be valid in a WebSocket subprotocol, like `hub-config.ts` in the UI requires. */

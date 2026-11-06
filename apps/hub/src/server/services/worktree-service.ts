@@ -1185,7 +1185,7 @@ export class WorktreeService {
     // Kill any running terminal PTY sessions + layout. Fire-and-forget: the
     // kill may hop to the terminal daemon, and a failure there must not fail
     // the worktree removal (the boot reconcile retries it).
-    void terminalService.killWorktree(worktreeId).catch((err) => {
+    void terminalService.killWorktree(worktreeId, host).catch((err) => {
       log.warn({ worktreeId, err }, "failed to kill the worktree's terminals");
     });
     terminalService.deleteLayout(worktreeId);

@@ -28,6 +28,14 @@ function toRow(r: typeof chatForwards.$inferSelect): ChatForwardRow {
   };
 }
 
+/** Rows a former owner logged for a chat after it moved. */
+export interface HeldEventsSummary {
+  hostId: string;
+  count: number;
+  /** When the earliest held row was logged by the worker. */
+  firstAt: number;
+}
+
 export class ChatForwardQueries {
   add(row: ChatForwardRow): void {
     getDb()
@@ -109,5 +117,31 @@ export class ChatForwardQueries {
       .from(chatEventHolds)
       .where(eq(chatEventHolds.chatId, chatId))
       .all().length;
+  }
+
+  /** The held rows of a chat, oldest id first. */
+  heldRows(chatId: string): ChatEventRowWire[] {
+    return getDb()
+      .select()
+      .from(chatEventHolds)
+      .where(eq(chatEventHolds.chatId, chatId))
+      .orderBy(chatEventHolds.id)
+      .all()
+      .map((r) => JSON.parse(r.row) as ChatEventRowWire);
+  }
+
+  /** The count, earliest time and worker of a chat's held rows, or null when none are held. */
+  heldSummary(chatId: string): HeldEventsSummary | null {
+    const rows = getDb()
+      .select({ hostId: chatEventHolds.hostId, row: chatEventHolds.row })
+      .from(chatEventHolds)
+      .where(eq(chatEventHolds.chatId, chatId))
+      .all();
+    if (rows.length === 0) return null;
+    let firstAt = Number.POSITIVE_INFINITY;
+    for (const r of rows) {
+      firstAt = Math.min(firstAt, (JSON.parse(r.row) as ChatEventRowWire).createdAt);
+    }
+    return { hostId: rows[0].hostId, count: rows.length, firstAt };
   }
 }

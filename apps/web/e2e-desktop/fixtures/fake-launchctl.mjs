@@ -55,13 +55,19 @@ function start(label, plistFile) {
   // The scripted ACP agent a spec names reaches the worker too, as real launchd would not pass it:
   // a worker that owns its chats starts their agent itself.
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("BAND_TEST_ACP_") && value !== undefined) env[key] = value;
+    if (key.startsWith("BAND_TEST_") && value !== undefined) env[key] = value;
   }
   for (const m of section("EnvironmentVariables").matchAll(/<key>([\s\S]*?)<\/key>\s*<string>([\s\S]*?)<\/string>/g)) {
     env[unxml(m[1])] = unxml(m[2]);
   }
   const log = openSync(join(dir, `${label}.log`), "a");
-  const child = spawn(program[0], program.slice(1), { env, detached: true, stdio: ["ignore", log, log] });
+  const cwd = /<key>WorkingDirectory<\/key>\s*<string>([\s\S]*?)<\/string>/.exec(text)?.[1];
+  const child = spawn(program[0], program.slice(1), {
+    env,
+    cwd: cwd ? unxml(cwd) : undefined,
+    detached: true,
+    stdio: ["ignore", log, log],
+  });
   child.unref();
   writeFileSync(join(dir, `${label}.pid`), String(child.pid));
   writeFileSync(join(dir, `${label}.plist`), plistFile);
