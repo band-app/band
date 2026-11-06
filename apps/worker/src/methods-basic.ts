@@ -76,6 +76,12 @@ async function checkTreeLinks(policy: WorkerContext["policy"], dir: string): Pro
 export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => void {
   const { host, policy, session } = ctx;
   const path = (a: Params, key: string, follow = true) => policy.resolve(str(a, key), follow);
+  // A read-only call the user made for a file outside the roots (an external tab) sets
+  // `external`. It skips the roots check and nothing else: the path must still be absolute.
+  const readPath = (a: Params, key: string, follow = true) =>
+    optBool(a, "external") === true
+      ? policy.resolveExternalRead(str(a, key), follow)
+      : policy.resolve(str(a, key), follow);
 
   r.json("host.info", () => describeHost(ctx));
 
@@ -177,10 +183,10 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
 
   r.json("fs.stat", async (a) => {
     const followSymlinks = optBool(a, "followSymlinks") ?? false;
-    return host.fs.stat(await path(a, "path", followSymlinks), { followSymlinks });
+    return host.fs.stat(await readPath(a, "path", followSymlinks), { followSymlinks });
   });
-  r.json("fs.realpath", async (a) => host.fs.realpath(await path(a, "path")));
-  r.bytes("fs.readFile", async (a) => host.fs.readFile(await path(a, "path")));
+  r.json("fs.realpath", async (a) => host.fs.realpath(await readPath(a, "path")));
+  r.bytes("fs.readFile", async (a) => host.fs.readFile(await readPath(a, "path")));
   r.json("fs.writeFile", async (a) => {
     const target = await path(a, "path");
     const data = await readWriteData(ctx, a.data);

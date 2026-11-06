@@ -57,9 +57,9 @@ function hostFor(worktreeId: string) {
 }
 
 /** Stat that names a missing file in plain words instead of a raw ENOENT. */
-async function statFile(fs: HostFs, path: string) {
+async function statFile(fs: HostFs, path: string, external = false) {
   try {
-    return await fs.stat(path);
+    return await fs.stat(path, { external });
   } catch (err) {
     const text =
       err instanceof Error ? `${(err as NodeJS.ErrnoException).code ?? ""} ${err.message}` : "";
@@ -77,12 +77,12 @@ export class ExternalFileService {
     assertAbsolute(absolutePath);
     const { fs } = hostFor(worktreeId);
     // No `followSymlinks`: a symlink reports `kind: "symlink"` and is refused.
-    const stat = await statFile(fs, absolutePath);
+    const stat = await statFile(fs, absolutePath, true);
     if (stat.kind === "symlink") throw new Error("Symbolic links are not allowed");
     if (stat.kind === "directory") throw new Error("Cannot operate on a directory");
     if (stat.kind !== "file") throw new Error("Not a regular file");
     if (stat.size > MAX_FILE_SIZE) return { tooLarge: true, size: stat.size };
-    const bytes = await fs.readFile(absolutePath);
+    const bytes = await fs.readFile(absolutePath, { external: true });
     const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (buffer.subarray(0, 8192).includes(0)) return { binary: true, size: stat.size };
     return {

@@ -197,9 +197,15 @@ export class RemoteHost implements Host {
   };
   readonly fs: HostFs = {
     stat: (path, options): Promise<FsStat> =>
-      this.rpc.call("fs.stat", { path, followSymlinks: options?.followSymlinks }),
-    realpath: (path) => this.rpc.call("fs.realpath", { path }),
-    readFile: (path) => this.rpc.callBytes("fs.readFile", { path }),
+      this.rpc.call("fs.stat", {
+        path,
+        followSymlinks: options?.followSymlinks,
+        external: options?.external,
+      }),
+    realpath: (path, options) =>
+      this.rpc.call("fs.realpath", { path, external: options?.external }),
+    readFile: (path, options) =>
+      this.rpc.callBytes("fs.readFile", { path, external: options?.external }),
     readStream: (path, range) =>
       this.streamOf("fs.readStream", { path, start: range?.start, end: range?.end }),
     writeFile: (path, data, options) => this.writeFile(path, data, options),

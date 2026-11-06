@@ -181,6 +181,35 @@ describe("external files for a worktree on a remote worker", () => {
     expect((await trpcData<{ content: string }>(again)).content).toBe("edited in Band\n");
   });
 
+  it("resolves and reads a file under the worker's temp dir, outside its roots", async () => {
+    const outside = tmp("band-extfile-remote-outside-");
+    const file = join(outside, "report.html");
+    writeFileSync(file, "<p>hi</p>\n");
+    const resolved = await trpcQuery(
+      server.url,
+      "worktree.resolvePath",
+      { worktreeId, path: file },
+      TOKEN,
+    );
+    expect(await trpcData(resolved)).toMatchObject({ exists: true, isFile: true, external: true });
+    const read = await trpcQuery(
+      server.url,
+      "worktree.readExternalFile",
+      { worktreeId, absolutePath: file },
+      TOKEN,
+    );
+    expect((await trpcData<{ content: string }>(read)).content).toBe("<p>hi</p>\n");
+    // Reading is allowed there, writing is still held to the roots.
+    const save = await trpcMutate(
+      server.url,
+      "worktree.saveExternalFile",
+      { worktreeId, absolutePath: file, content: "x" },
+      TOKEN,
+    );
+    expect(save.status).toBe(500);
+    expect(readFileSync(file, "utf-8")).toBe("<p>hi</p>\n");
+  });
+
   it("applies the worker's path policy: a file outside its roots and home is refused", async () => {
     // /etc/hosts exists on this machine, which is also the hub's, and was readable through the
     // old hub route. Through the worker it lies outside the roots and the worker's home.

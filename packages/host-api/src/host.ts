@@ -341,10 +341,14 @@ export interface HostFs {
    * Rejects when the path does not exist. A symlink reports `kind: "symlink"`
    * unless `followSymlinks` is set, which reports the entry it points at.
    */
-  stat(path: string, options?: { followSymlinks?: boolean }): Promise<FsStat>;
+  stat(path: string, options?: { followSymlinks?: boolean; external?: boolean }): Promise<FsStat>;
   /** The canonical path, with every symlink resolved. Rejects when the path does not exist. */
-  realpath(path: string): Promise<string>;
-  readFile(path: string): Promise<Uint8Array>;
+  realpath(path: string, options?: { external?: boolean }): Promise<string>;
+  /**
+   * `external` marks a read the user asked for by absolute path (an external file tab). A
+   * worker then skips its roots check for this read-only call. Writes never take it.
+   */
+  readFile(path: string, options?: { external?: boolean }): Promise<Uint8Array>;
   /**
    * Yields a file's bytes in chunks. Breaking out of the loop closes the file.
    * `range` limits it to the bytes `start` to `end`, both inclusive.

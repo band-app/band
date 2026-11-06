@@ -65,7 +65,7 @@ export async function resolveTarget(
   // so the tRPC query handler never parks the event loop on sync I/O.
   let canonicalRoot = root;
   try {
-    canonicalRoot = await fs.realpath(root);
+    canonicalRoot = await fs.realpath(root, { external: true });
   } catch {
     // worktree may have been deleted out from under us — leave as-is
   }
@@ -79,7 +79,7 @@ export async function resolveTarget(
 
   let targetStat: FsStat | null = null;
   try {
-    targetStat = await fs.stat(canonicalTarget, { followSymlinks: true });
+    targetStat = await fs.stat(canonicalTarget, { followSymlinks: true, external: true });
   } catch {
     // ENOENT or another IO error — reported via `exists: false`.
   }
@@ -119,7 +119,7 @@ export async function resolveTarget(
 async function canonicalizeMaybeMissing(fs: HostFs, p: string): Promise<string> {
   try {
     // Succeeds iff `p` exists and every component resolves.
-    return await fs.realpath(p);
+    return await fs.realpath(p, { external: true });
   } catch {
     // Missing / unresolvable — fall through to the walk-up below.
   }
@@ -127,7 +127,7 @@ async function canonicalizeMaybeMissing(fs: HostFs, p: string): Promise<string> 
   for (let i = parts.length - 1; i > 0; i--) {
     const prefix = parts.slice(0, i).join(sep) || sep;
     try {
-      const canonicalPrefix = await fs.realpath(prefix);
+      const canonicalPrefix = await fs.realpath(prefix, { external: true });
       // `path.join` collapses the duplicate separator that arises when
       // `canonicalPrefix === "/"`.
       return join(canonicalPrefix, ...parts.slice(i));

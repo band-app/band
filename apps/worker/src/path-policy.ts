@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, readlink, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 export class PathDeniedError extends Error {
@@ -139,6 +140,38 @@ export class PathPolicy {
       throw new PathDeniedError(path, `is outside the worker's roots${await this.hint(canonical)}`);
     }
     return canonical;
+  }
+
+  /**
+   * Canonical path for a read-only call on a file the user named (an external tab). It is
+   * resolved like {@link resolve}, but a path under a temp directory is allowed besides the roots.
+   * The home directory (`~/.ssh`, the worker's own token files), `/etc` and the rest of the
+   * disk stay refused. Only the
+   * hub's `fs.stat`, `fs.realpath` and `fs.readFile` take it, and no agent reaches those.
+   */
+  async resolveExternalRead(path: string, follow = true): Promise<string> {
+    if (typeof path !== "string" || path === "" || path.includes("\0")) {
+      throw new PathDeniedError(String(path), "is not a valid path");
+    }
+    if (!isAbsolute(path)) throw new PathDeniedError(path, "is not absolute");
+    const lexical = resolve(path);
+    let canonical: string;
+    if (follow) {
+      canonical = await this.canonical(lexical, 0);
+    } else {
+      const parent = await this.canonical(dirname(lexical), 0);
+      canonical = lexical === parent ? parent : join(parent, basename(lexical));
+    }
+    if (this.contains(canonical) || (await this.inReadableExtras(canonical))) return canonical;
+    return this.resolve(path, follow);
+  }
+
+  private async inReadableExtras(canonical: string): Promise<boolean> {
+    for (const dir of [tmpdir(), "/tmp", "/var/tmp"]) {
+      const real = await realpath(dir).catch(() => null);
+      if (real && (canonical === real || canonical.startsWith(real + sep))) return true;
+    }
+    return false;
   }
 
   private async inRegisteredWorktree(canonical: string): Promise<boolean> {
