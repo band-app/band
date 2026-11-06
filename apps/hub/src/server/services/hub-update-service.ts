@@ -10,7 +10,7 @@
  * a restart on another version or no restart within the timeout means it failed.
  */
 
-import { spawn } from "node:child_process";
+import { type SpawnOptions, spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -438,14 +438,16 @@ export class HubUpdateService {
       ? ["--user", "--scope", "--quiet", "--", process.execPath, scriptPath, planPath]
       : [scriptPath, planPath];
     // The token goes in this child's environment only, never in a file or the log.
-    const child = spawn(cmd, args, {
+    const childEnv: Record<string, string> = {
+      ...env,
+      BAND_HUB_UPDATE_TOKEN: settingsService.get().tokenSecret ?? "",
+    };
+    const spawnOptions: SpawnOptions = {
       detached: true,
       stdio: "ignore",
-      env: {
-        ...env,
-        BAND_HUB_UPDATE_TOKEN: settingsService.get().tokenSecret ?? "",
-      } as NodeJS.ProcessEnv,
-    });
+      env: childEnv as unknown as NodeJS.ProcessEnv,
+    };
+    const child = spawn(cmd, args, spawnOptions);
     child.on("error", (err) => {
       this.write({
         target,
