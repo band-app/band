@@ -143,9 +143,6 @@
     "plugins/github": {
       "entry": ["src/server/index.ts"],
       "project": ["src/**/*.{ts,tsx}"]
-    },
-    "plugins/simulator": {
-      "ignoreDependencies": ["serve-sim"]
     }
   }
 }

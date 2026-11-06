@@ -230,13 +230,19 @@ export class WorkerPlugins {
   }
 }
 
-/** Serves `plugin.call` and ties the plugins to the lease. */
-export function registerPluginMethods(r: Registrar, ctx: WorkerContext): () => Promise<void> {
+/**
+ * Routes a call or a stream to a bundled plugin or an extension's service by id. A bundled plugin
+ * with the same id wins over an extension's service until it is removed. The hub's link methods
+ * and the direct listener both use it. Null when the worker runs no plugin host.
+ */
+export function pluginRouter(ctx: WorkerContext): {
+  call: WorkerPlugins["call"];
+  stream: WorkerPlugins["stream"];
+} | null {
   const bundled = ctx.plugins;
   const extensions = ctx.extensions;
-  if (!bundled) return async () => {};
-  // A bundled plugin with the same id wins over an extension's service until it is removed.
-  const plugins = {
+  if (!bundled) return null;
+  return {
     call: (id: string, ...rest: [string, unknown, string, string]) =>
       !bundled.has(id) && extensions?.has(id)
         ? extensions.call(id, ...rest)
@@ -246,6 +252,14 @@ export function registerPluginMethods(r: Registrar, ctx: WorkerContext): () => P
         ? extensions.stream(id, ...rest)
         : bundled.stream(id, ...rest),
   };
+}
+
+/** Serves `plugin.call` and ties the plugins to the lease. */
+export function registerPluginMethods(r: Registrar, ctx: WorkerContext): () => Promise<void> {
+  const bundled = ctx.plugins;
+  const extensions = ctx.extensions;
+  const plugins = pluginRouter(ctx);
+  if (!bundled || !plugins) return async () => {};
   r.json(METHOD_PLUGIN_CALL, async (a) => {
     const worktreePath = await ctx.policy.resolve(str(a, "worktreePath"), true);
     ctx.lease.assertMayRun(worktreePath);

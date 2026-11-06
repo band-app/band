@@ -179,7 +179,7 @@ The worker starts `process.execPath <entry>` with the extension folder as the wo
 
 A service that exits is started again after 1 s, then 2 s, then 4 s. A third exit within 5 minutes marks it `failed` with the last exit code and stderr, and it stays failed until the next sync. A lease fence stops the process, and the next call after the hub renews starts it again. The service also stops when the worker shuts down, when the extension is removed or updated, and when the worker's trust drops to `restricted`.
 
-A bundled plugin with the same capability name takes precedence on that worker, and the worker logs it. This lets the simulator move into an extension without a conflict.
+A bundled plugin with the same capability name takes precedence on that worker, and the worker logs it. Band bundles no worker plugin now, so the official `simulator` extension runs as it is.
 
 ### The protocol
 
@@ -247,7 +247,7 @@ An extension can add a worktree panel: a page in the center "+" menu that is not
 }
 ```
 
-`capability` must be the capability of one of the extension's own services. The menu offers the panel when the worktree's worker is online and its service runs there, so a restricted worker, a worker that fails `requires` and the hub's own machine show nothing. `icon` is one of `globe`, `terminal`, `monitor`, `smartphone`, `image`, `box`, `play`, `activity`; any other name gets a puzzle icon. The tab stays mounted while hidden and is saved with the other center tabs.
+`capability` must be the capability of one of the extension's own services. The menu offers the panel when the worktree's worker is online and its service runs there, so a restricted worker, a worker that fails `requires` and the hub's own machine show nothing. `icon` is one of `globe`, `terminal`, `monitor`, `smartphone`, `image`, `box`, `play`, `activity`; any other name gets a puzzle icon. The tab stays mounted while hidden and is saved with the other center tabs. A panel may set `"defaultControl": true` (default false): Band then sends the control request itself as soon as the first stream connects, and again after each reconnect, so input reaches the service without pressing Take control. Release still works and stays released for that tab until the page reconnects. The hub rule is unchanged, since a stream is view-only until the control message arrives.
 
 The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like an editor, so it has no Band cookie, token or storage. Band posts `{ type: "band:hello", extensionApi: 1 }` with one transferred `MessagePort`. Everything else goes over that port.
 
@@ -267,7 +267,7 @@ From the page to Band:
 
 A stream is view-only. The hub drops everything the page sends until the person presses Take control in Band's own toolbar above the frame. The page cannot press it. Releasing control returns the stream to view-only, and a stream that opens while the person has control starts in control mode. Binary messages from the page are always dropped.
 
-Frames go from the service through the worker, the link and the hub to the browser. The hub route is `/api/extensions/<extension id>/worktrees/<worktree id>/stream?panel=<panel id>&name=<stream>&params=<json>`. It takes any device token and closes with code 4001 and a reason when the panel, the service or the worker is missing. Agents never reach it: the worker relay lists neither the route nor `extensions.panelCall`, and the MCP endpoint leaves `extensions.*` out.
+Frames go from the service through the worker, the link and the hub to the browser. In the desktop app, for a worktree on this Mac's own worker, the panel opens the stream on the worker's loopback listener instead (`ws://127.0.0.1:<port>/plugins/<capability>/stream?worktreeId=<id>&name=<stream>&params=<json>`, the same checks as the terminal socket: `Host`, `Origin`, token and worktree), and falls back to the hub route when that socket cannot open. Either way the service's `params` carry `profile`: `"direct"` on the loopback path (no hub link carries the frames, so a full-size, full-rate stream is fine) and `"hub"` through the hub (send smaller frames at a capped rate). Band sets `profile` after the page's own params, so the page cannot choose it. The hub route is `/api/extensions/<extension id>/worktrees/<worktree id>/stream?panel=<panel id>&name=<stream>&params=<json>`. It takes any device token and closes with code 4001 and a reason when the panel, the service or the worker is missing. Agents never reach it: the worker relay lists neither the route nor `extensions.panelCall`, and the MCP endpoint leaves `extensions.*` out.
 
 ## Tools
 
@@ -283,7 +283,7 @@ An extension can give agents tools that its worker service answers:
 }]
 ```
 
-Band adds each tool to the built-in `band` MCP server as `<extension id>_<name>`, for example `echo-service_echo`. A call goes to `method` on the service `service`, on the worker of the calling chat's worktree, with the call's arguments as `params`. The service's JSON result is the tool result. No tab has to be open. The arguments cannot name another worktree. When the chat's worker does not run the service, the tool answers an error that names the worker. `"agent": false` leaves the tool out of the agent's list. `inputSchema` is a JSON Schema and is advertised as written. The service validates its own arguments.
+Band adds each tool to the built-in `band` MCP server as `<extension id>_<name>`, for example `echo-service_echo`. A call goes to `method` on the service `service`, on the worker of the calling chat's worktree, with the call's arguments as `params`. The service's result is the tool result. A plain result is returned as JSON text. A result of the form `{ "content": [ ... ] }` is passed to the agent as the MCP tool result, with two block types: `{ "type": "text", "text": "..." }` and `{ "type": "image", "data": "<base64>", "mimeType": "image/png" | "image/jpeg" }`. An image is at most 5 MB decoded. Any other block type, another image type, bad base64 or an oversized image makes the call a tool error that names the problem. Images reach only the chat that made the call. No tab has to be open. The arguments cannot name another worktree. When the chat's worker does not run the service, the tool answers an error that names the worker. `"agent": false` leaves the tool out of the agent's list. `inputSchema` is a JSON Schema and is advertised as written. The service validates its own arguments.
 
 ## Agent access
 

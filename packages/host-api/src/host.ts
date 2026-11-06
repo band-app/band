@@ -94,7 +94,7 @@ export interface HostCapabilities {
    * Absent from the hub's own host and older workers.
    */
   chatOwnership?: boolean;
-  /** One key per worker plugin the host runs, named by the plugin id (`simulator`). */
+  /** One key per worker plugin the host runs, named by the plugin id. */
   [plugin: string]: boolean | undefined;
 }
 

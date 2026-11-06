@@ -105,8 +105,6 @@ function classify(files) {
     let m;
     if (file.startsWith("apps/web/e2e-desktop/")) {
       plan.skipped.push([file, "needs the desktop app on macOS"]);
-    } else if (/simulator/.test(file) && /\.(spec|test)\.ts$/.test(file) && /\/(e2e|tests)\//.test(file)) {
-      plan.skipped.push([file, "needs Xcode and a simulator"]);
     } else if (/^apps\/web\/e2e\/[^/]+\.spec\.ts$/.test(file)) plan.e2e.push(file);
     else if (/^apps\/hub\/tests\/.+\.test\.ts$/.test(file)) plan.hub.push(file);
     else if (/^apps\/web\/tests\/.+\.test\.ts$/.test(file)) plan.webUnit.push(file);

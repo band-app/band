@@ -1,4 +1,4 @@
-import { type ComponentType, createContext, type ReactNode, useContext } from "react";
+import { type ComponentType, createContext, useContext } from "react";
 
 /**
  * What the core offers plugin UI. Plugins never import the dashboard or its
@@ -23,42 +23,6 @@ export interface ClientPluginHost {
   openUrl(url: string): void;
   /** Open a file of the worktree in the center dock, scrolled to `line` when given. */
   openFile(worktreeId: string, path: string, line?: number | null): void;
-  /**
-   * The core's live remote screen: frames from the plugin's stream in, pointer and key events
-   * out. It draws the header (title, state, Take control / Release, screenshot) and the screen.
-   */
-  RemoteScreen: ComponentType<RemoteScreenProps>;
-  /**
-   * Shows the simulator `udid` in Simulator.app on this Mac. Present only in the desktop app.
-   * `canRevealSimulator` says whether the worktree's worker is this Mac's own worker.
-   */
-  revealSimulator?(worktreeId: string, udid: string): Promise<void>;
-  canRevealSimulator?(worktreeId: string): Promise<boolean>;
-}
-
-/** What the plugin's stream tells the viewer, from its `{"type":"info"}` messages. */
-export interface RemoteScreenInfo {
-  /** The screen size in the plugin's own units (points for the simulator). */
-  width: number;
-  height: number;
-  [key: string]: unknown;
-}
-
-export interface RemoteScreenApi {
-  /** Sends a JSON message to the plugin. Dropped by the hub while the viewer is view-only. */
-  send(message: Record<string, unknown>): void;
-  controlling: boolean;
-  info: RemoteScreenInfo | null;
-}
-
-export interface RemoteScreenProps {
-  pluginId: string;
-  worktreeId: string;
-  /** False while the tab is hidden; the stream stays connected. */
-  visible: boolean;
-  title: string;
-  /** Buttons the plugin adds to the header, shown beside Take control. */
-  actions?: (api: RemoteScreenApi) => ReactNode;
 }
 
 export interface WorktreePanelProps {

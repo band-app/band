@@ -66,7 +66,7 @@ export const DIRECT_WATCH_PATH = "/watch";
 export const DIRECT_WATCH_ENDED_CLOSE_CODE = 4101;
 
 /**
- * A plugin's live stream (the simulator's screen), with `worktreeId` in the query. The same
+ * A plugin's live stream (an extension panel's screen), with `worktreeId` in the query. The same
  * stream the hub serves at `/api/plugins/<id>/worktrees/<worktree>/stream`, minus the hub.
  */
 export const DIRECT_PLUGIN_STREAM_PATH = /^\/plugins\/([a-z0-9][a-z0-9-]*)\/stream$/;

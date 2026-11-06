@@ -198,3 +198,21 @@ test("S2: frames arrive in the panel, input waits for Take control, and a call r
   await expect(panel.echoes).toHaveCount(1);
   await expect(panel.echoes.first()).toHaveText("echo:tap");
 });
+
+test("S8: a panel with defaultControl starts in control and Release stops input; one without starts view-only", async ({
+  page,
+}) => {
+  const auto = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "auto");
+  await auto.open(worktreeA);
+  await auto.openFromMenu();
+  await expect(auto.frames).toHaveText("3");
+  await expect(auto.mode).toHaveText("Controlling");
+  await expect(auto.pageMode).toHaveText("control");
+  await auto.sendButton.click();
+  await expect(auto.echoes).toHaveCount(1);
+
+  await auto.controlButton.click();
+  await expect(auto.mode).toHaveText("View only");
+  await auto.sendButton.click();
+  await expect(auto.echoes).toHaveCount(1);
+});

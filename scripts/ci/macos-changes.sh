@@ -8,7 +8,7 @@
 #   CHANGED_FILES  optional path to a file listing changed paths, one per line.
 #                  Tests use it. When set, BASE and HEAD are not read.
 #
-# Outputs: cli, macos-machine, simulator, desktop, desktop-package, mobile,
+# Outputs: cli, macos-machine, desktop, desktop-package, mobile,
 # docker, full-suite.
 #   - A push to main starts no macOS job: the merge queue tested that commit.
 #   - A scheduled or manual run starts every job in full.
@@ -17,7 +17,7 @@
 #   - Any doubt about the diff base starts every job (fail open).
 set -euo pipefail
 
-OUTPUTS=(cli macos-machine simulator desktop desktop-package mobile docker full-suite)
+OUTPUTS=(cli macos-machine desktop desktop-package mobile docker full-suite)
 
 emit_all() {
   local value="$1" name
@@ -77,9 +77,6 @@ emit desktop '^(apps/desktop/|electron-builder\.yml$|apps/worker/scripts/build-d
 
 # Packaging: what electron-builder and the bundled worker are built from.
 emit desktop-package '^(apps/desktop/|electron-builder\.yml$|apps/worker/scripts/|pnpm-lock\.yaml$)'
-
-# Simulator: the plugin, its pane, the worker plugin host and its tests.
-emit simulator '^(plugins/simulator/|apps/web/src/components/remote-screen/|apps/worker/src/(plugins|bundled-worker-plugins)\.ts$|apps/hub/tests/simulator-(plugin|stream-profile)\.test\.ts$|apps/web/e2e/simulator-panel\.spec\.ts$)'
 
 # Mobile: the Expo app and the packages it imports.
 emit mobile '^(apps/mobile/|packages/client/|packages/shared/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$)'

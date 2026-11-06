@@ -1563,7 +1563,7 @@ async function main() {
   });
 
   // ---------------------------------------------------------------------------
-  // WebSocket server for plugin live streams (the simulator's screen)
+  // WebSocket server for plugin live streams (an extension panel's screen)
   // ---------------------------------------------------------------------------
   const pluginStreamWss = new WebSocketServer({
     noServer: true,

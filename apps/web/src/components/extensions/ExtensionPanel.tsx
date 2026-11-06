@@ -2,6 +2,7 @@ import type { PanelManifest } from "@band-app/plugin-api";
 import { Button } from "@band-app/ui";
 import { CircleAlert, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { directPluginStreamTarget, directSocketClosed } from "../../lib/direct-worker";
 import { HubWebSocket, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 import { readTheme } from "./ExtensionEditor";
@@ -39,6 +40,8 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
   const portRef = useRef<MessagePort | null>(null);
   const streamsRef = useRef(new Map<string, WebSocket>());
   const controllingRef = useRef(false);
+  // The person pressed Release on a `defaultControl` panel: stay released until the next reconnect.
+  const releasedRef = useRef(false);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const [ready, setReady] = useState(false);
@@ -60,32 +63,89 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
         post({ type: "stream.closed", id, code: 4000, reason: "Too many streams" });
         return;
       }
-      const query = new URLSearchParams({ panel: panel.id, name });
-      if (params !== undefined) query.set("params", JSON.stringify(params));
-      const ws = new HubWebSocket(
-        hubWsUrl(
-          `/api/extensions/${encodeURIComponent(extensionId)}/worktrees/${encodeURIComponent(
-            worktreeId,
-          )}/stream?${query}`,
-        ),
+      let cancelled = false;
+      // A placeholder holds the id while the direct target is resolved, so a `stream.close`
+      // that arrives meanwhile cancels the open.
+      const placeholder = {
+        readyState: WebSocket.CONNECTING,
+        send: () => undefined,
+        close: () => {
+          cancelled = true;
+          if (streamsRef.current.get(id) === (placeholder as unknown as WebSocket)) {
+            streamsRef.current.delete(id);
+          }
+        },
+      };
+      streamsRef.current.set(id, placeholder as unknown as WebSocket);
+
+      const attach = (ws: WebSocket, direct: boolean) => {
+        ws.binaryType = "arraybuffer";
+        streamsRef.current.set(id, ws);
+        let opened = false;
+        ws.addEventListener("open", () => {
+          opened = true;
+          const text = JSON.stringify({ type: "control", enabled: true });
+          if (panel.defaultControl && !releasedRef.current && !controllingRef.current) {
+            // The manifest asks for control from the start: take it, for every open stream.
+            controllingRef.current = true;
+            setControlling(true);
+            for (const other of streamsRef.current.values()) {
+              if (other.readyState === WebSocket.OPEN) other.send(text);
+            }
+            post({ type: "control", enabled: true });
+          } else if (controllingRef.current) {
+            // A stream opened while the person is controlling joins in control mode.
+            ws.send(text);
+          }
+          post({ type: "stream.opened", id });
+        });
+        ws.addEventListener("message", (event) => {
+          if (typeof event.data === "string")
+            post({ type: "stream.message", id, text: event.data });
+          else post({ type: "stream.frame", id, data: event.data as ArrayBuffer }, [event.data]);
+        });
+        ws.addEventListener("close", (event) => {
+          if (streamsRef.current.get(id) !== ws) return;
+          streamsRef.current.delete(id);
+          // The worker refused, is not there or cannot open the stream: the hub carries it. The
+          // hub's socket starts view-only, so a control taken on the worker is re-sent on open.
+          if (direct && directSocketClosed(worktreeId, event, opened) === "fallback") {
+            openHub();
+            return;
+          }
+          post({ type: "stream.closed", id, code: event.code, reason: event.reason });
+        });
+      };
+
+      const openHub = () => {
+        const query = new URLSearchParams({ panel: panel.id, name });
+        if (params !== undefined) query.set("params", JSON.stringify(params));
+        attach(
+          new HubWebSocket(
+            hubWsUrl(
+              `/api/extensions/${encodeURIComponent(extensionId)}/worktrees/${encodeURIComponent(
+                worktreeId,
+              )}/stream?${query}`,
+            ),
+          ),
+          false,
+        );
+      };
+
+      // In the desktop app, for a worktree on this Mac's worker, the stream goes to the worker's
+      // loopback listener. The service sees the `direct` profile there and `hub` here.
+      directPluginStreamTarget(panel.capability, worktreeId, { name, params }).then(
+        (target) => {
+          if (cancelled) return;
+          if (!target) return openHub();
+          attach(new WebSocket(target.url, target.protocols), true);
+        },
+        () => {
+          if (!cancelled) openHub();
+        },
       );
-      ws.binaryType = "arraybuffer";
-      streamsRef.current.set(id, ws);
-      ws.addEventListener("open", () => {
-        // A stream opened while the person is controlling joins in control mode.
-        if (controllingRef.current) ws.send(JSON.stringify({ type: "control", enabled: true }));
-        post({ type: "stream.opened", id });
-      });
-      ws.addEventListener("message", (event) => {
-        if (typeof event.data === "string") post({ type: "stream.message", id, text: event.data });
-        else post({ type: "stream.frame", id, data: event.data as ArrayBuffer }, [event.data]);
-      });
-      ws.addEventListener("close", (event) => {
-        if (streamsRef.current.get(id) === ws) streamsRef.current.delete(id);
-        post({ type: "stream.closed", id, code: event.code, reason: event.reason });
-      });
     },
-    [extensionId, panel.id, post, worktreeId],
+    [extensionId, panel.capability, panel.defaultControl, panel.id, post, worktreeId],
   );
 
   const onMessage = useCallback(
@@ -109,9 +169,16 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           }
           break;
         }
-        case "stream.close":
-          streamsRef.current.get(id)?.close(1000, "closed");
+        case "stream.close": {
+          const ws = streamsRef.current.get(id);
+          // Forget the id first, so the close event cannot start a hub fallback for a closed stream.
+          streamsRef.current.delete(id);
+          if (ws) {
+            ws.close(1000, "closed");
+            post({ type: "stream.closed", id, code: 1000, reason: "closed" });
+          }
           break;
+        }
         case "call":
           if (typeof msg.method === "string") {
             trpc.extensions.panelCall
@@ -146,6 +213,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
     portRef.current?.close();
     closeStreams();
     controllingRef.current = false;
+    releasedRef.current = false;
     setControlling(false);
     setReady(false);
     const channel = new MessageChannel();
@@ -182,6 +250,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
 
   const setControl = (enabled: boolean) => {
     controllingRef.current = enabled;
+    releasedRef.current = !enabled;
     setControlling(enabled);
     const text = JSON.stringify({ type: "control", enabled });
     for (const ws of streamsRef.current.values()) {

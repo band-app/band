@@ -4,7 +4,6 @@ import {
   formatToolDuration,
   hasToolDetails,
   type ImageContent,
-  isSimulatorTool,
   OUTPUT_LIMIT,
   shellRun,
   shownExitCode,
@@ -26,9 +25,6 @@ import {
 } from "@band-app/ui";
 import { ChevronRightIcon } from "lucide-react";
 import { memo, type ReactNode, useMemo, useState } from "react";
-import { OPEN_PANE_EVENT } from "../../lib/agent-pane-events";
-import { pluginPanelTabId } from "../../plugins/use-plugin-slot";
-import { usePanelVisibility } from "../panel-visibility-context";
 import { MessageResponse } from "./message";
 import { ToolInput, ToolOutput } from "./tool";
 
@@ -240,8 +236,6 @@ export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntr
   const failed = state === "error";
   const shell = entry.toolKind === "execute";
   const hasBody = hasToolDetails(entry);
-  const { worktreeId } = usePanelVisibility();
-  const simulator = isSimulatorTool(entry) && worktreeId;
 
   return (
     <Collapsible
@@ -266,26 +260,6 @@ export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntr
           </span>
           {hasBody && <Chevron openClass="group-data-[state=open]/tool-call:rotate-90" />}
         </CollapsibleTrigger>
-        {simulator && (
-          <button
-            type="button"
-            data-testid="tool-call__open-simulator"
-            onClick={() =>
-              window.dispatchEvent(
-                new CustomEvent(OPEN_PANE_EVENT, {
-                  detail: {
-                    worktreeId,
-                    paneId: pluginPanelTabId("simulator", "simulator"),
-                    kind: "plugin",
-                  },
-                }),
-              )
-            }
-            className="shrink-0 rounded px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            Open simulator
-          </button>
-        )}
       </ToolRow>
 
       <CollapsibleContent className="mt-2 space-y-3 text-popover-foreground">

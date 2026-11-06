@@ -43,6 +43,7 @@ import { handleChatRoute, isChatRoute } from "./chats/local-http.ts";
 import type { ChatOwner } from "./chats/owner.ts";
 import { hostDirs, type Registrar, type WorkerContext } from "./context.ts";
 import { isFileRoute, serveDirectFile } from "./direct-files.ts";
+import { pluginRouter } from "./plugins.ts";
 import { mapError, num, type Params, str } from "./rpc-util.ts";
 
 /** Largest request body, a saved file included. The editor opens files of up to 1 MB. */
@@ -377,7 +378,8 @@ export class DirectListener {
   /**
    * A plugin's live stream for the token's worktree, bridged as the hub bridges it
    * (`bridgePluginStream`), with the `direct` profile: full-size frames, since no hub link
-   * carries them. A stream that cannot open closes with the fallback code, so the client asks the
+   * carries them. The query may name the stream (`name`, default `screen`) and give JSON object
+   * `params`; the worker sets `profile: "direct"` after them, so a viewer cannot pick the profile. A stream that cannot open closes with the fallback code, so the client asks the
    * hub, which gives the real reason.
    */
   private upgradePluginStream(
@@ -390,7 +392,8 @@ export class DirectListener {
     const refuse = (status: number) => {
       socket.end(`HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Refused"}\r\n\r\n`);
     };
-    const plugins = this.ctx.plugins;
+    // Bundled plugins and extension services alike, as the hub's link reaches them.
+    const plugins = pluginRouter(this.ctx);
     if (!plugins) {
       refuse(404);
       return;
@@ -409,6 +412,26 @@ export class DirectListener {
       refuse(403);
       return;
     }
+    const streamName = url.searchParams.get("name") ?? "screen";
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(streamName)) {
+      refuse(400);
+      return;
+    }
+    let streamParams: Record<string, unknown> = {};
+    const rawParams = url.searchParams.get("params");
+    if (rawParams) {
+      try {
+        const parsed: unknown = JSON.parse(rawParams);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          refuse(400);
+          return;
+        }
+        streamParams = parsed as Record<string, unknown>;
+      } catch {
+        refuse(400);
+        return;
+      }
+    }
 
     this.wss.handleUpgrade(req, socket, head, (ws) => {
       const release = this.ctx.activity.hold();
@@ -421,8 +444,8 @@ export class DirectListener {
           this.ctx.lease.assertMayRun(path);
           const stream = await plugins.stream(
             pluginId,
-            "screen",
-            { profile: "direct" },
+            streamName,
+            { ...streamParams, profile: "direct" },
             worktreeId,
             path,
           );
