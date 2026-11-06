@@ -25,11 +25,13 @@ runs:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ inputs.browsers }}
 
-    # `--with-deps` still installs the apt packages on a cache hit. WebKit runs
+    # The system packages are installed on a cache hit too. WebKit runs
     # the iPhone-profile specs (`e2e/mobile-document-scroll.spec.ts`).
     - name: Install Playwright browsers
       shell: bash
-      run: pnpm --filter @band-app/web exec playwright install --with-deps ${{ inputs.browsers }}
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+      run: '"$GITHUB_WORKSPACE/scripts/ci/install-playwright.sh" "$BROWSERS"'
 
     # Same trust gate as the cache saves in ci.yml.
     - name: Save Playwright browsers cache
