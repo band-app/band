@@ -26,7 +26,7 @@ The desktop app checks for updates itself and shows a toast when one is ready:
 
 To check by hand, choose "Check for Updates…" in the Band menu. A development run has no such item. If you installed with Homebrew, `brew upgrade --cask band-app/band/band` works too.
 
-The desktop app updates only the app. A hub or worker on another machine needs its own update.
+The desktop app runs its local hub as a background service (see [Install](install.md#the-local-hub-is-a-background-service)). The first start after an update restarts that service, then the worker service, so both run the new bundle. The desktop app updates only the app. A hub or worker on another machine needs its own update.
 
 ## Version rule
 

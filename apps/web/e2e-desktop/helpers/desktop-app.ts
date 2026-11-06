@@ -11,6 +11,7 @@ import {
 import { assertProfileIsolated, isUnderOsTmp } from "./profile-guard";
 
 const DESKTOP_DIR = join(import.meta.dirname, "../../../desktop");
+const FAKE_LAUNCHCTL = join(import.meta.dirname, "..", "fixtures", "fake-launchctl.mjs");
 
 /** The Electron binary installed for apps/desktop. */
 function electronBinary(): string {
@@ -158,6 +159,10 @@ export async function launchDesktop(opts: {
       ...env,
       HOME: opts.home,
       BAND_DESKTOP_SECRET_STORE: "test",
+      // The local hub runs as a launchd agent. No spec may reach the real launchd, so the fake is
+      // the default; a spec that inspects the agents passes the same variables itself.
+      BAND_LAUNCHCTL_BIN: FAKE_LAUNCHCTL,
+      BAND_FAKE_LAUNCHD_DIR: join(opts.home, "fake-launchd"),
       ...extraEnv,
       BAND_DESKTOP_USER_DATA_DIR: userDataDir,
     },
