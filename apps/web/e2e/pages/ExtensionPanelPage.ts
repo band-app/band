@@ -1,7 +1,7 @@
 /**
  * Page object for an extension's worktree panel (`ExtensionPanel`): the "+" menu entry, the tab,
  * the sandboxed frame and the fixture page inside it (frame counter, mode, call result, echoes),
- * and Band's own Take control button. The frame has an opaque origin, so everything inside it is
+ * and the absence of a Take control button. The frame has an opaque origin, so everything inside it is
  * reached through `frameLocator`.
  */
 
@@ -15,7 +15,6 @@ export class ExtensionPanelPage {
   readonly tab: Locator;
   readonly panel: Locator;
   readonly controlButton: Locator;
-  readonly mode: Locator;
 
   constructor(
     private readonly page: Page,
@@ -30,7 +29,6 @@ export class ExtensionPanelPage {
     this.tab = page.getByTestId(`center-plugin-tab--ext:${extensionId}-${panelId}`);
     this.panel = page.getByTestId("extension-panel");
     this.controlButton = page.getByTestId("extension-panel__control");
-    this.mode = page.getByTestId("extension-panel__mode");
   }
 
   private get frame(): FrameLocator {
@@ -77,13 +75,6 @@ export class ExtensionPanelPage {
       await this.menuItem.click();
       await expect(this.tab).toBeVisible();
       await expect(this.panel).toHaveAttribute("data-ready", "true");
-    });
-  }
-
-  async takeControl(): Promise<void> {
-    await test.step("Take control", async () => {
-      await this.controlButton.click();
-      await expect(this.panel).toHaveAttribute("data-control", "true");
     });
   }
 }
