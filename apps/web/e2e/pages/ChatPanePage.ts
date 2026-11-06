@@ -301,6 +301,15 @@ export class ChatPanePage {
     return this.page.getByTestId(`center-chat-tab--${chatId}`).filter({ visible: true });
   }
 
+  /**
+   * Selects one chat's center tab with the press that selects it. A real click is blocked on a
+   * narrow window, where the title bar's back and forward buttons and the header's actions sit
+   * over the end of the tab strip, so the pointer-down goes straight to the tab.
+   */
+  async selectChatTab(chatId: string): Promise<void> {
+    await this.chatTab(chatId).dispatchEvent("pointerdown", { button: 0, isPrimary: true });
+  }
+
   /** Navigate to the worktree's chat view. The only place URLs are
    *  constructed in this page object. */
   async goto(worktreeId: string): Promise<void> {

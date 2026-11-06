@@ -170,6 +170,16 @@ export class LocalHost implements Host {
     },
     spawn: (launch, cwd, options) =>
       this.spawnAgent(launch, cwd, options?.held === true, options?.owned === true),
+    reattach: async (agentId, offsets) => {
+      const holder = this.options.agentHolder;
+      if (!holder) return null;
+      try {
+        return await HeldAgentProcess.attach(holder, agentId, offsets);
+      } catch {
+        // No daemon to ask: the agent is not held.
+        return null;
+      }
+    },
   };
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),

@@ -171,7 +171,22 @@ describe("the offset in chats.db follows the committed events (S1, S3)", () => {
           return texts.length >= 3 + round * 7 ? true : undefined;
         },
         { label: "some of the reply to be logged", timeoutMs: 60_000 },
-      );
+      ).catch(async (err: Error) => {
+        const db = await openDb(worker);
+        try {
+          const perChat = db
+            .prepare("SELECT chat_id, count(*) AS n FROM chat_events GROUP BY chat_id")
+            .all();
+          const wire = db
+            .prepare("SELECT chat_id, agent_id, stdout_offset FROM chat_wire_state")
+            .all();
+          throw new Error(
+            `${err.message}\nround ${round}\nrows: ${JSON.stringify(perChat)}\nwire: ${JSON.stringify(wire)}\n${worker.output()}`,
+          );
+        } finally {
+          db.close();
+        }
+      });
       await w.killWorker(worker, "SIGKILL", { waitForLease: false });
 
       const row = await wireRow(worker, chatId);
