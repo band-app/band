@@ -21,6 +21,8 @@ Every chat talks to its agent over the Agent Client Protocol (ACP). The worker s
 
 The adapters for Claude Code and Codex ship with Band. The other three agents, and the `claude` and `codex` binaries, must be installed on the worker. Band looks for them on the worker's `PATH` and in the folders agent installers use under the home directory, such as `~/.local/bin` and `~/.opencode/bin`.
 
+Band sets `CLAUDE_CODE_ARTIFACT=1` for Claude Code chats. Claude Code turns its Artifact tool off for the Agent SDK entrypoint that the adapter uses, unless that variable is truthy. To opt out, set `CLAUDE_CODE_ARTIFACT=0` in the worker's environment, and Band leaves your value. Claude Code still hides the tool for third-party providers such as Bedrock, and when `enableArtifact` is false in its settings.
+
 ## Chat and terminal mode
 
 An agent session has one of two modes, and it keeps its mode for its whole life.
