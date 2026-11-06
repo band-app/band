@@ -99,7 +99,7 @@ async function sendUpstream(server: McpServerView, init: UpstreamInit): Promise<
   await res.body?.cancel().catch(() => undefined);
   let renewed: Awaited<ReturnType<typeof mcpProxyService.credentialHeaders>>;
   try {
-    renewed = await mcpProxyService.credentialHeaders(server, true);
+    renewed = await mcpProxyService.credentialHeaders(server, true, first.headers);
   } catch {
     return new Response(null, { status: 401 });
   }
