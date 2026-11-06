@@ -264,7 +264,7 @@ export class Turns {
       const blocks = await this.promptBlocks(runtime, message, firstTurn ? sharedDir : null);
       const res = turn.cancelRequested
         ? ({ stopReason: "cancelled" } as acp.PromptResponse)
-        : await runtime.prompt(blocks);
+        : await runtime.prompt(blocks, { taskId: turn.id, startedAt: turn.startedAt });
       runtime.record({
         type: "turn-ended",
         taskId: turn.id,

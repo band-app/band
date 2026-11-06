@@ -265,12 +265,7 @@ export class LocalHost implements Host {
       // Without a daemon the agent is a child of this process: it works, and dies with the worker.
       return spawnAgentProcess(launch, cwd);
     }
-    const handle = await HeldAgentProcess.attach(
-      holder,
-      agentId,
-      { stdout: 0, stderr: 0 },
-      { autoAck: owned },
-    );
+    const handle = await HeldAgentProcess.attach(holder, agentId, { stdout: 0, stderr: 0 });
     if (!handle) throw new Error("The agent daemon lost the agent it just started");
     return handle;
   }
