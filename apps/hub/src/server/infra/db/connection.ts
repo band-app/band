@@ -45,6 +45,16 @@ export function getDb() {
   return _db;
 }
 
+/**
+ * Writes a consistent copy of the live database to `dest` with `VACUUM INTO`, which reads through
+ * SQLite and so also captures the pages still in the WAL. `dest` must not exist yet.
+ */
+export function backupDatabase(dest: string): void {
+  getDb();
+  if (!_sqlite) throw new Error("The database is not open, so it cannot be backed up");
+  _sqlite.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+}
+
 export function closeDb(): void {
   if (_sqlite) {
     // Truncate the WAL on graceful shutdown. Without this, `band.db-wal`

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { hostname } from "node:os";
+import { HUB_VERSION } from "./src/server/services/_utils/hub-version";
 
 export function parseCookies(req: IncomingMessage): Record<string, string> {
   const header = req.headers.cookie || "";
@@ -149,6 +150,8 @@ export function createAuthMiddleware(token: string | undefined, accepts?: TokenC
             status: "ok",
             app: "band-web-server",
             hostname: hostname(),
+            // The hub updater reads this after a restart to confirm the target version is running.
+            version: HUB_VERSION,
           }),
         );
       } else {

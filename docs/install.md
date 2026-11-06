@@ -64,3 +64,5 @@ A worker is a computer that runs worktrees and agents for a hub. Add one with a 
 ## Updating
 
 See [Updates](updates.md) for the desktop app, workers and the hub, and for the version rules between them.
+
+An npm hub run by systemd or launchd can update itself. If you use an `update.sh` script and a timer, see [Move from update.sh and the timer](updates.md#move-from-updatesh-and-the-timer).

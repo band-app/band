@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  Switch,
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -28,8 +29,10 @@ export function HubUpdateControls() {
     queryKey: ["settings.get", "hubUpdate"],
     queryFn: () => trpc.settings.get.query(),
   });
-  const saved = (settings.data as { hubUpdate?: { command?: string } } | undefined)?.hubUpdate
-    ?.command;
+  const savedUpdate = (
+    settings.data as { hubUpdate?: { command?: string; auto?: boolean } } | undefined
+  )?.hubUpdate;
+  const saved = savedUpdate?.command;
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,6 +70,17 @@ export function HubUpdateControls() {
       setDraft(null);
       await queryClient.invalidateQueries({ queryKey: ["settings.get", "hubUpdate"] });
     });
+
+  const setAuto = (auto: boolean) =>
+    run(async () => {
+      await trpc.settings.update.mutate({ hubUpdate: { auto } });
+      queryClient.setQueryData(["settings.get", "hubUpdate"], (old: object | undefined) => ({
+        ...old,
+        hubUpdate: { ...savedUpdate, auto },
+      }));
+      await queryClient.invalidateQueries({ queryKey: ["settings.get", "hubUpdate"] });
+    });
+  const lastRun = hubUpdate?.lastRun;
 
   return (
     <div className="mt-3 space-y-2" data-testid="hub-update">
@@ -162,6 +176,52 @@ export function HubUpdateControls() {
         <p role="alert" data-testid="hub-update__action-error" className="text-xs text-destructive">
           {error}
         </p>
+      ) : null}
+      <div className="flex items-center gap-2">
+        <Switch
+          aria-label="Update the hub automatically"
+          data-testid="hub-update__auto"
+          checked={savedUpdate?.auto === true}
+          disabled={busy || hubUpdate?.builtIn === false}
+          onCheckedChange={(on) => void setAuto(on)}
+        />
+        <span className="text-xs text-muted-foreground">
+          Update automatically when no agent turn runs
+        </span>
+      </div>
+      {hubUpdate?.builtIn === false && hubUpdate.builtInBlockedReason ? (
+        <p className="text-xs text-muted-foreground" data-testid="hub-update__blocked">
+          The built-in updater is off: {hubUpdate.builtInBlockedReason}.
+        </p>
+      ) : null}
+      {hubUpdate?.deferredSince ? (
+        <p className="text-xs text-muted-foreground" data-testid="hub-update__deferred">
+          Waiting for running agent turns since {new Date(hubUpdate.deferredSince).toLocaleString()}
+          .
+        </p>
+      ) : null}
+      {lastRun ? (
+        <div className="space-y-1 text-xs" data-testid="hub-update__last-run">
+          <div data-testid="hub-update__last-result">
+            Last run: {lastRun.from} to {lastRun.to}, {lastRun.result} ({lastRun.message})
+          </div>
+          {lastRun.backup ? (
+            <div
+              className="break-all font-mono text-muted-foreground"
+              data-testid="hub-update__backup"
+            >
+              {lastRun.backup}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {hubUpdate?.logTail ? (
+        <pre
+          data-testid="hub-update__log"
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground"
+        >
+          {hubUpdate.logTail}
+        </pre>
       ) : null}
       <div className="flex items-center gap-2">
         <Input
