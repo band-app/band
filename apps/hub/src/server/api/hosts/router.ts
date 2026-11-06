@@ -112,6 +112,8 @@ export const hostsRouter = t.router({
               ),
               ...describeHostVersion(h, HUB_VERSION, latest),
               update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
+              autoUpdate: workerUpdateService.isAuto(h.id),
+              autoUpdateDeferredSince: workerUpdateService.deferredSince(h.id),
               // Command names and paths are admin detail, like the update error above.
               agentCommands: ctx.admin ? h.agentCommands : {},
               agentCommandStates: (await hostAgentCommandService.states(h, ctx.admin)).map(
@@ -266,6 +268,24 @@ export const hostsRouter = t.router({
         }
         throw err;
       }
+    }),
+
+  /**
+   * Turns the automatic update of one worker on or off. A worker with it on installs the hub's
+   * version by itself when it is behind and no agent the restart would end runs on it.
+   */
+  setAutoUpdate: adminProcedure
+    .input(z.object({ hostId: z.string().min(1), auto: z.boolean() }))
+    .mutation(({ input }) => {
+      try {
+        workerUpdateService.setAuto(input.hostId, input.auto);
+      } catch (err) {
+        if (err instanceof WorkerUpdateError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        throw err;
+      }
+      return { hostId: input.hostId, auto: input.auto };
     }),
 
   /** Dismisses a failed update, so the Update button is offered again. */

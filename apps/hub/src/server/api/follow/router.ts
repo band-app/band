@@ -8,6 +8,9 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { CheckpointError, ContinueGateError } from "../../errors";
+import { hostNamesOf } from "../../services/_utils/repo-host-policy";
+import { chatOwnershipService } from "../../services/chat-ownership-service";
+import { chatService } from "../../services/chat-service";
 import { followService } from "../../services/follow-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -68,6 +71,33 @@ export const followRouter = t.router({
   bringOver: publicProcedure
     .input(z.object({ worktreeId }))
     .mutation(({ input }) => guard(() => followService.bringOver(input.worktreeId))),
+
+  /**
+   * Events a former owner logged for a chat after the chat continued elsewhere. They are never
+   * merged: this is the count, the time of the first one and the workers involved, or null.
+   */
+  heldEvents: publicProcedure.input(z.object({ chatId: z.string().min(1) })).query(({ input }) => {
+    const held = chatOwnershipService.heldSummary(input.chatId);
+    if (!held) return null;
+    const chat = chatService.get(input.chatId);
+    const [fromHostName] = hostNamesOf([held.hostId]);
+    const nowHost = chat?.ownerHostId ?? null;
+    return {
+      ...held,
+      fromHostName,
+      continuedOnHostName: nowHost ? hostNamesOf([nowHost])[0] : "This hub",
+    };
+  }),
+
+  /** The held events as a read-only transcript. */
+  heldTranscript: publicProcedure
+    .input(z.object({ chatId: z.string().min(1) }))
+    .query(({ input }) => chatOwnershipService.heldTranscript(input.chatId)),
+
+  /** Deletes the held events of a chat. Agents cannot reach this router. */
+  discardHeld: publicProcedure
+    .input(z.object({ chatId: z.string().min(1) }))
+    .mutation(({ input }) => ({ discarded: chatOwnershipService.discardHeld(input.chatId) })),
 
   /** Removes the old copy and its files. Refused unless `confirm` is true, and for a diverged copy unless `discardChanges` is true too. */
   discardOld: publicProcedure

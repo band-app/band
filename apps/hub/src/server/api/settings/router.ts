@@ -25,9 +25,10 @@ export const settingsRouter = t.router({
       voice,
       provisioning,
       hubUpdate,
+      workerUpdate,
       ...settings
     } = settingsService.get();
-    return ctx.admin ? { ...settings, voice, provisioning, hubUpdate } : settings;
+    return ctx.admin ? { ...settings, voice, provisioning, hubUpdate, workerUpdate } : settings;
   }),
 
   update: publicProcedure.input(settingsUpdateInput).mutation(({ input, ctx }) => {
@@ -56,6 +57,12 @@ export const settingsRouter = t.router({
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "Changing hubUpdate needs an admin token.",
+      });
+    }
+    if (input.workerUpdate !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing workerUpdate needs an admin token.",
       });
     }
     if (input.runners !== undefined && !ctx.admin) {

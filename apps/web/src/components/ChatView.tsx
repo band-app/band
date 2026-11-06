@@ -69,6 +69,7 @@ import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { AgentFailureCard } from "./chat/AgentFailureCard";
 import { ChatLoginMenu } from "./chat/ChatLoginMenu";
 import { EditorSelectionChip, SentSelectionChip } from "./chat/EditorSelectionChip";
+import { HeldEventsNotice } from "./chat/HeldEventsNotice";
 import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
 import { QueuedMessages, type QueuedMessageView } from "./chat/QueuedMessages";
@@ -707,6 +708,7 @@ export function ChatView({
         )}
         <ListeningPill chatId={chatId} />
         <StalledPill worktreeId={worktreeId} chatId={chatId} />
+        <HeldEventsNotice chatId={chatId} />
         <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
           {/* Absolutely positioned so it never shifts content while an older
               page loads (issue #572). */}

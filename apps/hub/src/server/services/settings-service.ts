@@ -155,6 +155,11 @@ export const settingsUpdateInput = z
       })
       .passthrough()
       .optional(),
+    // Workers that update themselves when idle (`services/worker-update-service.ts`). Admin only.
+    workerUpdate: z
+      .object({ autoHostIds: z.array(z.string().min(1).max(100)).max(1000).optional() })
+      .passthrough()
+      .optional(),
     // Where environment images are built (plan step 3.2).
     environmentBuilder: z
       .object({

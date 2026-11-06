@@ -147,6 +147,7 @@ import {
   workerLinkService,
 } from "./src/server/services/worker-link-service.ts";
 import { workerRelayService } from "./src/server/services/worker-relay-service.ts";
+import { workerUpdateService } from "./src/server/services/worker-update-service.ts";
 import { worktreeService } from "./src/server/services/worktree-service.ts";
 
 // ---------------------------------------------------------------------------
@@ -957,6 +958,7 @@ async function main() {
   workerLinkService.start();
   releaseCheckService.start();
   hubUpdateService.startAuto();
+  workerUpdateService.startAuto();
   extensionCatalogService.start();
   placementService.start();
   environmentBuildService.start();
@@ -1957,6 +1959,7 @@ async function main() {
     placementService.stop();
     releaseCheckService.stop();
     hubUpdateService.stopAuto();
+    workerUpdateService.stopAuto();
     extensionCatalogService.stop();
     environmentBuildService.stop();
     // Agents held by remote workers survive a lost link by design, but the hub keeps their ACP

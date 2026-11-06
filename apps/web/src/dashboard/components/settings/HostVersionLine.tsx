@@ -5,6 +5,7 @@ import { trpc } from "../../../lib/trpc-client";
 import { HOSTS_LIST_KEY, type HostView } from "../../hooks/use-update-status";
 import { CopyCommand } from "../CopyCommand";
 import { WorkerUpdateButton } from "../WorkerUpdateButton";
+import { UpdateControls } from "./UpdateControls";
 
 const STATE_LABEL: Record<HostView["versionState"], string | null> = {
   current: null,
@@ -59,14 +60,36 @@ function ErrorPopover({
 }
 
 /**
+ * Why a worker takes no automatic update, or null when it can. The row shows this instead of the
+ * Update button and the switch.
+ */
+function blockedReasonFor(host: HostView): string | null {
+  if (host.updateBlockedReason)
+    return `This worker cannot update itself: ${host.updateBlockedReason}`;
+  if (!host.serviceManager) {
+    return "This worker does not run under launchd or a systemd user unit, so the hub cannot restart it.";
+  }
+  return null;
+}
+
+/**
  * A host's Band version on the Hosts screen: what it runs, whether it is behind the hub, the
- * Update button (admin, and only for a worker that can restart itself) or the command to run by
- * hand, and the result of an update in progress.
+ * same update controls as the hub (latest release, Check for updates, Update, Update
+ * automatically) for an admin, the command to run by hand for a worker that cannot restart itself,
+ * and the result of an update in progress.
  */
 export function HostVersionLine({ host, isAdmin }: { host: HostView; isAdmin: boolean }) {
   const queryClient = useQueryClient();
   const label = STATE_LABEL[host.versionState];
   const showButton = host.canUpdate && isAdmin;
+  const blocked = blockedReasonFor(host);
+  const showControls = isAdmin && host.id !== "local";
+  const autoDisabledReason =
+    host.versionState === "ahead"
+      ? "Newer than the hub, so it is not updated until the hub catches up."
+      : host.versionState === "unknown"
+        ? "The version is unknown, so it is not updated automatically."
+        : null;
   return (
     <div
       className="space-y-1 text-xs text-muted-foreground"
@@ -104,14 +127,36 @@ export function HostVersionLine({ host, isAdmin }: { host: HostView; isAdmin: bo
             }
           />
         ) : null}
-        {showButton ? <WorkerUpdateButton host={host} /> : null}
       </div>
       {host.update && host.update.state !== "failed" ? (
         <div data-testid="settings__host-update-progress">
           {host.update.state === "installing" ? "Installing" : "Restarting"} {host.update.target}…
         </div>
       ) : null}
-      {host.updateTarget && !showButton && host.manualCommand ? (
+      {showControls ? (
+        <UpdateControls
+          testId="worker-update"
+          name={host.name}
+          updateAction={showButton ? <WorkerUpdateButton host={host} /> : null}
+          auto={host.autoUpdate}
+          autoLabel="Update automatically when idle"
+          autoDisabledReason={autoDisabledReason}
+          blockedReason={blocked}
+          manualCommand={host.updateTarget ? host.manualCommand : null}
+          onAutoChange={(on) =>
+            void trpc.workers.setAutoUpdate
+              .mutate({ hostId: host.id, auto: on })
+              .then(() => queryClient.invalidateQueries({ queryKey: HOSTS_LIST_KEY }))
+          }
+        >
+          {host.autoUpdate && host.autoUpdateDeferredSince ? (
+            <p className="text-xs text-muted-foreground" data-testid="worker-update__deferred">
+              Waiting for running agents since{" "}
+              {new Date(host.autoUpdateDeferredSince).toLocaleString()}.
+            </p>
+          ) : null}
+        </UpdateControls>
+      ) : host.updateTarget && host.manualCommand ? (
         <div className="space-y-1">
           <div>Run on the worker, then restart it:</div>
           <CopyCommand
