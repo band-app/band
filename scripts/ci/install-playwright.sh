@@ -19,9 +19,29 @@
 # .deb files stay in /var/cache/apt/archives, so a capped attempt loses nothing,
 # and a retry switches to archive.ubuntu.com. The install phase then runs from
 # the cache with no cap. APT_DOWNLOAD_TIMEOUT_SECONDS sets the cap (default 300).
+#
+# Run 42179615014 showed the cap alone is not enough: azure delivered ~25 of 181
+# packages per 300 s attempt, so 3 attempts could never finish. The download now
+# retries for as long as an attempt adds .debs to the archive, up to
+# APT_DOWNLOAD_BUDGET_SECONDS in total (default 900), and stops early after an
+# attempt that added none. The runner's mirror list lives in
+# /etc/apt/apt-mirrors.txt (the deb822 source points at it with `mirror+file:`),
+# so the mirror switch edits that file as well as sources.list and *.sources.
+#
+# The downloaded .debs are cached between runs. APT_DEB_CACHE_DIR names a
+# runner-owned directory that actions/cache restores and saves, because
+# /var/cache/apt/archives belongs to root. Before the download the script copies
+# the .debs from that directory into the archive, so apt finds them, and after
+# the download it copies the archive back. `--plan` prints the cache key part
+# (a hash of the package list Playwright prints) and installs nothing.
 set -uo pipefail
 
-browsers=${1:?usage: install-playwright.sh "<browsers>"}
+plan_only=0
+if [ "${1:-}" = --plan ]; then
+  plan_only=1
+  shift
+fi
+browsers=${1:?usage: install-playwright.sh [--plan] "<browsers>"}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 with_timeout=${WITH_TIMEOUT_SCRIPT:-$here/../with-timeout.mjs}
 playwright=${PLAYWRIGHT_CMD:-"pnpm --filter @band-app/web exec playwright"}
@@ -29,7 +49,10 @@ sudo_cmd=${SUDO-sudo}
 apt_timeout=${APT_TIMEOUT_SECONDS:-0}
 apt_attempts=${APT_ATTEMPTS:-3}
 download_timeout=${APT_DOWNLOAD_TIMEOUT_SECONDS:-300}
-apt_sources=${APT_SOURCES_FILES:-"/etc/apt/sources.list /etc/apt/sources.list.d/*"}
+apt_sources=${APT_SOURCES_FILES:-"/etc/apt/sources.list /etc/apt/sources.list.d/* /etc/apt/apt-mirrors.txt"}
+download_budget=${APT_DOWNLOAD_BUDGET_SECONDS:-900}
+archives=${APT_ARCHIVES_DIR:-/var/cache/apt/archives}
+deb_cache=${APT_DEB_CACHE_DIR:-}
 browser_timeout=${BROWSER_TIMEOUT_SECONDS:-1200}
 browser_attempts=${BROWSER_ATTEMPTS:-3}
 backoff=${INSTALL_BACKOFF_SECONDS:-10}
@@ -88,24 +111,105 @@ run_attempts() {
   return 1
 }
 
-install_system_deps() {
-  # The package list comes from Playwright, so it follows the version in use.
-  local plan packages
+deb_count() {
+  local n=0 f
+  for f in "$archives"/*.deb; do
+    [ -e "$f" ] && n=$((n + 1))
+  done
+  echo "$n"
+}
+
+# Puts the cached .debs where apt looks for them.
+restore_debs() {
+  [ -n "$deb_cache" ] && [ -d "$deb_cache" ] || return 0
+  local f
+  for f in "$deb_cache"/*.deb; do
+    [ -e "$f" ] && $sudo_cmd cp -n "$f" "$archives/"
+  done
+  echo "Restored the cache; $(deb_count) .debs now in $archives"
+}
+
+# Copies the archive to the runner-owned directory that actions/cache saves.
+save_debs() {
+  [ -n "$deb_cache" ] || return 0
+  mkdir -p "$deb_cache"
+  local f
+  for f in "$archives"/*.deb; do
+    [ -e "$f" ] && $sudo_cmd cp -n "$f" "$deb_cache/"
+  done
+  $sudo_cmd chown -R "$(id -u):$(id -g)" "$deb_cache" || true
+}
+
+# Prints the package list from Playwright, which follows the version in use.
+read_packages() {
+  local plan
   # shellcheck disable=SC2086
   plan=$($playwright install-deps --dry-run $browsers 2>/dev/null) || plan=""
-  packages=$(printf '%s\n' "$plan" | grep -o 'apt-get install.*' | head -n 1 | sed -E "s/^apt-get install//; s/[\"']//g; s/(^| )-[-a-zA-Z]+//g")
+  printf '%s\n' "$plan" | grep -o 'apt-get install.*' | head -n 1 | sed -E "s/^apt-get install//; s/[\"']//g; s/(^| )-[-a-zA-Z]+//g"
+}
+
+hash_text() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
+}
+
+# Downloads with retries while attempts make progress (more .debs in the archive).
+download_packages() {
+  local start=$SECONDS attempt=0 before after status
+  while :; do
+    attempt=$((attempt + 1))
+    before=$(deb_count)
+    echo "Playwright apt download attempt $attempt (limit ${download_timeout}s, $before .debs present): apt-get install --download-only"
+    status=0
+    # shellcheck disable=SC2086
+    if [ "$download_timeout" = 0 ]; then
+      $sudo_cmd env "PATH=$PATH" DEBIAN_FRONTEND=noninteractive apt-get "${apt_opts[@]}" install -y --no-install-recommends --download-only $packages || status=$?
+    else
+      $sudo_cmd env "PATH=$PATH" DEBIAN_FRONTEND=noninteractive node "$with_timeout" "$download_timeout" \
+        apt-get "${apt_opts[@]}" install -y --no-install-recommends --download-only $packages || status=$?
+    fi
+    if [ "$status" -eq 0 ]; then
+      return 0
+    fi
+    after=$(deb_count)
+    save_debs
+    if [ "$after" -le "$before" ]; then
+      echo "::error::Playwright apt download made no progress in attempt $attempt (exit code $status, $after .debs present); giving up"
+      return 1
+    fi
+    if [ $((SECONDS - start)) -ge "$download_budget" ]; then
+      echo "::error::Playwright apt download was still progressing ($before to $after .debs in attempt $attempt) but used the ${download_budget}s time budget; giving up"
+      return 1
+    fi
+    echo "::warning::Playwright apt download attempt $attempt stopped (exit code $status) after adding $((after - before)) .debs; retrying"
+    retry_download
+    sleep "$backoff"
+  done
+}
+
+install_system_deps() {
+  packages=$(read_packages)
   if [ -z "$packages" ]; then
     echo "::error::Could not read the system package list from 'playwright install-deps --dry-run'"
     return 1
   fi
+  restore_debs
   run_attempts "Playwright apt update" "$apt_attempts" "$apt_timeout" clear_apt 1 apt-get "${apt_opts[@]}" update || return 1
-  # shellcheck disable=SC2086
-  run_attempts "Playwright apt download" "$apt_attempts" "$download_timeout" retry_download 1 \
-    apt-get "${apt_opts[@]}" install -y --no-install-recommends --download-only $packages || return 1
+  download_packages || return 1
+  save_debs
   # shellcheck disable=SC2086
   run_attempts "Playwright apt install" "$apt_attempts" "$apt_timeout" clear_apt 1 \
     apt-get "${apt_opts[@]}" install -y --no-install-recommends $packages
 }
+
+if [ "$plan_only" = 1 ]; then
+  packages=$(read_packages)
+  if [ -z "$packages" ]; then
+    echo "::error::Could not read the system package list from 'playwright install-deps --dry-run'" >&2
+    exit 1
+  fi
+  echo "apt-packages-hash=$(printf '%s' "$packages" | hash_text)"
+  exit 0
+fi
 
 if [ "$(uname -s)" = Linux ] || [ -n "${FORCE_APT:-}" ]; then
   install_system_deps || exit 1
