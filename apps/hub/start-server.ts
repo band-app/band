@@ -37,6 +37,10 @@ import {
   EXT_INSTALL_PATH,
   handleExtensionInstall,
 } from "./src/server/api/extensions/install-handler.ts";
+import {
+  extensionStreamTarget,
+  handleExtensionStream,
+} from "./src/server/api/extensions/stream-handler.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import {
@@ -106,6 +110,7 @@ import { browserService } from "./src/server/services/browser-service.ts";
 import { checkpointService } from "./src/server/services/checkpoint-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
+import { extensionCatalogService } from "./src/server/services/extension-catalog-service.ts";
 import { extensionService } from "./src/server/services/extension-service.ts";
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
@@ -944,6 +949,7 @@ async function main() {
   // Known workers become resolvable hosts, before any worktree asks for one.
   workerLinkService.start();
   releaseCheckService.start();
+  extensionCatalogService.start();
   placementService.start();
   environmentBuildService.start();
   runnerService.start();
@@ -1633,6 +1639,14 @@ async function main() {
       return;
     }
 
+    const extensionStream = extensionStreamTarget(url.pathname);
+    if (extensionStream !== null) {
+      pluginStreamWss.handleUpgrade(req, socket, head, (ws) => {
+        void handleExtensionStream(ws, req, extensionStream);
+      });
+      return;
+    }
+
     const pluginStream = pluginStreamTarget(url.pathname);
     if (pluginStream !== null) {
       pluginStreamWss.handleUpgrade(req, socket, head, (ws) => {
@@ -1922,6 +1936,7 @@ async function main() {
     mcpProxyService.stop();
     placementService.stop();
     releaseCheckService.stop();
+    extensionCatalogService.stop();
     environmentBuildService.stop();
     // Agents held by remote workers survive a lost link by design, but the hub keeps their ACP
     // state and nothing can reattach after it stops, so they end with it.

@@ -249,3 +249,72 @@ describe("parseMarkdown with github html", () => {
     assert.equal(p.type === "paragraph" && spansText(p.spans), "use <div> here");
   });
 });
+
+describe("prose with symbols", () => {
+  // The web chat's tests/markdown-prose.test.ts holds the same lines. The app has no math, so
+  // `$` is always text, and none of these may pick up bold, italic, strike or a link.
+  const VERBATIM = [
+    "Premiuma od 10 $. Od januara 2026. on košta 19,80 $.",
+    "1.000,50$ i 5$ i 7$.",
+    "Max gets $100 a month and Ultra gets $200",
+    "costs $5 and $10, or $1,000 to $2,000",
+    "US$10 i $ 10",
+    "$10–$20",
+    "$10-$20",
+    "€10 and $20",
+    "$1 and $2",
+    "$HOME and $PATH",
+    "$PATH/$HOME",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal shell syntax is the input
+    "${foo}",
+    "^foo$ and a$b$c",
+    "~30 min and ~2 h",
+    "~/Projects/x and ~ 5",
+    "snake_case_name",
+    "*.ts and *.tsx",
+    "<repo>-<branch>",
+    "Array<string>",
+    "#1117 and @name",
+    "Cena je 5 EUR. 5. novembar je dan",
+    "Rok je 2026. 5. novembra",
+    "$x^2$",
+  ];
+
+  for (const line of VERBATIM) {
+    it(`shows "${line}" as written`, () => {
+      const blocks = parseMarkdown(line);
+      assert.equal(blocks.length, 1);
+      const [para] = blocks;
+      assert.equal(para.type, "paragraph");
+      if (para.type !== "paragraph") return;
+      assert.equal(spansText(para.spans), line);
+      for (const span of para.spans) {
+        assert.equal(span.bold || span.italic || span.strike || span.link, undefined);
+      }
+    });
+  }
+
+  it("keeps an escaped dollar as a literal dollar", () => {
+    const [para] = parseMarkdown("\\$5 and \\$6");
+    assert.equal(para.type === "paragraph" && spansText(para.spans), "$5 and $6");
+  });
+
+  it("links a bare URL without its trailing punctuation", () => {
+    const [para] = parseMarkdown("see https://a.com/x. and (https://b.com/y), ok");
+    if (para.type !== "paragraph") throw new Error("expected a paragraph");
+    assert.deepEqual(
+      para.spans.filter((s) => s.link).map((s) => s.text),
+      ["https://a.com/x", "https://b.com/y"],
+    );
+  });
+
+  it("starts a list only at the start of a line", () => {
+    assert.equal(parseMarkdown("1. one\n2. two")[0].type, "list");
+    assert.equal(parseMarkdown("Datum: 5. novembar")[0].type, "paragraph");
+  });
+
+  it("still styles real strikethrough", () => {
+    const [para] = parseMarkdown("~~stari~~ cena");
+    assert.equal(para.type === "paragraph" && para.spans[0].strike, true);
+  });
+});

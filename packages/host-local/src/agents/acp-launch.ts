@@ -146,6 +146,13 @@ export async function resolveAcpLaunch(def: AcpAgentDefinition): Promise<AcpLaun
     env.CLAUDE_CODE_ENABLE_CFC = "1";
   }
 
+  // Claude Code turns the Artifact tool off for the Agent SDK entrypoint the adapter uses, unless
+  // CLAUDE_CODE_ARTIFACT is truthy. A value already in the worker's environment is the user's
+  // choice (for example 0 to opt out), and launch env overrides the inherited one, so skip then.
+  if (def.type === "claude-code" && process.env.CLAUDE_CODE_ARTIFACT === undefined) {
+    env.CLAUDE_CODE_ARTIFACT = "1";
+  }
+
   const testAgent = process.env.BAND_TEST_ACP_AGENT;
   if (testAgent) return { command: process.execPath, args: [testAgent], env };
 

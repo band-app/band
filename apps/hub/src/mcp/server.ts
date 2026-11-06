@@ -112,7 +112,7 @@ function createMcpServer(req: IncomingMessage): McpServer {
   });
 
   const procedures = discoverProcedures();
-  const ctx = createContext({ req });
+  const ctx = createContext({ req, agent: true });
   const caller = appRouter.createCaller(ctx);
 
   for (const proc of procedures) {

@@ -2,6 +2,7 @@ export { Channel } from "./channel.ts";
 export * from "./chats.ts";
 export { LinkClient, type LinkClientOptions } from "./client.ts";
 export * from "./direct.ts";
+export * from "./extensions.ts";
 export {
   decodeFrames,
   encodeFrame,

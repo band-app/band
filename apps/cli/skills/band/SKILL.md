@@ -60,7 +60,7 @@ A repo is identified by its remote URL and default branch. The hub keeps no path
 
 - `<path>` registers a git repository on the hub's machine and reads its `origin` URL and default branch. Returns the repo name.
 - `--url` registers a repo by its remote URL. A worker clones it to `~/band/repos/<owner>/<name>` the first time a worktree for it lands there. Without `--branch` the hub asks the remote for its default branch.
-- `--from <worker> <path>` registers the repo that a folder on a worker holds (worker ids are in `band workers list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
+- `--from <worker> <path>` registers the repo that a folder on a worker holds (worker ids are in `band workers list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token. An agent can use `--add-root` only when its own worker has admin trust and `<worker>` is that worker; otherwise it is refused.
 
 A folder with no remote is registered without a URL and can only run on the worker that holds it.
 
@@ -394,11 +394,13 @@ band tokens revoke <id>
 ```sh
 band extensions list
 band extensions reload
+band extensions catalog
 band extensions install <url | file.tar.gz> [--sha256 <hex>]
+band extensions install --official <id>
 band extensions remove <id>
 ```
 
-An extension is a folder in `<BAND_HOME>/extensions/<id>/` on the hub with a `band-extension.json`. It adds an editor for some files (for example spreadsheets) that opens in a center tab. `list` shows each extension and its editors, and an `error:` line for a folder that failed to load, with the reason. `reload` rereads the folder after you copy an extension in and needs an admin token. `install` takes a release archive (a `.tar.gz` with one folder named by the extension id) from an https URL or a local file, and checks its sha256 when given or when `<url>.sha256` exists. `remove` deletes an extension. These commands need an admin token. Run `reload`, `install` and `remove` only when the user asks.
+An extension is a folder in `<BAND_HOME>/extensions/<id>/` on the hub with a `band-extension.json`. It adds an editor for some files (for example spreadsheets) that opens in a center tab. `list` shows each extension and its editors, and an `error:` line for a folder that failed to load, with the reason. `reload` rereads the folder after you copy an extension in and needs an admin token. `install` takes a release archive (a `.tar.gz` with one folder named by the extension id) from an https URL or a local file, and checks its sha256 when given or when `<url>.sha256` exists. `catalog` lists the official extensions with their status (installed, update, needs a newer Band). `install --official <id>` installs or updates one from the catalog, checked against the catalog's sha256. `remove` deletes an extension. These commands need an admin token. Run `reload`, `install` and `remove` only when the user asks.
 
 The `band` MCP server also gives a chat access to the editor tabs open in its own worktree: `band_editor_list`, `band_editor_open { file }`, `band_editor_selection` (what the user selected), and each editor's own tools as `<extension id>_<tool>` with a `file` argument. Edits stay unsaved in the tab and the user saves. When the user says "this" or "the selection", call `band_editor_selection` first.
 

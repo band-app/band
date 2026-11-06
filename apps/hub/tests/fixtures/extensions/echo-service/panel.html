@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Echo panel</title></head>
+  <body>
+    <h1>Echo panel</h1>
+    <p>Frames: <span id="frames">0</span></p>
+    <p>Mode: <span id="mode">view-only</span></p>
+    <p>Call: <span id="call">none</span></p>
+    <ul id="echoes"></ul>
+    <button id="send" type="button">Send input</button>
+    <script>
+      let port = null;
+      let frames = 0;
+      const $ = (id) => document.getElementById(id);
+      window.addEventListener("message", (event) => {
+        if (event.data?.type !== "band:hello" || !event.ports[0]) return;
+        port = event.ports[0];
+        port.onmessage = (e) => {
+          const m = e.data;
+          if (m.type === "init") {
+            port.postMessage({ type: "ready" });
+            port.postMessage({ type: "stream.open", id: "s1", name: "screen", params: { frames: 3 } });
+            port.postMessage({ type: "call", id: "c1", method: "echo", params: { hello: "panel" } });
+          } else if (m.type === "stream.frame" || (m.type === "stream.message" && !m.text.startsWith("echo:"))) {
+            frames += 1;
+            $("frames").textContent = String(frames);
+          } else if (m.type === "stream.message") {
+            const li = document.createElement("li");
+            li.textContent = m.text;
+            $("echoes").appendChild(li);
+          } else if (m.type === "control") {
+            $("mode").textContent = m.enabled ? "control" : "view-only";
+          } else if (m.type === "call.result") {
+            $("call").textContent = JSON.stringify(m.result);
+          } else if (m.type === "call.error") {
+            $("call").textContent = "error: " + m.message;
+          }
+        };
+      });
+      $("send").addEventListener("click", () => {
+        port?.postMessage({ type: "stream.send", id: "s1", message: "tap" });
+      });
+    </script>
+  </body>
+</html>

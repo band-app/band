@@ -22,6 +22,12 @@ export interface Host {
   readonly git: HostGit;
   readonly worktree: HostWorktree;
   readonly fs: HostFs;
+  /**
+   * Single files anywhere on the machine, for a person's `band open` and external
+   * tabs. Unlike `fs` it is not limited to the worker's folders, so only a call
+   * made for a device token may reach it (the relay and the direct path do not).
+   */
+  readonly external: HostExternalFiles;
   /** Which folder holds each repo on this host, and how a repo gets there. */
   readonly repos: HostRepos;
   readonly search: HostSearch;
@@ -60,6 +66,11 @@ export interface Host {
    * no worker plugins.
    */
   readonly plugins?: HostPlugins;
+  /**
+   * The worker services of installed extensions. Only a remote host has it: the hub's own machine
+   * runs none.
+   */
+  readonly extensions?: HostExtensions;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +321,34 @@ export interface FsStat {
   size: number;
   /** Epoch milliseconds. */
   mtimeMs: number;
+}
+
+/** What {@link HostExternalFiles.stat} found at a path. */
+export type ExternalFileStat =
+  | { outcome: "missing" }
+  | { outcome: "denied" }
+  | {
+      outcome: "ok";
+      /** The path with every symlink resolved. */
+      canonicalPath: string;
+      /** The kind of entry the path points at, links followed. */
+      kind: FsEntryKind;
+      /** True when the path itself is a symbolic link. */
+      symlink: boolean;
+      size: number;
+      /** Whether the worker's user may read it. */
+      readable: boolean;
+      /** Whether the worker's user may write it. */
+      writable: boolean;
+    };
+
+export interface HostExternalFiles {
+  /** Never rejects for a missing path or a permission problem; those are outcomes. */
+  stat(path: string): Promise<ExternalFileStat>;
+  /** Reads a regular file, not a link. Rejects with the OS error code (`EACCES`). */
+  readFile(path: string): Promise<Uint8Array>;
+  /** Replaces an existing regular file, not a link. Never creates one. */
+  writeFile(path: string, data: string | Uint8Array): Promise<void>;
 }
 
 export interface FsEntry {
@@ -876,6 +915,37 @@ export interface DirectGrant {
   token: string;
   /** Epoch ms after which the listener refuses the token. */
   expiresAt: number;
+}
+
+/** One extension the worker should run (`extensions.sync`). */
+export interface HostExtensionItem {
+  id: string;
+  version: string;
+  /** SHA-256 of the extension's `.tar.gz`, hex. */
+  sha256: string;
+}
+
+/** One worker service of an extension and where it stands on a worker. */
+export interface HostExtensionServiceState {
+  extensionId: string;
+  serviceId: string;
+  capability: string;
+  version: string;
+  state: "running" | "restarting" | "stopped" | "failed" | "not-eligible";
+  reason?: string;
+}
+
+export interface HostExtensionStates {
+  services: HostExtensionServiceState[];
+  /** Extensions the worker could not set up at all, with the reason. */
+  problems: Array<{ extensionId: string; reason: string }>;
+}
+
+export interface HostExtensions {
+  /** Makes the worker's running set equal `items` and returns the states. */
+  sync(items: HostExtensionItem[]): Promise<HostExtensionStates>;
+  /** The states now, without changing anything. */
+  status(): Promise<HostExtensionStates>;
 }
 
 export interface HostPlugins {

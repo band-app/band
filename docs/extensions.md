@@ -7,6 +7,25 @@ order: 40
 
 An editor extension adds an editor for some kinds of files, such as spreadsheets. A person opens a matching file in a center tab, edits it and saves it back to the worktree. The extension is a folder of web files. It runs only in a sandboxed iframe, holds no Band token and runs no code on the hub or on a worker.
 
+## Official extensions
+
+Band lists the extensions of `band-app/band-extensions` as official. The hub fetches one file, `https://github.com/band-app/band-extensions/releases/download/catalog/index.json`, at startup and once a day, and keeps it in memory. `BAND_EXTENSION_CATALOG_URL` replaces the URL and is read on every fetch. If the file cannot be read, the hub logs it once and Settings > Extensions shows "Catalog unavailable".
+
+The file is a JSON list. Each entry has:
+
+| Field | Meaning |
+| --- | --- |
+| `id`, `name`, `description` | What the list shows. `id` is the extension id and folder name. |
+| `version` | Plain MAJOR.MINOR.PATCH. |
+| `url`, `sha256` | The `.tar.gz` release archive and its checksum. The hub refuses an archive that does not match. |
+| `minBand` | The oldest Band version that can run it. An older hub shows "Not compatible" and offers no button. |
+| `worker` | True when the extension has a part that runs on workers. The confirm dialog says it runs code on workers (standard and admin workers only). |
+| `requires` | Worker facts it needs, such as `os=darwin`. |
+
+An entry that fails validation is skipped. Nothing installs by itself: an admin clicks Install, or Update to vX when the catalog has a newer version than the installed one. The same calls are `band extensions catalog` and `band extensions install --official <id>`.
+
+The hub records how each extension was installed in `<BAND_HOME>/extensions/.installs/<id>.json` (source, sha256, version). An extension is Official when it was installed from the catalog, or when its archive's sha256 equals the catalog's for that id. Otherwise the list says "Installed from URL" or "Installed from file". A folder copied in by hand has no record and shows "Installed by hand".
+
 ## Install
 
 From a release archive, which is a `.tar.gz` with one top-level folder named by the extension id:
@@ -120,7 +139,7 @@ selection = { address, kind, label, text?, rect? }
 - `text` is the selected content as text (tab-separated for a cell range). The hub keeps at most 4 KB and ends a longer one with `…`.
 - `rect` is optional, in the editor's own document units.
 
-The tab sends it to the hub with `editors.setSelection`. The hub keeps the latest selection per worktree and forgets it when that tab closes or its window stops reporting. A collapsed selection (`null`) clears it.
+The tab sends it to the hub with `editors.setSelection`. The hub keeps the latest selection per worktree. It stays after the tab closes or the window stops reporting, because the phone closes its editor screen to open the chat. It goes when a new selection replaces it, when the editor sends `null` (a collapsed selection), or after 30 minutes (`BAND_EDITOR_SELECTION_TTL_MS`, read on every check).
 
 Keyboard focus inside the frame does not reach Band, so the editor handles Cmd+S itself and sends `save`.
 
@@ -129,6 +148,142 @@ Band saves with `PUT /api/worktree-file/<worktreeId>/<path>`, a raw body up to 5
 ### Reloading
 
 After a save, and whenever the file changes on disk, every other tab on that file compares the new bytes with the ones it knows. With no unsaved edits it sends `reload`. With unsaved edits it shows the banner "This file changed while you have unsaved edits" with **Load theirs** and **Keep mine**. A tab's own save does not count as a change.
+
+## Worker services
+
+An extension can run code on workers. The manifest lists each process under `contributes.workerServices`:
+
+```json
+{
+  "contributes": {
+    "workerServices": [
+      { "id": "main", "entry": "service.mjs", "requires": ["os=darwin"], "capability": "simulator" }
+    ]
+  }
+}
+```
+
+`entry` is a `.mjs` file in the extension folder. `requires` takes worker facts (`os=darwin`, `arch=arm64`) and binary names that must be on the worker's `PATH`. `capability` is the name the worker reports in its capabilities while the service runs, and the name the hub uses to call it.
+
+### Where it runs
+
+The hub keeps the `.tar.gz` of each installed extension in `<BAND_HOME>/extensions/.archives/` and tells every eligible worker which extensions to run (`extensions.sync`, with id, version and sha256). It does this when a worker connects and after every install, update, removal and `workers.setTrust`. The worker downloads the archive from the hub over its link (`extensions.fetch`), checks the sha256, unpacks it under `<state dir>/extensions/<id>/<version>/` and removes other versions. Then it starts one process per service whose `requires` hold.
+
+A worker is eligible when its trust level is `standard` or `admin` and it is a connected worker. A `restricted` worker (the default for ephemeral and runner-started workers) never receives the archive and never runs the code, and the hub's own machine runs none. Installing an extension is admin only, and the install is the approval: an extension with a worker service runs code on every standard and admin worker, as the worker's user. The process has its own environment and nothing else separating it from the worker: there is no sandbox.
+
+`workers.list` returns `extensionServices` for each worker, with `extensionId`, `serviceId`, `capability`, `version`, `state` (`running`, `restarting`, `stopped`, `failed` or `not-eligible`) and a `reason`. A restricted worker shows `not-eligible` with the reason `restricted`, and a service whose `requires` fail shows the failed requirement, such as `needs os=darwin, this worker has linux`.
+
+### The process
+
+The worker starts `process.execPath <entry>` with the extension folder as the working directory. Under Electron (the desktop app's bundled worker) the spawn sets `ELECTRON_RUN_AS_NODE=1` itself, so it does not depend on what the worker inherited. The environment is an allowlist (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TMPDIR`, `TZ`, `DISPLAY`, `XDG_RUNTIME_DIR`). No `BAND_*`, `GIT_CONFIG_*` or token variable reaches the service.
+
+A service that exits is started again after 1 s, then 2 s, then 4 s. A third exit within 5 minutes marks it `failed` with the last exit code and stderr, and it stays failed until the next sync. A lease fence stops the process, and the next call after the hub renews starts it again. The service also stops when the worker shuts down, when the extension is removed or updated, and when the worker's trust drops to `restricted`.
+
+A bundled plugin with the same capability name takes precedence on that worker, and the worker logs it. This lets the simulator move into an extension without a conflict.
+
+### The protocol
+
+Control messages are NDJSON on the service's stdin (worker to service) and stdout (service to worker). A request is `{id, method, params}` and its answer `{id, result}` or `{id, error: {message}}`.
+
+| Method | Meaning |
+| --- | --- |
+| `init { worker, version, serviceId, stateDir }` | Sent once, first. `stateDir` survives updates and restarts. |
+| `call { method, params, worktreeKey, worktreePath }` | Returns the JSON result. |
+| `stream.open { streamId, name, params, worktreeKey, worktreePath }` | Opens a live stream. |
+| `stream.close { streamId }` | The viewer left. |
+| `worktree.release { worktreeKey, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). |
+| `stop` | Exit after finishing up. The worker kills the process after 3 s. |
+
+The service sends the notification `stream.end { streamId }` to end a stream. Stream data does not use stdio. It goes over file descriptor 3, a pipe the worker opens beside stdio, as binary frames: a 4-byte big-endian length, a 4-byte stream id, a kind byte (0 text, 1 bytes) and the payload, in both directions. The hub reaches a service with the same `plugin.call` and `plugin.stream` link methods as a bundled worker plugin.
+
+### Who can reach a service
+
+Same rule as a bundled worker plugin's stream. `GET /api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) accepts any device token, admin or not. The viewer is view-only until the person sends `{"type":"control","enabled":true}`, and the hub drops every other message from a view-only viewer before it reaches the service. An agent never reaches a service: the worker relay lists no such route (WebSocket routes are not relayed), `extensions.callService` is admin only, and `extensions.*` is left out of the MCP endpoint and the relay.
+
+### Keeping a worker in step
+
+The hub sends `extensions.sync` when a worker connects and after every install, update, removal and trust change. It also remembers the set each worker acknowledged and, with every lease renewal, sends it again when the worker has not acknowledged the current set. A sync that failed (the link was down, the worker was busy) therefore repeats until it succeeds, so a worker lowered to `restricted` stops its services even if the first sync never arrived. The call is idempotent.
+
+### Lease
+
+A service does not start or restart while the worker's lease is not valid, like `acp.spawn`. A service stopped by the fence, or a service synced while the lease is out, shows `stopped` and starts at the next renewal.
+
+### The SDK
+
+`packages/extension-worker-sdk` implements the service side. It is plain JavaScript with no dependencies, so an author copies `src/` next to the entry file or bundles it:
+
+```js
+import { defineWorkerService } from "./sdk/index.mjs";
+
+defineWorkerService({
+  onInit: ({ worker, stateDir }) => {},
+  calls: { echo: (params, { worktreeKey, worktreePath }) => params },
+  streams: {
+    screen: (params, scope, stream) => {
+      stream.send("hello");
+      return { onMessage: (m) => stream.send(m), onClose: () => {} };
+    },
+  },
+  onRelease: (worktreeKey, reason) => {},
+  onStop: () => {},
+});
+```
+
+`console.log` writes to stderr, because stdout is the control channel.
+
+### Limits
+
+- Panels and tools are described above. `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) still reach a service directly.
+- A service's scopes (the worktrees it served) are kept in memory, so `worktree.release { reason: "removed" }` does not reach a worktree the service last served before a restart.
+
+## Panels
+
+An extension can add a worktree panel: a page in the center "+" menu that is not tied to a file. Declare it next to the worker service that feeds it:
+
+```json
+"contributes": {
+  "workerServices": [{ "id": "main", "entry": "service.mjs", "capability": "screen" }],
+  "panels": [{ "id": "screen", "label": "Screen", "icon": "monitor", "entry": "panel.html", "capability": "screen" }]
+}
+```
+
+`capability` must be the capability of one of the extension's own services. The menu offers the panel when the worktree's worker is online and its service runs there, so a restricted worker, a worker that fails `requires` and the hub's own machine show nothing. `icon` is one of `globe`, `terminal`, `monitor`, `smartphone`, `image`, `box`, `play`, `activity`; any other name gets a puzzle icon. The tab stays mounted while hidden and is saved with the other center tabs.
+
+The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like an editor, so it has no Band cookie, token or storage. Band posts `{ type: "band:hello", extensionApi: 1 }` with one transferred `MessagePort`. Everything else goes over that port.
+
+From Band to the page:
+
+- `init { worktreeId, theme, layout, visible }`, sent once. The page answers `{ type: "ready" }`.
+- `stream.opened { id }`, `stream.frame { id, data }` (an `ArrayBuffer`), `stream.message { id, text }` and `stream.closed { id, code, reason }`.
+- `call.result { id, result }` and `call.error { id, message }`.
+- `control { enabled }`, `visible { visible }` and `layout { layout }`.
+
+From the page to Band:
+
+- `stream.open { id, name, params }` opens the stream `name` of the service. A panel may hold 4 streams. Ids are the page's own strings.
+- `stream.send { id, message }` sends a text message to the service.
+- `stream.close { id }`.
+- `call { id, method, params }` calls `method` of the service on this worktree's worker and answers with `call.result` or `call.error`.
+
+A stream is view-only. The hub drops everything the page sends until the person presses Take control in Band's own toolbar above the frame. The page cannot press it. Releasing control returns the stream to view-only, and a stream that opens while the person has control starts in control mode. Binary messages from the page are always dropped.
+
+Frames go from the service through the worker, the link and the hub to the browser. The hub route is `/api/extensions/<extension id>/worktrees/<worktree id>/stream?panel=<panel id>&name=<stream>&params=<json>`. It takes any device token and closes with code 4001 and a reason when the panel, the service or the worker is missing. Agents never reach it: the worker relay lists neither the route nor `extensions.panelCall`, and the MCP endpoint leaves `extensions.*` out.
+
+## Tools
+
+An extension can give agents tools that its worker service answers:
+
+```json
+"tools": [{
+  "name": "echo",
+  "description": "Echoes its arguments back",
+  "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } } },
+  "service": "main",
+  "method": "echo"
+}]
+```
+
+Band adds each tool to the built-in `band` MCP server as `<extension id>_<name>`, for example `echo-service_echo`. A call goes to `method` on the service `service`, on the worker of the calling chat's worktree, with the call's arguments as `params`. The service's JSON result is the tool result. No tab has to be open. The arguments cannot name another worktree. When the chat's worker does not run the service, the tool answers an error that names the worker. `"agent": false` leaves the tool out of the agent's list. `inputSchema` is a JSON Schema and is advertised as written. The service validates its own arguments.
 
 ## Agent access
 
@@ -165,7 +320,7 @@ Address: <address>
 
 ## Settings > Extensions
 
-Settings > Extensions lists every installed extension with its version, editors and file types. A folder that failed to load shows an error icon with a popover naming the folder and the reason. An admin can install from a URL (with an optional SHA-256) or upload a `.tar.gz`, remove an extension after a confirmation, and reload the folder after copying one in by hand. The upload posts the file as the raw body of `POST /api/extensions/install` with the device token as a Bearer header.
+Settings > Extensions starts with the official catalog (name, description, version, and Install, Installed, Update to vX or Not compatible with this Band version), a Reload button that also rereads the catalog, and the install controls. It lists every installed extension with its version, where it came from, editors and file types. A folder that failed to load shows an error icon with a popover naming the folder and the reason. An admin can install from a URL (with an optional SHA-256) or upload a `.tar.gz`, remove an extension after a confirmation, and reload the folder after copying one in by hand. The upload posts the file as the raw body of `POST /api/extensions/install` with the device token as a Bearer header.
 
 For each file type an extension handles, the page shows the default editor and lets an admin change it or go back to the manifest default. It reads and writes the same synced `band:extension-defaults` key as Open With, so the two stay in step. A non-admin device sees the list and the defaults but no install, remove, reload or default controls.
 

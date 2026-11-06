@@ -110,7 +110,7 @@ agent → /mcp-proxy/band → hub → status stream → window → editor tab �
 agent ← /mcp-proxy/band ← hub ← editors.result (tRPC) ← window ← mcp answer
 ```
 
-- Each window registers its open editor tabs with the hub (`editors.register { clientId, worktreeId, file, extensionId, editorId }`, `editors.unregister`) and keeps the list current. The hub forgets a window's tabs when its activity report expires (`client-activity-service`, 3 minutes) or it unregisters on page hide.
+- Each window registers its open editor tabs with the hub (`editors.register { clientId, worktreeId, file, extensionId, editorId }`, `editors.unregister`) and keeps the list current. The hub forgets a window's tabs when its activity report expires (`client-activity-service`, 3 minutes) or it unregisters on page hide. The selection is separate: it stays after its tab is gone, until a new selection replaces it, the editor sends `null`, or `BAND_EDITOR_SELECTION_TTL_MS` (30 minutes) passes, so a phone can leave the editor screen and still send the selection from the chat.
 - A call picks the tab for `(worktree, file, editor)` in the window that most recently had focus (`services.setActivity` reports). It sends `editor-call { callId, tabKey, message }` on the status stream to that client only. The window passes it to the tab, and posts the answer with `editors.result { callId, message }`.
 - `band_editor_open` with no tab open sends `editor-open { file, editor }` to the most recently focused window of any worktree. That window opens the tab, and the call waits for `ready` (30 s). With no window connected it answers "No Band window is open. Ask the person to open Band."
 - A call times out after 60 s with an error naming the window.

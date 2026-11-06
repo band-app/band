@@ -88,7 +88,7 @@ const THEME_TOKENS = [
   "link",
 ] as const;
 
-function readTheme(): { mode: "dark" | "light"; tokens: Record<string, string> } {
+export function readTheme(): { mode: "dark" | "light"; tokens: Record<string, string> } {
   const root = document.documentElement;
   const style = getComputedStyle(root);
   const tokens: Record<string, string> = {};

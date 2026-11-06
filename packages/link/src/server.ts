@@ -82,6 +82,11 @@ export class LinkServer extends EventEmitter {
     };
   }
 
+  /** The ids of the workers whose link is up now. */
+  connectedWorkerIds(): string[] {
+    return [...this.sessions].filter(([, s]) => s.attached).map(([id]) => id);
+  }
+
   getSession(workerId: string): ServerSession | undefined {
     return this.sessions.get(workerId);
   }

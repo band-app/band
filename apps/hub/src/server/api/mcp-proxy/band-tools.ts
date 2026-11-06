@@ -19,6 +19,7 @@ import { hostTrustService } from "../../services/host-trust-service";
 import { pluginHost } from "../../services/plugin-host-service";
 import { worktreeService } from "../../services/worktree-service";
 import { registerEditorTools } from "./editor-tools";
+import { registerExtensionTools } from "./extension-tools";
 
 const createInput = z.object({
   repo: z.string().describe("Name of a repo registered with Band"),
@@ -125,6 +126,7 @@ async function createServer(chatId: string): Promise<McpServer> {
   );
   registerPluginTools(server, chatId);
   await registerEditorTools(server, chatId);
+  await registerExtensionTools(server, chatId);
   return server;
 }
 

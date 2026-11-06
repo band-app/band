@@ -274,6 +274,20 @@ export class FileViewerPage {
     return this.markdownPreview.getByTestId(`markdown-preview__block--${kind}`);
   }
 
+  /** Brightness (0 black to 255 white) of a message label in the preview's
+   *  rendered mermaid sequence diagram. Light on a dark diagram, dark on a
+   *  light one. */
+  async previewMermaidTextBrightness(): Promise<number> {
+    const label = this.previewRenderedBlock("mermaid").locator("svg .messageText").first();
+    await expect(label).toBeVisible({ timeout: 20_000 });
+    return await label.evaluate((el) => {
+      const [r, g, b] = getComputedStyle(el)
+        .fill.match(/\d+(\.\d+)?/g)
+        ?.map(Number) ?? [0, 0, 0];
+      return (r + g + b) / 3;
+    });
+  }
+
   /** The `<table>` inside the preview's rendered table block. */
   get previewTable(): Locator {
     return this.previewRenderedBlock("table").getByRole("table");

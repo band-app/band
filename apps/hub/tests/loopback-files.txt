@@ -1,4 +1,5 @@
 acp-chat.test.ts
+agent-artifact-env.test.ts
 agent-logins.test.ts
 agent-sessions.test.ts
 agent-status-sources.test.ts
