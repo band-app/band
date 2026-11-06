@@ -21,6 +21,10 @@ Every chat talks to its agent over the Agent Client Protocol (ACP). The worker s
 
 The adapters for Claude Code and Codex ship with Band. The other three agents, and the `claude` and `codex` binaries, must be installed on the worker. Band looks for them on the worker's `PATH` and in the folders agent installers use under the home directory, such as `~/.local/bin` and `~/.opencode/bin`.
 
+### Claude in Chrome
+
+Claude Code ignores `claudeInChromeDefaultEnabled` for the SDK sessions that chats use. When the worker's Claude config has `"claudeInChromeDefaultEnabled": true` (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), Band starts the chat's Claude agent with `CLAUDE_CODE_ENABLE_CFC=1`, so the chat has the Claude in Chrome tools like the terminal CLI. The file is read at each agent launch on the worker that runs the chat. A `CLAUDE_CODE_ENABLE_CFC` already set in the worker's environment wins. Band does not make Chrome reachable from a headless worker.
+
 ## Chat and terminal mode
 
 An agent session has one of two modes, and it keeps its mode for its whole life.

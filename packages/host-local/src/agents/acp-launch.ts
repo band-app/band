@@ -13,7 +13,7 @@
  * scripted ACP agent so integration tests run with no network and no login.
  */
 
-import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
@@ -93,6 +93,29 @@ function notFound(command: string, path: string): string {
 }
 
 /**
+ * Whether Claude Code's global config turns Claude in Chrome on by default.
+ * The CLI ignores that setting for SDK sessions, which is what the ACP
+ * adapter starts, so Band passes it on as `CLAUDE_CODE_ENABLE_CFC`. Read at
+ * each launch from `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`. A
+ * missing or unparsable file means off.
+ */
+function claudeInChromeDefault(): boolean {
+  const file = process.env.CLAUDE_CONFIG_DIR
+    ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json")
+    : join(homedir(), ".claude.json");
+  try {
+    const config = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    return (
+      typeof config === "object" &&
+      config !== null &&
+      (config as Record<string, unknown>).claudeInChromeDefaultEnabled === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Resolves the launch for an agent definition, or returns a message saying
  * why it can't start (for instance, OpenCode isn't installed).
  */
@@ -112,6 +135,15 @@ export async function resolveAcpLaunch(def: AcpAgentDefinition): Promise<AcpLaun
     const found = binary(def, agentBinary.names, path);
     if (def.command && !found) return notFound(def.command, path);
     if (found) env[agentBinary.variable] = found;
+  }
+
+  // A value the worker's own environment already holds wins over the config file.
+  if (
+    def.type === "claude-code" &&
+    process.env.CLAUDE_CODE_ENABLE_CFC === undefined &&
+    claudeInChromeDefault()
+  ) {
+    env.CLAUDE_CODE_ENABLE_CFC = "1";
   }
 
   const testAgent = process.env.BAND_TEST_ACP_AGENT;
