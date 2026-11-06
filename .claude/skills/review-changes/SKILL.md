@@ -50,7 +50,7 @@ For each match, run `gh issue view <num>` and include the body in the context bu
 
 ### Repo conventions
 
-Read `CLAUDE.md`, `CONTRIBUTING.md` and the `.claude/rules/` notes whose `paths` match the changed files at the repo root — they define repo conventions the criteria files reference.
+Read `CLAUDE.md` and `CONTRIBUTING.md` at the repo root, plus the `.claude/rules/` notes whose `paths` match the changed files. They define repo conventions the criteria files reference.
 
 ### File inventory
 
