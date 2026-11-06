@@ -486,7 +486,6 @@ jobs:
 
       # The remote browser suites skip when no Chromium is found.
       - uses: ./.github/actions/setup-playwright
-        timeout-minutes: 20
         with:
           browsers: chromium
 
@@ -542,7 +541,6 @@ jobs:
       - uses: ./.github/actions/use-build
 
       - uses: ./.github/actions/setup-playwright
-        timeout-minutes: 20
         with:
           browsers: chromium
 
@@ -598,7 +596,6 @@ jobs:
       - uses: ./.github/actions/use-build
 
       - uses: ./.github/actions/setup-playwright
-        timeout-minutes: 20
 
       # A real Xvfb and x11vnc for `e2e/desktop-viewer-x11vnc.spec.ts`, which fails on Linux CI without them.
       - name: Install Xvfb and x11vnc
@@ -683,7 +680,6 @@ jobs:
 
       # The remote browser suite skips when no Chromium is found.
       - uses: ./.github/actions/setup-playwright
-        timeout-minutes: 20
         with:
           browsers: chromium
 
@@ -794,7 +790,6 @@ jobs:
         if: steps.list.outputs.has == 'true'
 
       - uses: ./.github/actions/setup-playwright
-        timeout-minutes: 20
         if: steps.list.outputs.has == 'true'
 
       - name: Test quarantined (hub)
@@ -1811,8 +1806,7 @@ jobs:
         run: pnpm --filter @band-app/server exec vitest run tests/simulator-plugin.test.ts -t "stream carries"
 
       - name: Install Playwright Chromium (simulator tab)
-        timeout-minutes: 10
-        run: node scripts/with-timeout.mjs 300 pnpm --filter @band-app/web exec playwright install chromium
+        run: pnpm --filter @band-app/web exec playwright install chromium
 
       - name: Test simulator tab (e2e)
         env:
