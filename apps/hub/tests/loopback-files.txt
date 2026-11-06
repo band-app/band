@@ -20,6 +20,7 @@ external-file-routes.test.ts
 file-watcher.test.ts
 format-trpc.test.ts
 hook-host-routing.test.ts
+hub-update-builtin.test.ts
 hub-update.test.ts
 lsp-reconnect.test.ts
 needs-attention.test.ts

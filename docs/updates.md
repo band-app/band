@@ -91,6 +91,39 @@ The hub is updated in the way you installed it. The "Update Band" panel shows th
 
 The panel picks the command from `BAND_INSTALL_METHOD` in the hub's environment. The compose file sets `compose`, the Kubernetes manifest sets `k8s`, and the Docker image defaults to `docker`. Set it to `helm` for a Helm chart and to `npm` for a hub installed with `npm i -g @band-app/server` under a systemd user unit named `band-hub`. When it is unset, the panel says to pull the image and recreate the container. See [Run the hub on a server](run-the-hub-on-a-server.md).
 
+### The built-in updater
+
+A hub installed with `npm i -g @band-app/server` and run by a systemd user unit (named `band-hub`) or a launchd agent (label `app.band.hub`) can update itself. It needs `BAND_INSTALL_METHOD=npm` in the hub's environment. Set `BAND_HUB_SERVICE_MANAGER` to `systemd` or `launchd` when the hub cannot tell which one runs it. The "Update Band" panel says why the updater is off when a condition is missing.
+
+An update does this, in order:
+
+1. Waits while agent turns run (automatic updates only, see below).
+2. Copies the database to `<BAND_HOME>/backups/<from-version>-<time>.db` with SQLite's `VACUUM INTO`, which also captures the pages still in the write-ahead log.
+3. Runs `npm i -g --prefix <prefix> @band-app/server@<version>` with the npm beside the hub's own node.
+4. Restarts the service with `systemctl --user restart band-hub` or `launchctl kickstart -k gui/<uid>/app.band.hub`.
+5. Polls `/api/health` until it reports the target version. `BAND_HUB_UPDATE_HEALTH_TIMEOUT_MS` sets the wait (2 minutes by default).
+
+If the new version does not report itself in time, or the restart fails, the updater stops the service, installs the previous version, restores the backup over `band.db`, starts the service and records the run as `rolled-back`. Under launchd it stops with `launchctl bootout gui/<uid>/app.band.hub` and starts with `launchctl bootstrap gui/<uid> <plist>`, so `KeepAlive` cannot respawn the hub while the database is restored. The plist is `~/Library/LaunchAgents/app.band.hub.plist`, or `BAND_HUB_LAUNCHD_PLIST`. The panel shows it as failed, with the reason and the last log lines. The install, the restart and the check run in a small script (`<BAND_HOME>/hub-update/supervisor.mjs`) that the hub starts before the restart, because the hub cannot check its own replacement. Under systemd it runs in its own scope, so the restart does not end it.
+
+After a successful update the updater deletes the oldest backups in `<BAND_HOME>/backups/` and keeps the newest 5. Set `hubUpdate.keepBackups` in `~/.band/settings.json` to keep another number. A failed or rolled-back run deletes nothing.
+
+The panel shows the last run, the backup path and the log tail to an admin. The log is `<BAND_HOME>/hub-update.log` and the state of the last run is `<BAND_HOME>/hub-update-last.json`.
+
+**Update automatically.** The switch in the panel sets `hubUpdate.auto` in `~/.band/settings.json`. It is off by default. With it on, the hub installs a newer release as soon as the release check reports one and no agent turn younger than 180 minutes (`BAND_HUB_UPDATE_MAX_TASK_AGE_MIN`) runs. If turns run, the hub waits, and goes ahead anyway once the first deferral is 6 hours old (`BAND_HUB_UPDATE_MAX_DEFER_H`). It also waits while the hub lists a live agent mid-turn (the list the update confirm dialog shows, `workers.hubInterruptions`), because a hub restart ends every agent it runs, including those a worker holds. This covers a turn that a worker runs or that an agent started itself, which no task row records. The same 6 hour limit applies. The panel shows since when it waits. An update that failed is not retried by itself for the same version.
+
+**The Update hub button** runs the same built-in path when no `hubUpdate.command` is set. A command still wins, so an install that uses the script below keeps working.
+
+#### Move from update.sh and the timer
+
+1. Check that the panel shows no reason for the built-in updater being off.
+2. Turn on "Update automatically".
+3. Disable the timer: `systemctl --user disable --now band-hub-update.timer`. The hub does not touch your timer, so both run until you do.
+4. Clear the "Hub update command" field, otherwise the button keeps running your script.
+
+The example script does two things besides updating. It defers while turns run, which the updater does with the same limits. It does not refresh a copy of the `band` CLI, and a hub does not need one: the CLI lookup (`packages/host-local/src/process/cli-binary.ts`) finds the `@band-app/worker-cli-<platform>-<arch>` package that `npm i -g @band-app/server` installs as an optional dependency, so the update replaces the CLI along with the hub. If your setup copies a binary to `~/band-hub/binaries/band` and points `BAND_CLI_PATH` at it, remove `BAND_CLI_PATH` so the lookup uses the npm package. A stale `BAND_CLI_PATH` wins over it.
+
+Docker, compose, Helm and Kubernetes hubs still show the command to run. The updater does not replace its own container.
+
 ### The Update hub button
 
 An admin can set a command that the hub runs to update itself. Enter it in the "Hub update command" field of the "Update Band" panel, or set `hubUpdate.command` in `~/.band/settings.json`. When a command is set and a newer release exists, the panel shows an "Update hub" button.

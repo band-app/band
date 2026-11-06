@@ -118,6 +118,7 @@ import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
 import { extensionCatalogService } from "./src/server/services/extension-catalog-service.ts";
 import { extensionService } from "./src/server/services/extension-service.ts";
+import { hubUpdateService } from "./src/server/services/hub-update-service.ts";
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
@@ -955,6 +956,7 @@ async function main() {
   // Known workers become resolvable hosts, before any worktree asks for one.
   workerLinkService.start();
   releaseCheckService.start();
+  hubUpdateService.startAuto();
   extensionCatalogService.start();
   placementService.start();
   environmentBuildService.start();
@@ -1954,6 +1956,7 @@ async function main() {
     mcpProxyService.stop();
     placementService.stop();
     releaseCheckService.stop();
+    hubUpdateService.stopAuto();
     extensionCatalogService.stop();
     environmentBuildService.stop();
     // Agents held by remote workers survive a lost link by design, but the hub keeps their ACP

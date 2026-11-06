@@ -8,7 +8,8 @@
  * (`BAND_HUB_UPDATE_TIMEOUT_MS`) turns the run into a failure that quotes the script's output.
  */
 
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -101,5 +102,59 @@ test.describe("the hub installed from npm", () => {
     await update.updateAllButton().click();
     await expect(update.updateAllResult(worker.hostId)).toHaveAttribute("data-state", "updated");
     await expect(update.workerVersion(worker.hostId)).toHaveAttribute("data-version", HUB_VERSION);
+  });
+});
+
+test.describe("the built-in updater", () => {
+  test("shows the schedule setting, the last run, the backup path and the log", async ({
+    page,
+  }) => {
+    const stubs = await startReleasesStub("v9.0.0");
+    const home = createTmpHome();
+    const work = join(home, "rig");
+    mkdirSync(join(work, "prefix"), { recursive: true });
+    writeFileSync(join(work, "npm"), '#!/bin/sh\necho npm-stub-ran "$@"\n', { mode: 0o755 });
+    writeFileSync(join(work, "systemctl"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    // The hub cannot restart itself in a test, so the restarted hub's health is a stub that
+    // reports the target version.
+    const health = createServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ status: "ok", version: "9.0.0" }));
+    });
+    await new Promise<void>((resolve) => health.listen(0, "127.0.0.1", resolve));
+    const healthPort = (health.address() as { port: number }).port;
+    seedSettings(home, { tokenSecret: TOKEN });
+    const hub = await startServer({
+      tmpHome: home,
+      env: {
+        BAND_GITHUB_API_URL: stubs.url,
+        BAND_INSTALL_METHOD: "npm",
+        BAND_HUB_VERSION: HUB_VERSION,
+        BAND_HUB_SERVICE_MANAGER: "systemd",
+        BAND_HUB_INSTALL_PREFIX: join(work, "prefix"),
+        BAND_NPM_BIN: join(work, "npm"),
+        BAND_SYSTEMCTL_BIN: join(work, "systemctl"),
+        BAND_HUB_UPDATE_HEALTH_URL: `http://127.0.0.1:${healthPort}/api/health`,
+        BAND_HUB_UPDATE_HEALTH_POLL_MS: "100",
+      },
+    });
+    try {
+      const update = new UpdatePanelPage(page, hub.url, TOKEN);
+      await update.goto();
+      await update.openPanel();
+      await expect(update.hubAutoSwitch()).not.toBeChecked();
+      await update.setHubAuto(true);
+      await expect(update.hubAutoSwitch()).toBeChecked();
+      await update.setHubAuto(false);
+      await update.clickUpdateHub();
+      await expect(update.hubLastResult()).toContainText("0.50.0 to 9.0.0, ok");
+      await expect(update.hubBackup()).toContainText("0.50.0-");
+      await expect(update.hubLog()).toContainText("npm-stub-ran i -g --prefix");
+    } finally {
+      await hub.close();
+      await new Promise((r) => health.close(r));
+      await stubs.close();
+      cleanupTmpHome(home);
+    }
   });
 });

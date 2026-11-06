@@ -178,7 +178,10 @@ export const hostsRouter = t.router({
         const st = hubUpdateService.status();
         return {
           ...st,
-          // The log tail can name paths and registries, so only an admin sees it.
+          // The log tail, the backup path and the build-in state can name paths and registries, so only an admin sees them.
+          logTail: ctx.admin ? st.logTail : "",
+          lastRun: ctx.admin ? st.lastRun : null,
+          builtInBlockedReason: ctx.admin ? st.builtInBlockedReason : null,
           error: st.error && !ctx.admin ? "The hub update failed." : st.error,
         };
       })(),

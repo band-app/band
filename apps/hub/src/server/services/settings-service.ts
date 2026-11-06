@@ -148,6 +148,10 @@ export const settingsUpdateInput = z
     hubUpdate: z
       .object({
         command: z.string().max(1000).optional(),
+        // Install a newer release by itself when no agent turn runs (built-in updater).
+        auto: z.boolean().optional(),
+        // Backups in <BAND_HOME>/backups kept after a successful built-in update.
+        keepBackups: z.number().int().min(1).max(100).optional(),
       })
       .passthrough()
       .optional(),
@@ -265,6 +269,12 @@ export class SettingsService {
         pairingAddresses?: unknown;
       };
       patch = rest;
+    }
+    // `hubUpdate` holds the command and the auto switch, edited by separate controls, so a patch
+    // changes only the fields it names.
+    if (patch.hubUpdate) {
+      const current = (this.queries.load() as { hubUpdate?: object }).hubUpdate;
+      patch = { ...patch, hubUpdate: { ...current, ...patch.hubUpdate } };
     }
     this.queries.save(patch);
   }
