@@ -93,6 +93,9 @@ export interface CommandRegistryDeps {
   openFileExternal: () => void;
 }
 
+/** Starts and stops dictation in the chat pane that last held focus. */
+export const DICTATE_SHORTCUT = "Cmd+Shift+Space";
+
 // ---------------------------------------------------------------------------
 // Platform detection
 // ---------------------------------------------------------------------------
@@ -338,6 +341,12 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       label: "Maximize / Restore Pane",
       shortcut: "Cmd+Shift+M",
       action: () => deps.toggleMaximize(),
+    },
+    {
+      id: "dictate",
+      label: "Dictate",
+      shortcut: DICTATE_SHORTCUT,
+      action: () => window.dispatchEvent(new CustomEvent("band:dictate")),
     },
     {
       id: "toggle-sidebar",

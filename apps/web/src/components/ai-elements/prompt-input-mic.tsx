@@ -3,6 +3,11 @@ import { cn } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Mic, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  DICTATE_SHORTCUT,
+  formatShortcut,
+  isMacPlatform,
+} from "../../dashboard/lib/command-registry";
 import { trpc } from "../../lib/trpc-client";
 import { transcribeClip } from "../../lib/voice-api";
 import {
@@ -14,6 +19,17 @@ import {
 import { usePromptInputContext } from "./prompt-input";
 
 export const VOICE_STATUS_KEY = ["voice.status"] as const;
+
+/** Event the command palette's "Dictate" entry dispatches. */
+export const DICTATE_EVENT = "band:dictate";
+
+/** The chat pane that last held focus, so the palette can target it after taking focus itself. */
+let lastFocusedPane: Element | null = null;
+
+function isDictateShortcut(e: KeyboardEvent): boolean {
+  const mod = isMacPlatform() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  return mod && e.shiftKey && !e.altKey && e.code === "Space";
+}
 
 type Phase = "idle" | "starting" | "recording" | "transcribing";
 
@@ -123,13 +139,60 @@ export function PromptInputMic({ className }: { className?: string }) {
     };
   }, [setNotice]);
 
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const available = Boolean(status.data?.available) && voiceRecordingSupported();
+  // Latest handlers for the window listeners below, which are bound once per availability.
+  const actionsRef = useRef({ phase, start, stop, cancel });
+  actionsRef.current = { phase, start, stop, cancel };
+
+  // Cmd+Shift+Space toggles dictation and Escape cancels it, for the chat pane that holds focus.
+  // Terminals and the browser pane sit outside the chat pane, so they never match.
+  useEffect(() => {
+    if (!available) return;
+    const pane = () => buttonRef.current?.closest("[data-chat-pane]") ?? null;
+    const toggle = () => {
+      const { phase: p, start: s, stop: st } = actionsRef.current;
+      if (p === "recording") void st();
+      else if (p === "idle") void s();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      const el = pane();
+      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
+      if (isDictateShortcut(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) toggle();
+      } else if (e.key === "Escape" && actionsRef.current.phase === "recording") {
+        e.preventDefault();
+        e.stopPropagation();
+        actionsRef.current.cancel();
+      }
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      const el = pane();
+      if (el && e.target instanceof Node && el.contains(e.target)) lastFocusedPane = el;
+    };
+    const onDictate = () => {
+      const el = pane();
+      if (el && el === lastFocusedPane) toggle();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("focusin", onFocusIn);
+    window.addEventListener(DICTATE_EVENT, onDictate);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("focusin", onFocusIn);
+      window.removeEventListener(DICTATE_EVENT, onDictate);
+    };
+  }, [available]);
+
   const isRecording = phase === "recording";
   useEffect(() => {
     setMicRecording(isRecording);
     return () => setMicRecording(false);
   }, [isRecording, setMicRecording]);
 
-  if (!status.data?.available || !voiceRecordingSupported()) return null;
+  if (!available) return null;
 
   const recording = phase === "recording";
   const busy = phase === "starting" || phase === "transcribing";
@@ -137,7 +200,10 @@ export function PromptInputMic({ className }: { className?: string }) {
     <div className="relative flex min-w-0 items-center gap-0.5">
       <button
         type="button"
+        ref={buttonRef}
         data-testid="prompt-input__mic"
+        title={`${recording ? "Stop and transcribe" : "Dictate"} (${formatShortcut(DICTATE_SHORTCUT)})`}
+        aria-keyshortcuts={isMacPlatform() ? "Meta+Shift+Space" : "Control+Shift+Space"}
         data-phase={phase}
         aria-label={recording ? "Stop and transcribe" : "Dictate"}
         aria-pressed={recording}
