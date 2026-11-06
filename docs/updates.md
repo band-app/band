@@ -58,6 +58,22 @@ npm i -g @band-app/worker@<version>
 
 Restart the worker afterwards.
 
+### Update a worker automatically
+
+Settings > Workers has an "Update automatically when idle" switch on every worker row, and Settings > Hub has the same controls for the hub: the version, the latest release, "Check for updates", the update button and the switch. An admin on any client (web, desktop, phone) sees them. A worker row also shows the latest release and "Check for updates", which asks GitHub now (calls within 30 seconds share one answer).
+
+A worker with the switch on installs the hub's version by itself. The hub checks every minute (`BAND_WORKER_UPDATE_AUTO_POLL_MS`) and updates a worker when all of this holds:
+
+- it is online and set to update automatically (the switch is off by default),
+- it is behind the hub, so the target is the hub's own version and never a newer release (update the hub first, workers follow),
+- it can restart itself: it runs under launchd or a systemd user unit from an `npm i -g` install, and does not report `updateBlocked`,
+- no update is running on it and its last update did not fail (use Retry update or Dismiss),
+- no agent that the restart would end runs on it. This is the list the confirm dialog shows. Held agents survive the restart and do not count.
+
+While such an agent runs, the hub waits, and goes ahead once the first deferral is 6 hours old (`BAND_WORKER_UPDATE_MAX_DEFER_H`). The row shows since when it waits. A hub restart restarts that clock. The desktop app's bundled worker, a worker ahead of the hub, a worker without a service manager and a worker with an unknown version are not updated automatically, and the row says why.
+
+The setting is `settings.workerUpdate.autoHostIds` in `~/.band/settings.json` (admin only to read or write), changed with `workers.setAutoUpdate`.
+
 ### What a worker update interrupts
 
 The dialog lists the agents that the restart will end. Chat agents that a worker started keep running through the restart. A separate background process on the worker holds them, so the update does not stop a running turn. After the worker comes back, the hub reattaches to the same agents and the chat carries on. The dialog then says "No agent will be interrupted."
@@ -209,4 +225,6 @@ The Update hub button does not defer. When agent turns are running it lists them
 | `BAND_AGENT_REATTACH_TIMEOUT_MS` | hub | How long the hub waits for a restarted worker before it drops held agents. The default is 2 minutes. |
 | `BAND_WORKER_VERSION_RETRY_MS` | worker | How long a refused worker waits before it exits. The default is 5 minutes. |
 | `BAND_NPM_BIN` | worker | The `npm` that a worker update runs. The default is the one beside the worker's own `node`. |
+| `BAND_WORKER_UPDATE_AUTO_POLL_MS` | hub | How often the hub looks for workers to update automatically. The default is 1 minute. |
+| `BAND_WORKER_UPDATE_MAX_DEFER_H` | hub | How long an automatic worker update waits for running agents. The default is 6 hours. |
 | `BAND_WORKER_UPDATE_RESTART_TIMEOUT_MS` | hub | How long the hub waits for an updated worker to reconnect. The default is 3 minutes. |

@@ -1,6 +1,8 @@
 import { Button, Input } from "@band-app/ui";
 import { useEffect, useState } from "react";
 import { invoke } from "../../../lib/desktop-ipc";
+import { isDesktop } from "../../../lib/is-desktop";
+import { HubUpdateControls } from "../HubUpdateControls";
 import { SettingsRow } from "./SettingsRow";
 
 interface HubChoiceView {
@@ -14,12 +16,27 @@ interface HubChoiceView {
 type SetResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Rows for the Settings dialog's Hub section (desktop app only): the hub this
- * window talks to. Local runs the hub bundled with the app. Remote connects to
- * a hub at another URL with its token and starts nothing locally. Applying a
+ * Rows for the Settings dialog's Hub section. The update controls show for an admin on every
+ * client. The hub picker is desktop only: the hub this window talks to. Local runs the hub
+ * bundled with the app. Remote connects to a hub at another URL with its token and starts nothing locally. Applying a
  * change reloads the window, so it is not part of the dialog's Save.
  */
 export function HubSettings() {
+  return (
+    <>
+      {isDesktop ? <HubChoiceRows /> : null}
+      <SettingsRow
+        variant="stacked"
+        label="Updates"
+        description="The hub's version, the latest release and how the hub updates. A worker installs the hub's version once the hub runs it. Workers have the same controls in Settings > Workers."
+      >
+        <HubUpdateControls inSettings />
+      </SettingsRow>
+    </>
+  );
+}
+
+function HubChoiceRows() {
   const [mode, setMode] = useState<"local" | "remote">("local");
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
