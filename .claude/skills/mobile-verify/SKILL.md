@@ -157,6 +157,9 @@ Check each tool first and install only what is missing. All of it is user space 
 | `st6-devices.yaml` | Add device shows the pairing link; Revoke asks first, removes another device, and asks the stronger confirm for the session's own token. |
 | `st7-non-admin.yaml` | With a non-admin device token Devices shows the admin-only notice and Hosts shows no Update button. |
 | `st8-usage.yaml` | Usage lists the Claude and Codex accounts of the hub machine (usage stub) with percent bars, reset times and workers; pull to refresh makes new requests to the stub. |
+| `e1-editor-save.yaml` | A file whose default editor is the fixture extension opens in a WebView in the compact layout; an edit shows "unsaved changes", Back asks "Discard changes?" while the page reports dirty, Save writes the file on the hub (`/expect-file`). |
+| `e2-editor-selection.yaml` | A word selected in the editor shows as a chip above the chat composer; the sent prompt holds the `Selected in …` block, and after removing the chip the next prompt has none. |
+| `e3-editor-open-with.yaml` | A markdown file has no Open with; the extension's file switches to the built-in viewer and back, and the choice persists. Uses `gamma-editor` and the web suite's fixture extension. |
 | `perf-explorer-fling.yaml` | Flings through the open 3,000-file folder; fails when the frame log's longest JS gap is over 100 ms. Runs only with `--perf`. |
 
 The hub is seeded after it starts (`scripts/seed.mjs`; `scripts/seed-explorer.mjs` adds the repo `delta` for the Explorer flows: a 3,000-file `bulk` folder, a 1.3 MB file, a binary, a PNG, markdown, a long-line file and one file of each change kind): repos `alpha` and `beta`, the worktrees

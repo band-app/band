@@ -4,7 +4,7 @@ import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { insertAtSelection } from "@band-app/shared/dictation-text";
 import PasteInput, { type PastedFile } from "@mattermost/react-native-paste-input";
 import { ArrowUp, X } from "lucide-react-native";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -20,6 +20,8 @@ import { useAttachmentPicker } from "../../lib/composer/use-attachment-picker";
 import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { useDictation } from "../../lib/composer/use-dictation";
 import { useDraft } from "../../lib/composer/use-draft";
+import { chipLabel, withSelection } from "../../lib/extensions/selection";
+import { useEditorSelection } from "../../lib/extensions/use-editors";
 import { colors, useScheme } from "../../theme";
 import { Glass, MicGlyph, PlusGlyph } from "../glass";
 import { Icon } from "../icon";
@@ -92,24 +94,36 @@ export function Composer({
   const dictating = dictation.state.phase === "recording";
   const transcribing = dictation.state.phase === "transcribing";
 
+  // The editor selection of this worktree rides along as a chip; removing it drops it for one message.
+  const editorSelection = useEditorSelection(worktreeId);
+  const [chipDropped, setChipDropped] = useState(false);
+  const selectionStamp = editorSelection
+    ? `${editorSelection.updatedAt ?? ""}|${editorSelection.selection.address}`
+    : "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new selection brings the chip back
+  useEffect(() => setChipDropped(false), [selectionStamp]);
+  const chip = editorSelection && !chipDropped ? editorSelection : null;
+
   const canSend = text.trim().length > 0 || attachments.length > 0;
-  const expanded = focused || sheetOpen || drawerOpen || attachments.length > 0;
+  const expanded = focused || sheetOpen || drawerOpen || attachments.length > 0 || chip !== null;
 
   const submit = useCallback(async () => {
     if (!canSend) return;
     const sent = { text, attachments };
+    const wire = withSelection(text, chip);
+    setChipDropped(false);
     setText("");
     setAttachments([]);
     setHint(null);
     try {
-      await onSend(sent.text, toWireFiles(sent.attachments));
+      await onSend(wire, toWireFiles(sent.attachments));
     } catch (err) {
       // Put the message back so nothing typed is lost.
       setText(textRef.current ? `${sent.text}\n${textRef.current}` : sent.text);
       setAttachments((current) => [...sent.attachments, ...current]);
       Alert.alert("Couldn't send", err instanceof Error ? err.message : "Try again.");
     }
-  }, [canSend, text, attachments, onSend, setText]);
+  }, [canSend, text, attachments, chip, onSend, setText]);
 
   const addFrom = useCallback(async (pick: () => Promise<Attachment[]>) => {
     try {
@@ -238,6 +252,26 @@ export function Composer({
                 ))}
               </ScrollView>
             ) : null}
+            {chip ? (
+              <View style={styles.selectionChip} testID="composer__selection">
+                <Text
+                  style={styles.selectionText}
+                  numberOfLines={1}
+                  testID="composer__selection-label"
+                >
+                  {chipLabel(chip)}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove selection"
+                  onPress={() => setChipDropped(true)}
+                  hitSlop={8}
+                  testID="composer__selection-remove"
+                >
+                  <Icon icon={X} size="sm" color={colors.mutedForeground} />
+                </Pressable>
+              </View>
+            ) : null}
             {hint ? (
               <Text style={styles.hint} testID="composer__hint">
                 {hint}
@@ -361,6 +395,20 @@ function formatElapsed(seconds: number): string {
 }
 
 const styles = StyleSheet.create({
+  selectionChip: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.muted,
+    borderRadius: 12,
+    flexDirection: "row",
+    gap: 6,
+    marginHorizontal: 14,
+    marginTop: 6,
+    maxWidth: "92%",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  selectionText: { color: colors.foreground, flexShrink: 1, fontSize: 13 },
   listening: {
     alignItems: "center",
     flexDirection: "row",

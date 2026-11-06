@@ -1,0 +1,14 @@
+# Opens a file of gamma-editor from the worktree's Explorer. FILE is the file name in the root.
+appId: app.getband.mobile
+---
+- runFlow:
+    file: open-view.yaml
+    env:
+      TARGET: gamma-editor
+      VIEW: Explorer
+- extendedWaitUntil:
+    visible:
+      id: explorer__row-${FILE}
+    timeout: 15000
+- tapOn:
+    id: explorer__row-${FILE}

@@ -17,10 +17,13 @@ import { ChatProvider } from "../../../components/chat/chat-context";
 import { Markdown } from "../../../components/chat/markdown";
 import { FileIcon } from "../../../components/file-icon";
 import { CodeList, type CodeRow } from "../../../components/files/code-list";
+import { EditorView } from "../../../components/files/editor-view";
 import { VideoPlayer } from "../../../components/files/video-view";
 import { ViewHeader } from "../../../components/files/view-header";
 import { Body } from "../../../components/ui";
 import { highlight } from "../../../lib/chat/highlight";
+import { BUILTIN_EDITOR, editorRef, editorsForFile } from "../../../lib/extensions/editors";
+import { useFileEditor } from "../../../lib/extensions/use-editors";
 import { splitRunsIntoLines, textLines } from "../../../lib/files/code-lines";
 import { baseName, dirName, fileKind, languageForPath } from "../../../lib/files/paths";
 import { SessionGate, useHubSession } from "../../../lib/hub-session";
@@ -55,11 +58,13 @@ function FileScreen({
 }) {
   const { client, hub } = useHubSession();
   const kind = fileKind(path);
+  const editor = useFileEditor(worktreeId, path);
+  const extensionEditor = editor.resolved;
   const file = useQuery({
     queryKey: ["worktree.getFile", worktreeId, path],
     queryFn: () => client.worktree.getFile.query({ worktreeId, path }),
     // An image or video is fetched by its player from its own URL, so there is no need to read it as text.
-    enabled: kind !== "image" && kind !== "video",
+    enabled: kind !== "image" && kind !== "video" && !extensionEditor && !editor.loading,
   });
   const data = file.data;
   const text = data && "content" in data ? data.content : null;
@@ -73,8 +78,38 @@ function FileScreen({
     );
   };
 
+  const openWith = () => {
+    const choices = editorsForFile(editor.options, path);
+    if (choices.length === 0) return;
+    Alert.alert("Open with", baseName(path), [
+      ...choices.map((c) => ({
+        text: `${c.extensionName}: ${c.editor.label}`,
+        onPress: () => editor.choose(editorRef(c.extensionId, c.editor.id)),
+      })),
+      { text: "Built-in viewer", onPress: () => editor.choose(BUILTIN_EDITOR) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+  const canOpenWith = editorsForFile(editor.options, path).length > 0;
+
   let body: ReactNode;
-  if (kind === "image") {
+  if (extensionEditor) {
+    body = (
+      <EditorView
+        hubUrl={hub.url}
+        token={hub.token}
+        worktreeId={worktreeId}
+        path={path}
+        editorRef={editorRef(extensionEditor.extensionId, extensionEditor.editor.id)}
+      />
+    );
+  } else if (editor.loading && kind === "code") {
+    body = (
+      <View style={styles.center}>
+        <ActivityIndicator color={colors.mutedForeground} />
+      </View>
+    );
+  } else if (kind === "image") {
     body = <ImageView hubUrl={hub.url} token={hub.token} worktreeId={worktreeId} path={path} />;
   } else if (kind === "video") {
     body = <VideoPlayer hubUrl={hub.url} token={hub.token} worktreeId={worktreeId} path={path} />;
@@ -144,9 +179,9 @@ function FileScreen({
         icon={<FileIcon name={path} size={16} />}
         testID="file"
       />
-      {text !== null ? (
+      {text !== null || extensionEditor ? (
         <View style={styles.bar}>
-          {kind === "markdown" && text.length <= HIGHLIGHT_FILE_LIMIT ? (
+          {text !== null && kind === "markdown" && text.length <= HIGHLIGHT_FILE_LIMIT ? (
             <View style={styles.modes}>
               {[false, true].map((isSource) => (
                 <Pressable
@@ -166,6 +201,17 @@ function FileScreen({
           ) : (
             <View />
           )}
+          {canOpenWith ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open with"
+              onPress={openWith}
+              hitSlop={8}
+              testID="file__open-with"
+            >
+              <Text style={styles.copy}>Open with…</Text>
+            </Pressable>
+          ) : null}
           {text !== null ? (
             <Pressable
               accessibilityRole="button"
