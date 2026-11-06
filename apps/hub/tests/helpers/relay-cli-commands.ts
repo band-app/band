@@ -67,6 +67,8 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "extensions list": "extensions are installed by an admin, and an agent has no use for the list",
   "extensions reload": "extension management is admin only",
   "extensions install": "extension management is admin only",
+  "extensions catalog":
+    "extensions are installed by an admin, and an agent has no use for the catalog",
   "extensions remove": "extension management is admin only",
   "mcp list": "MCP server management is admin only",
   "mcp add": "MCP server management is admin only",

@@ -1,5 +1,7 @@
+import { compareVersions } from "@band-app/shared/versions";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { extensionCatalogService } from "../../services/extension-catalog-service";
 import { ExtensionInstallError, extensionService } from "../../services/extension-service";
 import { pluginHost } from "../../services/plugin-host-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
@@ -20,7 +22,58 @@ async function refuse<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** The source of an installed extension as the UI shows it. Official wins when the archive is the catalog's. */
+async function installedView() {
+  const list = await extensionService.list();
+  const extensions = list.extensions.map((m) => {
+    const record = list.installs[m.id];
+    const entry = extensionCatalogService.get(m.id);
+    const official =
+      record?.source === "official" || (!!record && !!entry && record.sha256 === entry.sha256);
+    const source: "official" | "url" | "file" | "unknown" = official
+      ? "official"
+      : (record?.source ?? "unknown");
+    return { id: m.id, official, source };
+  });
+  return { ...list, sources: extensions };
+}
+
 export const extensionsRouter = t.router({
+  catalog: publicProcedure.query(async () => {
+    const { entries, available } = extensionCatalogService.snapshot();
+    const installed = (await extensionService.list()).extensions;
+    return {
+      available,
+      entries: entries.map((entry) => {
+        const have = installed.find((e) => e.id === entry.id)?.version ?? null;
+        return {
+          ...entry,
+          official: true as const,
+          installed: have,
+          updateAvailable: have !== null && (compareVersions(have, entry.version) ?? 0) < 0,
+          compatible: extensionCatalogService.compatible(entry),
+        };
+      }),
+    };
+  }),
+  refreshCatalog: adminProcedure.mutation(async () => {
+    await extensionCatalogService.refresh();
+    return { available: extensionCatalogService.snapshot().available };
+  }),
+  installOfficial: adminProcedure
+    .input(z.object({ id: z.string().min(1).max(64) }))
+    .mutation(({ input }) =>
+      refuse(async () => {
+        const entry = extensionCatalogService.get(input.id);
+        if (!entry) {
+          throw new ExtensionInstallError(`"${input.id}" is not in the official catalog`);
+        }
+        if (!extensionCatalogService.compatible(entry)) {
+          throw new ExtensionInstallError(`${entry.name} needs Band ${entry.minBand} or newer`);
+        }
+        return extensionService.install(entry.url, entry.sha256, "official", entry.id);
+      }),
+    ),
   install: adminProcedure
     .input(z.object({ url: z.string().min(1).max(2000), sha256: z.string().max(64).optional() }))
     .mutation(({ input }) => refuse(() => extensionService.install(input.url, input.sha256))),
@@ -100,6 +153,9 @@ export const extensionsRouter = t.router({
         });
       }
     }),
-  list: publicProcedure.query(() => extensionService.list()),
-  reload: adminProcedure.mutation(() => extensionService.reload()),
+  list: publicProcedure.query(() => installedView()),
+  reload: adminProcedure.mutation(async () => {
+    await extensionService.reload();
+    return installedView();
+  }),
 });

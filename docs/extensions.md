@@ -7,6 +7,25 @@ order: 40
 
 An editor extension adds an editor for some kinds of files, such as spreadsheets. A person opens a matching file in a center tab, edits it and saves it back to the worktree. The extension is a folder of web files. It runs only in a sandboxed iframe, holds no Band token and runs no code on the hub or on a worker.
 
+## Official extensions
+
+Band lists the extensions of `band-app/band-extensions` as official. The hub fetches one file, `https://github.com/band-app/band-extensions/releases/download/catalog/index.json`, at startup and once a day, and keeps it in memory. `BAND_EXTENSION_CATALOG_URL` replaces the URL and is read on every fetch. If the file cannot be read, the hub logs it once and Settings > Extensions shows "Catalog unavailable".
+
+The file is a JSON list. Each entry has:
+
+| Field | Meaning |
+| --- | --- |
+| `id`, `name`, `description` | What the list shows. `id` is the extension id and folder name. |
+| `version` | Plain MAJOR.MINOR.PATCH. |
+| `url`, `sha256` | The `.tar.gz` release archive and its checksum. The hub refuses an archive that does not match. |
+| `minBand` | The oldest Band version that can run it. An older hub shows "Not compatible" and offers no button. |
+| `worker` | True when the extension has a part that runs on workers. The confirm dialog says it runs code on workers (standard and admin workers only). |
+| `requires` | Worker facts it needs, such as `os=darwin`. |
+
+An entry that fails validation is skipped. Nothing installs by itself: an admin clicks Install, or Update to vX when the catalog has a newer version than the installed one. The same calls are `band extensions catalog` and `band extensions install --official <id>`.
+
+The hub records how each extension was installed in `<BAND_HOME>/extensions/.installs/<id>.json` (source, sha256, version). An extension is Official when it was installed from the catalog, or when its archive's sha256 equals the catalog's for that id. Otherwise the list says "Installed from URL" or "Installed from file". A folder copied in by hand has no record and shows "Installed by hand".
+
 ## Install
 
 From a release archive, which is a `.tar.gz` with one top-level folder named by the extension id:
@@ -301,7 +320,7 @@ Address: <address>
 
 ## Settings > Extensions
 
-Settings > Extensions lists every installed extension with its version, editors and file types. A folder that failed to load shows an error icon with a popover naming the folder and the reason. An admin can install from a URL (with an optional SHA-256) or upload a `.tar.gz`, remove an extension after a confirmation, and reload the folder after copying one in by hand. The upload posts the file as the raw body of `POST /api/extensions/install` with the device token as a Bearer header.
+Settings > Extensions starts with the official catalog (name, description, version, and Install, Installed, Update to vX or Not compatible with this Band version), a Reload button that also rereads the catalog, and the install controls. It lists every installed extension with its version, where it came from, editors and file types. A folder that failed to load shows an error icon with a popover naming the folder and the reason. An admin can install from a URL (with an optional SHA-256) or upload a `.tar.gz`, remove an extension after a confirmation, and reload the folder after copying one in by hand. The upload posts the file as the raw body of `POST /api/extensions/install` with the device token as a Bearer header.
 
 For each file type an extension handles, the page shows the default editor and lets an admin change it or go back to the manifest default. It reads and writes the same synced `band:extension-defaults` key as Open With, so the two stay in step. A non-admin device sees the list and the defaults but no install, remove, reload or default controls.
 

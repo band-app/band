@@ -14,6 +14,11 @@ import { scrubWorkerEnv } from "../../scripts/test-env.mjs";
 // starts inherits an environment without the Band worker's identity.
 scrubWorkerEnv();
 
+// Every hub a test starts fetches the official extension catalog at boot. Point it at a closed
+// loopback port so the fetch fails at once and no test hub reaches GitHub. The catalog tests
+// pass their own stub URL to `startServer`.
+process.env.BAND_EXTENSION_CATALOG_URL ??= "http://127.0.0.1:9/index.json";
+
 // Tests that run pnpm under a temp HOME (dev-server, plain-repos) would make
 // corepack look for pnpm in an empty cache and download it. Point it at the
 // cache of the real HOME, read here before any test changes HOME, and never

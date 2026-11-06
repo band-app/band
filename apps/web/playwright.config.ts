@@ -12,6 +12,11 @@ import { scrubWorkerEnv } from "../../scripts/test-env.mjs";
 // inherits an environment without the identity of the Band worker running the suite.
 scrubWorkerEnv();
 
+// Every hub a spec starts fetches the official extension catalog at boot. Point it at a closed
+// loopback port so the fetch fails at once and no spec reaches GitHub. The catalog specs pass
+// their own stub URL to `startServer`.
+process.env.BAND_EXTENSION_CATALOG_URL ??= "http://127.0.0.1:9/index.json";
+
 // Without WebKit the iPhone project would fail every spec. Skip it locally and
 // say how to install it; CI installs it, so it always runs there.
 const hasWebkit = existsSync(webkit.executablePath());

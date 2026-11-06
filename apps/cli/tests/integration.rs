@@ -6939,3 +6939,71 @@ fn workers_check_updates_prints_the_latest_release_and_when_it_was_checked() {
     assert_eq!(json["latest"], "9.9.9");
     assert_eq!(json["updateAvailable"], true);
 }
+
+fn mock_trpc_reply(data: serde_json::Value) -> String {
+    let body = serde_json::json!({"result": {"data": data}}).to_string();
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+#[test]
+fn extensions_catalog_lists_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(mock_trpc_reply(serde_json::json!({
+        "available": true,
+        "entries": [
+            {"id": "alpha", "name": "Alpha", "version": "2.0.0", "minBand": "0.0.1",
+             "installed": "1.0.0", "updateAvailable": true, "compatible": true},
+            {"id": "beta", "name": "Beta", "version": "1.0.0", "minBand": "99.0.0",
+             "installed": null, "updateAvailable": false, "compatible": false}
+        ]
+    })));
+
+    let out = band_against_mock(&tmp, &mock, &["extensions", "catalog"]);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = stdout(&out);
+    assert_eq!(
+        mock.captured_path().unwrap().split('?').next().unwrap(),
+        "/trpc/extensions.catalog"
+    );
+    assert!(text.contains("update from 1.0.0"), "text: {text}");
+    assert!(text.contains("needs Band 99.0.0"), "text: {text}");
+}
+
+#[test]
+fn extensions_install_official_calls_the_catalog_procedure() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(mock_trpc_reply(serde_json::json!({
+        "id": "alpha", "version": "2.0.0"
+    })));
+
+    let out = band_against_mock(
+        &tmp,
+        &mock,
+        &["extensions", "install", "--official", "alpha"],
+    );
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        mock.captured_path().unwrap(),
+        "/trpc/extensions.installOfficial"
+    );
+    assert!(
+        stdout(&out).contains("Installed extension alpha 2.0.0"),
+        "text: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn extensions_install_needs_a_source_or_official() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(String::new());
+
+    let out = band_against_mock(&tmp, &mock, &["extensions", "install"]);
+
+    assert!(!out.status.success());
+}

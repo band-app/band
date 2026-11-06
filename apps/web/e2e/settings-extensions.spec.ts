@@ -193,6 +193,7 @@ test("S2: install by URL with its .sha256, and a wrong sha256 installs nothing",
   await ext.installFromUrl(`${stubUrl}/text-editor.tar.gz`);
   expect((await ok).status()).toBe(200);
   await expect(ext.row("text-editor")).toBeVisible();
+  await expect(ext.source("text-editor")).toHaveAttribute("data-source", "url");
 
   await ext.settings.backToApp();
   const worktree = new WorktreePage(page, server.url, TOKEN);
@@ -215,6 +216,7 @@ test("S3: upload an archive", async ({ page }) => {
   expect((await done).status()).toBe(200);
   await expect(ext.row("text-editor")).toBeVisible();
   await expect(ext.version("text-editor")).toHaveText("0.0.1");
+  await expect(ext.source("text-editor")).toHaveAttribute("data-source", "file");
 });
 
 test("S4: remove an extension and its files open in the built-in viewer", async ({ page }) => {

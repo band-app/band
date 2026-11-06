@@ -23,6 +23,38 @@ const DEFAULTS_EVENT = "band:extension-defaults-changed";
 export interface ExtensionList {
   extensions: ExtensionManifest[];
   errors: { folder: string; error: string }[];
+  /** How each installed extension got here. */
+  sources?: { id: string; official: boolean; source: "official" | "url" | "file" | "unknown" }[];
+}
+
+export const EXTENSION_CATALOG_QUERY_KEY = ["extensions.catalog"] as const;
+
+export interface CatalogEntryView {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  minBand: string;
+  worker: boolean;
+  requires: string[];
+  installed: string | null;
+  updateAvailable: boolean;
+  compatible: boolean;
+}
+
+export function useExtensionCatalog(): {
+  catalog: { available: boolean; entries: CatalogEntryView[] } | null;
+} {
+  const query = useQuery({
+    queryKey: EXTENSION_CATALOG_QUERY_KEY,
+    queryFn: async () =>
+      (await trpc.extensions.catalog.query()) as {
+        available: boolean;
+        entries: CatalogEntryView[];
+      },
+    staleTime: 30_000,
+  });
+  return { catalog: query.data ?? null };
 }
 
 export interface ResolvedEditor {

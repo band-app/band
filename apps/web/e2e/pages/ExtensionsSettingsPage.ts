@@ -37,6 +37,42 @@ export class ExtensionsSettingsPage {
     return this.dialog.getByTestId(`settings-extensions__editors--${id}`);
   }
 
+  source(id: string): Locator {
+    return this.dialog.getByTestId(`settings-extensions__source--${id}`);
+  }
+
+  officialRow(id: string): Locator {
+    return this.dialog.getByTestId(`settings-extensions__official-row--${id}`);
+  }
+
+  /** The "Installed" / "Not compatible" text that replaces the button. */
+  officialState(id: string): Locator {
+    return this.dialog.getByTestId(`settings-extensions__official-state--${id}`);
+  }
+
+  officialInstallButton(id: string): Locator {
+    return this.dialog.getByTestId(`settings-extensions__official-install--${id}`);
+  }
+
+  get catalogUnavailable(): Locator {
+    return this.dialog.getByTestId("settings-extensions__catalog-unavailable");
+  }
+
+  async installOfficial(id: string): Promise<void> {
+    await test.step(`Install official ${id}`, async () => {
+      await this.officialInstallButton(id).click();
+      await this.confirmOfficial();
+    });
+  }
+
+  async confirmOfficial(): Promise<void> {
+    await this.page.getByTestId("settings-extensions__official-confirm").click();
+  }
+
+  get officialWorkerNote(): Locator {
+    return this.page.getByTestId("settings-extensions__official-worker-note");
+  }
+
   brokenFolder(folder: string): Locator {
     return this.dialog.getByTestId(`settings-extensions__broken--${folder}`);
   }
