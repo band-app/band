@@ -23,6 +23,10 @@ The adapters for Claude Code and Codex ship with Band. The other three agents, a
 
 Band sets `CLAUDE_CODE_ARTIFACT=1` for Claude Code chats. Claude Code turns its Artifact tool off for the Agent SDK entrypoint that the adapter uses, unless that variable is truthy. To opt out, set `CLAUDE_CODE_ARTIFACT=0` in the worker's environment, and Band leaves your value. Claude Code still hides the tool for third-party providers such as Bedrock, and when `enableArtifact` is false in its settings.
 
+### Claude in Chrome
+
+Claude Code ignores `claudeInChromeDefaultEnabled` for the SDK sessions that chats use. When the worker's Claude config has `"claudeInChromeDefaultEnabled": true` (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), Band starts the chat's Claude agent with `CLAUDE_CODE_ENABLE_CFC=1`, so the chat has the Claude in Chrome tools like the terminal CLI. The file is read at each agent launch on the worker that runs the chat. A `CLAUDE_CODE_ENABLE_CFC` already set in the worker's environment wins. Band does not make Chrome reachable from a headless worker.
+
 ## Chat and terminal mode
 
 An agent session has one of two modes, and it keeps its mode for its whole life.
