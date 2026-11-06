@@ -25,7 +25,9 @@ import {
 } from "./helpers/server";
 import { trpcMutate } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
+import { CommandPalette } from "./pages/CommandPalette";
 import { SettingsPage } from "./pages/SettingsPage";
+import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-voice-token";
 const KEY = "sk-e2e-voice-secret-key-123456";
@@ -79,6 +81,11 @@ test("the composer has no mic until voice is set up", async ({ page }) => {
   await chat.waitForReady();
   await expect(chat.promptInput).toBeVisible();
   await expect(chat.mic).toHaveCount(0);
+  // The shortcut does nothing where the mic would not render, and shows no error.
+  await chat.focusComposerIn(0);
+  await chat.pressDictateShortcut();
+  await expect(chat.listeningIn(0)).toHaveCount(0);
+  await expect(chat.micError).toHaveCount(0);
 });
 
 test("Settings > Voice tests the connection and reports a wrong key without showing it", async ({
@@ -195,6 +202,91 @@ test("cancelling a recording inserts nothing and sends no audio", async ({ page 
   await expect(chat.micListening).toHaveCount(0);
   await expect(chat.promptInput).toHaveValue("Draft");
   expect(stub.requests).toHaveLength(0);
+});
+
+test("the shortcut starts and stops dictation from the composer and from the transcript", async ({
+  page,
+}) => {
+  stub.requests.length = 0;
+  const chat = new ChatPanePage(page, server.url, TOKEN);
+  await chat.goto(WS);
+  await chat.waitForReady();
+
+  await chat.typeMessage("Fix the ");
+  await chat.placeCaretAtEnd();
+  await chat.pressDictateShortcut();
+  await expect(chat.micListening).toBeVisible();
+  await expect(chat.micTimer).toBeVisible();
+  await chat.pressDictateShortcut();
+  await expect(chat.promptInput).toHaveValue("Fix the login bug");
+  await expect(chat.micListening).toHaveCount(0);
+  expect(stub.requests).toHaveLength(1);
+
+  // Focus on the transcript, not the textarea, still reaches this pane's mic.
+  await chat.focusConversation(0);
+  await chat.pressDictateShortcut();
+  await expect(chat.micListening).toBeVisible();
+  await chat.pressEscape();
+  await expect(chat.micListening).toHaveCount(0);
+});
+
+test("Escape cancels a recording and transcribes nothing", async ({ page }) => {
+  stub.requests.length = 0;
+  const chat = new ChatPanePage(page, server.url, TOKEN);
+  await chat.goto(WS);
+  await chat.waitForReady();
+
+  await chat.typeMessage("Draft");
+  await chat.pressDictateShortcut();
+  await expect(chat.micListening).toBeVisible();
+  await chat.pressEscape();
+  await expect(chat.micListening).toHaveCount(0);
+  await expect(chat.promptInput).toHaveValue("Draft");
+  expect(stub.requests).toHaveLength(0);
+});
+
+test("the shortcut records only in the pane that has focus, and not in a terminal", async ({
+  page,
+}) => {
+  const chat = new ChatPanePage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  await chat.goto(WS);
+  await chat.waitForReady();
+  await worktree.clickChatSplitRight(WS);
+  await expect(chat.root).toHaveCount(2);
+
+  await chat.focusComposerIn(1);
+  await chat.pressDictateShortcut();
+  await expect(chat.listeningIn(1)).toBeVisible();
+  await expect(chat.listeningIn(0)).toHaveCount(0);
+  await chat.pressEscape();
+  await expect(chat.listeningIn(1)).toHaveCount(0);
+
+  await worktree.focusTerminal();
+  await chat.pressDictateShortcut();
+  await expect(chat.listeningIn(0)).toHaveCount(0);
+  await expect(chat.listeningIn(1)).toHaveCount(0);
+});
+
+test("the palette lists Dictate with its shortcut, runs it, and the mic names the shortcut", async ({
+  page,
+}) => {
+  const chat = new ChatPanePage(page, server.url, TOKEN);
+  const palette = new CommandPalette(page);
+  await chat.goto(WS);
+  await chat.waitForReady();
+
+  const mac = process.platform === "darwin";
+  await expect(chat.mic).toHaveAttribute("title", mac ? /⌘⇧Space/ : /Ctrl\+Shift\+Space/);
+
+  await chat.focusComposerIn(0);
+  await palette.open();
+  await expect(palette.item("dictate")).toBeVisible();
+  await expect(palette.shortcut("dictate")).toHaveText(mac ? "⌘⇧Space" : "Ctrl+Shift+Space");
+  await palette.run("dictate");
+  await expect(chat.micListening).toBeVisible();
+  await chat.cancelDictation();
+  await expect(chat.micListening).toHaveCount(0);
 });
 
 test.describe("a denied microphone", () => {

@@ -734,6 +734,45 @@ export class ChatPanePage {
     });
   }
 
+  /** Presses the dictation shortcut (⌘⇧Space, Ctrl+Shift+Space off macOS). */
+  async pressDictateShortcut(): Promise<void> {
+    await test.step("Press the dictation shortcut", async () => {
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await this.page.keyboard.press(`${modifier}+Shift+Space`);
+    });
+  }
+
+  /** Presses Escape with whatever holds focus. */
+  async pressEscape(): Promise<void> {
+    await test.step("Press Escape", async () => {
+      await this.page.keyboard.press("Escape");
+    });
+  }
+
+  /** Puts focus on the conversation area of the nth visible chat pane, outside its textarea. */
+  async focusConversation(index = 0): Promise<void> {
+    await test.step(`Focus the conversation of chat pane ${index}`, async () => {
+      await this.root.nth(index).evaluate((el: HTMLElement) => el.focus());
+    });
+  }
+
+  /** Puts focus in the composer of the nth visible chat pane. */
+  async focusComposerIn(index: number): Promise<void> {
+    await test.step(`Focus the composer of chat pane ${index}`, async () => {
+      await this.root.nth(index).getByTestId("chat__composer").focus();
+    });
+  }
+
+  /** The "Listening" state inside the nth visible chat pane. */
+  listeningIn(index: number): Locator {
+    return this.root.nth(index).getByTestId("prompt-input__mic-listening");
+  }
+
+  /** The mic button inside the nth visible chat pane. */
+  micIn(index: number): Locator {
+    return this.root.nth(index).getByTestId("prompt-input__mic");
+  }
+
   /** Cancels the recording in progress. */
   async cancelDictation(): Promise<void> {
     await test.step("Cancel the dictation", async () => {
