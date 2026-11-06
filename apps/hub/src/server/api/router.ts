@@ -71,6 +71,7 @@ import { pluginsRouter } from "./plugins/router";
 import { prereqsRouter } from "./prereqs/router";
 import { provisioningRouter } from "./provisioning/router";
 import { queueRouter } from "./queue/router";
+import { quickCommandsRouter } from "./quick-commands/router";
 import { reportsRouter } from "./reports/router";
 import { reposRouter } from "./repos/router";
 import { resourcesRouter } from "./resources/router";
@@ -104,6 +105,7 @@ export const appRouter = t.router({
   browsers: browsersRouter,
   browserProfiles: browserProfilesRouter,
   groups: groupsRouter,
+  quickCommands: quickCommandsRouter,
   panelFocus: panelFocusRouter,
   clientState: clientStateRouter,
   tasks: tasksRouter,

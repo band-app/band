@@ -8,6 +8,7 @@ import {
   MessageSquarePlus,
   Pencil,
   X,
+  Zap,
 } from "lucide-react-native";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -26,6 +27,7 @@ import { ChatView } from "../../components/chat/chat-view";
 import { AgentPicker, closeTab, renameTab, TabSwitcher } from "../../components/chat/tab-switcher";
 import { WorktreeHeader } from "../../components/chat/worktree-header";
 import { Icon } from "../../components/icon";
+import { QuickCommandsSheet } from "../../components/quick-commands-sheet";
 import { StateIcon } from "../../components/state-icon";
 import { TerminalPane } from "../../components/terminal/terminal-pane";
 import { Body, Centered } from "../../components/ui";
@@ -34,6 +36,7 @@ import { type ChatTab, useWorktreeTabs } from "../../lib/chat/use-worktree-tabs"
 import { tapDismiss } from "../../lib/composer/tap-dismiss";
 import { openChanges, openExplorer } from "../../lib/files/open";
 import { SessionGate, useHubSession } from "../../lib/hub-session";
+import { terminalStart } from "../../lib/quick-commands.ts";
 import { useHosts, useRepos, useStatusFeed } from "../../lib/use-hub-data";
 import { findRow, type WorktreeRow } from "../../lib/worktree-list";
 import { colors, tints, tones } from "../../theme";
@@ -120,6 +123,7 @@ const WorktreeChats = memo(function WorktreeChats({
   const [picker, setPicker] = useState(false);
   const pickerAfterSheet = useRef(false);
   const [views, setViews] = useState(false);
+  const [quickCommands, setQuickCommands] = useState(false);
   // What the Views sheet chose; it runs once the sheet has closed, so a modal never opens over it.
   const afterViews = useRef<(() => void) | null>(null);
 
@@ -191,6 +195,12 @@ const WorktreeChats = memo(function WorktreeChats({
     },
   ];
   const actionItems: ViewsSheetItem[] = [
+    {
+      key: "quick-commands",
+      title: "Quick commands",
+      icon: Zap,
+      onPress: afterSheet(() => setQuickCommands(true)),
+    },
     {
       key: "new-chat",
       title: "New chat",
@@ -359,6 +369,20 @@ const WorktreeChats = memo(function WorktreeChats({
           const run = afterViews.current;
           afterViews.current = null;
           run?.();
+        }}
+      />
+      <QuickCommandsSheet
+        visible={quickCommands}
+        onClose={() => setQuickCommands(false)}
+        repo={repo}
+        agents={tabs.agents}
+        onRun={(command) => {
+          setQuickCommands(false);
+          const started =
+            command.action === "agent"
+              ? actions.create(command.agentId, command.prompt)
+              : actions.createTerminal(terminalStart(command));
+          started.catch(() => Alert.alert("Couldn't run the quick command"));
         }}
       />
       <AgentPicker

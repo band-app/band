@@ -154,6 +154,8 @@ The remote-loopback job runs only the files in `apps/hub/tests/loopback-files.tx
 
 - `apps/web/tests/sidebar-drop.test.ts` calls `planParentDrop` (`apps/web/src/dashboard/lib/sidebar-drop.ts`) directly. They are pure functions (a worktree, a target and the list in, a reason, a plan or null out). The refusals (a drop onto itself or a descendant) are checked here so the spec needs only one case of each. The drops themselves are covered by `sidebar-grouping.spec.ts` through the real UI.
 
+- `apps/mobile/tests/quick-commands.test.ts` calls the pure form-draft, validation and ordering functions in `apps/mobile/src/lib/quick-commands.ts` directly. They take a draft or a command list and return a result, so there is no state to fake. The hub side is covered through the real server in `apps/hub/tests/quick-commands.test.ts`, and the Maestro flow `apps/mobile/e2e/q1-quick-commands.yaml` covers the sheet.
+
 
 - `apps/hub/tests/hub-version-unreleased.test.ts` calls `isUnreleasedVersion` and `updateTargetFor` directly. They are pure functions (a version string in, a boolean or target out). The hub's version is imported from `package.json` at build time, so no server can be started at a stamped nightly version such as `0.1.0-nightly.<date>.<sha>`, and `BAND_HUB_VERSION` accepts only plain MAJOR.MINOR.PATCH. `worker-versions-dev-hub.test.ts` covers the same rule through a real hub at `0.1.0`.
 
@@ -585,6 +587,16 @@ A bundled plugin can run code on a worker and give agents tools (guide: `docs/ar
 - Tests: the fixture extension `apps/hub/tests/fixtures/extensions/echo-service` stands in for any plugin: `extension-panels-tools.test.ts` (tools, image results, streams on both paths), `extension-worker-services.test.ts`, `apps/worker/tests/extensions.test.ts` (the lease fence), and the probes in `remote-relay.test.ts`. The simulator's own tests live in `band-app/band-extensions`.
 - Extension tools may return `{ content: [text | image blocks] }` (`api/mcp-proxy/extension-tools.ts`, images PNG or JPEG up to 5 MB decoded); anything else is JSON text, and an invalid block is a tool error.
 - Not done yet: worker plugins on the hub's own machine.
+
+## Architecture: quick commands
+
+A person saves terminal commands and agent prompts on the hub and runs them with one tap in a worktree (guide: `docs/quick-commands.md`). `quick_commands` (`infra/db/queries/quick-commands.ts`, `services/quick-command-service.ts`, `api/quick-commands/router.ts`) holds `label`, `repo_name` (null for a global command), `action` (`terminal` with `command` and `append_enter`, or `agent` with `agent_id` and `prompt`) and `last_run_at`. `repo_name` has no foreign key, because `RepoQueries.saveAll` rewrites the repos table and a cascade would wipe the commands, so `repos.remove` calls `quickCommandService.removeForRepo`.
+
+- The hub validates (label up to 80 characters, text up to 4000, a known repo and a known `settings.codingAgents` id, all 400) and orders the list by `last_run_at`, then label. It runs nothing. A client runs a command: a Terminal one is `terminal.create` with `command` (the shell runs it as it starts) or, with Append Enter off, `terminal.create` then `terminal.send` of the text; an Agent one is `agentSessions.launch` with the agent, the prompt and the device's mode. `quickCommands.markRun` moves it to the top.
+- `quickCommands.*` is for any device token and left out of the MCP endpoint (`src/mcp/server.ts`) and the relay, so an agent can neither read nor plant a command.
+- UI: `QuickCommandDialog.tsx`, `QuickCommandsMenu.tsx` (the tab bar button), the Quick Commands submenu of `TerminalSelectionContextMenu`, Settings > Quick commands. The menu opens Settings on a section through the `band:open-settings-section` window event. Mobile: `QuickCommandsSheet` in the worktree's more sheet, pure parts in `apps/mobile/src/lib/quick-commands.ts`.
+- Tests: `apps/hub/tests/quick-commands.test.ts`, the `quick-commands-*` probes in `remote-relay.test.ts` and a check in `mcp.test.ts`, `apps/web/e2e/quick-commands.spec.ts`, `apps/mobile/tests/quick-commands.test.ts`.
+- Not done yet: a `band quick-commands` CLI command, default commands, per-worker scope.
 
 ## Architecture: worktree groups
 

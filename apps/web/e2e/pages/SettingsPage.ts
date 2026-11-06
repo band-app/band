@@ -52,6 +52,7 @@ export type SettingsNavId =
   | "context"
   | "runners"
   | "groups"
+  | "quick-commands"
   | "agents"
   | "usage"
   | "notifications"

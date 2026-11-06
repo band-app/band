@@ -174,6 +174,22 @@ export const worktreeGroups = sqliteTable("worktree_groups", {
   createdAt: integer("created_at").notNull(),
 });
 
+// A saved command a person runs with one tap: text for a terminal or a prompt for an agent.
+// `repo_name` is null for a global command. It has no foreign key: `RepoQueries.saveAll` rewrites
+// the repos table, which would cascade into this one.
+export const quickCommands = sqliteTable("quick_commands", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  repoName: text("repo_name"),
+  action: text("action").notNull(),
+  command: text("command").notNull().default(""),
+  appendEnter: integer("append_enter", { mode: "boolean" }).notNull().default(true),
+  agentId: text("agent_id"),
+  prompt: text("prompt").notNull().default(""),
+  lastRunAt: integer("last_run_at"),
+  createdAt: integer("created_at").notNull(),
+});
+
 export const worktrees = sqliteTable("worktrees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   repoName: text("repo_name")

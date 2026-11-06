@@ -25,8 +25,8 @@ export interface TabActions {
   close: (id: string) => Promise<void>;
   move: (id: string, delta: number) => void;
   rename: (id: string, name: string) => Promise<void>;
-  create: (agentId: string | undefined) => Promise<void>;
-  createTerminal: () => Promise<void>;
+  create: (agentId: string | undefined, prompt?: string) => Promise<void>;
+  createTerminal: (start?: { command?: string; typeText?: string }) => Promise<void>;
 }
 
 export function closeTab(actions: TabActions, id: string) {
