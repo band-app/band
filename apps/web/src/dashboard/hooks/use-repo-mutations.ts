@@ -198,13 +198,33 @@ export function useRemoveWorktree() {
       setDeleting(toWorktreeId(repo, name, hostId), true);
     },
     onSuccess: async (_data, { repo, name, hostId }) => {
+      // Read the origin first: the refetch below drops the deleted row.
+      const deletedWorktreeId = toWorktreeId(repo, name, hostId);
+      const origin = queryClient
+        .getQueryData<RepoInfo[]>(queryKeys.repos)
+        ?.find((p) => p.name === repo)
+        ?.worktrees.find(
+          (wt) => toWorktreeId(repo, wt.name, wt.hostId) === deletedWorktreeId,
+        )?.origin;
+
       // Awaited so the card is gone from the list before it stops showing
       // as deleting (see onSettled), rather than flashing back to normal.
       await queryClient.invalidateQueries({ queryKey: queryKeys.repos });
 
-      const deletedWorktreeId = toWorktreeId(repo, name, hostId);
       if (store.getState().activeWorktreeId === deletedWorktreeId) {
         const repos = queryClient.getQueryData<RepoInfo[]>(queryKeys.repos);
+        // Prefer the worktree this one was started from, in any repo, while it still exists.
+        if (origin && !origin.removed) {
+          const parentExists = repos?.some((p) =>
+            p.worktrees.some(
+              (wt) => toWorktreeId(p.name, wt.name, wt.hostId) === origin.worktreeId,
+            ),
+          );
+          if (parentExists) {
+            openWorktree(origin.worktreeId);
+            return;
+          }
+        }
         const repoInfo = repos?.find((p) => p.name === repo);
         if (repoInfo) {
           // Navigate to the repo's main worktree by its immutable `name`.
