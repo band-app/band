@@ -15,6 +15,8 @@ export interface EchoArchiveOptions {
   requires?: string[];
   /** The capability the service reports. */
   capability?: string;
+  /** Leave out the panel and the tools (the plain service of PR 2). Defaults to false. */
+  plainService?: boolean;
 }
 
 export interface EchoArchive {
@@ -32,6 +34,35 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
     version,
     extensionApi: 1,
     contributes: {
+      ...(options.plainService
+        ? {}
+        : {
+            panels: [
+              {
+                id: "screen",
+                label: "Echo screen",
+                icon: "monitor",
+                entry: "panel.html",
+                capability: options.capability ?? "echo",
+              },
+            ],
+            tools: [
+              {
+                name: "echo",
+                description: "Echoes its arguments back from the worker service",
+                inputSchema: { type: "object", properties: { text: { type: "string" } } },
+                service: "main",
+                method: "echo",
+              },
+              {
+                name: "hidden",
+                description: "Not for agents",
+                service: "main",
+                method: "echo",
+                agent: false,
+              },
+            ],
+          }),
       workerServices: [
         {
           id: "main",
@@ -46,6 +77,7 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
     { name: "echo-service/", type: "5" },
     { name: "echo-service/band-extension.json", data: JSON.stringify(manifest) },
     { name: "echo-service/service.mjs", data: readFileSync(join(FIXTURE, "service.mjs")) },
+    { name: "echo-service/panel.html", data: readFileSync(join(FIXTURE, "panel.html")) },
     { name: "echo-service/sdk/", type: "5" },
     ...readdirSync(SDK)
       .filter((f) => f.endsWith(".mjs"))

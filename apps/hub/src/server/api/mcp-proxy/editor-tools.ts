@@ -161,7 +161,7 @@ export async function registerEditorTools(server: McpServer, chatId: string): Pr
     }
     advertised.set(name, withFileProperty(route.tool.inputSchema));
   }
-  advertiseEditorSchemas(server, advertised);
+  advertiseToolSchemas(server, advertised);
 
   function registerEditorTool(server: McpServer, name: string, route: ToolRoute) {
     server.registerTool(
@@ -169,7 +169,7 @@ export async function registerEditorTools(server: McpServer, chatId: string): Pr
       {
         description: `${route.tool.description}\nActs on the document open in the editor tab for \`file\`. Unsaved: the person saves.`,
         // Accepts any object; the editor validates its own arguments. The real schema is
-        // advertised through `tools/list` (see `advertiseEditorSchemas`).
+        // advertised through `tools/list` (see `advertiseToolSchemas`).
         // biome-ignore lint/suspicious/noExplicitAny: the SDK accepts a Zod object here
         inputSchema: z.object({ file: fileArg }).passthrough() as any,
         ...(route.tool.annotations ? { annotations: route.tool.annotations } : {}),
@@ -267,7 +267,10 @@ function withFileProperty(schema: Record<string, unknown>): Record<string, unkno
  * `_requestHandlers` is the SDK's private map; the wrapper falls back to the unpatched list if
  * a later SDK version moves it.
  */
-function advertiseEditorSchemas(server: McpServer, schemas: Map<string, Record<string, unknown>>) {
+export function advertiseToolSchemas(
+  server: McpServer,
+  schemas: Map<string, Record<string, unknown>>,
+) {
   if (schemas.size === 0) return;
   const handlers = (
     server.server as unknown as {

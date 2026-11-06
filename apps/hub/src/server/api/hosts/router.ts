@@ -95,25 +95,30 @@ export const hostsRouter = t.router({
       const latest = releaseCheckService.status().latest;
       return {
         hosts: await Promise.all(
-          hosts.map(async (h) => ({
-            ...h,
-            sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
-            // The reason can hold the service's stderr, so it is admin detail.
-            extensionServices: (
-              await extensionWorkerService.viewFor(h.id, h.status === "online")
-            ).map((v) =>
-              ctx.admin || v.state === "running" || v.state === "not-eligible"
-                ? v
-                : { ...v, reason: "see an admin for details" },
-            ),
-            ...describeHostVersion(h, HUB_VERSION, latest),
-            update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
-            // Command names and paths are admin detail, like the update error above.
-            agentCommands: ctx.admin ? h.agentCommands : {},
-            agentCommandStates: (await hostAgentCommandService.states(h, ctx.admin)).map((state) =>
-              ctx.admin ? state : { ...state, override: null, effective: null },
-            ),
-          })),
+          hosts.map(async (h) => {
+            const services = await extensionWorkerService.viewFor(h.id, h.status === "online");
+            // The row's capabilities come from the worker's hello. A service that starts later
+            // adds its capability, which is what the "+" menu offers an extension panel for.
+            const running = services.filter((v) => v.state === "running").map((v) => v.capability);
+            return {
+              ...h,
+              capabilities: [...new Set([...h.capabilities, ...running])],
+              sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+              // The reason can hold the service's stderr, so it is admin detail.
+              extensionServices: services.map((v) =>
+                ctx.admin || v.state === "running" || v.state === "not-eligible"
+                  ? v
+                  : { ...v, reason: "see an admin for details" },
+              ),
+              ...describeHostVersion(h, HUB_VERSION, latest),
+              update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
+              // Command names and paths are admin detail, like the update error above.
+              agentCommands: ctx.admin ? h.agentCommands : {},
+              agentCommandStates: (await hostAgentCommandService.states(h, ctx.admin)).map(
+                (state) => (ctx.admin ? state : { ...state, override: null, effective: null }),
+              ),
+            };
+          }),
         ),
       };
     }),

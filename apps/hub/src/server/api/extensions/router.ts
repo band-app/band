@@ -60,6 +60,46 @@ export const extensionsRouter = t.router({
         });
       }
     }),
+  /**
+   * A panel's call to its extension's worker service, on the worker of a worktree. Any device
+   * token may make it, because the panel is the person's own page. The panel names itself, and
+   * the manifest decides which service answers, so a panel reaches only its own extension's
+   * service. Left out of the MCP endpoint and the relay like the rest of `extensions.*`.
+   */
+  panelCall: publicProcedure
+    .input(
+      z.object({
+        extensionId: z.string().min(1).max(64),
+        panelId: z.string().min(1).max(64),
+        worktreeId: z.string().min(1),
+        method: z.string().min(1).max(100),
+        params: z.unknown().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const manifest = await extensionService.get(input.extensionId);
+      const panel = manifest?.contributes.panels.find((p) => p.id === input.panelId);
+      if (!manifest || !panel) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `${input.extensionId} has no panel ${input.panelId}`,
+        });
+      }
+      try {
+        const result = await pluginHost.callForWorktree(
+          panel.capability,
+          input.worktreeId,
+          input.method,
+          input.params ?? {},
+        );
+        return { result: result ?? null };
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }),
   list: publicProcedure.query(() => extensionService.list()),
   reload: adminProcedure.mutation(() => extensionService.reload()),
 });

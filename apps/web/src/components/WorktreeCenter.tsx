@@ -33,7 +33,9 @@ import {
 import type { Extension } from "@codemirror/state";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   AlignJustify,
+  Box,
   ChevronDown,
   ChevronRight,
   ClipboardCopy,
@@ -42,13 +44,18 @@ import {
   Eye,
   GitCompare,
   Globe,
+  Image as ImageIcon,
   Loader2,
   MessageSquare,
+  Monitor,
   MoreVertical,
   Pencil,
+  Play,
   Plus,
+  Puzzle,
   RotateCcw,
   Save,
+  Smartphone,
   SquarePen,
   Terminal as TerminalIcon,
   TerminalSquare,
@@ -182,9 +189,12 @@ import { useFileDropTarget } from "../lib/use-file-drop-target";
 import { clientPluginHost } from "../plugins/client-plugin-host";
 import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
 import {
+  extensionIdOfOwner,
   findPanelContribution,
+  isExtensionPanelOwner,
   parsePluginPanelTabId,
   pluginPanelTabId,
+  useExtensionPanels,
   useWorktreePanels,
 } from "../plugins/use-plugin-slot";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
@@ -198,6 +208,7 @@ import {
   useWorktreeChrome,
 } from "./DesktopTitleBar";
 import { ExtensionEditor } from "./extensions/ExtensionEditor";
+import { ExtensionPanel } from "./extensions/ExtensionPanel";
 import { OpenWithItems } from "./extensions/OpenWithItems";
 import {
   type LayoutHeaderActionsProps,
@@ -896,9 +907,58 @@ interface PluginLeafParams {
   panelId: string;
 }
 
+/** The page of an installed extension's panel. Nothing renders until the extension list loads. */
+function ExtensionPanelLeaf({
+  worktreeId,
+  extensionId,
+  panelId,
+  visible,
+}: {
+  worktreeId: string;
+  extensionId: string;
+  panelId: string;
+  visible: boolean;
+}) {
+  const { list } = useExtensions();
+  const panel = list?.extensions
+    .find((e) => e.id === extensionId)
+    ?.contributes.panels.find((p) => p.id === panelId);
+  return (
+    <div
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      tabIndex={-1}
+      data-band-leaf-root=""
+      data-testid={`center-extension-leaf--${extensionId}-${panelId}`}
+    >
+      {panel ? (
+        <ExtensionPanel
+          worktreeId={worktreeId}
+          extensionId={extensionId}
+          panel={panel}
+          visible={visible}
+        />
+      ) : list ? (
+        <div className="p-4 text-sm text-muted-foreground">
+          The {panelId} panel of {extensionId} is not installed.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function PluginLeaf({ params }: LayoutPanelProps<PluginLeafParams>) {
   const { visible, worktreeId: hostWorktreeId } = usePanelVisibility();
   const worktreeId = hostWorktreeId ?? params.worktreeId;
+  if (worktreeId && isExtensionPanelOwner(params.pluginId)) {
+    return (
+      <ExtensionPanelLeaf
+        worktreeId={worktreeId}
+        extensionId={extensionIdOfOwner(params.pluginId)}
+        panelId={params.panelId}
+        visible={visible}
+      />
+    );
+  }
   const contribution = findPanelContribution(pluginPanelTabId(params.pluginId, params.panelId));
   if (!worktreeId || !contribution) return null;
   const Panel = contribution.panel.component;
@@ -2636,8 +2696,14 @@ function TerminalTab(props: LayoutTabProps<TermLeafParams>) {
 function PluginTab(props: LayoutTabProps<PluginLeafParams>) {
   const { pluginId, panelId } = props.params;
   const contribution = findPanelContribution(pluginPanelTabId(pluginId, panelId));
-  const Icon = contribution?.panel.icon ?? Globe;
-  const label = contribution?.panel.label ?? panelId;
+  const { list: extensionList } = useExtensions();
+  const extensionPanel = isExtensionPanelOwner(pluginId)
+    ? extensionList?.extensions
+        .find((e) => e.id === extensionIdOfOwner(pluginId))
+        ?.contributes.panels.find((p) => p.id === panelId)
+    : undefined;
+  const Icon = contribution?.panel.icon ?? extensionPanelIcon(extensionPanel?.icon);
+  const label = contribution?.panel.label ?? extensionPanel?.label ?? panelId;
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
   const tabId = pluginPanelTabId(pluginId, panelId);
@@ -3081,6 +3147,22 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
   );
 });
 
+/** The icons an extension panel may name in its manifest. Anything else gets the puzzle icon. */
+const EXTENSION_PANEL_ICONS: Record<string, typeof Globe> = {
+  globe: Globe,
+  terminal: TerminalIcon,
+  monitor: Monitor,
+  smartphone: Smartphone,
+  image: ImageIcon,
+  box: Box,
+  play: Play,
+  activity: Activity,
+};
+
+function extensionPanelIcon(name: string | undefined): typeof Globe {
+  return (name && EXTENSION_PANEL_ICONS[name]) || Puzzle;
+}
+
 /** The "+" menu entries of the plugin panels the worktree's worker can serve (the Simulator). */
 function PluginPanelItems({
   worktreeId,
@@ -3090,8 +3172,22 @@ function PluginPanelItems({
   onPick: (pluginId: string, panelId: string) => void;
 }) {
   const panels = useWorktreePanels(worktreeId);
+  const extensionPanels = useExtensionPanels(worktreeId);
   return (
     <>
+      {extensionPanels.map(({ extensionId, panel }) => {
+        const Icon = extensionPanelIcon(panel.icon);
+        return (
+          <DropdownMenuItem
+            key={`ext:${extensionId}.${panel.id}`}
+            onClick={() => onPick(`ext:${extensionId}`, panel.id)}
+            data-testid={`worktree-center__new-tab--ext-${extensionId}-${panel.id}`}
+          >
+            <Icon className="size-4" />
+            {panel.label}
+          </DropdownMenuItem>
+        );
+      })}
       {panels.map(({ pluginId, panel }) => (
         <DropdownMenuItem
           key={`${pluginId}.${panel.id}`}
@@ -3236,6 +3332,7 @@ function addPluginLeaf(
     existing.api.setActive();
     return;
   }
+  // An extension panel's real label comes from its tab once the extension list is loaded.
   const label = findPanelContribution(id)?.panel.label ?? panelId;
   api.addPanel({
     id,
@@ -3326,12 +3423,13 @@ function addSharedViewLeaf(
     const parsed = parsePluginPanelTabId(tab.id);
     const contribution = findPanelContribution(tab.id);
     // A panel this build does not know is left out, and the list keeps the entry for other devices.
-    if (!parsed || !contribution) return;
+    // An extension panel is kept: its tab and page wait for the extension list.
+    if (!parsed || (!contribution && !isExtensionPanelOwner(parsed.pluginId))) return;
     api.addPanel({
       id: tab.id,
       component: "plugin",
       tabComponent: "plugin",
-      title: contribution.panel.label,
+      title: contribution?.panel.label ?? parsed.panelId,
       params: { worktreeId, ...parsed },
       position,
       renderer: "always",
