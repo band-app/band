@@ -548,6 +548,13 @@ export interface AgentStdio {
    * daemon keeps. Without it the only way to let go of the agent is `kill`.
    */
   release?(): void;
+  /**
+   * Tells the agent daemon the worker has stored the output up to these byte offsets, so it may
+   * drop it. Set for a held agent. Until then the daemon keeps every byte for a reattach.
+   */
+  ack?(offsets: { stdout: number; stderr: number }): void;
+  /** Bytes of stderr the worker has read from a held agent so far. */
+  stderrOffset?(): number;
   /** The process holds a GitHub token from the hub's vault in its environment. */
   ghToken?: boolean;
   /**

@@ -18,11 +18,13 @@ import {
   AcpAgentProcess,
   type AttachedSession,
   isSessionLostError,
+  launchSpecHash,
   type PermissionOutcome,
 } from "@band-app/chat-runtime/acp-agent-process";
 import { findOption, selectValues } from "@band-app/chat-runtime/config-options";
 import { PendingWork } from "@band-app/chat-runtime/pending-work";
 import { loggedSessionCost, sessionStateFromLog } from "@band-app/chat-runtime/session-state";
+import { WireTap } from "@band-app/chat-runtime/wire-tap";
 import type { Host } from "@band-app/host-api";
 import type { ChatLaunchReply, OwnedChatInfo } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
@@ -33,7 +35,7 @@ import type {
   LoggedChatEvent,
   SessionState,
 } from "@band-app/shared/chat-events";
-import type { ChatStore } from "./store.ts";
+import type { ChatStore, WireState } from "./store.ts";
 
 /** After `session/cancel`, how long a turn gets to stop before its agent process is killed. */
 const CANCEL_GRACE_MS = 15_000;
@@ -108,6 +110,14 @@ export class ChatRuntime {
   /** The agent the process runs. A different one needs a new process. */
   private agentId: string | null = null;
   private launch: ChatLaunchReply | null = null;
+  /** The tap on the current process's JSON-RPC lines. */
+  private tap: WireTap | null = null;
+  /** The hash of the launch the current process started with. */
+  private specHash: string | null = null;
+  /** The turn the agent is working on, for the stored client state. */
+  private turn: { seq: number; taskId: string; startedAt: number } | null = null;
+  private heldAgentId: string | null = null;
+  private persistScheduled = false;
 
   constructor(
     readonly chatId: string,
@@ -147,7 +157,8 @@ export class ChatRuntime {
       createdAt,
     });
     this.env.emit(this.chatId, { ...event, eventId: id, createdAt } as ChatEvent);
-    this.env.logged();
+    // Replication reads committed rows only: the row may sit in a batch that is still open.
+    this.env.store.afterCommit(() => this.env.logged());
   }
 
   broadcastTransient(event: ChatEventPayload): void {
@@ -194,6 +205,7 @@ export class ChatRuntime {
     if (notification.sessionId !== this.sessionId) return;
     const update = notification.update;
     this.applyLive(update);
+    this.persistSoon();
     if (!this.attaching) {
       this.work.observeUpdate(update, this.inTurn);
       if (!this.inTurn && this.routing === "log" && AGENT_WORK_UPDATES.has(update.sessionUpdate)) {
@@ -225,6 +237,7 @@ export class ChatRuntime {
       settled = true;
       this.pending.delete(requestId);
       this.record({ type: "request-resolved", requestId, answer });
+      this.persistSoon();
       this.env.stateChanged(this.chatId);
     };
     const handlers = make(done);
@@ -254,7 +267,9 @@ export class ChatRuntime {
         }),
         () => resolve({ outcome: "cancelled" }),
       );
+      this.tap?.claimAgentRequest("session/request_permission", requestId);
       this.record({ type: "permission", requestId, request });
+      this.persistSoon();
       this.env.stateChanged(this.chatId);
     });
   }
@@ -275,7 +290,9 @@ export class ChatRuntime {
         }),
         () => resolve({ action: "cancel" }),
       );
+      this.tap?.claimAgentRequest("elicitation/create", requestId);
       this.record({ type: "elicitation", requestId, request });
+      this.persistSoon();
       this.env.stateChanged(this.chatId);
     });
   }
@@ -286,6 +303,7 @@ export class ChatRuntime {
       onAsyncTask: (n) => {
         if (n.sessionId !== this.sessionId || this.attaching) return;
         this.work.observeAsyncTask(n.update);
+        this.persistSoon();
         this.env.activity(this.chatId, "work");
         this.env.stateChanged(this.chatId);
       },
@@ -297,11 +315,96 @@ export class ChatRuntime {
         this.env.log.debug({ chatId: this.chatId, stderr: stderr.slice(-500) }, "agent stderr");
         for (const p of [...this.pending.values()]) p.cancel();
         this.work.clear();
+        this.dropWireState();
         this.process = null;
         this.starting = null;
         this.env.stateChanged(this.chatId);
       },
     };
+  }
+
+  // ---- durable client state ------------------------------------------------
+
+  /**
+   * The tap whose batches commit in one transaction with the events parsed from them. After the
+   * commit the daemon may drop those bytes.
+   */
+  private newTap(): WireTap {
+    const store = this.env.store;
+    const tap: WireTap = new WireTap(
+      {
+        begin: () => store.beginBatch(),
+        commit: (snapshot) => {
+          let saved = true;
+          try {
+            if (this.tap === tap) this.saveWire(tap, snapshot);
+          } catch (err) {
+            // The events still commit, but the stored offset is now behind them: keep the daemon's
+            // bytes until a later batch stores the state.
+            saved = false;
+            this.env.log.error({ chatId: this.chatId, err }, "could not store the client state");
+          }
+          try {
+            store.commitBatch();
+          } catch (err) {
+            // Not committed, so the daemon keeps the bytes and a rebuilt client reads them again.
+            this.env.log.error({ chatId: this.chatId, err }, "could not commit the chat batch");
+            return;
+          }
+          if (saved && this.tap === tap) tap.acknowledge();
+        },
+        changed: () => this.persistSoon(),
+      },
+      0,
+      1,
+      (line, err) => this.env.log.warn({ chatId: this.chatId, line, err }, "bad line from agent"),
+    );
+    return tap;
+  }
+
+  private saveWire(tap: WireTap, snapshot = tap.snapshot()): void {
+    const prompt = snapshot.openClientRequests.find((r) => r.method === "session/prompt");
+    const state: WireState = {
+      agentId: this.heldAgentId,
+      sessionId: this.sessionId,
+      specHash: this.specHash,
+      stdoutOffset: snapshot.stdoutOffset,
+      stderrOffset: tap.stderrOffset(),
+      nextRequestId: snapshot.nextRequestId,
+      promptRequestId: prompt?.id ?? null,
+      openClientRequests: snapshot.openClientRequests,
+      openAgentRequests: snapshot.openAgentRequests,
+      turn: this.inTurn && this.turn ? this.turn : null,
+      revision: this.revision,
+      work: this.work.snapshot(),
+      live: this.live,
+    };
+    this.env.store.saveWireState(this.chatId, state);
+  }
+
+  /** The agent is gone for good: nothing is left to rebuild a client for. */
+  private dropWireState(): void {
+    const tap = this.tap;
+    this.tap = null;
+    // Commits the open batch's events (without state); the tap no longer matches, so it saves none.
+    tap?.dispose();
+    this.env.store.clearWireState(this.chatId);
+  }
+
+  /** Stores the client state after the code that changed it has run. Joins a batch that is open. */
+  persistSoon(): void {
+    if (this.persistScheduled || !this.tap) return;
+    this.persistScheduled = true;
+    setImmediate(() => {
+      this.persistScheduled = false;
+      const tap = this.tap;
+      if (!tap) return;
+      try {
+        this.saveWire(tap);
+      } catch (err) {
+        this.env.log.warn({ chatId: this.chatId, err }, "could not store the client state");
+      }
+    });
   }
 
   // ---- process and session attach ----------------------------------------
@@ -320,21 +423,42 @@ export class ChatRuntime {
         command: launch.agent.command,
       });
       if (typeof resolved === "string") throw new Error(resolved);
-      const env = await this.env.spawnEnv({ ...resolved.env, ...launch.env, ...launch.loginEnv });
+      const baseEnv = { ...resolved.env, ...launch.env, ...launch.loginEnv };
+      // What a rebuilt client compares a fresh launch with. Taken before the worker adds its own
+      // variables (its CLI path, a GitHub token), and stored as a hash only.
+      const specHash = launchSpecHash({ ...resolved, env: baseEnv, unsetEnv: launch.unsetEnv });
+      const env = await this.env.spawnEnv(baseEnv);
       // Held by the agent daemon when the worker has one, so the agent outlives a worker restart.
       // `owned` tells the daemon the chat works without the hub.
       const hostAcp = this.env.host.acp;
-      const proc = await AcpAgentProcess.start(
-        {
-          resolveLaunch: (def) => hostAcp.resolveLaunch(def),
-          spawn: (spawnLaunch, spawnCwd) =>
-            hostAcp.spawn(spawnLaunch, spawnCwd, { held: true, owned: true }),
-        },
-        { ...resolved, env, unsetEnv: launch.unsetEnv },
-        launch.cwd,
-        launch.agent.label,
-        this.handlers(generation),
-      );
+      const tap = this.newTap();
+      this.tap = tap;
+      this.specHash = specHash;
+      this.heldAgentId = null;
+      let proc: AcpAgentProcess;
+      try {
+        proc = await AcpAgentProcess.start(
+          {
+            resolveLaunch: (def) => hostAcp.resolveLaunch(def),
+            spawn: async (spawnLaunch, spawnCwd) => {
+              const child = await hostAcp.spawn({ ...spawnLaunch, specHash }, spawnCwd, {
+                held: true,
+                owned: true,
+              });
+              this.heldAgentId = child.held?.agentId ?? null;
+              return child;
+            },
+          },
+          { ...resolved, env, unsetEnv: launch.unsetEnv },
+          launch.cwd,
+          launch.agent.label,
+          this.handlers(generation),
+          tap,
+        );
+      } catch (err) {
+        if (this.tap === tap) this.tap = null;
+        throw err;
+      }
       // Stopped while it started (the chat was released or switched agent): it never runs.
       if (this.generation !== generation) {
         proc.close();
@@ -593,13 +717,18 @@ export class ChatRuntime {
     return sessionId ? loggedSessionCost(this.env.store.events, sessionId) : null;
   }
 
-  async prompt(blocks: acp.ContentBlock[]): Promise<acp.PromptResponse> {
+  async prompt(
+    blocks: acp.ContentBlock[],
+    turn?: { taskId: string; startedAt: number },
+  ): Promise<acp.PromptResponse> {
     const proc = this.process;
     if (!proc?.alive || !this.sessionId) {
       throw new Error("The agent is not running. Send the message again to restart it.");
     }
     this.inTurn = true;
     this.turnSeq++;
+    this.turn = turn ? { seq: this.turnSeq, ...turn } : null;
+    this.persistSoon();
     try {
       try {
         return await proc.prompt(this.sessionId, blocks);
@@ -616,6 +745,8 @@ export class ChatRuntime {
       }
     } finally {
       this.inTurn = false;
+      this.turn = null;
+      this.persistSoon();
     }
   }
 
@@ -721,6 +852,7 @@ export class ChatRuntime {
 
   private stopProcess(): void {
     for (const p of [...this.pending.values()]) p.cancel();
+    this.dropWireState();
     this.process?.close();
     this.process = null;
     this.sessionId = null;
@@ -735,6 +867,9 @@ export class ChatRuntime {
     this.generation++;
     this.starting = null;
     for (const p of [...this.pending.values()]) p.cancel();
+    // Commits the open batch with its state, so the stored offset matches the logged events.
+    this.tap?.dispose();
+    this.tap = null;
     this.process?.release();
     this.process = null;
     this.sessionId = null;
