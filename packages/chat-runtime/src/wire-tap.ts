@@ -21,6 +21,8 @@ export type JsonRpcId = number | string;
 export interface OpenRequest {
   id: JsonRpcId;
   method: string;
+  /** For a client request: the stdin offset after the request's bytes. A rebuilt client compares it with what the daemon wrote. */
+  stdinEnd?: number;
 }
 
 /** What the tap knows at a commit point. */
@@ -29,13 +31,15 @@ export interface WireSnapshot {
   stdoutOffset: number;
   /** The id the client's next request takes. */
   nextRequestId: number;
+  /** Bytes the client has written to the agent's stdin, counting the message being written. */
+  stdinOffset: number;
   /** Requests the client sent and the agent has not answered (`session/prompt` among them). */
   openClientRequests: OpenRequest[];
   /**
    * Requests the agent sent and the client has not answered (permission, form). `requestId` is the
    * id Band logged the request under, once the client claimed it.
    */
-  openAgentRequests: Array<OpenRequest & { requestId?: string }>;
+  openAgentRequests: Array<OpenRequest & { requestId?: string; optionIds?: string[] }>;
 }
 
 export interface WireHooks {
@@ -56,6 +60,20 @@ export interface WireSource {
   stderrOffset?(): number;
 }
 
+/** What a rebuilt client carries over from the one that stopped. */
+export interface WireRestore {
+  openClientRequests: OpenRequest[];
+  openAgentRequests: Array<OpenRequest & { requestId?: string }>;
+  /** Bytes the agent daemon has written to the agent's stdin. */
+  stdinBase: number;
+  /**
+   * The id of the `session/prompt` the former client left open. The tap holds the agent's output
+   * until the rebuilt client has re-issued that request ({@link WireTap.adopted}); the agent's reply
+   * to the old id then resolves the new request.
+   */
+  adoptPromptId?: JsonRpcId;
+}
+
 const NEWLINE = 0x0a;
 
 function isId(value: unknown): value is JsonRpcId {
@@ -66,10 +84,23 @@ export class WireTap {
   private delivered: number;
   private committed: number;
   private nextId = 1;
-  private readonly openClient = new Map<JsonRpcId, string>();
+  private readonly openClient = new Map<JsonRpcId, { method: string; stdinEnd: number | null }>();
   private readonly openAgent = new Map<JsonRpcId, { method: string; requestId?: string }>();
   private scheduled = false;
   private source: WireSource | null = null;
+  /**
+   * Request ids of a rebuilt client sit above every id a former client used: the client's own ids
+   * (from 0) are shifted by this on their way out and back on their way in.
+   */
+  private readonly idBase: number;
+  private stdin: number;
+  private sender: ((message: acp.AnyMessage) => Promise<void>) | null = null;
+  private adopt: { storedId: JsonRpcId; sdkId: JsonRpcId | null } | null = null;
+  private resolveAdopted!: () => void;
+  /** Resolves once the rebuilt client has re-issued the open prompt (see {@link WireRestore}). */
+  readonly adopted: Promise<void>;
+  private held: Promise<void> | null = null;
+  private resolveHeld: (() => void) | null = null;
 
   /**
    * @param stdoutBase The offset of the first byte of the stream this tap reads. Zero for a new
@@ -81,17 +112,70 @@ export class WireTap {
     stdoutBase = 0,
     nextRequestId = 1,
     private readonly onBadLine: (line: string, err: unknown) => void = () => undefined,
+    restore?: WireRestore,
   ) {
     this.delivered = stdoutBase;
     this.committed = stdoutBase;
     this.nextId = nextRequestId;
+    this.idBase = restore ? nextRequestId : 0;
+    this.stdin = restore?.stdinBase ?? 0;
+    this.adopted = new Promise((resolve) => {
+      this.resolveAdopted = resolve;
+    });
+    if (restore) {
+      // Only the prompt is carried over: the rebuilt client waits for nothing else.
+      for (const r of restore.openClientRequests) {
+        if (r.id !== restore.adoptPromptId) continue;
+        this.openClient.set(r.id, { method: r.method, stdinEnd: r.stdinEnd ?? null });
+      }
+      for (const r of restore.openAgentRequests) {
+        this.openAgent.set(r.id, { method: r.method, requestId: r.requestId });
+      }
+      if (restore.adoptPromptId !== undefined) {
+        this.adopt = { storedId: restore.adoptPromptId, sdkId: null };
+      } else {
+        this.resolveAdopted();
+      }
+      // Nothing reaches the client until it is ready for the replay.
+      this.held = new Promise((resolve) => {
+        this.resolveHeld = resolve;
+      });
+    } else {
+      this.resolveAdopted();
+    }
+  }
+
+  /** Lets the agent's output through. A rebuilt client calls it once it can take the replay. */
+  release(): void {
+    this.resolveHeld?.();
+    this.resolveHeld = null;
+  }
+
+  /** How the tap writes a message to the agent on its own (an answer to a request from before the restart). */
+  setSender(send: (message: acp.AnyMessage) => Promise<void>): void {
+    this.sender = send;
+  }
+
+  /** Answers an agent request the former client left open, with the agent's own id. */
+  async respond(id: JsonRpcId, result: unknown): Promise<void> {
+    if (!this.sender || !this.openAgent.has(id)) return;
+    const message = { jsonrpc: "2.0", id, result } as acp.AnyMessage;
+    this.openAgent.delete(id);
+    this.stdin += Buffer.byteLength(`${JSON.stringify(message)}\n`);
+    this.hooks.changed?.();
+    await this.sender(message);
   }
 
   snapshot(): WireSnapshot {
     return {
       stdoutOffset: this.delivered,
       nextRequestId: this.nextId,
-      openClientRequests: [...this.openClient].map(([id, method]) => ({ id, method })),
+      stdinOffset: this.stdin,
+      openClientRequests: [...this.openClient].map(([id, r]) => ({
+        id,
+        method: r.method,
+        ...(r.stdinEnd === null ? {} : { stdinEnd: r.stdinEnd }),
+      })),
       openAgentRequests: [...this.openAgent].map(([id, r]) => ({ id, ...r })),
     };
   }
@@ -114,6 +198,7 @@ export class WireTap {
     let rest: Buffer = Buffer.alloc(0);
     return new ReadableStream<acp.AnyMessage>({
       pull: async (controller) => {
+        await this.held;
         // Reads until a line is ready, so a pull never ends with nothing queued.
         for (;;) {
           let next: IteratorResult<Uint8Array>;
@@ -158,19 +243,39 @@ export class WireTap {
     }
   }
 
-  /** Observes what the SDK writes to the agent. Returns the message unchanged. */
-  outbound(message: acp.AnyMessage): acp.AnyMessage {
+  /**
+   * Observes what the SDK writes to the agent. Returns the message to write, with a rebuilt client's
+   * request ids shifted above the former client's, or null for the one request the tap keeps back
+   * (the re-issued prompt, whose reply the agent owes to the old id).
+   */
+  outbound(message: acp.AnyMessage): acp.AnyMessage | null {
     const m = message as { id?: unknown; method?: unknown };
-    if (isId(m.id)) {
-      if (typeof m.method === "string") {
-        this.openClient.set(m.id, m.method);
-        if (typeof m.id === "number" && m.id >= this.nextId) this.nextId = m.id + 1;
-      } else {
-        this.openAgent.delete(m.id);
-      }
-      this.hooks.changed?.();
+    if (!isId(m.id)) {
+      this.stdin += Buffer.byteLength(`${JSON.stringify(message)}\n`);
+      return message;
     }
-    return message;
+    if (typeof m.method !== "string") {
+      // The client answers a request the agent sent.
+      this.openAgent.delete(m.id);
+      this.stdin += Buffer.byteLength(`${JSON.stringify(message)}\n`);
+      this.hooks.changed?.();
+      return message;
+    }
+    if (this.adopt && this.adopt.sdkId === null && m.method === "session/prompt") {
+      this.adopt.sdkId = m.id;
+      this.resolveAdopted();
+      return null;
+    }
+    const out =
+      typeof m.id === "number" && this.idBase > 0
+        ? ({ ...(message as object), id: m.id + this.idBase } as acp.AnyMessage)
+        : message;
+    const id = (out as { id: JsonRpcId }).id;
+    if (typeof id === "number" && id >= this.nextId) this.nextId = id + 1;
+    this.stdin += Buffer.byteLength(`${JSON.stringify(out)}\n`);
+    this.openClient.set(id, { method: m.method, stdinEnd: this.stdin });
+    this.hooks.changed?.();
+    return out;
   }
 
   /** Hands one line to the SDK. Returns whether a message was queued. */
@@ -194,19 +299,45 @@ export class WireTap {
       this.schedule();
       return false;
     }
+    const routed = this.observe(message);
+    if (!routed) {
+      // A reply to a request from before the restart that nobody waits for.
+      this.delivered += bytes;
+      this.schedule();
+      return false;
+    }
     this.begin();
-    this.observe(message);
     this.delivered += bytes;
-    controller.enqueue(message);
+    controller.enqueue(routed);
     this.schedule();
     return true;
   }
 
-  private observe(message: acp.AnyMessage): void {
+  /** Notes the message and returns what the SDK should see, or null when nobody waits for it. */
+  private observe(message: acp.AnyMessage): acp.AnyMessage | null {
     const m = message as { id?: unknown; method?: unknown };
-    if (!isId(m.id)) return;
-    if (typeof m.method === "string") this.openAgent.set(m.id, { method: m.method });
-    else this.openClient.delete(m.id);
+    if (!isId(m.id)) return message;
+    if (typeof m.method === "string") {
+      this.openAgent.set(m.id, { method: m.method });
+      return message;
+    }
+    // A reply to a request of the client.
+    if (this.adopt && m.id === this.adopt.storedId && this.adopt.sdkId !== null) {
+      this.openClient.delete(m.id);
+      const sdkId = this.adopt.sdkId;
+      this.adopt = null;
+      return { ...(message as object), id: sdkId } as acp.AnyMessage;
+    }
+    if (this.idBase > 0 && typeof m.id === "number") {
+      if (m.id < this.idBase) {
+        this.openClient.delete(m.id);
+        return null;
+      }
+      this.openClient.delete(m.id);
+      return { ...(message as object), id: m.id - this.idBase } as acp.AnyMessage;
+    }
+    this.openClient.delete(m.id);
+    return message;
   }
 
   private batchOpen = false;

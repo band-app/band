@@ -462,7 +462,12 @@ describe("hub state follows the owner's events (S5)", () => {
       label: "status working",
       timeoutMs: 20_000,
     });
-    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
+    // This hub's lease is 1.5 s. Once it runs out the agent daemon's watchdog (every 2 s) stops the
+    // held agent, so the restarted worker finds no agent to take over. Wait past a watchdog tick
+    // so that is certain. (With a lease that outlasts the restart the turn carries on:
+    // chat-ownership-reattach.test.ts.)
+    await w.killWorker(owner, "SIGKILL");
+    await new Promise((resolve) => setTimeout(resolve, 2500));
     owner = await w.restartWorker(owner);
     await waitFor(async () => ((await worktreeStatus(wt)) === "failed" ? true : undefined), {
       label: "status failed after the restart",

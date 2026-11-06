@@ -123,6 +123,14 @@ export class PendingWork {
     return { holds: [...this.holds], taskToolCalls: [...this.taskToolCalls] };
   }
 
+  /** Puts back holds a former client saved with {@link snapshot}. */
+  restore(saved: { holds: Array<[string, PendingWorkHold]>; taskToolCalls: string[] }): void {
+    this.holds.clear();
+    this.taskToolCalls.clear();
+    for (const [key, hold] of saved.holds) this.holds.set(key, hold);
+    for (const id of saved.taskToolCalls) this.taskToolCalls.add(id);
+  }
+
   clear(): void {
     this.holds.clear();
     this.taskToolCalls.clear();

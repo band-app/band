@@ -43,6 +43,8 @@ export interface TurnsEnv {
   sharedUrl(chatId: string, filename: string): string;
   /** A turn started or ended, or the queue changed. */
   changed(chatId: string): void;
+  /** True while the chat's client is being rebuilt after a restart: no turn starts meanwhile. */
+  blocked?(chatId: string): boolean;
 }
 
 /** A file's media type from its name, for the shared-file cards. */
@@ -104,7 +106,7 @@ export class Turns {
 
   /** Starts the chat's next queued message when no turn runs. */
   drain(chatId: string): boolean {
-    if (this.running.has(chatId)) return false;
+    if (this.running.has(chatId) || this.env.blocked?.(chatId)) return false;
     const next = this.env.store.queue(chatId)[0];
     if (!next) return false;
     this.env.store.removeQueued(chatId, next.id);
@@ -262,9 +264,33 @@ export class Turns {
 
     try {
       const blocks = await this.promptBlocks(runtime, message, firstTurn ? sharedDir : null);
-      const res = turn.cancelRequested
-        ? ({ stopReason: "cancelled" } as acp.PromptResponse)
-        : await runtime.prompt(blocks, { taskId: turn.id, startedAt: turn.startedAt });
+      await this.conclude(
+        chatId,
+        turn,
+        runtime,
+        previousCost,
+        turn.cancelRequested
+          ? Promise.resolve({ stopReason: "cancelled" } as acp.PromptResponse)
+          : runtime.prompt(blocks, { taskId: turn.id, startedAt: turn.startedAt, message }),
+      );
+    } catch (err) {
+      // Reading the attachments failed before the agent saw the prompt.
+      this.fail(chatId, turn, runtime, err);
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  /** Logs how the turn ended once the agent answers `work` (a prompt, or a reopened one), and settles it. */
+  private async conclude(
+    chatId: string,
+    turn: RunningTurn,
+    runtime: ChatRuntime,
+    previousCost: number | null,
+    work: Promise<acp.PromptResponse>,
+  ): Promise<void> {
+    try {
+      const res = await work;
       runtime.record({
         type: "turn-ended",
         taskId: turn.id,
@@ -280,16 +306,58 @@ export class Turns {
       const failed = FAILED_STOP_REASONS.has(res.stopReason);
       this.finish(chatId, turn, stopped ? "idle" : failed ? "failed" : "done");
     } catch (err) {
-      runtime.record({
-        type: "turn-ended",
-        taskId: turn.id,
-        error: err instanceof Error ? err.message : String(err),
-        durationMs: Date.now() - turn.startedAt,
-      });
-      this.finish(chatId, turn, "failed");
-    } finally {
-      unsubscribe();
+      this.fail(chatId, turn, runtime, err);
     }
+  }
+
+  private fail(chatId: string, turn: RunningTurn, runtime: ChatRuntime, err: unknown): void {
+    runtime.record({
+      type: "turn-ended",
+      taskId: turn.id,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - turn.startedAt,
+    });
+    this.finish(chatId, turn, "failed");
+  }
+
+  /**
+   * Carries on a turn the worker was running when it restarted: the agent kept working, and the
+   * rebuilt client waits for its answer to the prompt the former client sent.
+   */
+  adopt(
+    chatId: string,
+    t: { taskId: string; startedAt: number; prompt: string },
+    done: Promise<acp.PromptResponse>,
+  ): void {
+    const turn: RunningTurn = {
+      id: t.taskId,
+      prompt: t.prompt,
+      startedAt: t.startedAt,
+      cancelRequested: false,
+    };
+    this.running.set(chatId, turn);
+    this.env.changed(chatId);
+    const runtime = this.env.runtime(chatId);
+    void this.conclude(chatId, turn, runtime, runtime.sessionCostUsd(), done);
+  }
+
+  /**
+   * The prompt of a turn never reached the agent. The turn ends as failed and its message goes back
+   * to the head of the queue, which stays paused as after any failed turn.
+   */
+  abandon(
+    chatId: string,
+    t: { taskId: string; startedAt: number; message: StoredQueuedMessage | null },
+  ): void {
+    const runtime = this.env.runtime(chatId);
+    runtime.record({
+      type: "turn-ended",
+      taskId: t.taskId,
+      error: "The worker restarted before the agent received the message",
+      durationMs: Date.now() - t.startedAt,
+    });
+    if (t.message) this.env.store.unshiftQueued(chatId, t.message);
+    this.env.changed(chatId);
   }
 
   private async applyChoice(runtime: ChatRuntime, category: "model" | "mode", value: string) {
@@ -343,6 +411,8 @@ export class Turns {
   private finish(chatId: string, turn: RunningTurn, outcome: TurnOutcome): void {
     if (this.running.get(chatId) !== turn) return;
     this.running.delete(chatId);
+    // A newer launch waits for the turn's end.
+    this.env.runtime(chatId).restartIfClean();
     if (outcome === "failed" || !this.drain(chatId)) this.env.changed(chatId);
   }
 }
