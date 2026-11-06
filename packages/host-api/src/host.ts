@@ -538,6 +538,11 @@ export interface AgentStdio {
    * survives the link and the worker restarting. The same `agentId` reattaches it.
    */
   held?: { agentId: string; specHash: string | null };
+  /**
+   * Stops using the process and leaves it running. Set for a held agent, which the worker's agent
+   * daemon keeps. Without it the only way to let go of the agent is `kill`.
+   */
+  release?(): void;
   /** The process holds a GitHub token from the hub's vault in its environment. */
   ghToken?: boolean;
   /**
@@ -553,7 +558,11 @@ export interface HostAcp {
   /** The launch for an agent, or a message saying why it can't start (for example, not installed). */
   resolveLaunch(def: AcpAgentDefinition): Promise<AcpLaunch | string>;
   /** Starts the adapter in `cwd`. Rejects when the process cannot start. */
-  spawn(launch: AcpLaunch, cwd: string, options?: { held?: boolean }): Promise<AgentStdio>;
+  spawn(
+    launch: AcpLaunch,
+    cwd: string,
+    options?: { held?: boolean; owned?: boolean },
+  ): Promise<AgentStdio>;
 }
 
 /** What it takes to start a stdio MCP server (plan step 4.4). */

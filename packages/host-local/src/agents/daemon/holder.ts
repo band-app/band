@@ -69,6 +69,8 @@ export class AgentHolder {
   private readonly owners = new Map<string, AgentDaemonClient>();
   private readonly listeners = new Map<string, Listeners>();
   private closed = false;
+  /** When the worker's lease last said it ends, for a daemon launched after the renewal. */
+  private leaseUntil: number | null = null;
 
   constructor(private readonly options: AgentHolderOptions) {
     this.paths = agentDaemonPaths(options.runDir);
@@ -134,6 +136,8 @@ export class AgentHolder {
   /** Stops streaming to the current listeners. The agent keeps running. */
   detach(agentId: string): void {
     this.listeners.delete(agentId);
+    // A closed holder has dropped its connections, which already tells the daemon.
+    if (this.closed) return;
     // The daemon starts its orphan clock once no worker watches the agent.
     void this.ownerOf(agentId)
       .then((client) => client?.request("detach", { agentId }))
@@ -166,6 +170,7 @@ export class AgentHolder {
 
   /** Tells the daemons the worker's lease now runs `ttlMs` more. Starts no daemon. */
   async lease(ttlMs: number): Promise<void> {
+    this.leaseUntil = Date.now() + ttlMs;
     await this.discover().catch(() => undefined);
     await Promise.all(
       this.clients().map((client) => client.request("lease", { ttlMs }).catch(() => false)),
@@ -286,6 +291,9 @@ export class AgentHolder {
         }
         this.current = this.adopt(client);
         this.stale = null;
+        // A daemon launched after the last renewal has no lease yet and would never enforce one.
+        const remaining = this.leaseUntil === null ? 0 : this.leaseUntil - Date.now();
+        if (remaining > 0) void client.request("lease", { ttlMs: remaining }).catch(() => false);
         return;
       } catch (err) {
         lastErr = err;

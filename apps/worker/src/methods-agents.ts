@@ -189,6 +189,9 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
     let killed = 0;
     for (const record of await holder.list()) {
       if (keep.has(record.agentId)) continue;
+      // The hub never knows an owned chat's agent. The daemon's orphan clock ends it when the
+      // worker no longer watches it.
+      if (record.owned && !record.exit) continue;
       if (record.exit) {
         await holder.forget(record.agentId);
         continue;

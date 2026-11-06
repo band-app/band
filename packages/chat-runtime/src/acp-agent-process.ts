@@ -583,6 +583,21 @@ export class AcpAgentProcess {
     this.child.kill("SIGTERM");
   }
 
+  /**
+   * Lets go of the agent and leaves it running, when a process outside this one holds it. For a
+   * worker shutting down. Falls back to {@link close} for an agent that is this process's child.
+   */
+  release(): void {
+    if (!this.child.release) {
+      this.close();
+      return;
+    }
+    if (this.closed) return;
+    this.closed = true;
+    this.connection.close();
+    this.child.release();
+  }
+
   /** Adds the agent's stderr to a failed request, so the error says why. */
   private async guard<T>(work: Promise<T>): Promise<T> {
     try {
