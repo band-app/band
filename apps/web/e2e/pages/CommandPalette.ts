@@ -47,6 +47,10 @@ export class CommandPalette {
     return this.page.getByTestId(`command-palette__shortcut--${commandId}`);
   }
 
+  hint(commandId: string): Locator {
+    return this.page.getByTestId(`command-palette__hint--${commandId}`);
+  }
+
   /** Open the palette with ⇧⌘P (Ctrl+Shift+P off macOS). */
   async open(): Promise<void> {
     await test.step("Open the command palette (⇧⌘P)", async () => {

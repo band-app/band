@@ -355,7 +355,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       id: "switch-worktree",
       label: "Switch Worktree…",
       shortcut: "Cmd+K",
-      hint: isMacPlatform() ? "or hold ⌘ and scroll" : "or hold Alt and scroll",
+      hint: isMacPlatform() ? "or hold ⌘⇧ and scroll" : "or hold Alt+Shift and scroll",
       action: () => deps.openWorktreePicker(),
     },
     {

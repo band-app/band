@@ -1,6 +1,6 @@
 /**
  * Switching worktrees with the mouse: the side buttons step worktree history,
- * and holding Cmd while scrolling opens the switcher, steps its highlight, and
+ * and holding Cmd+Shift while scrolling opens the switcher, steps its highlight, and
  * opens the highlighted worktree when Cmd is released.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -17,6 +17,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { CommandPalette } from "./pages/CommandPalette";
 import { TerminalSurface } from "./pages/TerminalSurface";
 import { WorktreePage } from "./pages/WorktreePage";
 import { WorktreePicker } from "./pages/WorktreePicker";
@@ -97,7 +98,7 @@ async function spoofPlatform(page: Page, platform: Platform): Promise<void> {
 }
 
 for (const [name, platform] of PLATFORMS) {
-  test(`${name}: scroll opens the switcher, steps the highlight, and releasing the key opens it`, async ({
+  test(`${name}: Shift+scroll opens the switcher, steps the highlight, and releasing the key opens it`, async ({
     page,
   }) => {
     const worktreePage = new WorktreePage(page, server.url, TOKEN);
@@ -106,7 +107,7 @@ for (const [name, platform] of PLATFORMS) {
     await worktreePage.goto(WT_C);
     await worktreePage.waitForReady();
 
-    await picker.holdModifier();
+    await picker.holdChord();
     await picker.wheel(100);
     await picker.waitVisible();
     await picker.expectOptionCount(3);
@@ -128,7 +129,7 @@ for (const [name, platform] of PLATFORMS) {
       `worktree-picker__item--${order[2]}`,
     );
 
-    await picker.releaseModifier();
+    await picker.releaseChord();
     await expect(picker.dialog).toBeHidden();
     await expect(page).toHaveURL(urlFor(order[2]));
   });
@@ -142,22 +143,68 @@ for (const [name, platform] of PLATFORMS) {
     await worktreePage.goto(WT_C);
     await worktreePage.waitForReady();
 
-    await picker.holdModifier();
+    await picker.holdChord();
     await picker.wheel(100);
     await picker.waitVisible();
     await page.keyboard.press("Escape");
     await expect(picker.dialog).toBeHidden();
-    await picker.releaseModifier();
+    await picker.releaseChord();
     await expect(page).toHaveURL(urlFor(WT_C));
 
     if (platform === "mac") await worktreePage.openWorktreePickerViaShortcut();
     else await worktreePage.openWorktreePickerViaCtrlShortcut();
     await picker.waitVisible();
-    await picker.releaseModifier();
+    await picker.releaseChord();
     await expect(picker.dialog).toBeVisible();
     await picker.typeQuery("mouse-nav-a");
     await expect(picker.input).toHaveValue("mouse-nav-a");
     await expect(page).toHaveURL(urlFor(WT_C));
+  });
+
+  test(`${name}: scroll without Shift does not open the switcher and is not prevented`, async ({
+    page,
+  }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const picker = new WorktreePicker(page);
+    await spoofPlatform(page, platform);
+    await worktreePage.goto(WT_C);
+    await worktreePage.waitForReady();
+
+    const prevented = await picker.recordWheelPrevented();
+    await picker.holdModifier();
+    await picker.wheel(100);
+    await expect.poll(prevented).toEqual([false]);
+    await expect(picker.dialog).toBeHidden();
+    await picker.releaseModifier();
+  });
+
+  test(`${name}: horizontal-only deltas step, and releasing Shift keeps the switcher open`, async ({
+    page,
+  }) => {
+    const worktreePage = new WorktreePage(page, server.url, TOKEN);
+    const picker = new WorktreePicker(page);
+    await spoofPlatform(page, platform);
+    await worktreePage.goto(WT_C);
+    await worktreePage.waitForReady();
+
+    await picker.holdChord();
+    await picker.wheel(0, 100);
+    await picker.waitVisible();
+    const order = await picker.orderedWorktreeIds();
+    await expect(picker.highlightedOption).toHaveAttribute(
+      "data-testid",
+      `worktree-picker__item--${order[1]}`,
+    );
+    await picker.wheel(0, 100);
+    await expect(picker.highlightedOption).toHaveAttribute(
+      "data-testid",
+      `worktree-picker__item--${order[2]}`,
+    );
+    await picker.releaseShift();
+    await expect(picker.dialog).toBeVisible();
+    await picker.releaseModifier();
+    await expect(picker.dialog).toBeHidden();
+    await expect(page).toHaveURL(urlFor(order[2]));
   });
 
   test(`${name}: small trackpad deltas step once per threshold`, async ({ page }) => {
@@ -167,7 +214,7 @@ for (const [name, platform] of PLATFORMS) {
     await worktreePage.goto(WT_C);
     await worktreePage.waitForReady();
 
-    await picker.holdModifier();
+    await picker.holdChord();
     await picker.wheel(100);
     await picker.waitVisible();
     const order = await picker.orderedWorktreeIds();
@@ -184,7 +231,7 @@ for (const [name, platform] of PLATFORMS) {
       "data-testid",
       `worktree-picker__item--${order[2]}`,
     );
-    await picker.releaseModifier();
+    await picker.releaseChord();
   });
 
   test(`${name}: over a terminal and an editor the switcher steps and the content stays put`, async ({
@@ -208,7 +255,7 @@ for (const [name, platform] of PLATFORMS) {
       return pos !== null && pos.viewportY === pos.baseY;
     };
     expect(await atBottom()).toBe(true);
-    await picker.holdModifier();
+    await picker.holdChord();
     // An upward wheel would scroll the scrollback if it reached the terminal.
     await picker.wheelOver(terminal.wrapper, -100);
     await picker.waitVisible();
@@ -216,7 +263,7 @@ for (const [name, platform] of PLATFORMS) {
     await expect(picker.highlightedOption).not.toHaveCount(0);
     expect(await atBottom()).toBe(true);
     await page.keyboard.press("Escape");
-    await picker.releaseModifier();
+    await picker.releaseChord();
     await expect(page).toHaveURL(urlFor(WT_C));
 
     // The editor, scrolled to the top of a long file.
@@ -224,12 +271,12 @@ for (const [name, platform] of PLATFORMS) {
     await worktreePage.waitForReady();
     await worktreePage.openFileLeaf("long.txt", WT_C);
     expect(await worktreePage.editorScrollTop()).toBe(0);
-    await picker.holdModifier();
+    await picker.holdChord();
     await picker.wheelOver(worktreePage.fileEditor(), 100);
     await picker.waitVisible();
     await picker.wheel(100);
     expect(await worktreePage.editorScrollTop()).toBe(0);
-    await picker.releaseModifier();
+    await picker.releaseChord();
   });
 
   test(`${name}: hover moves the highlight, click opens, and a window blur opens the highlighted row`, async ({
@@ -241,7 +288,7 @@ for (const [name, platform] of PLATFORMS) {
     await worktreePage.goto(WT_C);
     await worktreePage.waitForReady();
 
-    await picker.holdModifier();
+    await picker.holdChord();
     await picker.wheel(100);
     await picker.waitVisible();
     const order = await picker.orderedWorktreeIds();
@@ -253,18 +300,29 @@ for (const [name, platform] of PLATFORMS) {
     await picker.blurWindow();
     await expect(picker.dialog).toBeHidden();
     await expect(page).toHaveURL(urlFor(order[2]));
-    await picker.releaseModifier();
+    await picker.releaseChord();
 
     // Click on a row opens it while the key is still held.
     await worktreePage.goto(WT_C);
     await worktreePage.waitForReady();
-    await picker.holdModifier();
+    await picker.holdChord();
     await picker.wheel(100);
     await picker.waitVisible();
     const second = await picker.orderedWorktreeIds();
     await picker.item(second[1]).click();
     await expect(picker.dialog).toBeHidden();
     await expect(page).toHaveURL(urlFor(second[1]));
-    await picker.releaseModifier();
+    await picker.releaseChord();
   });
 }
+
+test("the command palette hint names the chord", async ({ page }) => {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const palette = new CommandPalette(page);
+  await worktreePage.goto(WT_C);
+  await worktreePage.waitForReady();
+  await palette.open();
+  await expect(palette.hint("switch-worktree")).toHaveText(
+    process.platform === "darwin" ? "or hold ⌘⇧ and scroll" : "or hold Alt+Shift and scroll",
+  );
+});
