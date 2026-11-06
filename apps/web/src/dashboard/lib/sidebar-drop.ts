@@ -1,4 +1,4 @@
-import { originDescendants } from "@band-app/shared/sidebar-tree";
+import { bySortIndex, originDescendants } from "@band-app/shared/sidebar-tree";
 import type { PinnedTree, WorktreeEntry } from "./sidebar-grouping";
 
 /** Where a drag ended relative to the row under the pointer. */
@@ -25,6 +25,8 @@ export type DropPlan =
       worktreeId: string;
       origin: string | null;
       groupId: string | null;
+      /** The order of the rows at the target level, written once the move is done. */
+      order?: WorktreeRef[];
     }
   | { type: "refuse"; reason: string }
   | { type: "none" };
@@ -169,9 +171,40 @@ export function planParentDrop(
     if (origin !== null && cycle.has(origin)) return refuseCycle;
   }
   const groupId = over.worktree.groupId ?? null;
-  const unchanged =
-    (active.worktree.origin?.worktreeId ?? null) === origin &&
-    (active.worktree.groupId ?? null) === groupId;
-  if (unchanged) return NONE;
-  return { type: "parent", worktree: refOf(active), worktreeId: activeId, origin, groupId };
+  const parentChanged = (active.worktree.origin?.worktreeId ?? null) !== origin;
+  const groupChanged = (active.worktree.groupId ?? null) !== groupId;
+  if (zone === "into") {
+    if (!parentChanged && !groupChanged) return NONE;
+    return { type: "parent", worktree: refOf(active), worktreeId: activeId, origin, groupId };
+  }
+  // The rows at the target level, in the order the sidebar shows them, with the dragged row placed
+  // before or after the one it was dropped on.
+  const liveIds = new Set(entries.map((e) => e.worktreeId));
+  const parentOf = (e: WorktreeEntry): string | null => {
+    const id = e.worktree.origin?.worktreeId;
+    return id !== undefined && id !== e.worktreeId && liveIds.has(id) ? id : null;
+  };
+  const level = entries
+    .filter((e) => parentOf(e) === origin && (e.worktree.groupId ?? null) === groupId)
+    .sort(bySortIndex("sortIndex"));
+  const currentIds = level.map((e) => e.worktreeId);
+  const nextIds = moveWithin(
+    level.some((e) => e.worktreeId === activeId) ? currentIds : [...currentIds, activeId],
+    activeId,
+    overId,
+    zone,
+  );
+  const byId = new Map(entries.map((e) => [e.worktreeId, e]));
+  const order = nextIds.flatMap((id) => {
+    const entry = byId.get(id);
+    return entry ? [refOf(entry)] : [];
+  });
+  if (!parentChanged && !groupChanged) {
+    if (nextIds.join("|") === currentIds.join("|")) return NONE;
+    return { type: "reorder", scope: "siblings", order };
+  }
+  if (!groupChanged) {
+    return { type: "reorder", scope: "siblings", order, reparent: { ...refOf(active), origin } };
+  }
+  return { type: "parent", worktree: refOf(active), worktreeId: activeId, origin, groupId, order };
 }

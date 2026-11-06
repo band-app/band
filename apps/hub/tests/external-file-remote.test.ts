@@ -3,7 +3,15 @@
 // the worker link and the worker's own path policy, never the hub's disk.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
@@ -58,6 +66,8 @@ describe("external files for a worktree on a remote worker", () => {
   let worktreeId: string;
 
   let workerRootDir: string;
+  let workerHomeDir: string;
+  let secondRootDir: string;
 
   beforeAll(async () => {
     hubHome = createTmpHome("band-ext-remote-hub-");
@@ -66,6 +76,8 @@ describe("external files for a worktree on a remote worker", () => {
     workerRootDir = workerRoot;
     const workerState = tmp("band-ext-remote-state-");
     const workerHome = tmp("band-ext-remote-whome-");
+    workerHomeDir = workerHome;
+    secondRootDir = tmp("band-ext-remote-root2-");
     const hubRepo = join(tmp("band-ext-remote-hubrepo-"), "proj");
     makeRepo(hubRepo);
     makeRepo(join(workerRoot, "proj"));
@@ -103,6 +115,8 @@ describe("external files for a worktree on a remote worker", () => {
         hostId,
         "--root",
         workerRoot,
+        "--root",
+        secondRootDir,
         "--state-dir",
         workerState,
       ],
@@ -124,7 +138,7 @@ describe("external files for a worktree on a remote worker", () => {
         const { hosts } = await trpcData<{ hosts: Array<{ id: string; status: string }> }>(res);
         return hosts.find((h) => h.id === hostId)?.status === "online" ? true : undefined;
       },
-      { label: "worker online", timeoutMs: 15_000 },
+      { label: "worker online", timeoutMs: 30_000 },
     ).catch((err) => {
       throw new Error(`${err.message}\n${output}`);
     });
@@ -181,25 +195,115 @@ describe("external files for a worktree on a remote worker", () => {
     expect((await trpcData<{ content: string }>(again)).content).toBe("edited in Band\n");
   });
 
-  it("applies the worker's path policy: a file outside its roots and home is refused", async () => {
-    // /etc/hosts exists on this machine, which is also the hub's, and was readable through the
-    // old hub route. Through the worker it lies outside the roots and the worker's home.
+  it("opens, reads and saves a file in the worker user's home, outside every root", async () => {
+    const dotfile = join(workerHomeDir, ".claude", "settings.json");
+    mkdirSync(join(workerHomeDir, ".claude"), { recursive: true });
+    writeFileSync(dotfile, '{"a":1}\n');
+
+    const opened = await trpcMutate(
+      server.url,
+      "editor.openFile",
+      { worktreeId, filePath: dotfile, focus: false },
+      TOKEN,
+    );
+    expect(opened.status).toBe(200);
+    expect(await trpcData<{ external: boolean; filePath: string }>(opened)).toMatchObject({
+      external: true,
+      filePath: dotfile,
+    });
+
     const read = await trpcQuery(
       server.url,
       "worktree.readExternalFile",
-      { worktreeId, absolutePath: "/etc/hosts" },
+      { worktreeId, absolutePath: dotfile },
       TOKEN,
     );
-    expect(read.status).toBe(500);
-    expect(await read.text()).toMatch(/outside|allowed|root|permission|not allowed/i);
-    const save = await trpcMutate(
+    expect((await trpcData<{ content: string }>(read)).content).toBe('{"a":1}\n');
+    const saved = await trpcMutate(
       server.url,
       "worktree.saveExternalFile",
-      { worktreeId, absolutePath: "/etc/hosts", content: "evil" },
+      { worktreeId, absolutePath: dotfile, content: '{"a":2}\n' },
       TOKEN,
     );
-    expect(save.status).toBe(500);
-    expect(readFileSync("/etc/hosts", "utf-8")).not.toBe("evil");
+    expect(saved.status).toBe(200);
+    expect(readFileSync(dotfile, "utf-8")).toBe('{"a":2}\n');
+  });
+
+  it("opens a file in another root the worker serves", async () => {
+    const file = join(secondRootDir, "README.md");
+    writeFileSync(file, "# other root\n");
+    const opened = await trpcMutate(
+      server.url,
+      "editor.openFile",
+      { worktreeId, filePath: file, focus: false },
+      TOKEN,
+    );
+    expect(opened.status).toBe(200);
+    expect(await trpcData<{ external: boolean }>(opened)).toMatchObject({ external: true });
+  });
+
+  it("says why a path cannot be opened: missing, directory, unreadable", async () => {
+    const open = async (filePath: string) => {
+      const res = await trpcMutate(server.url, "editor.openFile", { worktreeId, filePath }, TOKEN);
+      return { status: res.status, text: await res.text() };
+    };
+    const missing = await open(join(workerHomeDir, "nope.txt"));
+    expect(missing.status).toBe(404);
+    expect(missing.text).toMatch(/File not found/);
+
+    const dir = await open(workerHomeDir);
+    expect(dir.status).toBe(400);
+    expect(dir.text).toMatch(/Not a regular file/);
+
+    if (process.getuid?.() !== 0) {
+      const locked = join(workerHomeDir, "locked.txt");
+      writeFileSync(locked, "secret");
+      chmodSync(locked, 0o000);
+      const denied = await open(locked);
+      expect(denied.status).toBe(400);
+      expect(denied.text).toMatch(/Permission denied/);
+      const read = await trpcQuery(
+        server.url,
+        "worktree.readExternalFile",
+        { worktreeId, absolutePath: locked },
+        TOKEN,
+      );
+      expect(await read.text()).toMatch(/Permission denied/);
+    }
+  });
+
+  it("refuses to save over a symlink, a directory or a file that does not exist", async () => {
+    const real = join(workerHomeDir, "real.txt");
+    writeFileSync(real, "keep");
+    const link = join(workerHomeDir, "link.txt");
+    symlinkSync(real, link);
+    for (const absolutePath of [link, workerHomeDir, join(workerHomeDir, "new.txt")]) {
+      const res = await trpcMutate(
+        server.url,
+        "worktree.saveExternalFile",
+        { worktreeId, absolutePath, content: "x" },
+        TOKEN,
+      );
+      expect(res.status, absolutePath).toBe(500);
+    }
+    expect(readFileSync(real, "utf-8")).toBe("keep");
+  });
+
+  it("keeps an agent to the worker's folders: the same call with chat headers is refused", async () => {
+    const file = join(workerHomeDir, "agent-target.txt");
+    writeFileSync(file, "x");
+    const res = await fetch(`${server.url}/trpc/editor.openFile`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `band_token=${TOKEN}`,
+        "x-band-worktree-id": worktreeId,
+        "x-band-chat-id": "chat-1",
+      },
+      body: JSON.stringify({ worktreeId, filePath: file }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/Agents can only open files inside this worker's folders/);
   });
 
   it("refuses a call with no device token", async () => {

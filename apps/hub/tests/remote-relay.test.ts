@@ -383,6 +383,11 @@ beforeAll(async () => {
             absolutePath: "/etc/hosts",
             content: "x",
           }),
+          // An agent may open a tab only for a file the worker's path policy allows.
+          post("open-external", "/trpc/editor.openFile", {
+            worktreeId: WT_A,
+            filePath: "/etc/hosts",
+          }),
           post("vault-oauth", "/trpc/vault.startOAuth", {
             name: "x",
             serverUrl: "http://127.0.0.1:1/mcp",
@@ -659,6 +664,10 @@ describe("the worker relay (S2)", () => {
     expect(by("set-unread")?.status).toBe(403);
     expect(by("read-external")?.status).toBe(403);
     expect(by("save-external")?.status).toBe(403);
+    expect(by("open-external")?.status).toBe(400);
+    expect(by("open-external")?.body).toContain(
+      "Agents can only open files inside this worker's folders",
+    );
     expect(by("other-route")?.status).toBe(403);
     expect(by("file-download")?.status).toBe(403);
     expect(by("file-range")?.status).toBe(403);
@@ -1537,15 +1546,45 @@ describe("system and editor calls on the worker (S4)", () => {
     );
     expect(opened).toMatchObject({ ok: true, external: false, filePath: "only-on-worker.txt" });
 
-    // The hub's own checkout is not on the worker, so it is not found there.
+    // A path that exists nowhere is not found. (A person's token may open an existing file outside
+    // the worker's folders; `external-file-remote.test.ts` covers that.)
     const outside = await trpcMutate(
       server.url,
       "editor.openFile",
-      { worktreeId: WT_A, filePath: join(hubRepo, "hello.txt") },
+      { worktreeId: WT_A, filePath: join(hubRepo, "no-such-file.txt") },
       TEST_TOKEN,
     );
     expect(outside.status).toBe(404);
     expect(await outside.text()).toMatch(/File not found/);
+  });
+
+  it("lets a person's terminal on the worker open a file outside the worker's folders", async () => {
+    const outside = tmp("band-relay-outside-");
+    writeFileSync(join(outside, "settings.json"), "{}\n");
+    // A short command line: the terminal redraws a long one and can swallow the Enter.
+    const body = JSON.stringify({
+      worktreeId: WT_A,
+      filePath: join(outside, "settings.json"),
+      focus: false,
+    });
+    writeFileSync(join(outside, "body.json"), body);
+    writeFileSync(
+      join(outside, "open.sh"),
+      `curl -s -w ' opened:%{http_code}:done\\n' -X POST "$BAND_SERVER_URL/trpc/editor.openFile" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d @${join(outside, "body.json")}\n`,
+    );
+    const created = await m<{ terminalId: string }>("terminal.create", { worktreeId: WT_A });
+    const socket = await TerminalSocket.open(server, {
+      worktreeId: WT_A,
+      terminalId: created.terminalId,
+      token: TEST_TOKEN,
+    });
+    try {
+      socket.type(`sh ${join(outside, "open.sh")}\r`);
+      await socket.waitForOutput(":done", 20_000).catch(() => undefined);
+      expect(socket.output).toContain("opened:200:done");
+    } finally {
+      await socket.close();
+    }
   });
 
   it("formats a file with the config on the worker", async () => {

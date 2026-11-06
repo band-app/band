@@ -12,7 +12,13 @@ band open /etc/hosts
 
 `band open` opens the file in the worktree of the terminal or agent that runs it (`$BAND_WORKTREE_ID`). Outside Band, or with `--worktree <id>`, it uses that worktree or the one most recently focused in the dashboard.
 
-An external tab reads and saves the file on the machine the worktree runs on. For a worktree on a remote worker that is the worker's disk, through the worker's path policy (its home and roots). The hub's own disk is never read for it. A file the worker's policy refuses cannot be opened.
+An external tab reads and saves the file on the machine the worktree runs on. For a worktree on a remote worker that is the worker's disk, and the hub's own disk is never read for it. A person (a device token) may open any regular file the worker's user can read, and save any it can write, inside the worker's folders or not (`~/.claude/settings.json`, `~/.zshrc`). The worker's folder policy does not apply, because a device token already gets a full terminal there. The worker serves this through `fs.external.stat | readFile | writeFile`, which only the hub calls for a device-token request. They take an absolute path, refuse symbolic links and anything but a regular file, and never create a file. Saving needs an existing file.
+
+An agent keeps to the worker's folders. `editor.openFile` from an agent's chat through the relay, the MCP endpoint or a call carrying a chat header answers "Agents can only open files inside this worker's folders" for a path outside them. The relay and the direct path do not list the external methods or `readExternalFile | saveExternalFile`.
+
+A terminal on the worker counts as a person: its relay call names a terminal and no chat, and the terminal already gives the worker user's shell.
+
+`band open` says why a path fails: "File not found", "Not a regular file" (a directory or device) or "Permission denied".
 
 ## From Finder (desktop app)
 

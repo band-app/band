@@ -1,11 +1,31 @@
+import { isAbsolute, resolve, sep } from "node:path";
+import { HostPathDeniedError } from "@band-app/host-api";
 import { formatFileLocation } from "@band-app/shared/file-location";
 import { resolveTarget } from "@band-app/worktree-ops/resolve-path";
 import { WorktreeNotFoundError } from "../errors";
 import { hostRegistry } from "../infra/host/registry";
+import { externalFileProblem } from "./external-file-service";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";
 import { FormatterError, formatFile } from "./formatter";
 import { emit } from "./watcher-service";
 import { worktreeService } from "./worktree-service";
+
+type ResolvedWorktree = NonNullable<ReturnType<typeof worktreeService.resolve>>;
+
+interface OpenTarget {
+  canonicalTarget: string;
+  inside: boolean;
+  relativePath: string | null;
+}
+
+function classify(canonicalRoot: string, canonicalTarget: string): OpenTarget {
+  const root = canonicalRoot.replace(/\/+$/, "");
+  const inside = canonicalTarget === root || canonicalTarget.startsWith(`${root}${sep}`);
+  const relativePath = inside
+    ? (canonicalTarget === root ? "" : canonicalTarget.slice(root.length + 1)).split(sep).join("/")
+    : null;
+  return { canonicalTarget, inside, relativePath };
+}
 
 /**
  * Editor domain service.
@@ -101,6 +121,12 @@ export class EditorService {
     lineEnd?: number;
     column?: number;
     focus?: boolean;
+    /**
+     * `person` (a device token) may open any regular file the worker's user can read.
+     * `agent` (the relay, the MCP endpoint, a call carrying chat or worktree headers)
+     * keeps to the worker's folders.
+     */
+    caller?: "person" | "agent";
   }): Promise<{
     ok: true;
     worktreeId: string;
@@ -120,18 +146,10 @@ export class EditorService {
       throw new EditorOpenError("NOT_FOUND", `Worktree '${targetWorktreeId}' not found`);
     }
 
-    const resolved = await resolveTarget(worktree.host.fs, worktree.worktree.path, input.filePath);
-
-    // `stat` follows to a directory too. Without the `isFile`
-    // guard, `band open /path/to/some-dir` would pass through to the
-    // renderer as an external "file" and the editor would try to open
-    // the directory as a text buffer.
-    if (!resolved.exists) {
-      throw new EditorOpenError("NOT_FOUND", `File not found: ${input.filePath}`);
-    }
-    if (!resolved.isFile) {
-      throw new EditorOpenError("BAD_REQUEST", `Not a file: ${input.filePath}`);
-    }
+    const resolved =
+      input.caller === "agent"
+        ? await this.resolveForAgent(worktree, input.filePath)
+        : await this.resolveForPerson(worktree, input.filePath);
 
     // Two open modes share this procedure:
     //   - In-worktree: emit a worktree-relative path so the renderer
@@ -160,6 +178,50 @@ export class EditorService {
       filePath: formatted,
       external: !resolved.inside,
     };
+  }
+
+  private async resolveForPerson(
+    worktree: ResolvedWorktree,
+    filePath: string,
+  ): Promise<OpenTarget> {
+    const root = worktree.worktree.path;
+    const target = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
+    const { external } = worktree.host;
+    const stat = await external.stat(target);
+    const problem = externalFileProblem(stat, filePath, "read");
+    if (problem) {
+      const notFile =
+        stat.outcome === "ok" && stat.kind !== "file" ? ("BAD_REQUEST" as const) : undefined;
+      throw new EditorOpenError(
+        notFile ?? (stat.outcome === "missing" ? "NOT_FOUND" : "BAD_REQUEST"),
+        problem,
+      );
+    }
+    if (stat.outcome !== "ok")
+      throw new EditorOpenError("NOT_FOUND", `File not found: ${filePath}`);
+    const rootStat = await external.stat(root);
+    const canonicalRoot = rootStat.outcome === "ok" ? rootStat.canonicalPath : root;
+    return classify(canonicalRoot, stat.canonicalPath);
+  }
+
+  private async resolveForAgent(worktree: ResolvedWorktree, filePath: string): Promise<OpenTarget> {
+    const resolved = await resolveTarget(worktree.host.fs, worktree.worktree.path, filePath);
+    if (!resolved.exists) {
+      // The worker's policy hides whether a path outside its folders exists. Say so rather than "not found".
+      try {
+        await worktree.host.fs.stat(resolved.canonicalTarget, { followSymlinks: true });
+      } catch (err) {
+        if (err instanceof HostPathDeniedError) {
+          throw new EditorOpenError(
+            "BAD_REQUEST",
+            `Agents can only open files inside this worker's folders: ${filePath}`,
+          );
+        }
+      }
+      throw new EditorOpenError("NOT_FOUND", `File not found: ${filePath}`);
+    }
+    if (!resolved.isFile) throw new EditorOpenError("BAD_REQUEST", `Not a file: ${filePath}`);
+    return resolved;
   }
 }
 
