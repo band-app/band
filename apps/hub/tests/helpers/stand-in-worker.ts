@@ -18,6 +18,8 @@ export interface StandInWorkerOptions {
   /** The version in the hello. Omit it to model a worker from before version reporting. */
   version?: string;
   serviceManager?: "launchd" | "systemd";
+  /** Why the worker cannot update itself (a worker outside an npm global layout, such as the desktop app's). */
+  updateBlocked?: string;
   /**
    * Runs chat agents (the scripted ACP stub) for the hub's `acp.*` calls, as plain child processes.
    * `held` makes the stand-in say the agents live in an agent daemon, the way a real worker does.
@@ -71,6 +73,7 @@ export async function connectStandInWorker(
         buildId: version ? `band-worker@${version}` : "stand-in",
         ...(version ? { version } : {}),
         ...(opts.serviceManager ? { serviceManager: opts.serviceManager } : {}),
+        ...(opts.updateBlocked ? { updateBlocked: opts.updateBlocked } : {}),
         mode: "attached",
         capabilities: [],
         labels: {},

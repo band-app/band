@@ -87,15 +87,20 @@ export function describeHostVersion(
   const manager = host.info?.serviceManager;
   const serviceManager = manager === "launchd" || manager === "systemd" ? manager : null;
   const updateTarget = updateTargetFor(relation, hubVersion, latest);
+  const updateBlockedReason =
+    typeof host.info?.updateBlocked === "string" ? host.info.updateBlocked : null;
   return {
     workerVersion,
     versionState: refused ? "refused" : relation,
     updateRequired: refused ? required : null,
     serviceManager,
     updateTarget,
-    canUpdate: host.status === "online" && serviceManager !== null && updateTarget !== null,
-    updateBlockedReason:
-      typeof host.info?.updateBlocked === "string" ? host.info.updateBlocked : null,
+    canUpdate:
+      host.status === "online" &&
+      serviceManager !== null &&
+      updateBlockedReason === null &&
+      updateTarget !== null,
+    updateBlockedReason,
     manualCommand: updateTarget ? workerUpdateCommand(updateTarget) : null,
   };
 }

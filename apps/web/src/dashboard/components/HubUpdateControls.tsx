@@ -7,12 +7,13 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  Switch,
 } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../lib/trpc-client";
 import { UPDATE_STATUS_KEY, useUpdateStatus } from "../hooks/use-update-status";
+import { CopyCommand } from "./CopyCommand";
+import { UpdateControls } from "./settings/UpdateControls";
 
 /** Polls while a hub update runs, because the hub is gone for a moment when it restarts. */
 const POLL_MS = 2000;
@@ -20,9 +21,10 @@ const POLL_MS = 2000;
 /**
  * Admin controls for updating the hub from the panel: the command field, the Update hub button,
  * the state while the hub restarts, and the failure with the log tail. Without a command only the
- * field shows, and the panel keeps the manual command.
+ * field shows, and the panel keeps the manual command. In Settings > Hub (`inSettings`) it also
+ * shows the version, the latest release and Check for updates, as each worker row does.
  */
-export function HubUpdateControls() {
+export function HubUpdateControls({ inSettings = false }: { inSettings?: boolean }) {
   const queryClient = useQueryClient();
   const status = useUpdateStatus();
   const settings = useQuery({
@@ -83,36 +85,67 @@ export function HubUpdateControls() {
   const lastRun = hubUpdate?.lastRun;
 
   return (
-    <div className="mt-3 space-y-2" data-testid="hub-update">
-      {hubUpdate?.configured && status.data?.updateAvailable ? (
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            data-testid="hub-update__button"
-            disabled={busy || updating}
-            onClick={() =>
-              void run(async () => {
-                const { agents } = await trpc.workers.hubInterruptions.query();
-                const running = agents.filter((a) => a.busy);
-                if (running.length === 0) {
-                  await trpc.workers.updateHub.mutate();
-                  return;
+    <div className="mt-3 space-y-2" data-testid="hub-update-section">
+      <UpdateControls
+        testId="hub-update"
+        name="the hub"
+        showHeader={inSettings}
+        version={inSettings ? (status.data?.hubVersion ?? null) : undefined}
+        auto={savedUpdate?.auto === true}
+        onAutoChange={(on) => void setAuto(on)}
+        autoLabel="Update automatically when no agent turn runs"
+        autoDisabledReason={null}
+        busy={busy || hubUpdate?.builtIn === false}
+        updateAction={
+          hubUpdate?.configured && status.data?.updateAvailable ? (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="hub-update__button"
+                disabled={busy || updating}
+                onClick={() =>
+                  void run(async () => {
+                    const { agents } = await trpc.workers.hubInterruptions.query();
+                    const running = agents.filter((a) => a.busy);
+                    if (running.length === 0) {
+                      await trpc.workers.updateHub.mutate();
+                      return;
+                    }
+                    setTurns(running);
+                    setConfirmOpen(true);
+                  })
                 }
-                setTurns(running);
-                setConfirmOpen(true);
-              })
-            }
+              >
+                {updating ? "Updating the hub…" : "Update hub"}
+              </Button>
+              {updating ? (
+                <span className="text-xs text-muted-foreground" data-testid="hub-update__state">
+                  Updating to {hubUpdate.target}. This page reconnects when the hub is back.
+                </span>
+              ) : null}
+            </>
+          ) : null
+        }
+      >
+        {inSettings && hubUpdate && !hubUpdate.configured && status.data?.updateAvailable ? (
+          <div
+            className="space-y-1 text-xs text-muted-foreground"
+            data-testid="hub-update__manual-note"
           >
-            {updating ? "Updating the hub…" : "Update hub"}
-          </Button>
-          {updating ? (
-            <span className="text-xs text-muted-foreground" data-testid="hub-update__state">
-              Updating to {hubUpdate.target}. This page reconnects when the hub is back.
-            </span>
-          ) : null}
-        </div>
-      ) : null}
+            <p>
+              This hub updates with a command. Run it on the hub's machine, then restart the hub:
+            </p>
+            {status.data.hubCommand ? (
+              <CopyCommand
+                command={status.data.hubCommand}
+                testId="hub-update__manual"
+                label="Copy the hub update command"
+              />
+            ) : null}
+          </div>
+        ) : null}
+      </UpdateControls>
       <Dialog open={confirmOpen} onOpenChange={(next) => !busy && setConfirmOpen(next)}>
         <DialogContent className="sm:max-w-[460px]" data-testid="hub-update__dialog">
           <DialogHeader>
@@ -177,18 +210,6 @@ export function HubUpdateControls() {
           {error}
         </p>
       ) : null}
-      <div className="flex items-center gap-2">
-        <Switch
-          aria-label="Update the hub automatically"
-          data-testid="hub-update__auto"
-          checked={savedUpdate?.auto === true}
-          disabled={busy || hubUpdate?.builtIn === false}
-          onCheckedChange={(on) => void setAuto(on)}
-        />
-        <span className="text-xs text-muted-foreground">
-          Update automatically when no agent turn runs
-        </span>
-      </div>
       {hubUpdate?.builtIn === false && hubUpdate.builtInBlockedReason ? (
         <p className="text-xs text-muted-foreground" data-testid="hub-update__blocked">
           The built-in updater is off: {hubUpdate.builtInBlockedReason}.
