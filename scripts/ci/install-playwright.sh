@@ -11,6 +11,14 @@
 # dpkg repair. APT_TIMEOUT_SECONDS (default 0, off) adds an outer cap that
 # runs apt as root so the whole group can be stopped. Only the browser
 # download has a default cap, and it is generous.
+#
+# Run 42167062165 showed a third failure: the runner's mirror
+# (azure.archive.ubuntu.com) delivered ~1 package a minute, so apt kept
+# "working" past the 20 minute step limit. The download therefore runs as its
+# own phase (`apt-get install --download-only`), capped per attempt. Finished
+# .deb files stay in /var/cache/apt/archives, so a capped attempt loses nothing,
+# and a retry switches to archive.ubuntu.com. The install phase then runs from
+# the cache with no cap. APT_DOWNLOAD_TIMEOUT_SECONDS sets the cap (default 300).
 set -uo pipefail
 
 browsers=${1:?usage: install-playwright.sh "<browsers>"}
@@ -20,6 +28,8 @@ playwright=${PLAYWRIGHT_CMD:-"pnpm --filter @band-app/web exec playwright"}
 sudo_cmd=${SUDO-sudo}
 apt_timeout=${APT_TIMEOUT_SECONDS:-0}
 apt_attempts=${APT_ATTEMPTS:-3}
+download_timeout=${APT_DOWNLOAD_TIMEOUT_SECONDS:-300}
+apt_sources=${APT_SOURCES_FILES:-"/etc/apt/sources.list /etc/apt/sources.list.d/*"}
 browser_timeout=${BROWSER_TIMEOUT_SECONDS:-1200}
 browser_attempts=${BROWSER_ATTEMPTS:-3}
 backoff=${INSTALL_BACKOFF_SECONDS:-10}
@@ -32,6 +42,20 @@ clear_apt() {
     [ -e "$lock" ] && $sudo_cmd fuser -k -9 "$lock" >/dev/null 2>&1
   done
   $sudo_cmd env "PATH=$PATH" dpkg --configure -a || true
+}
+
+# A slow mirror is the likeliest reason for a capped download, so retry elsewhere.
+switch_mirror() {
+  local f
+  for f in $apt_sources; do
+    [ -f "$f" ] && $sudo_cmd sed -i.bak 's#//azure\.archive\.ubuntu\.com#//archive.ubuntu.com#g' "$f"
+  done
+  $sudo_cmd env "PATH=$PATH" DEBIAN_FRONTEND=noninteractive apt-get "${apt_opts[@]}" update || true
+}
+
+retry_download() {
+  clear_apt
+  switch_mirror
 }
 
 # run_attempts <label> <attempts> <seconds> <before-retry function or ""> <as-root 0|1> <command...>
@@ -75,6 +99,9 @@ install_system_deps() {
     return 1
   fi
   run_attempts "Playwright apt update" "$apt_attempts" "$apt_timeout" clear_apt 1 apt-get "${apt_opts[@]}" update || return 1
+  # shellcheck disable=SC2086
+  run_attempts "Playwright apt download" "$apt_attempts" "$download_timeout" retry_download 1 \
+    apt-get "${apt_opts[@]}" install -y --no-install-recommends --download-only $packages || return 1
   # shellcheck disable=SC2086
   run_attempts "Playwright apt install" "$apt_attempts" "$apt_timeout" clear_apt 1 \
     apt-get "${apt_opts[@]}" install -y --no-install-recommends $packages
