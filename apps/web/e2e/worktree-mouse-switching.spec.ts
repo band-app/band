@@ -172,8 +172,15 @@ for (const [name, platform] of PLATFORMS) {
 
     const prevented = await picker.recordWheelPrevented();
     await picker.holdModifier();
-    await picker.wheel(100);
-    await expect.poll(prevented).toEqual([false]);
+    // Chromium can drop a wheel event it has no scrollable target for, so send
+    // until the page has seen one, then check none was prevented.
+    await expect
+      .poll(async () => {
+        await picker.wheel(100);
+        return (await prevented()).length;
+      })
+      .toBeGreaterThan(0);
+    expect((await prevented()).every((p) => p === false)).toBe(true);
     await expect(picker.dialog).toBeHidden();
     await picker.releaseModifier();
   });
