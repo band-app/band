@@ -75,8 +75,11 @@ test.afterAll(async () => {
 
 async function open(page: import("@playwright/test").Page) {
   const worktreePage = new WorktreePage(page, server.url, TOKEN);
-  await worktreePage.goto("app-main");
-  await worktreePage.waitForReady();
+  // Open the worktree the test renames. A double-click on the card of another worktree also
+  // navigates to it, and the terminal that mounts there takes focus from the title field, so
+  // the field closes before the test types into it.
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForWorktreeReady(WORKTREE);
   return new RenameWorktreePage(page);
 }
 

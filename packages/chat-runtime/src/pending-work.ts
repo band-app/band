@@ -115,6 +115,14 @@ export class PendingWork {
     return [...this.holds.values()];
   }
 
+  /** The holds as plain data, for a rebuilt client to restore. */
+  snapshot(): {
+    holds: Array<[string, PendingWorkHold]>;
+    taskToolCalls: string[];
+  } {
+    return { holds: [...this.holds], taskToolCalls: [...this.taskToolCalls] };
+  }
+
   clear(): void {
     this.holds.clear();
     this.taskToolCalls.clear();

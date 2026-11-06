@@ -48,6 +48,66 @@ export class CenterTabStrip {
     this.overflowDropdown = center.getByTestId("layout-tab-overflow").filter({ visible: true });
   }
 
+  /**
+   * Start a file-manager drag of real files on disk. A real Finder drag cannot be automated: the
+   * drag events are dispatched on the page, but the `File` objects come from a file input filled
+   * by Playwright, so Electron's `webUtils.getPathForFile` returns their real paths.
+   */
+  async startFileDrag(files: string[]): Promise<void> {
+    await test.step("Start a file drag", async () => {
+      await this.page.evaluate(() => {
+        for (const old of document.querySelectorAll('[data-testid="test-tab-drag-source"]'))
+          old.remove();
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.setAttribute("data-testid", "test-tab-drag-source");
+        input.style.display = "none";
+        document.body.append(input);
+      });
+      await this.page.getByTestId("test-tab-drag-source").setInputFiles(files);
+      await this.page.evaluate(() => {
+        const input = document.querySelector<HTMLInputElement>(
+          '[data-testid="test-tab-drag-source"]',
+        );
+        const dt = new DataTransfer();
+        for (const file of Array.from(input?.files ?? [])) dt.items.add(file);
+        (window as unknown as { __testTabDrag: DataTransfer }).__testTabDrag = dt;
+      });
+    });
+  }
+
+  /** Drop the started drag on the first visible tab strip. Returns whether the drop was cancelled. */
+  async dropOnStrip(): Promise<boolean> {
+    return await test.step("Drop files on the tab strip", async () => {
+      return await this.strip.first().evaluate((el) => {
+        const dt = (window as unknown as { __testTabDrag?: DataTransfer }).__testTabDrag;
+        const init = { bubbles: true, cancelable: true, dataTransfer: dt };
+        el.dispatchEvent(new DragEvent("dragover", init));
+        const drop = new DragEvent("drop", init);
+        el.dispatchEvent(drop);
+        return drop.defaultPrevented;
+      });
+    });
+  }
+
+  /** Drop the started drag on the empty center area (shown when every tab is closed). */
+  async dropOnEmptyState(): Promise<void> {
+    await test.step("Drop files on the empty center area", async () => {
+      await this.page.getByTestId("worktree-center__empty-state").evaluate((el) => {
+        const dt = (window as unknown as { __testTabDrag?: DataTransfer }).__testTabDrag;
+        const init = { bubbles: true, cancelable: true, dataTransfer: dt };
+        el.dispatchEvent(new DragEvent("dragover", init));
+        el.dispatchEvent(new DragEvent("drop", init));
+      });
+    });
+  }
+
+  /** The strip's highlight while a file drag is over it. */
+  get dropHighlight(): Locator {
+    return this.page.locator('[data-layout-kind="center"] [data-file-drop-over]');
+  }
+
   async readScroll(): Promise<TabStripScroll> {
     return await this.list.evaluate((el) => ({
       scrollLeft: el.scrollLeft,

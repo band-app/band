@@ -40,6 +40,12 @@
 
 /* ---- header ---- */
 
+/* A file dragged from the file manager is over the tab strip: it will open as a tab. */
+.band-layout-header[data-file-drop-over] {
+  background: color-mix(in srgb, var(--selection) 60%, transparent);
+  box-shadow: inset 0 0 0 1px var(--selection-border);
+}
+
 .band-layout-header {
   display: flex;
   flex: none;

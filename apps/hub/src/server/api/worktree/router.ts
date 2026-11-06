@@ -3,10 +3,16 @@ import { PathsService } from "@band-app/worktree-ops/resolve-path";
 import { commitShaSchema, filePathSchema, resolvePathInput } from "@band-app/worktree-ops/schemas";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import {
+  externalPreviewUrl,
+  isPlainAbsolutePath,
+} from "../../services/_utils/external-preview-link";
+import { worktreeDownloadUrl } from "../../services/_utils/worktree-download-link";
 import { worktreePreviewUrl } from "../../services/_utils/worktree-preview-link";
 import { diffService } from "../../services/diff-service";
 import { directAccessService } from "../../services/direct-access-service";
 import { editorService } from "../../services/editor-service";
+import { externalFileService } from "../../services/external-file-service";
 import { filesService } from "../../services/files-service";
 import { FormatterError } from "../../services/formatter";
 import { gitGraphService } from "../../services/git-graph-service";
@@ -323,6 +329,26 @@ export const worktreeRouter = t.router({
     .input(directOps["worktree.saveFile"].input)
     .mutation(({ input }) => directOps["worktree.saveFile"].run(worktreeOps, input)),
 
+  /**
+   * A file outside the worktree, read on the worktree's own worker (never the
+   * hub's disk). Left out of the relay and the direct path: device tokens only.
+   */
+  readExternalFile: publicProcedure
+    .input(z.object({ worktreeId: z.string().min(1), absolutePath: z.string().min(1) }))
+    .query(({ input }) => externalFileService.read(input.worktreeId, input.absolutePath)),
+
+  saveExternalFile: publicProcedure
+    .input(
+      z.object({
+        worktreeId: z.string().min(1),
+        absolutePath: z.string().min(1),
+        content: z.string(),
+      }),
+    )
+    .mutation(({ input }) =>
+      externalFileService.save(input.worktreeId, input.absolutePath, input.content),
+    ),
+
   createFile: publicProcedure
     .input(directOps["worktree.createFile"].input)
     .mutation(({ input }) => directOps["worktree.createFile"].run(worktreeOps, input)),
@@ -353,6 +379,33 @@ export const worktreeRouter = t.router({
       return { url: worktreePreviewUrl(input.worktreeId, input.path) };
     }),
 
+  /** A signed URL for an HTML file outside the worktree; the grant covers the file's folder. */
+  externalPreviewUrl: publicProcedure
+    .input(z.object({ worktreeId: z.string().min(1), absolutePath: z.string().min(1) }))
+    .query(({ input, ctx }) => {
+      // Same refusal as /api/external-file: an agent never mints a grant for files outside its folders.
+      if (ctx.agent || ctx.chatId || ctx.worktreeId || ctx.terminalId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Agents cannot preview external files" });
+      }
+      if (!worktreeService.resolve(input.worktreeId)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Worktree not found" });
+      }
+      if (!isPlainAbsolutePath(input.absolutePath)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Absolute path required" });
+      }
+      return { url: externalPreviewUrl(input.worktreeId, input.absolutePath) };
+    }),
+
+  /** A signed URL (5 minutes, one file) that a drag out of the Explorer hands to another app. */
+  downloadUrl: publicProcedure
+    .input(z.object({ worktreeId: z.string(), path: z.string().min(1) }))
+    .query(({ input }) => {
+      if (!worktreeService.resolve(input.worktreeId)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Worktree not found" });
+      }
+      return { url: worktreeDownloadUrl(input.worktreeId, input.path) };
+    }),
+
   searchFiles: publicProcedure
     .input(directOps["worktree.searchFiles"].input)
     .query(({ input }) => directOps["worktree.searchFiles"].run(worktreeOps, input)),
@@ -368,7 +421,7 @@ export const worktreeRouter = t.router({
   // path an authenticated caller supplies (not just in-worktree ones), so it
   // is a filesystem-existence oracle. That is acceptable under Band's threat
   // model — the same auth scope already reads arbitrary absolute paths via
-  // `host.readFile` — and the `external` flag is load-bearing, not dead code:
+  // `worktree.readExternalFile` — and the `external` flag is load-bearing, not dead code:
   // it's how the client decides between a worktree-relative and an external
   // tab. Do not "harden" this by dropping the out-of-worktree classification.
   resolvePath: publicProcedure

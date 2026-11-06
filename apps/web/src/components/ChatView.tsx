@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, SearchBar } from "@/dashboard";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useEditorSelection, withSelectionBlock } from "../lib/editor-selection";
 import { groupModelsByProvider, modelNameWithoutProvider } from "../lib/model-providers";
 import { useToastObstruction } from "../lib/toast-obstructions";
 import { trpc } from "../lib/trpc-client";
@@ -66,6 +67,8 @@ import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { AgentFailureCard } from "./chat/AgentFailureCard";
 import { ChatLoginMenu } from "./chat/ChatLoginMenu";
+import { EditorSelectionChip } from "./chat/EditorSelectionChip";
+import { HeldEventsNotice } from "./chat/HeldEventsNotice";
 import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
 import { QueuedMessages, type QueuedMessageView } from "./chat/QueuedMessages";
@@ -383,12 +386,24 @@ export function ChatView({
     return () => window.removeEventListener("band:new-chat-session", onNewChat);
   }, [visible, wsActive, handleNewSession]);
 
+  // The person's selection in an open editor tab rides along as a chip. Removing it drops it for
+  // one message; a new selection brings it back.
+  const editorSelection = useEditorSelection(worktreeId);
+  const [selectionDismissed, setSelectionDismissed] = useState<number | null>(null);
+  const shownSelection =
+    editorSelection && editorSelection.updatedAt !== selectionDismissed ? editorSelection : null;
+  const shownSelectionRef = useRef(shownSelection);
+  shownSelectionRef.current = shownSelection;
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.text.trim() && !message.files?.length) return;
+      const carried = shownSelectionRef.current;
       // The server queues the message when a turn is already running.
       try {
-        await send(message.text, message.files);
+        await send(withSelectionBlock(message.text, carried), message.files);
+        // A removed chip applies to one message; the next one carries the selection again.
+        setSelectionDismissed(null);
       } catch (err) {
         console.error("[ChatView] send failed:", err);
       }
@@ -683,6 +698,7 @@ export function ChatView({
         )}
         <ListeningPill chatId={chatId} />
         <StalledPill worktreeId={worktreeId} chatId={chatId} />
+        <HeldEventsNotice chatId={chatId} />
         <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
           {/* Absolutely positioned so it never shifts content while an older
               page loads (issue #572). */}
@@ -771,7 +787,14 @@ export function ChatView({
           >
             <SlashCommandSuggestions skills={skills} />
             <FileMentionSuggestions worktreeId={worktreeId} />
+            {shownSelection && (
+              <EditorSelectionChip
+                state={shownSelection}
+                onRemove={() => setSelectionDismissed(shownSelection.updatedAt)}
+              />
+            )}
             <PromptInputBody>
+              <PromptInputAttach />
               <PromptInputTextarea
                 placeholder={
                   questionPending ? "Answer the questions above to continue" : "Type a message..."
@@ -790,14 +813,13 @@ export function ChatView({
                 }
                 onStop={handleStop}
               />
+              <PromptInputMic />
             </PromptInputBody>
             <PromptInputNotice />
             <PromptInputActions>
               {/* min-w-0 lets the picker labels truncate on a narrow screen
                   instead of pushing the settings out of the composer. */}
               <div className="flex min-w-0 items-center gap-0.5">
-                <PromptInputAttach />
-                <PromptInputMic />
                 <SessionHistoryMenu
                   worktreeId={worktreeId}
                   chatId={chatId}

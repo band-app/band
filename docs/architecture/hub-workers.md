@@ -21,7 +21,7 @@ A laptop that sleeps cannot host these. A mesh of peers has no natural owner for
 1. **One hub, API only.** `apps/hub` owns the database, the API, the chat event log, scheduling and auth. Settings exist only on the hub. The UI stays in `apps/web` as a separate static SPA that connects to a hub URL. The hub, a static host or Electron can serve it.
 2. **Workers own machines.** Every git, file, process, PTY, search, LSP and agent operation for a worktree runs on that worktree's worker, through a `Host` interface. The hub never touches a worker's disk directly.
 3. **Workers dial out.** Each worker keeps one outbound WebSocket to the hub and opens no inbound ports. This works behind NAT and tunnels without a VPN.
-4. **Local mode is unchanged.** The hub runs a `LocalHost` in-process, so a single-machine user sees no difference.
+4. **Local mode is unchanged.** The hub runs a `LocalHost` in-process, so a single-machine user sees no difference. Amended by [roles-and-updates.md](roles-and-updates.md).
 5. **Chat stays on the hub, and only agent stdio is remote.** The hub keeps the ACP client and the event log. The worker spawns the agent and relays its stdio. Replay, queueing and subscriptions stay independent of where the agent runs. Amended by [chat-ownership.md](chat-ownership.md): a worker that offers chat ownership runs the ACP client and the log for the chats of its worktrees, and the hub keeps a replicated copy.
 6. **Runners only spawn.** A runner is a spawn hook script that receives env vars and starts `band-worker`. Ephemeral workers exit when idle, and attached workers (a laptop, a home server) stay connected.
 

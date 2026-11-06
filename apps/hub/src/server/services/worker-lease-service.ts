@@ -20,6 +20,7 @@ import {
 } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { RepoQueries } from "../infra/db/queries/repos";
+import { extensionWorkerService } from "./extension-worker-service";
 import { tokenService } from "./token-service";
 
 const log = createLogger("worker-lease");
@@ -143,6 +144,8 @@ export class WorkerLeaseService {
       entry.inFlight = false;
       entry.lastAckAt = Date.now();
       tokenService.touchHost(hostId, entry.lastAckAt);
+      // Each renewal is also the moment to send the extension set again if the worker has not acknowledged it.
+      extensionWorkerService.onRenewed(hostId);
     } catch (err) {
       entry.inFlight = false;
       entry.lastFailAt = Date.now();

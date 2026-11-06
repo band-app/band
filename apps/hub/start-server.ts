@@ -37,6 +37,15 @@ import {
   EXT_INSTALL_PATH,
   handleExtensionInstall,
 } from "./src/server/api/extensions/install-handler.ts";
+import {
+  extensionStreamTarget,
+  handleExtensionStream,
+} from "./src/server/api/extensions/stream-handler.ts";
+import {
+  EXTERNAL_FILE_PREFIX,
+  handleExternalFile,
+  handleExternalPreview,
+} from "./src/server/api/external-file.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import {
@@ -80,6 +89,7 @@ import {
 } from "./src/server/infra/usage-scanner/usage-scanner.ts";
 import { parseByteRange } from "./src/server/services/_utils/byte-range.ts";
 import { attachmentDisposition } from "./src/server/services/_utils/content-disposition.ts";
+import { EXTERNAL_PREVIEW_PREFIX } from "./src/server/services/_utils/external-preview-link.ts";
 import { openHostedFile } from "./src/server/services/_utils/hosted-file.ts";
 import {
   annotateHtmlForEdit,
@@ -92,6 +102,10 @@ import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
 import { parseSharedPath } from "./src/server/services/_utils/shared-dir.ts";
 import {
+  verifyWorktreeDownloadGrant,
+  WORKTREE_DOWNLOAD_PREFIX,
+} from "./src/server/services/_utils/worktree-download-link.ts";
+import {
   verifyWorktreePreviewGrant,
   WORKTREE_PREVIEW_PREFIX,
 } from "./src/server/services/_utils/worktree-preview-link.ts";
@@ -102,7 +116,9 @@ import { browserService } from "./src/server/services/browser-service.ts";
 import { checkpointService } from "./src/server/services/checkpoint-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
+import { extensionCatalogService } from "./src/server/services/extension-catalog-service.ts";
 import { extensionService } from "./src/server/services/extension-service.ts";
+import { hubUpdateService } from "./src/server/services/hub-update-service.ts";
 import { mcpProxyService } from "./src/server/services/mcp-proxy-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
@@ -131,6 +147,7 @@ import {
   workerLinkService,
 } from "./src/server/services/worker-link-service.ts";
 import { workerRelayService } from "./src/server/services/worker-relay-service.ts";
+import { workerUpdateService } from "./src/server/services/worker-update-service.ts";
 import { worktreeService } from "./src/server/services/worktree-service.ts";
 
 // ---------------------------------------------------------------------------
@@ -655,6 +672,41 @@ async function handleWorktreePreview(req: IncomingMessage, res: ServerResponse):
   );
 }
 
+/** `GET /api/worktree-download/<worktreeId>/<expiry>.<signature>/<path>`: one file as an attachment behind a signed grant. */
+async function handleWorktreeDownload(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const [rest = ""] = (req.url ?? "").slice(WORKTREE_DOWNLOAD_PREFIX.length).split("?");
+  const [rawId, grant, ...pathParts] = rest.split("/");
+  let wId: string;
+  let filePath: string;
+  try {
+    wId = decodeURIComponent(rawId ?? "");
+    filePath = decodeURIComponent(pathParts.join("/"));
+  } catch {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+  if (!wId || !grant || !filePath) {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+  if (!verifyWorktreeDownloadGrant(wId, grant, filePath)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+  await serveWorktreeFile(
+    res,
+    wId,
+    filePath,
+    { "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" },
+    undefined,
+    true,
+    req.headers.range,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Node IncomingMessage ↔ Web Request adapters.
 //
@@ -905,6 +957,9 @@ async function main() {
   // Known workers become resolvable hosts, before any worktree asks for one.
   workerLinkService.start();
   releaseCheckService.start();
+  hubUpdateService.startAuto();
+  workerUpdateService.startAuto();
+  extensionCatalogService.start();
   placementService.start();
   environmentBuildService.start();
   runnerService.start();
@@ -1079,6 +1134,20 @@ async function main() {
       return;
     }
 
+    // Signed folder grant for an HTML file outside a worktree: /api/external-preview/<worktreeId>/<grant>/<path...>.
+    if (req.method === "GET" && req.url?.startsWith(EXTERNAL_PREVIEW_PREFIX)) {
+      await handleExternalPreview(req, res);
+      return;
+    }
+
+    // Signed one-file download: /api/worktree-download/<worktreeId>/<expiry>.<signature>/<path...>.
+    // Before the device-token check, because a file manager fetching a drag
+    // cannot send it; the signature names one file and expires in 5 minutes.
+    if (req.method === "GET" && req.url?.startsWith(WORKTREE_DOWNLOAD_PREFIX)) {
+      await handleWorktreeDownload(req, res);
+      return;
+    }
+
     // Auth check (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
 
@@ -1166,6 +1235,12 @@ async function main() {
         ? join("shared", parsed.worktreeId, parsed.chatId)
         : join("shared", parsed.worktreeId);
       serveStaticFile(res, bandHome(), subdir, encodedName);
+      return;
+    }
+
+    // Bytes of a file outside the worktree (PDF, image, video preview of an external tab).
+    if (req.method === "GET" && req.url?.startsWith(EXTERNAL_FILE_PREFIX)) {
+      await handleExternalFile(req, res);
       return;
     }
 
@@ -1510,7 +1585,7 @@ async function main() {
   });
 
   // ---------------------------------------------------------------------------
-  // WebSocket server for plugin live streams (the simulator's screen)
+  // WebSocket server for plugin live streams (an extension panel's screen)
   // ---------------------------------------------------------------------------
   const pluginStreamWss = new WebSocketServer({
     noServer: true,
@@ -1582,6 +1657,14 @@ async function main() {
     if (desktopHost !== null) {
       desktopWss.handleUpgrade(req, socket, head, (ws) => {
         void handleDesktopConnection(ws, req, desktopHost);
+      });
+      return;
+    }
+
+    const extensionStream = extensionStreamTarget(url.pathname);
+    if (extensionStream !== null) {
+      pluginStreamWss.handleUpgrade(req, socket, head, (ws) => {
+        void handleExtensionStream(ws, req, extensionStream);
       });
       return;
     }
@@ -1875,6 +1958,9 @@ async function main() {
     mcpProxyService.stop();
     placementService.stop();
     releaseCheckService.stop();
+    hubUpdateService.stopAuto();
+    workerUpdateService.stopAuto();
+    extensionCatalogService.stop();
     environmentBuildService.stop();
     // Agents held by remote workers survive a lost link by design, but the hub keeps their ACP
     // state and nothing can reattach after it stops, so they end with it.

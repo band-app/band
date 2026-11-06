@@ -1052,17 +1052,17 @@ describe("the plugin stream route", () => {
   it("checks the token, the worktree, the host and the origin before it opens a stream", async () => {
     const access = await liveAccess(WT_A);
     const protocols = ["band", `band-token.${access.token}`];
-    const url = streamUrl(access.port, "simulator", WT_A);
+    const url = streamUrl(access.port, "echo", WT_A);
     expect(await upgradeResult(url, ["band"])).toBe(401);
     // A hub token, or one an agent's relay holds, is no credential here.
     expect(await upgradeResult(url, ["band", `band-token.${TEST_TOKEN}`])).toBe(401);
     expect(await upgradeResult(url, ["band", "band-token.brt_agentrelaytoken"])).toBe(401);
-    expect(await upgradeResult(streamUrl(access.port, "simulator", WT_B), protocols)).toBe(403);
+    expect(await upgradeResult(streamUrl(access.port, "echo", WT_B), protocols)).toBe(403);
     expect(await upgradeResult(url, protocols, { origin: "https://evil.example" })).toBe(403);
     expect(await upgradeResult(url, protocols, { origin: "app://local" })).toBe(403);
     expect(await upgradeResult(url, protocols, { host: `evil.example:${access.port}` })).toBe(421);
     expect(
-      await upgradeResult(`ws://127.0.0.1:${access.port}/plugins/simulator/stream`, protocols),
+      await upgradeResult(`ws://127.0.0.1:${access.port}/plugins/echo/stream`, protocols),
     ).toBe(400);
   });
 

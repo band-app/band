@@ -52,6 +52,22 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     return { chan: ch.id };
   });
 
+  // Person-only, like `fs.external.readFile`: no path policy, links and non-regular files refused.
+  r.raw("fs.external.readStream", async (a) => {
+    const target = str(a, "path");
+    const stat = await host.external.stat(target); // a bad file fails the call, not the stream
+    if (stat.outcome === "denied") throw new Error("Permission denied");
+    if (stat.outcome !== "ok") throw new Error(`File not found: ${target}`);
+    if (stat.symlink) throw new Error("Symbolic links are not allowed");
+    if (stat.kind !== "file") throw new Error("Not a regular file");
+    const ch = session.openChannel("fs.read", { path: target });
+    const start = optNum(a, "start");
+    const end = optNum(a, "end");
+    const range = start !== undefined && end !== undefined ? { start, end } : undefined;
+    serve(ch, host.external.readStream(target, range), { release: activity.hold() });
+    return { chan: ch.id };
+  });
+
   r.raw("fs.watch", async (a) => {
     const root = await path(a, "root");
     const ch = session.openChannel("fs.watch", { root });

@@ -20,6 +20,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import type { AcpLaunch, AgentStdio, HostAcp } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { loginSecretScrubber } from "@band-app/shared/agent-logins";
+import type { WireTap } from "./wire-tap";
 
 const log = createLogger("acp-agent");
 
@@ -290,6 +291,7 @@ export class AcpAgentProcess {
     cwd: string,
     label: string,
     handlers: AcpAgentHandlers,
+    tap?: WireTap,
   ): Promise<AcpAgentProcess> {
     // An agent that fails on its credential may print it. Neither stderr nor an error message
     // that reaches a failure card or the chat log may hold a Band login's secret.
@@ -310,16 +312,33 @@ export class AcpAgentProcess {
       }
     })();
 
-    const wire = acp.ndJsonStream(
-      new WritableStream<Uint8Array>({
-        write: (chunk) => child.stdin.write(chunk),
-        close: () => child.stdin.end(),
-      }),
-      iterableToReadable(child.stdout),
-    );
+    const out = new WritableStream<Uint8Array>({
+      write: (chunk) => child.stdin.write(chunk),
+      close: () => child.stdin.end(),
+    });
+    // With a tap the agent's stdout is read line by line there, so each line has its byte offset.
+    const wire = tap
+      ? acp.ndJsonStream(out, new ReadableStream<Uint8Array>({ start: (c) => c.close() }))
+      : acp.ndJsonStream(out, iterableToReadable(child.stdout));
+    const innerWriter = tap ? wire.writable.getWriter() : null;
+    const wireWritable =
+      tap && innerWriter
+        ? new WritableStream<acp.AnyMessage>({
+            write: (message) => innerWriter.write(tap.outbound(message)),
+            close: () => innerWriter.close(),
+            abort: (reason) => innerWriter.abort(reason),
+          })
+        : wire.writable;
+    const wireReadable = tap
+      ? tap.inbound({
+          stdout: child.stdout,
+          ack: child.ack?.bind(child),
+          stderrOffset: child.stderrOffset?.bind(child),
+        })
+      : wire.readable;
     const stream = {
-      writable: wire.writable,
-      readable: splitAsyncTasks(wire.readable, (n) => handlers.onAsyncTask?.(n)),
+      writable: wireWritable,
+      readable: splitAsyncTasks(wireReadable, (n) => handlers.onAsyncTask?.(n)),
     };
     const connection = acp
       .client({ name: "band" })
@@ -581,6 +600,21 @@ export class AcpAgentProcess {
     this.closed = true;
     this.connection.close();
     this.child.kill("SIGTERM");
+  }
+
+  /**
+   * Lets go of the agent and leaves it running, when a process outside this one holds it. For a
+   * worker shutting down. Falls back to {@link close} for an agent that is this process's child.
+   */
+  release(): void {
+    if (!this.child.release) {
+      this.close();
+      return;
+    }
+    if (this.closed) return;
+    this.closed = true;
+    this.connection.close();
+    this.child.release();
   }
 
   /** Adds the agent's stderr to a failed request, so the error says why. */

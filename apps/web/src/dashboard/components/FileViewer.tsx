@@ -15,6 +15,8 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDirectAssetUrl } from "../../lib/use-direct-asset-url";
+import { useExternalAssetUrl } from "../../lib/use-external-asset-url";
+import type { ExternalFileSource } from "../adapter";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
 import { isHtmlFile } from "../lib/html-preview";
@@ -29,6 +31,7 @@ import { useMarkdownPreviewWidth } from "../lib/markdown-preview-width";
 import type { FileContentResult } from "../types";
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
+import { ExternalHtmlPreview } from "./ExternalHtmlPreview";
 import { HtmlVisualEditor } from "./HtmlVisualEditor";
 import { ImagePreview } from "./ImagePreview";
 import { LanguagePickerDialog } from "./LanguagePickerDialog";
@@ -111,10 +114,13 @@ interface FileViewerProps {
    * /writes go through the host file IO surface
    * (`adapter.readExternalFile` / `adapter.saveExternalFile`) instead of
    * the worktree one. `worktreeId` is still required by the prop
-   * shape but is unused on this path — image/PDF preview URLs and LSP
-   * are intentionally not wired for external files.
+   * shape but is unused on this path — LSP is not wired for external
+   * files. PDF, image, video and HTML previews go through
+   * `adapter.readExternalBlob` and `adapter.getExternalHtmlPreviewUrl`.
    */
   external?: boolean;
+  /** Where an external file lives. Defaults to the worktree's worker. */
+  externalSource?: ExternalFileSource;
   /**
    * When true, the viewer renders an untitled (scratch) buffer that
    * has no backing file. `filePath` carries the synthetic `untitled:N`
@@ -290,6 +296,7 @@ export function FileViewer({
   savedScrollTop,
   onEditedContentChange,
   external,
+  externalSource,
   untitled,
   languageOverride,
   onLanguageOverrideChange,
@@ -440,16 +447,9 @@ export function FileViewer({
       return;
     }
 
-    // Images and PDFs are rendered via the raw file URL — no tRPC fetch needed.
-    // External files don't have a worktree-relative URL; for the moment we
-    // fall through to the text-content path (binary detection will catch
-    // genuine images), since opening an arbitrary binary outside the worktree
-    // root is rare and the image preview UI isn't a goal of the external-file
-    // flow.
-    if (
-      !external &&
-      (previewType === "image" || previewType === "video" || previewType === "pdf")
-    ) {
+    // Images, videos and PDFs are rendered from their bytes (a raw file URL, or
+    // for an external file a Blob read through the adapter) — no text fetch.
+    if (previewType === "image" || previewType === "video" || previewType === "pdf") {
       setData(null);
       setLoading(false);
       setError(null);
@@ -469,7 +469,7 @@ export function FileViewer({
     setData(null);
 
     const promise = external
-      ? adapter.readExternalFile!(filePath)
+      ? adapter.readExternalFile!(filePath, { worktreeId, source: externalSource ?? "worker" })
       : adapter.getWorktreeFile!(worktreeId, filePath);
     promise
       .then((result) => {
@@ -493,7 +493,7 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [adapter, worktreeId, filePath, previewType, external, untitled]);
+  }, [adapter, worktreeId, filePath, previewType, external, externalSource, untitled]);
 
   // The user's explicit choice from the language picker always wins over
   // file-extension detection (issue #434: "manual override sticks for the
@@ -507,27 +507,33 @@ export function FileViewer({
         ? detectLanguage(filePath, data.language)
         : "plaintext";
 
-  // External files don't have a worktree-relative raw URL endpoint, so
-  // image/PDF rendering for external paths is intentionally not wired.
+  // An external file has no worktree-relative raw URL; its bytes come as a Blob.
+  const isMediaPreview =
+    previewType === "image" || previewType === "video" || previewType === "pdf";
+  const externalAsset = useExternalAssetUrl(
+    adapter,
+    external === true && isMediaPreview,
+    filePath,
+    {
+      worktreeId,
+      source: externalSource ?? "worker",
+    },
+  );
   const hubFileUrl =
     !external && adapter.getWorktreeFileUrl
       ? adapter.getWorktreeFileUrl(worktreeId, filePath)
       : undefined;
   // On the desktop app, a file of a worktree on this computer's worker comes from the worker.
-  const fileUrl = useDirectAssetUrl(
-    previewType === "image" || previewType === "video" || previewType === "pdf"
-      ? hubFileUrl
-      : undefined,
-  );
+  const directFileUrl = useDirectAssetUrl(isMediaPreview ? hubFileUrl : undefined);
+  const fileUrl = external ? externalAsset.url : directFileUrl;
 
   const showMarkdownToggle = previewType === "markdown" && !!renderMarkdownBlock;
   const showVisualToggle =
     !!htmlVisual &&
     previewType === "code" &&
     isHtmlFile(filePath) &&
-    !external &&
     !untitled &&
-    !!adapter.getWorktreePreviewUrl;
+    (external ? !!adapter.getExternalHtmlPreviewUrl : !!adapter.getWorktreePreviewUrl);
   // The code view is the default for HTML, so only an explicit "preview" shows the page.
   const visualActive = showVisualToggle && controlledViewMode === "preview";
   const [markdownPreviewWidth] = useMarkdownPreviewWidth();
@@ -592,7 +598,12 @@ export function FileViewer({
     }
     if (editedContentRef.current === null) return true;
     const save = external
-      ? adapter.saveExternalFile && ((c: string) => adapter.saveExternalFile!(filePath, c))
+      ? adapter.saveExternalFile &&
+        ((c: string) =>
+          adapter.saveExternalFile!(filePath, c, {
+            worktreeId,
+            source: externalSource ?? "worker",
+          }))
       : adapter.saveWorktreeFile &&
         ((c: string) => adapter.saveWorktreeFile!(worktreeId, filePath, c));
     if (!save) return false;
@@ -616,7 +627,7 @@ export function FileViewer({
     } finally {
       setSaving(false);
     }
-  }, [adapter, worktreeId, filePath, external, untitled, onSaveAs]);
+  }, [adapter, worktreeId, filePath, external, externalSource, untitled, onSaveAs]);
 
   // What a Visual mode edit is checked against: unsaved text if any, else a
   // fresh read of the file, so an edit never lands on a file that has changed
@@ -1176,6 +1187,15 @@ export function FileViewer({
           </div>
         )}
 
+        {!loading && !error && external && isMediaPreview && externalAsset.error && (
+          <div
+            data-testid="file-viewer__error"
+            className="flex h-32 items-center justify-center text-sm text-destructive"
+          >
+            {externalAsset.error}
+          </div>
+        )}
+
         {/* Image preview */}
         {!loading && !error && previewType === "image" && fileUrl && (
           <ImagePreview src={fileUrl} alt={getFilename(filePath)} />
@@ -1224,8 +1244,18 @@ export function FileViewer({
             </div>
           )}
 
+        {/* An external HTML file: the page in a sandboxed iframe, read-only. */}
+        {!loading && !error && visualActive && external && (
+          <ExternalHtmlPreview
+            adapter={adapter}
+            absolutePath={filePath}
+            ctx={{ worktreeId, source: externalSource ?? "worker" }}
+            diskContent={data?.content}
+          />
+        )}
+
         {/* HTML Visual mode: the page in a sandboxed iframe. */}
-        {!loading && !error && visualActive && data?.content !== undefined && (
+        {!loading && !error && visualActive && !external && data?.content !== undefined && (
           <HtmlVisualEditor
             worktreeId={worktreeId}
             filePath={filePath}

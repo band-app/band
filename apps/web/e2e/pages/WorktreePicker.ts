@@ -100,6 +100,80 @@ export class WorktreePicker {
     );
   }
 
+  /** The row cmdk marks as highlighted. */
+  get highlightedOption(): Locator {
+    return this.dialog.locator('[role="option"][data-selected="true"]');
+  }
+
+  /** The switcher modifier for the page's platform: Cmd on macOS, Alt elsewhere. */
+  private async modifier(): Promise<"Meta" | "Alt"> {
+    const mac = await this.page.evaluate(() => {
+      const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+      return nav.userAgentData?.platform
+        ? nav.userAgentData.platform === "macOS"
+        : /Mac|iPhone|iPad/.test(navigator.platform);
+    });
+    return mac ? "Meta" : "Alt";
+  }
+
+  async holdModifier(): Promise<void> {
+    await this.page.keyboard.down(await this.modifier());
+  }
+
+  /** Hold the switcher chord: the platform modifier plus Shift. */
+  async holdChord(): Promise<void> {
+    await this.holdModifier();
+    await this.page.keyboard.down("Shift");
+  }
+
+  async releaseShift(): Promise<void> {
+    await this.page.keyboard.up("Shift");
+  }
+
+  /** Release Shift, then the platform modifier. */
+  async releaseChord(): Promise<void> {
+    await this.releaseShift();
+    await this.releaseModifier();
+  }
+
+  async releaseModifier(): Promise<void> {
+    await this.page.keyboard.up(await this.modifier());
+  }
+
+  /** One wheel event over the middle of the page. */
+  async wheel(deltaY: number, deltaX = 0): Promise<void> {
+    const size = this.page.viewportSize();
+    await this.page.mouse.move((size?.width ?? 1280) / 2, (size?.height ?? 800) / 2);
+    await this.page.mouse.wheel(deltaX, deltaY);
+  }
+
+  /** Start recording whether each wheel event was default-prevented. Returns a reader of the list. */
+  async recordWheelPrevented(): Promise<() => Promise<boolean[]>> {
+    await this.page.evaluate(() => {
+      const w = window as unknown as { __wheelPrevented: boolean[] };
+      w.__wheelPrevented = [];
+      // Bubble phase on window runs after the app's capture listener.
+      window.addEventListener("wheel", (e) => w.__wheelPrevented.push(e.defaultPrevented), {
+        passive: true,
+      });
+    });
+    return () =>
+      this.page.evaluate(
+        () => (window as unknown as { __wheelPrevented: boolean[] }).__wheelPrevented,
+      );
+  }
+
+  /** One wheel event with the pointer over `target`. */
+  async wheelOver(target: Locator, deltaY: number): Promise<void> {
+    await target.hover();
+    await this.page.mouse.wheel(0, deltaY);
+  }
+
+  /** The window losing focus, as when the user switches to another app. */
+  async blurWindow(): Promise<void> {
+    await this.page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  }
+
   async waitVisible(): Promise<void> {
     await test.step("Wait for the worktree picker to open", async () => {
       await this.dialog.waitFor({ state: "visible", timeout: 15_000 });

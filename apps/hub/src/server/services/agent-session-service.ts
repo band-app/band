@@ -1388,6 +1388,16 @@ export class AgentSessionService {
     backgroundObserver = observer;
   }
 
+  /** The agent process of each chat that has one: the chat, its worktree and the pid on the worker. */
+  agentPids(): { chatId: string; worktreeId: string; pid: number }[] {
+    const out: { chatId: string; worktreeId: string; pid: number }[] = [];
+    for (const rt of runtimes.values()) {
+      const pid = rt.process?.pid;
+      if (pid !== undefined) out.push({ chatId: rt.chatId, worktreeId: rt.worktreeId, pid });
+    }
+    return out;
+  }
+
   /** When the chat's agent last sent anything (ms since epoch), or null. */
   lastActivityAt(chatId: string): number | null {
     return runtimes.get(chatId)?.lastActivityAt ?? null;

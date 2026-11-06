@@ -20,7 +20,14 @@
  * convention of primary page objects.
  */
 
-import { type Download, expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  type Download,
+  expect,
+  type FrameLocator,
+  type Locator,
+  type Page,
+  test,
+} from "@playwright/test";
 import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FindWidget } from "./FindWidget";
 import { MarkdownTableEditor } from "./MarkdownTableEditor";
@@ -54,6 +61,59 @@ export class FileViewerPage {
   /** The `<video>` of a video preview tab. */
   get videoPlayer(): Locator {
     return this.root.getByTestId("video-preview__player");
+  }
+
+  /** The PDF viewer iframe of a PDF preview tab. */
+  get pdfFrame(): Locator {
+    return this.root.getByTestId("pdf-preview__frame");
+  }
+
+  /** The sandboxed iframe that shows an external HTML file. */
+  get externalHtmlFrameElement(): Locator {
+    return this.root.getByTestId("file-viewer__external-html-preview");
+  }
+
+  /** The page inside {@link externalHtmlFrameElement}. */
+  get externalHtmlFrame(): FrameLocator {
+    return this.page.frameLocator('[data-testid="file-viewer__external-html-preview"]');
+  }
+
+  /** A heading inside the external HTML preview. */
+  externalHtmlHeading(name: string): Locator {
+    return this.externalHtmlFrame.getByRole("heading", { name });
+  }
+
+  /** The loaded width of an image inside the external HTML preview; 0 when it did not load. */
+  async externalHtmlImageNaturalWidth(alt: string): Promise<number> {
+    return this.externalHtmlFrame
+      .getByRole("img", { name: alt })
+      .evaluate((img) => (img as HTMLImageElement).naturalWidth);
+  }
+
+  /** The preview video's `readyState`; 1 or more means its metadata loaded. */
+  async videoReadyState(): Promise<number> {
+    return this.videoPlayer.evaluate((el) => (el as HTMLVideoElement).readyState);
+  }
+
+  /** The error line the viewer shows in place of a preview. */
+  get errorMessage(): Locator {
+    return this.root.getByTestId("file-viewer__error");
+  }
+
+  /** Switch the open HTML tab to its Preview mode. */
+  async showHtmlPreview(): Promise<void> {
+    await test.step("Switch the HTML tab to Preview", async () => {
+      await this.page.getByTestId("center-file-leaf__view--preview").click();
+      await expect(this.externalHtmlFrameElement).toBeVisible();
+    });
+  }
+
+  /** The first bytes of a Blob URL's content, as text. */
+  async blobPrefix(url: string, length: number): Promise<string> {
+    return this.page.evaluate(
+      async ({ url, length }) => (await (await fetch(url)).text()).slice(0, length),
+      { url, length },
+    );
   }
 
   /** The `<img>` of an image preview tab, named by its file name. */
@@ -272,6 +332,20 @@ export class FileViewerPage {
    *  frontmatter, mermaid). */
   previewRenderedBlock(kind: "table" | "frontmatter" | "mermaid"): Locator {
     return this.markdownPreview.getByTestId(`markdown-preview__block--${kind}`);
+  }
+
+  /** Brightness (0 black to 255 white) of a message label in the preview's
+   *  rendered mermaid sequence diagram. Light on a dark diagram, dark on a
+   *  light one. */
+  async previewMermaidTextBrightness(): Promise<number> {
+    const label = this.previewRenderedBlock("mermaid").locator("svg .messageText").first();
+    await expect(label).toBeVisible({ timeout: 20_000 });
+    return await label.evaluate((el) => {
+      const [r, g, b] = getComputedStyle(el)
+        .fill.match(/\d+(\.\d+)?/g)
+        ?.map(Number) ?? [0, 0, 0];
+      return (r + g + b) / 3;
+    });
   }
 
   /** The `<table>` inside the preview's rendered table block. */

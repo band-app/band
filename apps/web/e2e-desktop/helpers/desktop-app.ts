@@ -11,6 +11,7 @@ import {
 import { assertProfileIsolated, isUnderOsTmp } from "./profile-guard";
 
 const DESKTOP_DIR = join(import.meta.dirname, "../../../desktop");
+const FAKE_LAUNCHCTL = join(import.meta.dirname, "..", "fixtures", "fake-launchctl.mjs");
 
 /** The Electron binary installed for apps/desktop. */
 function electronBinary(): string {
@@ -48,6 +49,11 @@ export interface LaunchedDesktop {
    * `pick_folder` IPC resolves with `paths` instead of waiting for a person.
    */
   stubOpenDialog: (paths: string[]) => Promise<void>;
+  /**
+   * Hand the app a file the way macOS does for Finder's Open With: the `open-file` event on the
+   * app object. The Finder menu entry itself is a LaunchServices UI that cannot be automated.
+   */
+  emitOpenFile: (path: string) => Promise<void>;
   /** How many windows the app has open. */
   windowCount: () => number;
   /**
@@ -72,7 +78,10 @@ export interface LaunchedDesktop {
  *   singleton lives in userData, so a test instance cannot hand off to or quit the real one.
  * - Protocol handler and login items: the app never calls `setAsDefaultProtocolClient` or
  *   `setLoginItemSettings`; `app://` and `band-action://` are registered per process only.
- * - Keychain: `BAND_DESKTOP_SECRET_STORE=test` (fixed-key store).
+ * - Keychain: `BAND_DESKTOP_SECRET_STORE=test` (fixed-key store) for the app's own secrets, and
+ *   Chromium's `--use-mock-keychain` for its cookie key ("Band Key"). Without the switch, Chromium
+ *   asks the Keychain under the temp HOME, which has no keychain, and macOS opens a "Keychain Not
+ *   Found" dialog in the middle of the screen on every launch.
  * - launchd: specs point `BAND_LAUNCHCTL_BIN` at a fake.
  * - Chrome import: reads `homedir()`, which follows `$HOME` (the temp home), never the real Chrome.
  * - `~/.band`, `desktop.log`, `desktop-hub.enc`, window state: Node's `homedir()`, so under the temp home.
@@ -102,6 +111,11 @@ export async function launchDesktop(opts: {
    * cover the page when a spec that is not about the prompt connects to that remote hub.
    */
   answeredWorkerPrompt?: string[];
+  /**
+   * Paths handed to the app with the `open-file` event right after it starts, before its window
+   * has loaded the UI: a cold start from Finder.
+   */
+  openFilesBeforeUi?: string[];
 }): Promise<LaunchedDesktop> {
   if (!isUnderOsTmp(opts.home)) {
     throw new Error(
@@ -136,13 +150,19 @@ export async function launchDesktop(opts: {
   const app = await electron.launch({
     executablePath: packaged ?? electronBinary(),
     // A packaged app has its own entry point; the dev tree needs the directory.
-    args: packaged ? [] : [DESKTOP_DIR],
+    // `--use-mock-keychain` keeps Chromium's cookie encryption key off the Keychain (see the
+    // isolation notes above).
+    args: [...(packaged ? [] : [DESKTOP_DIR]), "--use-mock-keychain"],
     // The Keychain needs an unlocked login session, which a test run does not have, so the
     // app stores its secrets with a fixed-key stand-in for `safeStorage` (`secret-store.ts`).
     env: {
       ...env,
       HOME: opts.home,
       BAND_DESKTOP_SECRET_STORE: "test",
+      // The local hub runs as a launchd agent. No spec may reach the real launchd, so the fake is
+      // the default; a spec that inspects the agents passes the same variables itself.
+      BAND_LAUNCHCTL_BIN: FAKE_LAUNCHCTL,
+      BAND_FAKE_LAUNCHD_DIR: join(opts.home, "fake-launchd"),
       ...extraEnv,
       BAND_DESKTOP_USER_DATA_DIR: userDataDir,
     },
@@ -161,6 +181,12 @@ export async function launchDesktop(opts: {
     app.process().kill("SIGKILL");
     throw err;
   }
+
+  const emit = (path: string) =>
+    app.evaluate(({ app: electronApp }, filePath) => {
+      electronApp.emit("open-file", { preventDefault() {} }, filePath);
+    }, path);
+  for (const path of opts.openFilesBeforeUi ?? []) await emit(path);
 
   // Attached before any page loads, so a violation during the first paint is seen.
   const cspViolations: string[] = [];
@@ -190,6 +216,7 @@ export async function launchDesktop(opts: {
         dialog.showOpenDialog = (async () => ({ canceled: false, filePaths })) as never;
       }, paths);
     },
+    emitOpenFile: emit,
     windowCount: () => app.windows().length,
     closeDevTools: async () => {
       // The app opens them on `ready-to-show`, which may come after the window is found.

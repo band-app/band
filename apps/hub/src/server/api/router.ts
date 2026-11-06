@@ -44,7 +44,7 @@
 import { accountUsageRouter } from "./account-usage/router";
 import { agentLoginsRouter } from "./agent-logins/router";
 import { agentSessionsRouter } from "./agent-sessions/router";
-import { browserHostRouter, hostRouter } from "./browser-host/router";
+import { browserHostRouter } from "./browser-host/router";
 import { browserProfilesRouter } from "./browser-profiles/router";
 import { browsersRouter } from "./browsers/router";
 import { chatRouter } from "./chat/router";
@@ -54,6 +54,7 @@ import { cliRouter } from "./cli/router";
 import { clientStateRouter } from "./client-state/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
+import { editorsRouter } from "./editors/router";
 import { environmentRouter } from "./environment/router";
 import { extensionsRouter } from "./extensions/router";
 import { followRouter } from "./follow/router";
@@ -72,11 +73,11 @@ import { provisioningRouter } from "./provisioning/router";
 import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
 import { reposRouter } from "./repos/router";
+import { resourcesRouter } from "./resources/router";
 import { reviewsRouter } from "./reviews/router";
 import { runnersRouter } from "./runners/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
-import { simulatorsRouter } from "./simulators/router";
 import { statusesRouter, statusRouter } from "./statuses/router";
 import { subscriptionsRouter } from "./subscriptions/router";
 import { systemRouter } from "./system/router";
@@ -110,8 +111,8 @@ export const appRouter = t.router({
   ...terminalsRouters,
   cli: cliRouter,
   accountUsage: accountUsageRouter,
+  resources: resourcesRouter,
   hooks: hooksRouter,
-  host: hostRouter,
   workers: hostsRouter,
   // Old name, kept for desktop, mobile and CLI builds that still call it.
   hosts: hostsRouter,
@@ -125,6 +126,7 @@ export const appRouter = t.router({
   provisioning: provisioningRouter,
   agentLogins: agentLoginsRouter,
   voice: voiceRouter,
+  editors: editorsRouter,
   extensions: extensionsRouter,
   mcp: mcpServersRouter,
   browserHost: browserHostRouter,
@@ -139,7 +141,6 @@ export const appRouter = t.router({
   queue: queueRouter,
   reports: reportsRouter,
   plugins: pluginsRouter,
-  simulators: simulatorsRouter,
   reviews: reviewsRouter,
   // `system` is the new home for the legacy `servicesRouter`. The wire
   // surface is preserved by mounting it under the original `services`

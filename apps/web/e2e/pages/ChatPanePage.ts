@@ -647,6 +647,28 @@ export class ChatPanePage {
     });
   }
 
+  /** Brings the chat tab to the front, after another tab of its group (an editor) was opened. */
+  async showChat(): Promise<void> {
+    await test.step("Show the chat tab", async () => {
+      await this.page
+        .getByTestId(/^center-chat-tab--/)
+        .first()
+        .click();
+      await expect(this.promptInput).toBeVisible();
+    });
+  }
+
+  /** The chip for what the person selected in an editor tab. */
+  get selectionChip(): Locator {
+    return this.page.getByTestId("chat__selection-chip").filter({ visible: true });
+  }
+
+  async removeSelectionChip(): Promise<void> {
+    await test.step("Remove the selection chip", async () => {
+      await this.page.getByTestId("chat__selection-chip-remove").filter({ visible: true }).click();
+    });
+  }
+
   /** Type into the prompt textarea. Doesn't submit. */
   async typeMessage(text: string): Promise<void> {
     await test.step(`Type "${text}" into the prompt`, async () => {
@@ -671,6 +693,35 @@ export class ChatPanePage {
     return box?.height ?? 0;
   }
 
+  /** Bounding boxes of the composer's input-row controls (null when absent). */
+  async composerRow(): Promise<{
+    attach: Box | null;
+    textarea: Box | null;
+    submit: Box | null;
+    mic: Box | null;
+  }> {
+    const box = async (l: Locator) => ((await l.count()) ? await l.first().boundingBox() : null);
+    const v = (id: string) => this.page.getByTestId(id).filter({ visible: true });
+    return {
+      attach: await box(this.page.getByLabel("Attach files").filter({ visible: true })),
+      textarea: await box(this.promptInput),
+      submit: await box(v("prompt-input__submit-button")),
+      mic: await box(v("prompt-input__mic")),
+    };
+  }
+
+  /** Computed `color` of the Send button next to the foreground token's resolved color. */
+  async sendColors(): Promise<{ icon: string; foreground: string }> {
+    return this.submitButton.evaluate((el) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--foreground)";
+      document.body.appendChild(probe);
+      const foreground = getComputedStyle(probe).color;
+      probe.remove();
+      return { icon: getComputedStyle(el).color, foreground };
+    });
+  }
+
   /** Width of the dictation error line, in CSS px. */
   async micErrorWidth(): Promise<number> {
     return (await this.micError.boundingBox())?.width ?? 0;
@@ -681,6 +732,45 @@ export class ChatPanePage {
     await test.step("Tap the mic", async () => {
       await this.mic.click();
     });
+  }
+
+  /** Presses the dictation shortcut (⌘⇧Space, Ctrl+Shift+Space off macOS). */
+  async pressDictateShortcut(): Promise<void> {
+    await test.step("Press the dictation shortcut", async () => {
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await this.page.keyboard.press(`${modifier}+Shift+Space`);
+    });
+  }
+
+  /** Presses Escape with whatever holds focus. */
+  async pressEscape(): Promise<void> {
+    await test.step("Press Escape", async () => {
+      await this.page.keyboard.press("Escape");
+    });
+  }
+
+  /** Puts focus on the conversation area of the nth visible chat pane, outside its textarea. */
+  async focusConversation(index = 0): Promise<void> {
+    await test.step(`Focus the conversation of chat pane ${index}`, async () => {
+      await this.root.nth(index).evaluate((el: HTMLElement) => el.focus());
+    });
+  }
+
+  /** Puts focus in the composer of the nth visible chat pane. */
+  async focusComposerIn(index: number): Promise<void> {
+    await test.step(`Focus the composer of chat pane ${index}`, async () => {
+      await this.root.nth(index).getByTestId("chat__composer").focus();
+    });
+  }
+
+  /** The "Listening" state inside the nth visible chat pane. */
+  listeningIn(index: number): Locator {
+    return this.root.nth(index).getByTestId("prompt-input__mic-listening");
+  }
+
+  /** The mic button inside the nth visible chat pane. */
+  micIn(index: number): Locator {
+    return this.root.nth(index).getByTestId("prompt-input__mic");
   }
 
   /** Cancels the recording in progress. */
@@ -774,6 +864,108 @@ export class ChatPanePage {
     });
   }
 
+  /** The "Drop to attach" overlay over the chat pane while files are dragged over it. */
+  get dropOverlay(): Locator {
+    return this.page.getByTestId("chat-pane__drop-overlay").filter({ visible: true });
+  }
+
+  /** The composer's notice line (a dictation error or a refused drop). */
+  get composerNotice(): Locator {
+    return this.micError;
+  }
+
+  /** The composer's attachment chips. */
+  get attachments(): Locator {
+    return this.page.getByTestId("prompt-input__attachment").filter({ visible: true });
+  }
+
+  /**
+   * Start dragging files. The files come from a throwaway `<input type=file>` filled through
+   * `setInputFiles`, so they are real `File` objects (disk-backed when given as paths).
+   * `text` starts a text drag instead. A real Finder drag cannot be automated, so this is the
+   * test boundary: the drag events are dispatched on the page, the files are real.
+   */
+  async startDrag(
+    source:
+      | { files: (string | { name: string; mimeType: string; buffer: Buffer })[] }
+      | { text: string },
+  ): Promise<void> {
+    await test.step("Start a drag", async () => {
+      if ("text" in source) {
+        await this.page.evaluate((text) => {
+          const dt = new DataTransfer();
+          dt.setData("text/plain", text);
+          (window as unknown as { __testDrag: DataTransfer }).__testDrag = dt;
+        }, source.text);
+        return;
+      }
+      await this.page.evaluate(() => {
+        for (const old of document.querySelectorAll('[data-testid="test-drag-source"]'))
+          old.remove();
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.setAttribute("data-testid", "test-drag-source");
+        input.style.display = "none";
+        document.body.append(input);
+      });
+      const input = this.page.getByTestId("test-drag-source");
+      await input.setInputFiles(source.files);
+      await this.page.evaluate(() => {
+        const input = document.querySelector<HTMLInputElement>('[data-testid="test-drag-source"]');
+        const dt = new DataTransfer();
+        for (const file of Array.from(input?.files ?? [])) dt.items.add(file);
+        (window as unknown as { __testDrag: DataTransfer }).__testDrag = dt;
+      });
+    });
+  }
+
+  /** Dispatch a drag event of the started drag on the chat pane's message list, or on `target`. */
+  async dragEvent(
+    type: "dragenter" | "dragover" | "dragleave" | "drop",
+    target: "messages" | "composer" | "outside" = "messages",
+  ): Promise<void> {
+    await this.page.evaluate(
+      ({ type, target }) => {
+        const dt = (window as unknown as { __testDrag?: DataTransfer }).__testDrag;
+        const pane = Array.from(document.querySelectorAll('[data-testid="chat-pane"]')).find(
+          (el) => (el as HTMLElement).offsetParent !== null,
+        );
+        let el: Element | null | undefined = pane;
+        if (target === "composer") el = pane?.querySelector('[data-testid="chat-pane__composer"]');
+        if (target === "messages") el = pane?.querySelector('[role="log"]') ?? pane;
+        if (target === "outside") el = document.body;
+        el?.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt,
+            relatedTarget: type === "dragleave" && target !== "outside" ? document.body : null,
+          }),
+        );
+      },
+      { type, target },
+    );
+  }
+
+  /** Drop the started drag on the chat pane (a dragover first, as the browser sends one). */
+  async dropOnChat(target: "messages" | "composer" = "messages"): Promise<void> {
+    await test.step("Drop files on the chat", async () => {
+      await this.dragEvent("dragover", target);
+      await this.dragEvent("drop", target);
+    });
+  }
+
+  /** Drop the started drag outside the chat, on the page body. Returns whether the default was prevented. */
+  async dropOutsideChat(): Promise<boolean> {
+    return this.page.evaluate(() => {
+      const dt = (window as unknown as { __testDrag?: DataTransfer }).__testDrag;
+      const event = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt });
+      document.body.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+  }
+
   /** Open the full-screen preview of the first image in a message. */
   async openImagePreview(message: Locator): Promise<void> {
     await test.step("Open the image preview", async () => {
@@ -833,6 +1025,17 @@ export class ChatPanePage {
    *  text. Same role-scoping rationale as `userMessage`. */
   assistantMessage(text: string): Locator {
     return this.page.getByTestId("chat-pane__assistant-message").filter({ hasText: text });
+  }
+
+  /** KaTeX formulas rendered inside the assistant message carrying `text`. */
+  assistantFormulas(text: string): Locator {
+    return this.assistantMessage(text).locator(".katex");
+  }
+
+  /** Text a user can see in the assistant message carrying `text`: KaTeX's
+   *  hidden MathML copy is excluded, so a formula counts once. */
+  async assistantVisibleText(text: string): Promise<string> {
+    return await this.assistantMessage(text).evaluate((el) => (el as HTMLElement).innerText);
   }
 
   /** One failure card's parts. */
@@ -1684,6 +1887,19 @@ export class ChatPanePage {
           }
         ).__flickerSamples ?? [],
     );
+  }
+
+  /** Brightness (0 black to 255 white) of a message label in a rendered
+   *  mermaid sequence diagram in the chat. */
+  async mermaidTextBrightness(): Promise<number> {
+    const label = this.page.locator("svg .messageText").first();
+    await expect(label).toBeVisible({ timeout: 30_000 });
+    return await label.evaluate((el) => {
+      const [r, g, b] = getComputedStyle(el)
+        .fill.match(/\d+(\.\d+)?/g)
+        ?.map(Number) ?? [0, 0, 0];
+      return (r + g + b) / 3;
+    });
   }
 }
 

@@ -14,13 +14,22 @@ paths:
   - "apps/web/e2e-desktop/**"
   - "apps/web/public/manifest.webmanifest"
   - "apps/web/src/lib/hub-config.ts"
+  - "**/global-setup.ts"
+  - "**/global-teardown.ts"
+  - "**/web-server.ts"
+  - "apps/desktop/src/main/services/hub-service.ts"
+  - "apps/desktop/tests/hub-service.test.ts"
+  - "apps/desktop/src/main/services/hub-choice.ts"
+  - "apps/desktop/src/main/services/ui-paths.ts"
+  - "apps/web/e2e-desktop/desktop-hub-service.spec.ts"
+  - "apps/web/e2e-desktop/helpers/desktop-app.ts"
 ---
 
 # Architecture: desktop hub picker
 
 The desktop window loads the bundled UI from `app://<host>/` (`apps/desktop/src/main/app-protocol.ts`, a standard, secure, `supportFetchAPI` scheme; a path with no extension and no file gets `_shell.html`, so reloads and deep links keep their route). The UI build comes from `resources/web/dist/client` when packaged and `apps/web/dist/client` in a repo build (`services/ui-paths.ts`); with no build the window falls back to loading the hub's own URL. With `BAND_DEV_WEB_URL` set in an unpackaged run, local mode still loads the dev server.
 
-- The hub is `local` (default: Electron spawns `apps/hub`) or `remote` (a URL and token, nothing spawned). The choice lives in `~/.band/desktop-hub.json` (mode 0600, `services/hub-choice.ts`). A remote `http:` URL is accepted only for loopback, because the secure `app://` page can't make plain `http:`/`ws:` requests to other hosts.
+- Local mode runs the hub as the launchd user agent `app.band.hub` (`apps/desktop/src/main/services/hub-service.ts`, `HubService`): the app executable with `ELECTRON_RUN_AS_NODE=1` on `dist/start-server.mjs` of the bundle (the repo build in dev), `KeepAlive`, `RunAtLoad`, `AbandonProcessGroup`, output in `~/.band/server.log`, no secret in the plist (the hub reads its port and token from `settings.json`). Quitting the app leaves it running. `ensureRunning` installs or reloads it (a changed plist other than `PATH`), and the first start after an app version change (`desktop-hub-service.json`) runs `launchctl kickstart -k`, waits for health, and only then does `restartAfterUpdate` restart the worker service. A remote switch keeps the service unless `hub_set_choice` carries `stopLocal`, which boots it out and deletes the plist. `launchDesktop` defaults `BAND_LAUNCHCTL_BIN` to the fake, so no spec reaches the real launchd. Tests: `apps/desktop/tests/hub-service.test.ts`, `apps/web/e2e-desktop/desktop-hub-service.spec.ts`. A non-macOS platform still spawns the hub as a child (`web-server.ts`). The hub is `local` (default) or `remote` (a URL and token, nothing spawned). The choice lives in `~/.band/desktop-hub.json` (mode 0600, `services/hub-choice.ts`). A remote `http:` URL is accepted only for loopback, because the secure `app://` page can't make plain `http:`/`ws:` requests to other hosts.
 - Each hub has its own host, so its own origin and localStorage (drafts, tabs, last worktree): `app://local` for the bundled hub, `app://h-<12 hex of sha256(hub origin)>` for a remote one. The handler serves only the host the window is loaded under.
 - Every `app://` response carries a CSP (`buildCsp`): `connect-src` is `'self'` plus the current hub's http and ws origins, `frame-src` and `media-src` allow the hub, `object-src 'none'`. Inline scripts are allowed because the SPA shell has inline bootstrap scripts. A new origin the UI must reach (another API host) needs adding there.
 - The main window can't leave its `app://` host: `will-navigate` and `will-redirect` open web links in the browser and drop everything else, and `window.open` never creates a window (`navigation-guard.ts`). A hub switch loads programmatically, so it is unaffected.

@@ -11,7 +11,7 @@
  * or newer for Maestro.
  */
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { expectMerge, expectNoMerge, expectRerun, finishBuild, startGhStub } from "./checks.mjs";
@@ -22,6 +22,7 @@ import {
   addSubscription,
   chatSubscriptions,
   clearGroups,
+  editorSelection,
   fillWorktrees,
   findWorktree,
   makePlainRepo,
@@ -213,6 +214,8 @@ function checkTabs({ tabs, chats }, params) {
  * to the report (with `&max-gap=<ms>`, it fails when a frame log's longest gap is above it).
  * /groups-seed puts the alpha worktrees in the group Work and beta-main in Home, and /groups-clear
  * removes the groups again.
+ * /expect-selection?wt=<id>&value=<address>[&present=0] fails unless the hub's editor selection for the worktree has that address (or none).
+ * /expect-file?repo=<r>&name=<w>&path=<p>&value=<text>[&present=0] fails unless the worktree's file holds (or lacks) the text.
  * /explorer-change?name=<file> writes an untracked file into the delta repo's root, as an agent would.
  * /checks-finish-build completes the running job of widgets-feat-checks, and
  * /expect-rerun?run=<id>&failed=1|job=<id> fails unless the fake `gh` got that `gh run rerun`.
@@ -436,6 +439,26 @@ function startControlServer(hub, chats, udid, notes) {
         await makeWorktree(hub, url.searchParams.get("repo") ?? "alpha", url.searchParams.get("branch") ?? "", url.searchParams.get("dirty") === "1");
       } else if (url.pathname === "/make-plain") {
         await makePlainRepo(hub, url.searchParams.get("name") ?? "plain");
+      } else if (url.pathname === "/expect-selection") {
+        // The hub holds an editor selection for the worktree whose address is `value` (`present=0`: none).
+        const found = await editorSelection(hub, wt);
+        const want = url.searchParams.get("value") ?? "";
+        notes.push(`${wt}: editors.selection ${found ? JSON.stringify(found.selection) : "is null"}`);
+        if (url.searchParams.get("present") === "0") {
+          if (found) throw new Error(`${wt} still holds a selection`);
+        } else if (found?.selection?.address !== want) {
+          throw new Error(`${wt} selection is ${JSON.stringify(found)}, not ${want}`);
+        }
+      } else if (url.pathname === "/expect-file") {
+        // The file `path` in worktree `repo`/`name` holds `value` (`present=0`: it does not), read from disk.
+        const found = await findWorktree(hub, url.searchParams.get("repo") ?? "", url.searchParams.get("name") ?? "");
+        if (!found) throw new Error("no such worktree");
+        const file = join(found.path, url.searchParams.get("path") ?? "");
+        const want = url.searchParams.get("value") ?? "";
+        const has = existsSync(file) && readFileSync(file, "utf8").includes(want);
+        const expected = url.searchParams.get("present") !== "0";
+        notes.push(`${url.searchParams.get("path")}: ${has ? "holds" : "does not hold"} ${JSON.stringify(want)}`);
+        if (has !== expected) throw new Error(`${file} ${has ? "holds" : "does not hold"} ${JSON.stringify(want)}`);
       } else if (url.pathname === "/expect-worktree") {
         // present=1 fails unless repos.list holds the worktree, present=0 fails if it does;
         // file=<name> also fails unless that file is still in the worktree's folder.

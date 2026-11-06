@@ -6144,6 +6144,37 @@ fn open_falls_back_to_active_worktree() {
 }
 
 #[test]
+fn open_uses_the_terminals_worktree_over_the_dashboards_active_one() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/mine"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let worktree_path = stdout(&create_out);
+    fs::write(Path::new(&worktree_path).join("README.md"), "# Hi\n").unwrap();
+
+    // The dashboard has another worktree focused.
+    set_active_worktree(&env.band_dir, Some("my-repo-main"));
+
+    // A Band terminal in `feat/mine` sets BAND_WORKTREE_ID, so `band open` follows it.
+    let readme = Path::new(&worktree_path).join("README.md");
+    let output = env.band_with_env(
+        &["--output", "json", "open", readme.to_str().unwrap()],
+        &[("BAND_WORKTREE_ID", "my-repo-feat-mine")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(
+        json["worktreeId"].as_str(),
+        Some("my-repo-feat-mine"),
+        "json: {json}",
+    );
+}
+
+#[test]
 fn open_without_active_worktree_errors_clearly() {
     let env = TestEnv::new();
     // Explicitly clear any leftover active-worktree state from previous
@@ -6167,6 +6198,58 @@ fn open_without_active_worktree_errors_clearly() {
     assert!(
         err.contains("No active worktree"),
         "expected 'No active worktree' in stderr, got: {err}",
+    );
+}
+
+#[test]
+fn open_file_outside_the_worktree_opens_as_external() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/external"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    // A file in a scratch folder that is neither a worktree nor a root.
+    let outside = tempfile::tempdir().unwrap();
+    let file_path = outside.path().join("settings.json");
+    fs::write(&file_path, "{}\n").unwrap();
+
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        file_path.to_str().unwrap(),
+        "--worktree",
+        "my-repo-feat-external",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["external"].as_bool(), Some(true), "json: {json}");
+}
+
+#[test]
+fn open_directory_says_not_a_regular_file() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["worktrees", "create", "my-repo", "feat/dir"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let outside = tempfile::tempdir().unwrap();
+    let output = env.band(&[
+        "open",
+        outside.path().to_str().unwrap(),
+        "--worktree",
+        "my-repo-feat-dir",
+    ]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(
+        err.contains("Not a regular file"),
+        "expected 'Not a regular file' in stderr, got: {err}",
     );
 }
 
@@ -6425,8 +6508,8 @@ fn open_directory_is_rejected() {
     );
     let err = stderr(&output);
     assert!(
-        err.contains("Not a file") || err.contains("not a file"),
-        "expected 'not a file' error, got: {err}",
+        err.contains("Not a regular file") || err.contains("Not a file"),
+        "expected a 'not a regular file' error, got: {err}",
     );
 }
 
@@ -6855,4 +6938,72 @@ fn workers_check_updates_prints_the_latest_release_and_when_it_was_checked() {
     let json = json_of(&env.band(&["workers", "check-updates", "--output", "json"]));
     assert_eq!(json["latest"], "9.9.9");
     assert_eq!(json["updateAvailable"], true);
+}
+
+fn mock_trpc_reply(data: serde_json::Value) -> String {
+    let body = serde_json::json!({"result": {"data": data}}).to_string();
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+#[test]
+fn extensions_catalog_lists_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(mock_trpc_reply(serde_json::json!({
+        "available": true,
+        "entries": [
+            {"id": "alpha", "name": "Alpha", "version": "2.0.0", "minBand": "0.0.1",
+             "installed": "1.0.0", "updateAvailable": true, "compatible": true},
+            {"id": "beta", "name": "Beta", "version": "1.0.0", "minBand": "99.0.0",
+             "installed": null, "updateAvailable": false, "compatible": false}
+        ]
+    })));
+
+    let out = band_against_mock(&tmp, &mock, &["extensions", "catalog"]);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = stdout(&out);
+    assert_eq!(
+        mock.captured_path().unwrap().split('?').next().unwrap(),
+        "/trpc/extensions.catalog"
+    );
+    assert!(text.contains("update from 1.0.0"), "text: {text}");
+    assert!(text.contains("needs Band 99.0.0"), "text: {text}");
+}
+
+#[test]
+fn extensions_install_official_calls_the_catalog_procedure() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(mock_trpc_reply(serde_json::json!({
+        "id": "alpha", "version": "2.0.0"
+    })));
+
+    let out = band_against_mock(
+        &tmp,
+        &mock,
+        &["extensions", "install", "--official", "alpha"],
+    );
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(
+        mock.captured_path().unwrap(),
+        "/trpc/extensions.installOfficial"
+    );
+    assert!(
+        stdout(&out).contains("Installed extension alpha 2.0.0"),
+        "text: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn extensions_install_needs_a_source_or_official() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(String::new());
+
+    let out = band_against_mock(&tmp, &mock, &["extensions", "install"]);
+
+    assert!(!out.status.success());
 }

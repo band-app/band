@@ -37,6 +37,19 @@ function onPath(bin: string, pathVar: string | undefined): boolean {
   return false;
 }
 
+/** Why this worker fails the manifest's `requires` (worker facts, then binaries on the PATH), or null. */
+export function checkRequires(requires: string[], pathVar: string | undefined): string | null {
+  const { facts, binaries } = parseRequires(requires);
+  const have: Record<string, string> = { os: process.platform, arch: process.arch };
+  for (const [key, want] of Object.entries(facts)) {
+    if (have[key] !== want) return `needs ${key}=${want}, this worker has ${have[key] ?? "none"}`;
+  }
+  for (const bin of binaries) {
+    if (!onPath(bin, pathVar)) return `${bin} is not on the PATH`;
+  }
+  return null;
+}
+
 /**
  * The worker halves of the bundled plugins. A plugin runs here when the manifest's `requires`
  * hold (worker facts and binaries on the `PATH`) and its own `unavailable()` says nothing against
@@ -72,16 +85,7 @@ export class WorkerPlugins {
   }
 
   private async load(requires: string[], plugin: WorkerPlugin, stateDir: string): Promise<void> {
-    const { facts, binaries } = parseRequires(requires);
-    const have: Record<string, string> = { os: process.platform, arch: process.arch };
-    let reason: string | null = null;
-    for (const [key, want] of Object.entries(facts)) {
-      if (have[key] !== want)
-        reason = `needs ${key}=${want}, this worker has ${have[key] ?? "none"}`;
-    }
-    for (const bin of binaries) {
-      if (reason === null && !onPath(bin, process.env.PATH)) reason = `${bin} is not on the PATH`;
-    }
+    let reason: string | null = checkRequires(requires, process.env.PATH);
     const instance =
       reason === null
         ? plugin.create({
@@ -125,6 +129,11 @@ export class WorkerPlugins {
     } catch (err) {
       this.log.warn({ message: String(err) }, "could not save the worker plugin scopes");
     }
+  }
+
+  /** Whether a bundled plugin has this id, running here or not. */
+  has(pluginId: string): boolean {
+    return this.running.has(pluginId) || this.reasons.has(pluginId);
   }
 
   /** The plugin ids this worker can run. */
@@ -221,10 +230,36 @@ export class WorkerPlugins {
   }
 }
 
+/**
+ * Routes a call or a stream to a bundled plugin or an extension's service by id. A bundled plugin
+ * with the same id wins over an extension's service until it is removed. The hub's link methods
+ * and the direct listener both use it. Null when the worker runs no plugin host.
+ */
+export function pluginRouter(ctx: WorkerContext): {
+  call: WorkerPlugins["call"];
+  stream: WorkerPlugins["stream"];
+} | null {
+  const bundled = ctx.plugins;
+  const extensions = ctx.extensions;
+  if (!bundled) return null;
+  return {
+    call: (id: string, ...rest: [string, unknown, string, string]) =>
+      !bundled.has(id) && extensions?.has(id)
+        ? extensions.call(id, ...rest)
+        : bundled.call(id, ...rest),
+    stream: (id: string, ...rest: [string, unknown, string, string]) =>
+      !bundled.has(id) && extensions?.has(id)
+        ? extensions.stream(id, ...rest)
+        : bundled.stream(id, ...rest),
+  };
+}
+
 /** Serves `plugin.call` and ties the plugins to the lease. */
 export function registerPluginMethods(r: Registrar, ctx: WorkerContext): () => Promise<void> {
-  const plugins = ctx.plugins;
-  if (!plugins) return async () => {};
+  const bundled = ctx.plugins;
+  const extensions = ctx.extensions;
+  const plugins = pluginRouter(ctx);
+  if (!bundled || !plugins) return async () => {};
   r.json(METHOD_PLUGIN_CALL, async (a) => {
     const worktreePath = await ctx.policy.resolve(str(a, "worktreePath"), true);
     ctx.lease.assertMayRun(worktreePath);
@@ -275,6 +310,15 @@ export function registerPluginMethods(r: Registrar, ctx: WorkerContext): () => P
     );
     return { chan: ch.id };
   });
-  ctx.lease.onFence(() => plugins.releaseAll("fenced"));
-  return () => plugins.stop();
+  ctx.lease.onRenewed(() => {
+    void extensions?.resume();
+  });
+  ctx.lease.onFence(async () => {
+    await bundled.releaseAll("fenced");
+    await extensions?.fence();
+  });
+  return async () => {
+    await bundled.stop();
+    await extensions?.stop();
+  };
 }

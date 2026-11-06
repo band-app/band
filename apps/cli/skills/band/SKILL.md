@@ -60,7 +60,7 @@ A repo is identified by its remote URL and default branch. The hub keeps no path
 
 - `<path>` registers a git repository on the hub's machine and reads its `origin` URL and default branch. Returns the repo name.
 - `--url` registers a repo by its remote URL. A worker clones it to `~/band/repos/<owner>/<name>` the first time a worktree for it lands there. Without `--branch` the hub asks the remote for its default branch.
-- `--from <worker> <path>` registers the repo that a folder on a worker holds (worker ids are in `band workers list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token.
+- `--from <worker> <path>` registers the repo that a folder on a worker holds (worker ids are in `band workers list`). The worker keeps that folder as its mapping for the URL, so it does not clone the repo again. A folder outside the worker's roots is refused with a message starting `OUTSIDE_ROOTS:`. Repeat the command with `--add-root` to serve that folder from the worker. This needs an admin token. An agent can use `--add-root` only when its own worker has admin trust and `<worker>` is that worker; otherwise it is refused.
 
 A folder with no remote is registered without a URL and can only run on the worker that holds it.
 
@@ -202,14 +202,6 @@ band groups remove <group id|name>
 ```
 
 Groups are the sections of the sidebar. `list` shows each group's id, name and color in sidebar order. `create` prints the new group's id. `remove` deletes the group and leaves its worktrees ungrouped. An agent on a worker may list groups but cannot create, rename or remove them.
-
-### Open a worktree's iOS simulator
-
-```sh
-band simulators open [worktree id]
-```
-
-Boots the worktree's iOS simulator and opens its Simulator tab for every connected Band client, view-only until a person takes control. The worktree's worker must be a Mac with Xcode. An agent on a worker gets 403: an agent drives the simulator with the `simulator_*` tools (`simulator_describe`, `simulator_tap`, `simulator_type`, `simulator_button`, `simulator_screenshot`, `simulator_open_url`, `simulator_install`, `simulator_launch`).
 
 ### Remove a worktree (git worktree + state cleanup)
 
@@ -394,11 +386,15 @@ band tokens revoke <id>
 ```sh
 band extensions list
 band extensions reload
+band extensions catalog
 band extensions install <url | file.tar.gz> [--sha256 <hex>]
+band extensions install --official <id>
 band extensions remove <id>
 ```
 
-An extension is a folder in `<BAND_HOME>/extensions/<id>/` on the hub with a `band-extension.json`. It adds an editor for some files (for example spreadsheets) that opens in a center tab. `list` shows each extension and its editors, and an `error:` line for a folder that failed to load, with the reason. `reload` rereads the folder after you copy an extension in and needs an admin token. `install` takes a release archive (a `.tar.gz` with one folder named by the extension id) from an https URL or a local file, and checks its sha256 when given or when `<url>.sha256` exists. `remove` deletes an extension. These commands need an admin token. Run `reload`, `install` and `remove` only when the user asks.
+An extension is a folder in `<BAND_HOME>/extensions/<id>/` on the hub with a `band-extension.json`. It adds an editor for some files (for example spreadsheets) that opens in a center tab. `list` shows each extension and its editors, and an `error:` line for a folder that failed to load, with the reason. `reload` rereads the folder after you copy an extension in and needs an admin token. `install` takes a release archive (a `.tar.gz` with one folder named by the extension id) from an https URL or a local file, and checks its sha256 when given or when `<url>.sha256` exists. `catalog` lists the official extensions with their status (installed, update, needs a newer Band). `install --official <id>` installs or updates one from the catalog, checked against the catalog's sha256. `remove` deletes an extension. These commands need an admin token. Run `reload`, `install` and `remove` only when the user asks.
+
+The `band` MCP server also gives a chat access to the editor tabs open in its own worktree: `band_editor_list`, `band_editor_open { file }`, `band_editor_selection` (what the user selected), and each editor's own tools as `<extension id>_<tool>` with a `file` argument. Edits stay unsaved in the tab and the user saves. When the user says "this" or "the selection", call `band_editor_selection` first.
 
 ### Proxy an MCP server through the hub
 
@@ -466,22 +462,21 @@ band cronjobs trigger <key> <id>
 band open <file_path> [--worktree <string>] [--no-focus]
 ```
 
-Opens the file in the dashboard's currently focused worktree. When `--worktree` is omitted, the server uses the worktree most recently focused in the Band dashboard — exits non-zero if no worktree is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / "Open File…"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.
+Opens the file in a worktree. When `--worktree` is omitted, a Band terminal or agent opens it in its own worktree (`$BAND_WORKTREE_ID`); anywhere else the server uses the worktree most recently focused in the Band dashboard, and the command exits non-zero if none is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / "Open File…"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.
 
 Example:
 ```sh
-# Open the file in whichever worktree the dashboard is currently focused on
+# Open the file in this terminal's worktree ($BAND_WORKTREE_ID), else the focused one
 band open src/main.rs
 
 # Jump to line 42, column 5
 band open src/main.rs:42:5
 
-# Override the active-worktree fallback
+# Override the worktree ($BAND_WORKTREE_ID or the focused one)
 band open src/main.rs --worktree my-app/feat/auth
 
-# An out-of-worktree file opens as an external tab (worktree-relative
-# routing is bypassed; the FileViewer reads via the server's
-# readExternalFile capability).
+# An out-of-worktree file opens as an editable external tab, read and
+# saved on the machine the worktree runs on.
 band open ~/Downloads/v3.js
 ```
 
@@ -536,31 +531,32 @@ band worktrees list --output json | jq '.worktrees[] | select(.repo == "my-app")
 
 ### Open a file in the dashboard
 
-`band open <file>` routes a file to whichever worktree is currently
-focused in the Band dashboard (the most recently active one). Use it
+`band open <file>` opens a file in the worktree of the Band terminal or
+agent that runs it (`$BAND_WORKTREE_ID`). Outside Band it uses the worktree
+most recently focused in the dashboard. Use it
 from grep / stack-trace output to drop yourself straight into the
 editor without naming the worktree.
 
 ```sh
-# Open the file in whichever worktree the dashboard is currently focused on
+# Open the file in this terminal's worktree ($BAND_WORKTREE_ID), else the focused one
 band open src/main.rs
 
 # Jump to line 42, column 5
 band open src/main.rs:42:5
 
-# Override the active-worktree fallback
+# Override the worktree
 band open src/main.rs --worktree my-app/feat/auth
 
-# Open an arbitrary file from outside any worktree — opens as an
-# external editor tab (the same surface as desktop Cmd+O / "Open File…")
+# Open an arbitrary file from outside any worktree. It opens as an
+# editable external tab, read and saved on the worktree's machine.
 band open ~/Downloads/v3.js
 ```
 
 Files inside the target worktree open as normal editor tabs.
-Files outside any worktree root open as external tabs, hosted in
-the active worktree's editor pane. Errors when no worktree is
-active in the dashboard and no `--worktree` is supplied, or when
-the file doesn't exist on disk.
+Files outside any worktree root open as external tabs in that
+worktree's editor pane. Errors when no worktree can be chosen (no
+`--worktree`, no `$BAND_WORKTREE_ID`, none focused in the dashboard),
+or when the file doesn't exist on disk.
 
 ### Drive a coding agent
 

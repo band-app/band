@@ -12,10 +12,11 @@ import {
   DialogTitle,
 } from "@band-app/ui";
 import { Pin, PinOff } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
 import { usePinnedWorktrees } from "../hooks/use-pinned-worktrees";
 import { useRepos } from "../hooks/use-repos";
+import { isMacPlatform } from "../lib/command-registry";
 import { getRecentWorktreeOrder, recordWorktreeAccess } from "../lib/recent-worktrees";
 import { useDashboardStore } from "../stores/index";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
@@ -37,6 +38,13 @@ interface WorktreeEntry {
   isRoot: boolean;
 }
 
+/** Wheel pixels per highlight step, so trackpad smooth scrolling does not race. */
+const WHEEL_STEP_PX = 50;
+const LINE_HEIGHT_PX = 16;
+
+const valueFor = (e: WorktreeEntry) =>
+  `${e.repoName} ${e.name} ${e.branch} ${e.worktreeId}`.toLowerCase();
+
 interface WorktreePickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -52,6 +60,10 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
   const { isPinned, toggle: togglePinned } = usePinnedWorktrees();
 
   const [query, setQuery] = useState("");
+  // Scroll mode: opened by holding Cmd+Shift (Alt+Shift off macOS) and scrolling. The
+  // highlight follows the wheel and releasing the modifier opens it.
+  const [scrollMode, setScrollMode] = useState(false);
+  const [highlight, setHighlight] = useState<string | undefined>(undefined);
 
   // Read recent order once when the dialog opens
   const [recentOrder, setRecentOrder] = useState<string[]>([]);
@@ -102,6 +114,100 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
     // picker is open — precisely when agents are busiest.
   }, [repos, recentOrder, activeWorktreeId]);
 
+  const openRef = useRef(open);
+  openRef.current = open;
+  const scrollModeRef = useRef(false);
+  const entriesRef = useRef(sortedWorktrees);
+  entriesRef.current = sortedWorktrees;
+  const indexRef = useRef(0);
+  const accRef = useRef(0);
+  const needsInitRef = useRef(false);
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        scrollModeRef.current = false;
+        setScrollMode(false);
+        setHighlight(undefined);
+      }
+      onOpenChange(next);
+    },
+    [onOpenChange],
+  );
+
+  // Once the list is built for a scroll-opened dialog, highlight the previous
+  // worktree (index 1; index 0 is the current one).
+  useEffect(() => {
+    if (!needsInitRef.current || sortedWorktrees.length === 0) return;
+    // The recent order is read in an effect after the dialog opens, so the
+    // list can be rebuilt once more. Keep re-aiming until the wheel steps.
+    indexRef.current = Math.min(1, sortedWorktrees.length - 1);
+    setHighlight(valueFor(sortedWorktrees[indexRef.current]));
+  }, [sortedWorktrees]);
+
+  // The wheel listener runs in the capture phase on window, so it sees the
+  // event before terminals, editors and diff views and can keep them from
+  // scrolling.
+  useEffect(() => {
+    const mac = isMacPlatform();
+    const baseHeld = (e: { metaKey: boolean; altKey: boolean; ctrlKey: boolean }) =>
+      mac ? e.metaKey && !e.ctrlKey : e.altKey && !e.ctrlKey && !e.metaKey;
+    // Opening needs Shift too, so a stray Cmd+scroll never opens the switcher.
+    // Once open in scroll mode, releasing Shift keeps it open.
+    const modHeld = (e: {
+      metaKey: boolean;
+      altKey: boolean;
+      ctrlKey: boolean;
+      shiftKey: boolean;
+    }) => baseHeld(e) && (e.shiftKey || scrollModeRef.current);
+    const commit = () => {
+      if (!scrollModeRef.current || !openRef.current) return;
+      const entry = entriesRef.current[indexRef.current];
+      if (entry) handleSelectRef.current(entry.worktreeId);
+      else handleOpenChange(false);
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (!modHeld(e)) return;
+      if (openRef.current && !scrollModeRef.current) return; // opened with Cmd+K
+      e.preventDefault();
+      e.stopPropagation();
+      if (!openRef.current) {
+        scrollModeRef.current = true;
+        accRef.current = 0;
+        needsInitRef.current = true;
+        setScrollMode(true);
+        onOpenChange(true);
+        return;
+      }
+      const unit = e.deltaMode === 1 ? LINE_HEIGHT_PX : e.deltaMode === 2 ? 400 : 1;
+      // Shift turns a vertical wheel into horizontal deltas on macOS and Chromium.
+      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      accRef.current += delta * unit;
+      const steps = Math.trunc(accRef.current / WHEEL_STEP_PX);
+      if (steps === 0) return;
+      accRef.current -= steps * WHEEL_STEP_PX;
+      const list = entriesRef.current;
+      if (list.length === 0) return;
+      needsInitRef.current = false;
+      indexRef.current = Math.max(0, Math.min(list.length - 1, indexRef.current + steps));
+      setHighlight(valueFor(list[indexRef.current]));
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== (mac ? "Meta" : "Alt")) return;
+      // A lone Alt release focuses the menu bar on Windows and Linux.
+      if (!mac && scrollModeRef.current) e.preventDefault();
+      commit();
+    };
+    window.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", commit);
+    return () => {
+      window.removeEventListener("wheel", onWheel, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", commit);
+    };
+  }, [onOpenChange, handleOpenChange]);
+
   const handleSelect = useCallback(
     (worktreeId: string) => {
       clearNeedsAttention(worktreeId);
@@ -117,13 +223,15 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
       } else {
         openWorktree(worktreeId);
       }
-      onOpenChange(false);
+      handleOpenChange(false);
     },
-    [capabilities, openWorktree, clearNeedsAttention, onOpenChange],
+    [capabilities, openWorktree, clearNeedsAttention, handleOpenChange],
   );
+  const handleSelectRef = useRef(handleSelect);
+  handleSelectRef.current = handleSelect;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         // Mobile: slides up as a bottom drawer with the search input pinned
         // below the list. Desktop: floating card anchored in the upper third,
@@ -147,7 +255,16 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
           <DialogTitle>Switch Worktree</DialogTitle>
           <DialogDescription>Search worktrees by name, repo, or branch</DialogDescription>
         </DialogHeader>
-        <Command shouldFilter={true}>
+        <Command
+          shouldFilter={true}
+          value={scrollMode ? highlight : undefined}
+          onValueChange={(v) => {
+            if (!scrollMode) return;
+            setHighlight(v);
+            const i = entriesRef.current.findIndex((e) => valueFor(e) === v.toLowerCase());
+            if (i >= 0) indexRef.current = i;
+          }}
+        >
           <CommandInput placeholder="Switch worktree..." value={query} onValueChange={setQuery} />
           <CommandList className="max-h-[360px]">
             <CommandEmpty>No worktrees found.</CommandEmpty>
@@ -160,7 +277,7 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
               return (
                 <CommandItem
                   key={entry.worktreeId}
-                  value={`${entry.repoName} ${entry.name} ${entry.branch}`}
+                  value={valueFor(entry)}
                   onSelect={() => handleSelect(entry.worktreeId)}
                   data-testid={`worktree-picker__item--${entry.worktreeId}`}
                   // Coarse pointers (touch) get a 44px-tall row (iOS HIG hit

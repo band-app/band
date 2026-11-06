@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { queueBadgeLabel } from "@band-app/client/merge";
 import { sortRepoWorktrees } from "@band-app/shared/sidebar-tree";
 import { buildGroupRows } from "../../web/src/dashboard/lib/sidebar-grouping.ts";
 import { allCollapsed, setCollapsedMany } from "../src/lib/collapsed-repos.ts";
@@ -378,6 +379,22 @@ describe("badges", () => {
     assert.equal(pullRequestTone(pr("open"), "none"), "neutral");
     assert.equal(pullRequestTone(pr("merged"), "failure"), "merged");
     assert.equal(pullRequestTone(pr("closed"), "success"), "closed");
+  });
+
+  it("shows a PR in the merge queue as queued whatever its CI says (S1)", () => {
+    const queued = {
+      ...pr("open"),
+      mergeQueue: { state: "awaiting_checks" as const, position: 2, enqueuedAt: null },
+    };
+    assert.equal(pullRequestTone(queued, "success"), "queued");
+    assert.equal(pullRequestTone(queued, "failure"), "queued");
+    assert.equal(pullRequestTone({ ...queued, state: "merged" }, "success"), "merged");
+    assert.equal(queueBadgeLabel(queued.mergeQueue), "In merge queue · position 2");
+  });
+
+  it("keeps auto-merge without a queue entry on the CI color (S3)", () => {
+    const armed = { ...pr("open"), autoMerge: { enabledAt: null, method: "squash" } };
+    assert.equal(pullRequestTone(armed, "pending"), "pending");
   });
 
   it("shows no CI icon without checks", () => {

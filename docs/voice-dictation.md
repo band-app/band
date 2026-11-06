@@ -7,6 +7,8 @@ order: 30
 
 The chat composer has a mic button. Tap it, speak, tap it again, and the transcribed text appears at the cursor for you to edit. Band never sends the message for you.
 
+Keyboard: press ⌘⇧Space (Ctrl+Shift+Space on Windows and Linux) with focus anywhere in a chat pane to start recording, and press it again to stop and transcribe. Escape cancels a recording. The shortcut acts on the pane that has focus, does nothing in terminals, file tabs or the browser pane, and does nothing when the mic is hidden. "Dictate" in the command palette (⇧⌘P) does the same for the chat pane you used last.
+
 Band does not run speech models. The hub sends each recording to one OpenAI-compatible speech-to-text endpoint that you set up in Settings > Voice. The endpoint is a cloud service such as OpenAI or Groq, or a server you run yourself, such as mlx-audio on a Mac.
 
 ## How a recording travels
@@ -111,4 +113,4 @@ iPhone Safari. `MediaRecorder` with mp4 works on current iOS Safari. If your iOS
 
 ## Not included
 
-Streaming partial text, OpenAI's Realtime API, voice activity detection with auto-stop, hold-to-talk, global shortcuts, dictation into terminals, text to speech, and per-device endpoints. There is one hub-wide endpoint.
+Streaming partial text, OpenAI's Realtime API, voice activity detection with auto-stop, hold-to-talk, an OS-wide shortcut, dictation into terminals, text to speech, and per-device endpoints. There is one hub-wide endpoint.

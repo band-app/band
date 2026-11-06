@@ -146,6 +146,31 @@ export class UpdatePanelPage {
     });
   }
 
+  hubAutoSwitch(): Locator {
+    return this.panel.getByRole("switch", { name: "Update the hub automatically" });
+  }
+
+  hubLastResult(): Locator {
+    return this.panel.getByTestId("hub-update__last-result");
+  }
+
+  hubBackup(): Locator {
+    return this.panel.getByTestId("hub-update__backup");
+  }
+
+  hubLog(): Locator {
+    return this.panel.getByTestId("hub-update__log");
+  }
+
+  async setHubAuto(on: boolean): Promise<void> {
+    await test.step(`Turn the automatic hub update ${on ? "on" : "off"}`, async () => {
+      await expect(this.hubAutoSwitch()).toBeEnabled();
+      if ((await this.hubAutoSwitch().isChecked()) !== on) await this.hubAutoSwitch().click();
+      if (on) await expect(this.hubAutoSwitch()).toBeChecked();
+      else await expect(this.hubAutoSwitch()).not.toBeChecked();
+    });
+  }
+
   async clickUpdateHub(): Promise<void> {
     await this.hubUpdateButton().click();
   }

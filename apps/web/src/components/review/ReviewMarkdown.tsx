@@ -1,7 +1,11 @@
 import { cn } from "@band-app/ui";
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from "react";
 import { Streamdown } from "streamdown";
-import { streamdownComponents, streamdownPlugins } from "../streamdown-components";
+import {
+  streamdownComponents,
+  streamdownPlugins,
+  useStreamdownMermaid,
+} from "../streamdown-components";
 
 const SharedLink = streamdownComponents.a;
 
@@ -30,13 +34,16 @@ const reviewComponents = { ...streamdownComponents, a: SafeLink, img: AltOnlyIma
 
 /** Markdown for the review panel. Streamdown sanitises the tree, links are limited to http(s) and images are not loaded. */
 export function ReviewMarkdown({ children, className }: { children: string; className?: string }) {
+  const mermaid = useStreamdownMermaid();
   return (
     <Streamdown
+      key={mermaid.config.theme}
       className={cn(
         "break-words text-[13px] leading-relaxed [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className,
       )}
       plugins={streamdownPlugins}
+      mermaid={mermaid}
       components={reviewComponents}
     >
       {children}

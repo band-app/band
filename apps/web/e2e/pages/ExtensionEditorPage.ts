@@ -36,6 +36,10 @@ export class ExtensionEditorPage {
     return this.frame(path).getByTestId("status");
   }
 
+  get builtinViewer(): Locator {
+    return this.page.getByTestId("file-viewer__root");
+  }
+
   /** What the fixture editor could read from inside the sandbox, as JSON. */
   probe(path: string): Locator {
     return this.frame(path).getByTestId("probe");
@@ -74,10 +78,42 @@ export class ExtensionEditorPage {
     });
   }
 
+  /** Brings the file's tab to the front. */
+  async showTab(path: string): Promise<void> {
+    await test.step(`Show the tab of ${path}`, async () => {
+      await this.worktree.fileTab(path).click();
+    });
+  }
+
   async replaceText(path: string, text: string): Promise<void> {
     await test.step(`Type into ${path}`, async () => {
       await this.textarea(path).fill(text);
     });
+  }
+
+  /** Selects characters `start` to `end` of the document and tells the editor, as a mouse drag does. */
+  async selectText(path: string, start: number, end: number): Promise<void> {
+    await test.step(`Select characters ${start}-${end} in ${path}`, async () => {
+      await this.textarea(path).evaluate(
+        (el, range) => {
+          const area = el as HTMLTextAreaElement;
+          area.focus();
+          area.setSelectionRange(range.start, range.end);
+          area.dispatchEvent(new Event("select", { bubbles: true }));
+        },
+        { start, end },
+      );
+    });
+  }
+
+  /** The layout the editor was last told: `compact`, `regular`, or `none` before it hears one. */
+  layout(path: string): Locator {
+    return this.frame(path).getByTestId("layout");
+  }
+
+  /** The Save button of the compact layout. */
+  saveButton(path: string): Locator {
+    return this.editor(path).getByTestId("extension-editor__save");
   }
 
   async save(path: string): Promise<void> {

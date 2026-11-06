@@ -27,6 +27,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { keepServerOutput } from "./failure-artifacts";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./server-runtime";
 import { stopTerminalDaemon } from "./terminal-daemon";
 import {
@@ -333,6 +334,7 @@ async function startHubServer(opts: StartServerOptions): Promise<ServerHandle> {
             // can still be writing into the tmp home.
             if (child.pid !== undefined) await waitForProcessGroupExit(child.pid);
             if (!closeOpts?.keepTerminalDaemon) await stopTerminalDaemon(tmpHome);
+            keepServerOutput(allOutput);
           },
         });
       }

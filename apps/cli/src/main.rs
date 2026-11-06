@@ -73,11 +73,6 @@ enum Commands {
         #[command(subcommand)]
         cmd: GroupsCmd,
     },
-    /// Open a worktree's iOS simulator as a tab in the Band UI (Mac workers with Xcode)
-    Simulators {
-        #[command(subcommand)]
-        cmd: SimulatorsCmd,
-    },
     /// List the workers worktrees can run on
     #[command(name = "workers", alias = "hosts")]
     Workers {
@@ -128,8 +123,8 @@ enum Commands {
         /// Path to the file (absolute, or relative to cwd). Optionally
         /// suffixed with `:line` / `:line:col` / `:line-lineEnd`.
         file_path: String,
-        /// Worktree ID (overrides the dashboard's active worktree)
-        #[arg(long)]
+        /// Worktree ID (defaults to `$BAND_WORKTREE_ID`, then the dashboard's active worktree)
+        #[arg(long, env = "BAND_WORKTREE_ID")]
         worktree: Option<String>,
         /// Don't raise the dashboard window to the foreground after opening
         #[arg(long = "no-focus")]
@@ -762,15 +757,6 @@ enum SubscriptionsCmd {
 }
 
 #[derive(Subcommand)]
-enum SimulatorsCmd {
-    /// Boot the worktree's simulator and open its Simulator tab for every connected client
-    Open {
-        /// Worktree ID (defaults to the worktree of the current directory)
-        worktree: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
 enum GroupsCmd {
     /// List groups in sidebar order
     List,
@@ -957,11 +943,17 @@ enum ExtensionsCmd {
     /// Install an extension from a release archive (admin token)
     Install {
         /// An https URL (or http on loopback) or a local `.tar.gz` file, which is uploaded to the hub
-        source: String,
+        #[arg(required_unless_present = "official", conflicts_with = "official")]
+        source: Option<String>,
         /// Expected sha256 of the archive. Without it the hub checks `<url>.sha256` when that exists.
         #[arg(long)]
         sha256: Option<String>,
+        /// Install or update an extension from the official catalog (see `band extensions catalog`)
+        #[arg(long, value_name = "ID")]
+        official: Option<String>,
     },
+    /// List the official extensions in the catalog
+    Catalog,
     /// Delete an installed extension (admin token)
     Remove {
         /// Extension id (from `band extensions list`)
@@ -1367,9 +1359,6 @@ fn main() {
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
         },
         Commands::Env { .. } => unreachable!("handled before the match"),
-        Commands::Simulators { cmd } => match cmd {
-            SimulatorsCmd::Open { worktree } => cmd_simulators_open(worktree.as_deref()),
-        },
         Commands::Groups { cmd } => match cmd {
             GroupsCmd::List => cmd_groups_list(),
             GroupsCmd::Create { name, color } => cmd_groups_create(&name, color.as_deref()),
@@ -1457,9 +1446,16 @@ fn main() {
         Commands::Extensions { cmd } => match cmd {
             ExtensionsCmd::List => cmd_extensions("extensions.list", false),
             ExtensionsCmd::Reload => cmd_extensions("extensions.reload", true),
-            ExtensionsCmd::Install { source, sha256 } => {
-                cmd_extensions_install(&source, sha256.as_deref())
-            }
+            ExtensionsCmd::Install {
+                source,
+                sha256,
+                official,
+            } => match (official, source) {
+                (Some(id), _) => cmd_extensions_install_official(&id),
+                (None, Some(source)) => cmd_extensions_install(&source, sha256.as_deref()),
+                (None, None) => Err("Give a URL or file, or --official <id>".to_string()),
+            },
+            ExtensionsCmd::Catalog => cmd_extensions_catalog(),
             ExtensionsCmd::Remove { id } => cmd_extensions_remove(&id),
         },
         Commands::Settings => cmd_settings(json_output),
@@ -4566,25 +4562,6 @@ fn cmd_groups_rename(group: &str, new_name: &str) -> Result<CommandResult, Strin
     })
 }
 
-fn cmd_simulators_open(worktree: Option<&str>) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let id = resolve_worktree_id(&client, worktree)?;
-    validate::validate_name(&id, "Worktree id")?;
-    let data = client.trpc_mutate("simulators.open", &serde_json::json!({"worktreeId": id}))?;
-    let name = data
-        .pointer("/device/name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("simulator");
-    let state = data
-        .pointer("/device/state")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    Ok(CommandResult {
-        text: format!("Opened the Simulator tab of {id} ({name}, {state})\n"),
-        json: data,
-    })
-}
-
 fn cmd_groups_remove(group: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let id = resolve_group_id(&client, group)?;
@@ -5314,6 +5291,66 @@ fn cmd_extensions_install(source: &str, sha256: Option<&str>) -> Result<CommandR
     Ok(CommandResult {
         text: format!("Installed extension {} {}\n", text("id"), text("version")),
         json: serde_json::json!({"extension": data}),
+    })
+}
+
+fn cmd_extensions_install_official(id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("extensions.installOfficial", &serde_json::json!({"id": id}))?;
+    let text = |key: &str| data.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    Ok(CommandResult {
+        text: format!("Installed extension {} {}\n", text("id"), text("version")),
+        json: serde_json::json!({"extension": data}),
+    })
+}
+
+fn cmd_extensions_catalog() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("extensions.catalog", &serde_json::json!({}))?;
+    let entries = data
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<[String; 4]> = entries
+        .iter()
+        .map(|entry| {
+            let text = |key: &str| entry.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let compatible = entry
+                .get("compatible")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            let update = entry
+                .get("updateAvailable")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let status = if !compatible {
+                format!("needs Band {}", text("minBand"))
+            } else if update {
+                format!("update from {}", text("installed"))
+            } else if entry
+                .get("installed")
+                .is_some_and(serde_json::Value::is_string)
+            {
+                "installed".to_string()
+            } else {
+                "not installed".to_string()
+            };
+            [
+                text("id").to_string(),
+                text("name").to_string(),
+                text("version").to_string(),
+                status,
+            ]
+        })
+        .collect();
+    let mut out = format_table(&["ID", "NAME", "VERSION", "STATUS"], &rows);
+    if data.get("available").and_then(serde_json::Value::as_bool) == Some(false) {
+        out.push_str("Catalog unavailable\n");
+    }
+    Ok(CommandResult {
+        text: out,
+        json: data,
     })
 }
 
@@ -6053,14 +6090,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Changes only what the sidebar shows. The worktree id, folder and git branch stay the same. Agents may use this command for worktrees on their own worker."
         }),
         serde_json::json!({
-            "name": "simulators open",
-            "description": "Boot the worktree's iOS simulator and open its Simulator tab in the Band UI",
-            "parameters": [
-                {"name": "worktree", "type": "string", "required": false, "positional": true, "description": "Worktree ID (defaults to the worktree of the current directory)"},
-            ],
-            "notes": "The worktree's worker must be a Mac with Xcode. The tab opens on every connected client. Not available to an agent on a worker: an agent uses the simulator_* tools."
-        }),
-        serde_json::json!({
             "name": "groups list",
             "description": "List groups in sidebar order",
             "parameters": [],
@@ -6379,10 +6408,17 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "extensions install",
             "description": "Install an editor extension from a release archive (.tar.gz with one folder named by the extension id)",
             "parameters": [
-                {"name": "source", "type": "string", "required": true, "positional": true, "description": "An https URL (or http on loopback) or a local .tar.gz file, which is uploaded to the hub"},
-                {"name": "sha256", "type": "string", "required": false, "description": "Expected sha256 of the archive. Without it the hub checks <url>.sha256 when that file exists."}
+                {"name": "source", "type": "string", "required": false, "positional": true, "description": "An https URL (or http on loopback) or a local .tar.gz file, which is uploaded to the hub"},
+                {"name": "sha256", "type": "string", "required": false, "description": "Expected sha256 of the archive. Without it the hub checks <url>.sha256 when that file exists."},
+                {"name": "official", "type": "string", "required": false, "description": "Install or update an extension from the official catalog by id"}
             ],
             "notes": "Needs an admin token. The old version stays until the new one passes every check. Prints `Installed extension <id> <version>`."
+        }),
+        serde_json::json!({
+            "name": "extensions catalog",
+            "description": "List the official extensions in the catalog with their install status",
+            "parameters": [],
+            "notes": "Text output: `ID  NAME  VERSION  STATUS`, and `Catalog unavailable` when the hub could not read the catalog.\nJSON output: `{\"available\": true, \"entries\": [{\"id\": \"...\", \"version\": \"...\", \"installed\": null, \"updateAvailable\": false, \"compatible\": true}]}`."
         }),
         serde_json::json!({
             "name": "extensions remove",
@@ -6661,10 +6697,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Open a file in the active Band worktree's editor pane",
             "parameters": [
                 {"name": "file_path", "type": "string", "required": true, "positional": true, "description": "Path to the file (absolute, or relative to cwd). Optionally suffixed with ':line', ':line:col', or ':line-lineEnd'."},
-                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID (overrides the dashboard's active worktree)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID (defaults to $BAND_WORKTREE_ID, then the dashboard's active worktree)"},
                 {"name": "--no-focus", "type": "boolean", "required": false, "description": "Don't raise the dashboard window to the foreground after opening"},
             ],
-            "notes": "Opens the file in the dashboard's currently focused worktree. When `--worktree` is omitted, the server uses the worktree most recently focused in the Band dashboard — exits non-zero if no worktree is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever worktree the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the active-worktree fallback\nband open src/main.rs --worktree my-app/feat/auth\n\n# An out-of-worktree file opens as an external tab (worktree-relative\n# routing is bypassed; the FileViewer reads via the server's\n# readExternalFile capability).\nband open ~/Downloads/v3.js\n```"
+            "notes": "Opens the file in a worktree. When `--worktree` is omitted, a Band terminal or agent opens it in its own worktree (`$BAND_WORKTREE_ID`); anywhere else the server uses the worktree most recently focused in the Band dashboard, and the command exits non-zero if none is active. Relative paths are resolved against the current working directory. Paths inside the worktree open as normal editor tabs; paths outside any worktree root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever worktree the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the worktree ($BAND_WORKTREE_ID or the focused one)\nband open src/main.rs --worktree my-app/feat/auth\n\n# An out-of-worktree file opens as an editable external tab, read and\n# saved on the machine the worktree runs on.\nband open ~/Downloads/v3.js\n```"
         }),
         serde_json::json!({
             "name": "notify",

@@ -3,6 +3,11 @@ import { cn } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Mic, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  DICTATE_SHORTCUT,
+  formatShortcut,
+  isMacPlatform,
+} from "../../dashboard/lib/command-registry";
 import { trpc } from "../../lib/trpc-client";
 import { transcribeClip } from "../../lib/voice-api";
 import {
@@ -14,6 +19,17 @@ import {
 import { usePromptInputContext } from "./prompt-input";
 
 export const VOICE_STATUS_KEY = ["voice.status"] as const;
+
+/** Event the command palette's "Dictate" entry dispatches. */
+export const DICTATE_EVENT = "band:dictate";
+
+/** The chat pane that last held focus, so the palette can target it after taking focus itself. */
+let lastFocusedPane: Element | null = null;
+
+function isDictateShortcut(e: KeyboardEvent): boolean {
+  const mod = isMacPlatform() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  return mod && e.shiftKey && !e.altKey && e.code === "Space";
+}
 
 type Phase = "idle" | "starting" | "recording" | "transcribing";
 
@@ -28,7 +44,7 @@ function formatElapsed(seconds: number): string {
  * the message. Hidden until the hub has voice set up and this browser can record.
  */
 export function PromptInputMic({ className }: { className?: string }) {
-  const { textareaRef, setNotice } = usePromptInputContext();
+  const { textareaRef, setNotice, setMicRecording } = usePromptInputContext();
   const status = useQuery({
     queryKey: VOICE_STATUS_KEY,
     queryFn: () => trpc.voice.status.query(),
@@ -123,22 +139,78 @@ export function PromptInputMic({ className }: { className?: string }) {
     };
   }, [setNotice]);
 
-  if (!status.data?.available || !voiceRecordingSupported()) return null;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const available = Boolean(status.data?.available) && voiceRecordingSupported();
+  // Latest handlers for the window listeners below, which are bound once per availability.
+  const actionsRef = useRef({ phase, start, stop, cancel });
+  actionsRef.current = { phase, start, stop, cancel };
+
+  // Cmd+Shift+Space toggles dictation and Escape cancels it, for the chat pane that holds focus.
+  // Terminals and the browser pane sit outside the chat pane, so they never match.
+  useEffect(() => {
+    if (!available) return;
+    const pane = () => buttonRef.current?.closest("[data-chat-pane]") ?? null;
+    const toggle = () => {
+      const { phase: p, start: s, stop: st } = actionsRef.current;
+      if (p === "recording") void st();
+      else if (p === "idle") void s();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      const el = pane();
+      if (!el || !(e.target instanceof Node) || !el.contains(e.target)) return;
+      if (isDictateShortcut(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) toggle();
+      } else if (e.key === "Escape" && actionsRef.current.phase === "recording") {
+        e.preventDefault();
+        e.stopPropagation();
+        actionsRef.current.cancel();
+      }
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      const el = pane();
+      if (el && e.target instanceof Node && el.contains(e.target)) lastFocusedPane = el;
+    };
+    const onDictate = () => {
+      const el = pane();
+      if (el && el === lastFocusedPane) toggle();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("focusin", onFocusIn);
+    window.addEventListener(DICTATE_EVENT, onDictate);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("focusin", onFocusIn);
+      window.removeEventListener(DICTATE_EVENT, onDictate);
+    };
+  }, [available]);
+
+  const isRecording = phase === "recording";
+  useEffect(() => {
+    setMicRecording(isRecording);
+    return () => setMicRecording(false);
+  }, [isRecording, setMicRecording]);
+
+  if (!available) return null;
 
   const recording = phase === "recording";
   const busy = phase === "starting" || phase === "transcribing";
   return (
-    <div className="flex min-w-0 items-center gap-0.5">
+    <div className="relative flex min-w-0 items-center gap-0.5">
       <button
         type="button"
+        ref={buttonRef}
         data-testid="prompt-input__mic"
+        title={`${recording ? "Stop and transcribe" : "Dictate"} (${formatShortcut(DICTATE_SHORTCUT)})`}
+        aria-keyshortcuts={isMacPlatform() ? "Meta+Shift+Space" : "Control+Shift+Space"}
         data-phase={phase}
         aria-label={recording ? "Stop and transcribe" : "Dictate"}
         aria-pressed={recording}
         disabled={busy}
         onClick={() => (recording ? void stop() : void start())}
         className={cn(
-          "inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60",
+          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60",
           recording && "bg-destructive/10 text-destructive hover:bg-destructive/20",
           className,
         )}
@@ -154,7 +226,7 @@ export function PromptInputMic({ className }: { className?: string }) {
       {recording ? (
         <div
           data-testid="prompt-input__mic-listening"
-          className="flex items-center gap-1.5 pl-1 text-xs text-muted-foreground"
+          className="absolute right-full top-1/2 mr-1 flex -translate-y-1/2 items-center gap-1.5 whitespace-nowrap rounded-md bg-muted px-1.5 py-1 text-xs text-muted-foreground"
         >
           <span className="size-2 animate-pulse rounded-full bg-destructive" aria-hidden="true" />
           <span>Listening</span>

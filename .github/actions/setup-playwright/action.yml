@@ -25,11 +25,33 @@ runs:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ inputs.browsers }}
 
-    # `--with-deps` still installs the apt packages on a cache hit. WebKit runs
+    # The .deb files of the system packages are cached too, because the
+    # runner's mirror can be slow. The key follows the package list Playwright
+    # prints, so a Playwright bump never installs stale packages.
+    - name: Resolve apt package list
+      id: apt
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+      run: '"$GITHUB_WORKSPACE/scripts/ci/install-playwright.sh" --plan "$BROWSERS" >> "$GITHUB_OUTPUT"'
+
+    - name: Restore apt packages cache
+      id: cache-apt
+      if: runner.os == 'Linux'
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ runner.temp }}/playwright-apt-debs
+        key: playwright-apt-${{ runner.os }}-${{ runner.arch }}-${{ steps.apt.outputs.apt-packages-hash }}
+
+    # The system packages are installed on a cache hit too. WebKit runs
     # the iPhone-profile specs (`e2e/mobile-document-scroll.spec.ts`).
     - name: Install Playwright browsers
       shell: bash
-      run: pnpm --filter @band-app/web exec playwright install --with-deps ${{ inputs.browsers }}
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+        APT_DEB_CACHE_DIR: ${{ runner.temp }}/playwright-apt-debs
+      run: '"$GITHUB_WORKSPACE/scripts/ci/install-playwright.sh" "$BROWSERS"'
 
     # Same trust gate as the cache saves in ci.yml.
     - name: Save Playwright browsers cache
@@ -43,3 +65,18 @@ runs:
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ inputs.browsers }}
+
+    # Saved even when the install failed, so the next run starts with what this
+    # one downloaded. Same trust gate as the saves above.
+    - name: Save apt packages cache
+      if: |
+        !cancelled() && runner.os == 'Linux' &&
+        steps.cache-apt.outputs.cache-hit != 'true' &&
+        ((github.event_name != 'pull_request' &&
+          github.event_name != 'pull_request_target') ||
+         github.event.pull_request.head.repo.full_name == github.repository)
+      continue-on-error: true
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ runner.temp }}/playwright-apt-debs
+        key: playwright-apt-${{ runner.os }}-${{ runner.arch }}-${{ steps.apt.outputs.apt-packages-hash }}

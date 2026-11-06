@@ -20,6 +20,8 @@ import type {
   HostBrowser,
   HostDesktop,
   HostDirect,
+  HostExtensions,
+  HostExternalFiles,
   HostFs,
   HostGit,
   HostInfo,
@@ -28,6 +30,7 @@ import type {
   HostPlugins,
   HostRelay,
   HostRepos,
+  HostResources,
   HostScripts,
   HostSearch,
   HostSpeech,
@@ -51,6 +54,8 @@ import {
   encodeMessageFrame,
   type LinkSession,
   METHOD_DIRECT_REGISTER,
+  METHOD_EXTENSIONS_STATUS,
+  METHOD_EXTENSIONS_SYNC,
   METHOD_PLUGIN_CALL,
   METHOD_PLUGIN_STREAM,
   METHOD_RELAY_REGISTER,
@@ -194,6 +199,13 @@ export class RemoteHost implements Host {
     addRoot: (path) => this.rpc.call("repos.addRoot", { path }),
     list: () => this.rpc.call("repos.list", {}),
   };
+  readonly external: HostExternalFiles = {
+    stat: (path) => this.rpc.call("fs.external.stat", { path }),
+    readFile: (path) => this.rpc.callBytes("fs.external.readFile", { path }),
+    readStream: (path, range) =>
+      this.streamOf("fs.external.readStream", { path, start: range?.start, end: range?.end }),
+    writeFile: (path, data) => this.writeFile(path, data, undefined, "fs.external.writeFile"),
+  };
   readonly fs: HostFs = {
     stat: (path, options): Promise<FsStat> =>
       this.rpc.call("fs.stat", { path, followSymlinks: options?.followSymlinks }),
@@ -240,6 +252,11 @@ export class RemoteHost implements Host {
       const reply = await this.rpc.request<{ chan: number }>("desktop.open", {});
       return duplexOf(this.rpc.channel(reply.chan));
     },
+  };
+
+  readonly resources: HostResources = {
+    snapshot: () => this.rpc.call("resources.snapshot", {}),
+    storage: (request) => this.rpc.call("resources.storage", request),
   };
 
   readonly speech: HostSpeech = {
@@ -316,7 +333,7 @@ export class RemoteHost implements Host {
   // The worker keeps the browser. `browser.connect` opens one channel of length-prefixed CDP
   // messages, and resetting it drops the connection but not the browser.
   readonly browser: HostBrowser = {
-    open: (spec) => this.rpc.call("browser.open", spec, { timeoutMs: 60_000 }),
+    open: (spec) => this.rpc.call("browser.open", spec, { timeoutMs: 150_000 }),
     connect: async (worktreeId) => {
       const reply = await this.rpc.request<{ chan: number }>("browser.connect", { worktreeId });
       const ch = this.rpc.channel(reply.chan);
@@ -375,6 +392,11 @@ export class RemoteHost implements Host {
     },
   };
 
+  readonly extensions: HostExtensions = {
+    sync: (items) => this.rpc.call(METHOD_EXTENSIONS_SYNC, { items }, { timeoutMs: 180_000 }),
+    status: () => this.rpc.call(METHOD_EXTENSIONS_STATUS),
+  };
+
   readonly plugins: HostPlugins = {
     call: (pluginId, method, params, scope) => {
       const call: PluginCallParams = { pluginId, method, params, ...scope };
@@ -420,20 +442,21 @@ export class RemoteHost implements Host {
     path: string,
     data: string | Uint8Array,
     options?: { exclusive?: boolean; mode?: number },
+    method = "fs.writeFile",
   ): Promise<void> {
     const bytes = typeof data === "string" ? Buffer.from(data) : data;
     const base = { path, exclusive: options?.exclusive, mode: options?.mode };
     if (bytes.byteLength <= INLINE_WRITE_BYTES) {
       const inline =
         typeof data === "string" ? data : { base64: Buffer.from(bytes).toString("base64") };
-      await this.rpc.call("fs.writeFile", { ...base, data: inline });
+      await this.rpc.call(method, { ...base, data: inline });
       return;
     }
     // The worker reads the channel to its end, which needs this side to keep
     // sending while the request is open.
     const ch = this.rpc.session().openChannel("fs.write", { path });
     ch.discardIncoming();
-    const done = this.rpc.call("fs.writeFile", { ...base, data: { chan: ch.id } });
+    const done = this.rpc.call(method, { ...base, data: { chan: ch.id } });
     // A call that fails first (a denied path) must not leave an unhandled rejection behind the send.
     done.catch(() => undefined);
     try {

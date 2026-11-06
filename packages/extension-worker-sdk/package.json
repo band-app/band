@@ -1,0 +1,27 @@
+{
+  "name": "@band-app/extension-worker-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The author's side of an extension's worker service: defineWorkerService over the stdio protocol the Band worker speaks.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.mts",
+      "default": "./src/index.mjs"
+    },
+    "./protocol": {
+      "types": "./src/protocol.d.mts",
+      "default": "./src/protocol.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "typescript": "^5.7.0"
+  }
+}

@@ -4,9 +4,9 @@ import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 
 import { dirname, join, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { type ExtensionManifest, extensionManifestSchema } from "@band-app/plugin-api";
+import { readTarGz, TarError } from "@band-app/shared/tar-extract";
 import { mimeTypeFromFilename } from "@band-app/worktree-ops/http-files";
 import { bandHome } from "../infra/db/queries/settings";
-import { readTarGz, TarError } from "./_utils/tar-extract";
 
 const log = createLogger("extensions");
 
@@ -22,9 +22,34 @@ export interface ExtensionProblem {
   error: string;
 }
 
+/** The `.tar.gz` an extension was installed from, kept so workers can download it. */
+export interface ExtensionArchive {
+  id: string;
+  version: string;
+  sha256: string;
+  size: number;
+}
+
+/** How an extension got here, recorded in `<extensions>/.installs/<id>.json` at install. */
+export interface InstallRecord {
+  source: "official" | "url" | "file";
+  sha256: string;
+  version: string;
+}
+
 export interface ExtensionList {
   extensions: ExtensionManifest[];
   errors: ExtensionProblem[];
+  /** Install records by extension id. A folder copied in by hand has none. */
+  installs: Record<string, InstallRecord>;
+}
+
+/** One tool of an editor, as its `tools.json` lists it. */
+export interface EditorToolDef {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
 }
 
 export interface ExtensionFile {
@@ -53,6 +78,75 @@ const ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 export class ExtensionService {
   private loaded: ExtensionList | null = null;
   private loading: Promise<ExtensionList> | null = null;
+  /** Counts scans started. Only the newest scan may replace `loaded`. */
+  private scanSeq = 0;
+  private readonly listeners: Array<() => void> = [];
+
+  /** Calls `fn` after an extension was installed, updated or removed. */
+  onChange(fn: () => void): void {
+    this.listeners.push(fn);
+  }
+
+  private changed(): void {
+    for (const fn of this.listeners) {
+      try {
+        fn();
+      } catch (err) {
+        log.warn(`extension change listener: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  }
+
+  private archiveDir(): string {
+    return join(this.root(), ".archives");
+  }
+
+  /** The archive kept for an installed extension, or undefined when there is none. */
+  async archiveOf(id: string): Promise<ExtensionArchive | undefined> {
+    if (!ID_PATTERN.test(id)) return undefined;
+    try {
+      const meta = JSON.parse(await readFile(join(this.archiveDir(), `${id}.json`), "utf8"));
+      if (typeof meta.version === "string" && typeof meta.sha256 === "string") {
+        return { id, version: meta.version, sha256: meta.sha256, size: Number(meta.size) || 0 };
+      }
+    } catch {
+      // none kept
+    }
+    return undefined;
+  }
+
+  /** The kept archive's bytes, when its recorded version is `version`. */
+  async readArchive(
+    id: string,
+    version: string,
+  ): Promise<{ archive: ExtensionArchive; bytes: Buffer } | undefined> {
+    const archive = await this.archiveOf(id);
+    if (!archive || archive.version !== version) return undefined;
+    try {
+      const bytes = await readFile(join(this.archiveDir(), `${id}.tar.gz`));
+      if (createHash("sha256").update(bytes).digest("hex") !== archive.sha256) return undefined;
+      return { archive, bytes };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async keepArchive(id: string, version: string, bytes: Buffer): Promise<void> {
+    const dir = this.archiveDir();
+    await mkdir(dir, { recursive: true });
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const tag = randomBytes(4).toString("hex");
+    await writeFile(join(dir, `${id}.tar.gz.${tag}`), bytes, { mode: 0o600 });
+    await rename(join(dir, `${id}.tar.gz.${tag}`), join(dir, `${id}.tar.gz`));
+    await writeFile(
+      join(dir, `${id}.json.${tag}`),
+      JSON.stringify({ version, sha256, size: bytes.length }),
+      {
+        mode: 0o600,
+      },
+    );
+    await rename(join(dir, `${id}.json.${tag}`), join(dir, `${id}.json`));
+  }
 
   private root(): string {
     return join(bandHome(), "extensions");
@@ -60,11 +154,17 @@ export class ExtensionService {
 
   /** Reads every manifest again. A manifest that fails validation is skipped and listed as an error. */
   async reload(): Promise<ExtensionList> {
+    const seq = ++this.scanSeq;
     const pending = this.scan();
     this.loading = pending;
     try {
-      this.loaded = await pending;
-      return this.loaded;
+      const result = await pending;
+      if (seq === this.scanSeq) {
+        this.loaded = result;
+        return result;
+      }
+      // A newer scan began meanwhile, so this result may predate the change that caused it.
+      return (await this.loading) ?? this.loaded ?? result;
     } finally {
       if (this.loading === pending) this.loading = null;
     }
@@ -79,9 +179,45 @@ export class ExtensionService {
     return (await this.list()).extensions.find((e) => e.id === id);
   }
 
+  /**
+   * The tools an editor declares in its `tools` file (an MCP `tools/list` answer), minus the ones
+   * marked `"agent": false`. A missing or malformed file gives none.
+   */
+  async agentTools(extensionId: string, editorId: string): Promise<EditorToolDef[]> {
+    const manifest = await this.get(extensionId);
+    const editor = manifest?.contributes.fileEditors.find((e) => e.id === editorId);
+    if (!manifest || !editor?.tools) return [];
+    try {
+      const raw = await readFile(join(this.root(), manifest.id, editor.tools), "utf8");
+      const parsed = JSON.parse(raw) as { tools?: unknown };
+      if (!Array.isArray(parsed.tools)) return [];
+      const out: EditorToolDef[] = [];
+      for (const t of parsed.tools) {
+        if (!t || typeof t !== "object") continue;
+        const tool = t as Record<string, unknown>;
+        if (typeof tool.name !== "string" || tool.agent === false) continue;
+        out.push({
+          name: tool.name,
+          description: typeof tool.description === "string" ? tool.description : "",
+          inputSchema:
+            tool.inputSchema && typeof tool.inputSchema === "object"
+              ? (tool.inputSchema as Record<string, unknown>)
+              : { type: "object", properties: {} },
+          ...(tool.annotations && typeof tool.annotations === "object"
+            ? { annotations: tool.annotations as Record<string, unknown> }
+            : {}),
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
   private async scan(): Promise<ExtensionList> {
     const extensions: ExtensionManifest[] = [];
     const errors: ExtensionProblem[] = [];
+    const installs: Record<string, InstallRecord> = {};
     let folders: string[];
     try {
       folders = (await readdir(this.root(), { withFileTypes: true }))
@@ -89,7 +225,7 @@ export class ExtensionService {
         .map((d) => d.name)
         .sort();
     } catch {
-      return { extensions, errors };
+      return { extensions, errors, installs };
     }
     for (const folder of folders) {
       const problem = (error: string) => {
@@ -126,12 +262,41 @@ export class ExtensionService {
         continue;
       }
       extensions.push(manifest);
+      const record = await this.readRecord(manifest.id);
+      if (record) installs[manifest.id] = record;
     }
-    return { extensions, errors };
+    return { extensions, errors, installs };
+  }
+
+  private recordFile(id: string): string {
+    return join(this.root(), ".installs", `${id}.json`);
+  }
+
+  private async readRecord(id: string): Promise<InstallRecord | undefined> {
+    try {
+      const json = JSON.parse(
+        await readFile(this.recordFile(id), "utf8"),
+      ) as Partial<InstallRecord>;
+      if (
+        (json.source === "official" || json.source === "url" || json.source === "file") &&
+        typeof json.sha256 === "string" &&
+        typeof json.version === "string"
+      ) {
+        return { source: json.source, sha256: json.sha256, version: json.version };
+      }
+    } catch {
+      // no record
+    }
+    return undefined;
   }
 
   /** Downloads a release archive, checks its sha256 and installs it. */
-  async install(url: string, sha256?: string): Promise<ExtensionManifest> {
+  async install(
+    url: string,
+    sha256?: string,
+    source: InstallRecord["source"] = "url",
+    expectedId?: string,
+  ): Promise<ExtensionManifest> {
     const parsed = parseInstallUrl(url);
     const archive = await download(parsed);
     let expected = sha256?.trim().toLowerCase();
@@ -140,14 +305,19 @@ export class ExtensionService {
       sibling.pathname += ".sha256";
       expected = await downloadChecksum(sibling);
     }
-    return this.installArchive(archive, expected);
+    return this.installArchive(archive, expected, source, expectedId);
   }
 
   /**
    * Unpacks a `.tar.gz` with one top-level folder named by the extension's id and puts it in
    * `<BAND_HOME>/extensions/<id>`. The old version stays until the new one has passed every check.
    */
-  async installArchive(archive: Buffer, sha256?: string): Promise<ExtensionManifest> {
+  async installArchive(
+    archive: Buffer,
+    sha256?: string,
+    source: InstallRecord["source"] = "file",
+    expectedId?: string,
+  ): Promise<ExtensionManifest> {
     if (archive.length > MAX_INSTALL_BYTES) {
       throw new ExtensionInstallError("The archive is over the 200 MB limit");
     }
@@ -199,6 +369,12 @@ export class ExtensionService {
       );
     }
 
+    if (expectedId !== undefined && parsed.data.id !== expectedId) {
+      throw new ExtensionInstallError(
+        `The archive holds "${parsed.data.id}", not the "${expectedId}" that was requested`,
+      );
+    }
+
     const root = this.root();
     const tag = randomBytes(6).toString("hex");
     const staging = join(root, `.install-${tag}`);
@@ -227,8 +403,22 @@ export class ExtensionService {
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
+    // The archive is what a worker downloads to run the extension's worker services.
+    await this.keepArchive(folder, parsed.data.version, archive).catch((err) => {
+      log.warn(
+        `Could not keep the archive of "${folder}": ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    const record: InstallRecord = {
+      source,
+      sha256: createHash("sha256").update(archive).digest("hex"),
+      version: parsed.data.version,
+    };
+    await mkdir(join(root, ".installs"), { recursive: true });
+    await writeFile(this.recordFile(folder), JSON.stringify(record), { mode: 0o644 });
     log.info(`Installed extension "${folder}" ${parsed.data.version}`);
     await this.reload();
+    this.changed();
     return parsed.data;
   }
 
@@ -243,7 +433,11 @@ export class ExtensionService {
       throw new ExtensionInstallError(`No extension "${id}" is installed`);
     }
     await rm(dir, { recursive: true, force: true });
+    await rm(join(this.archiveDir(), `${id}.tar.gz`), { force: true });
+    await rm(join(this.archiveDir(), `${id}.json`), { force: true });
+    await rm(this.recordFile(id), { force: true });
     await this.reload();
+    this.changed();
   }
 
   /**

@@ -191,11 +191,17 @@ export async function directTerminalTarget(
 export async function directPluginStreamTarget(
   pluginId: string,
   worktreeId: string,
+  stream?: { name: string; params?: unknown },
 ): Promise<DirectSocketTarget | null> {
   const access = await directAccessFor(worktreeId);
   if (!access) return null;
+  const query = new URLSearchParams({ worktreeId });
+  if (stream) {
+    query.set("name", stream.name);
+    if (stream.params !== undefined) query.set("params", JSON.stringify(stream.params));
+  }
   return {
-    url: `ws://127.0.0.1:${access.port}${directPluginStreamPath(pluginId)}?worktreeId=${encodeURIComponent(worktreeId)}`,
+    url: `ws://127.0.0.1:${access.port}${directPluginStreamPath(pluginId)}?${query}`,
     protocols: [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${access.token}`],
   };
 }

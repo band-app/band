@@ -19,6 +19,7 @@ import {
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { chatFetch } from "../lib/direct-chat";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/layout-section-actions";
+import { requestOpenLocalFiles } from "../lib/open-local-files";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { trpc } from "../lib/trpc-client";
 import { WindowDragContext } from "./DesktopTitleBar";
@@ -754,13 +755,9 @@ export function SharedWorktreeLayout() {
       void (async () => {
         const absolutePath = await pickFile();
         if (!absolutePath) return;
-        const loc = parseFileLocation(absolutePath);
-        getWorktreeLeafActions(ws)?.openFile(loc.filePath, {
-          line: loc.line,
-          column: loc.column,
-          external: true,
-          preview: false,
-        });
+        // The picked file is on this Mac: a file inside a worktree on this Mac opens there as a
+        // normal tab, any other opens as an external tab read by the desktop app.
+        requestOpenLocalFiles([absolutePath]);
       })();
     };
     window.addEventListener("band:open-file-external", handler);

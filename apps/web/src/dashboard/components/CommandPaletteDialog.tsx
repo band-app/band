@@ -56,6 +56,14 @@ export function CommandPaletteDialog({ open, onOpenChange, commands }: CommandPa
                   data-testid={`command-palette__item--${cmd.id}`}
                 >
                   <span className="text-sm">{cmd.label}</span>
+                  {cmd.hint && (
+                    <span
+                      className="text-xs text-muted-foreground"
+                      data-testid={`command-palette__hint--${cmd.id}`}
+                    >
+                      {cmd.hint}
+                    </span>
+                  )}
                   {cmd.shortcut && (
                     <CommandShortcut data-testid={`command-palette__shortcut--${cmd.id}`}>
                       {formatShortcut(cmd.shortcut)}

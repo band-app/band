@@ -59,6 +59,8 @@ Shortcuts use ⌘ on macOS. On other systems the same shortcut uses Ctrl, with t
 | --- | --- |
 | ⌘K | Switch worktree |
 | ⌥⌘← and ⌥⌘→ | Previous and next worktree in your history |
+| Mouse back and forward buttons | Previous and next worktree in your history |
+| Hold ⌘⇧ and scroll | Open the worktree switcher and move through recent worktrees; release ⌘ to open the highlighted one. ⌘ and scroll alone does nothing |
 | ⌘B | Show or hide the sidebar |
 | ⌥⌘B | Show or hide the right panel |
 | ⌃0 | Focus the repo list |
@@ -101,6 +103,10 @@ Shortcuts use ⌘ on macOS. On other systems the same shortcut uses Ctrl, with t
 
 Notes for other systems:
 
+- Hold-to-scroll switching uses Alt+Shift (not Ctrl, which zooms) off macOS. Releasing Shift keeps the switcher open; releasing ⌘ (Alt) opens the highlighted worktree. Scrolling steps once per 50 pixels, stops at the ends of the list, and Esc cancels before you release the key. A switcher opened with ⌘K ignores the key release.
+- The mouse back and forward buttons arrive as mouse events (buttons 4 and 5) on macOS, Windows and Linux, so each press steps once. Band does not use Electron's `app-command`, which Windows and Linux also emit. In a plain browser the buttons step worktree history instead of the page's own history. The Alt release does not focus the desktop app's menu bar after a scroll switch.
+- The mouse buttons and the scroll switcher do nothing over a browser pane, because the page inside it receives those events.
+- The desktop app on macOS also treats a swipe as back or forward (swipe right goes back). Electron reports it only when System Settings > Trackpad > "Swipe between pages" includes three fingers. If macOS uses three fingers for full-screen apps, the swipe never reaches Band.
 - Off macOS, ⌥⌘T does not exist. Use Ctrl+Shift+N for a new chat.
 - Split right is Ctrl+Shift+D and split down is Alt+Shift+D, because Ctrl+D ends a shell.
 - Show chat is Ctrl+Alt+I.

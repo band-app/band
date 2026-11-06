@@ -330,7 +330,31 @@ beforeAll(async () => {
           probe("tokens", "/trpc/tokens.list"),
           probe("settings", "/trpc/settings.get"),
           probe("vault-list", "/trpc/vault.list"),
+          post("extensions-install-official", "/trpc/extensions.installOfficial", { id: "demo" }),
+          // The machine's process table and disk use are a person's page.
+          probe("resources-snapshot", "/trpc/resources.snapshot"),
+          probe(
+            "resources-storage",
+            `/trpc/resources.storage?input=${encodeURIComponent(JSON.stringify({ hostId: "local" }))}`,
+          ),
           probe("agent-logins-list", "/trpc/agentLogins.list"),
+          // Editor tabs and the person's selection belong to the windows, not to an agent.
+          probe(
+            "editors-selection",
+            `/trpc/editors.selection?input=${encodeURIComponent(JSON.stringify({ worktreeId: WT_A }))}`,
+          ),
+          post("editors-register", "/trpc/editors.register", {
+            clientId: "fake",
+            worktreeId: WT_A,
+            file: "a.band-test",
+            extensionId: "text-editor",
+            editorId: "text",
+          }),
+          post("editors-result", "/trpc/editors.result", {
+            clientId: "fake",
+            callId: "x",
+            message: {},
+          }),
           // An agent may not switch its own chat's account.
           post("chat-login-pick", "/trpc/chats.update", { chatId: "any-chat", loginId: "al-x" }),
           // A direct-path token would let the agent call the worker's loopback listener.
@@ -338,13 +362,48 @@ beforeAll(async () => {
             worktreeId: WT_A,
             hostId: "h-000000000000",
           }),
+          // A download grant is a bearer URL for a file of the worktree.
+          probe(
+            "download-url",
+            `/trpc/worktree.downloadUrl?input=${encodeURIComponent(JSON.stringify({ worktreeId: WT_A, path: "a.txt" }))}`,
+          ),
           // Updating the hub runs an admin's command on the hub's machine.
           post("hub-update", "/trpc/workers.updateHub", {}),
           post("update-all", "/trpc/workers.updateAll", {}),
           post("check-updates", "/trpc/workers.checkForUpdates", {}),
+          // The automatic update of a worker is an admin's switch.
+          post("set-auto-update", "/trpc/workers.setAutoUpdate", {
+            hostId: "h-000000000000",
+            auto: true,
+          }),
           probe("hub-interruptions", "/trpc/workers.hubInterruptions"),
+          // Events a former owner logged after a chat moved are a person's to view or discard.
+          post("discard-held", "/trpc/follow.discardHeld", { chatId: "any-chat" }),
+          probe(
+            "held-transcript",
+            `/trpc/follow.heldTranscript?input=${encodeURIComponent(JSON.stringify({ chatId: "any-chat" }))}`,
+          ),
           // Unread is a person's reading state; an agent may not set it, even on its own worktree.
           post("set-unread", "/trpc/worktrees.setUnread", { worktreeId: WT_A, unread: true }),
+          // External files are for a person's device token: a relay token reads or writes none.
+          post("read-external", "/trpc/worktree.readExternalFile", {
+            worktreeId: WT_A,
+            absolutePath: "/etc/hosts",
+          }),
+          post("save-external", "/trpc/worktree.saveExternalFile", {
+            worktreeId: WT_A,
+            absolutePath: "/etc/hosts",
+            content: "x",
+          }),
+          post("external-preview-url", "/trpc/worktree.externalPreviewUrl", {
+            worktreeId: WT_A,
+            absolutePath: "/etc/hosts",
+          }),
+          // An agent may open a tab only for a file the worker's path policy allows.
+          post("open-external", "/trpc/editor.openFile", {
+            worktreeId: WT_A,
+            filePath: "/etc/hosts",
+          }),
           post("vault-oauth", "/trpc/vault.startOAuth", {
             name: "x",
             serverUrl: "http://127.0.0.1:1/mcp",
@@ -390,18 +449,27 @@ beforeAll(async () => {
           probe("file-range", "/api/worktree-file/proj-main/hello.txt", {
             headers: { Range: "bytes=0-4" },
           }),
+          // A file outside the worktree, and a folder grant for its HTML, are for a person's token.
+          probe("external-file", `/api/external-file/${WT_A}?path=/etc/hosts`),
+          probe("external-preview", `/api/external-preview/${WT_A}/1.x.y/etc/hosts`),
           // The desktop route (plan step 7.1) is for a person's device token. The relay lists no
           // route for it, so no host id gets an agent through, including the hub's own.
           probe("desktop-local", "/api/hosts/local/desktop"),
           probe("desktop-worker", "/api/hosts/h-0123456789ab/desktop"),
-          // A plugin's live stream (the simulator's screen) is for a person's device token too, and
-          // so are the procedures that open the Simulator tab.
-          probe("plugin-stream", `/api/plugins/simulator/worktrees/${WT_A}/stream`),
-          post("simulators-open", "/trpc/simulators.open", { worktreeId: WT_A }),
+          // A worker service's live stream is for a person's device token too.
+          probe("plugin-stream", `/api/plugins/echo/worktrees/${WT_A}/stream`),
+          // An extension panel's stream and its service calls are for a person's device token as
+          // well: the relay lists neither the route nor the procedure.
           probe(
-            "simulators-status",
-            `/trpc/simulators.status?input=${encodeURIComponent(JSON.stringify({ worktreeId: WT_A }))}`,
+            "extension-panel-stream",
+            `/api/extensions/echo-service/worktrees/${WT_A}/stream?panel=screen&name=screen`,
           ),
+          post("extension-panel-call", "/trpc/extensions.panelCall", {
+            extensionId: "echo-service",
+            panelId: "screen",
+            worktreeId: WT_A,
+            method: "echo",
+          }),
           // Dictation spends the hub's speech-to-text key, so an agent gets neither the audio
           // route nor the voice procedures.
           post("voice-transcribe", "/api/voice/transcribe", {}),
@@ -602,6 +670,12 @@ describe("the worker relay (S2)", () => {
     expect(by("settings")?.status).toBe(403);
     // The vault, and the OAuth flows it starts, are out of agent reach.
     expect(by("vault-list")?.status).toBe(403);
+    expect(by("extensions-install-official")?.status).toBe(403);
+    expect(by("resources-snapshot")?.status).toBe(403);
+    for (const name of ["editors-selection", "editors-register", "editors-result"]) {
+      expect(by(name)?.status, name).toBe(403);
+    }
+    expect(by("resources-storage")?.status).toBe(403);
     expect(by("agent-logins-list")?.status).toBe(403);
     expect(by("chat-login-pick")?.status).toBe(403);
     expect(by("chat-login-pick")?.body).toContain("may not change a chat's login");
@@ -609,18 +683,31 @@ describe("the worker relay (S2)", () => {
     expect(by("hub-update")?.status).toBe(403);
     expect(by("update-all")?.status).toBe(403);
     expect(by("check-updates")?.status).toBe(403);
+    expect(by("set-auto-update")?.status).toBe(403);
     expect(by("hub-interruptions")?.status).toBe(403);
+    expect(by("discard-held")?.status).toBe(403);
+    expect(by("held-transcript")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);
+    expect(by("download-url")?.status).toBe(403);
     expect(by("set-unread")?.status).toBe(403);
+    expect(by("read-external")?.status).toBe(403);
+    expect(by("external-preview-url")?.status).toBe(403);
+    expect(by("external-file")?.status).toBe(403);
+    expect(by("external-preview")?.status).toBe(403);
+    expect(by("save-external")?.status).toBe(403);
+    expect(by("open-external")?.status).toBe(400);
+    expect(by("open-external")?.body).toContain(
+      "Agents can only open files inside this worker's folders",
+    );
     expect(by("other-route")?.status).toBe(403);
     expect(by("file-download")?.status).toBe(403);
     expect(by("file-range")?.status).toBe(403);
     expect(by("desktop-local")?.status).toBe(403);
     expect(by("desktop-worker")?.status).toBe(403);
     expect(by("plugin-stream")?.status).toBe(403);
-    expect(by("simulators-open")?.status).toBe(403);
-    expect(by("simulators-status")?.status).toBe(403);
+    expect(by("extension-panel-stream")?.status).toBe(403);
+    expect(by("extension-panel-call")?.status).toBe(403);
     expect(by("voice-transcribe")?.status).toBe(403);
     expect(by("voice-status")?.status).toBe(403);
     expect(by("voice-test")?.status).toBe(403);
@@ -801,7 +888,7 @@ describe("what an agent may call, and which ids it may take", () => {
     expect(call("h-a", "repos.addByUrl", { remoteUrl: "https://example.com/o/r.git" }).ok).toBe(
       true,
     );
-    // Adding from another host is fine. Widening its roots needs a person, so addRoot is refused.
+    // Adding from another host is fine. Widening its roots needs a person (or an admin worker on its own folder), so addRoot is refused here.
     expect(call("h-a", "repos.addFromWorker", { hostId: "h-b", path: "/x" }).ok).toBe(true);
     expect(
       call("h-a", "repos.addFromWorker", { hostId: "h-b", path: "/x", addRoot: true }).ok,
@@ -841,9 +928,12 @@ describe("the band CLI through the relay (S2)", () => {
   const cli = findCliBinary();
 
   // The agent's own environment, as the stub recorded it.
+  // The stub appends a line at a time and may still be writing the last one, so only lines
+  // that end in a newline count.
   const agentEnv = () =>
     readFileSync(a.stubLog, "utf8")
       .split("\n")
+      .slice(0, -1)
       .filter(Boolean)
       .map((l) => JSON.parse(l) as { env: { BAND_SERVER_URL?: string; BAND_TOKEN?: string } })
       .find((r) => r.env.BAND_TOKEN)?.env;
@@ -1176,7 +1266,7 @@ describe("the band CLI through the relay (S2)", () => {
       makeRepo(outside);
       const widened = await run("repos", "add", "--from", a.hostId, outside, "--add-root");
       expect(widened.code, widened.out).not.toBe(0);
-      expect(widened.out).toContain("needs a person's confirmation");
+      expect(widened.out).toContain("needs a person, or admin trust");
       const after = (await q<{ repos: Array<{ name: string }> }>("repos.list")).repos.map(
         (r) => r.name,
       );
@@ -1488,15 +1578,45 @@ describe("system and editor calls on the worker (S4)", () => {
     );
     expect(opened).toMatchObject({ ok: true, external: false, filePath: "only-on-worker.txt" });
 
-    // The hub's own checkout is not on the worker, so it is not found there.
+    // A path that exists nowhere is not found. (A person's token may open an existing file outside
+    // the worker's folders; `external-file-remote.test.ts` covers that.)
     const outside = await trpcMutate(
       server.url,
       "editor.openFile",
-      { worktreeId: WT_A, filePath: join(hubRepo, "hello.txt") },
+      { worktreeId: WT_A, filePath: join(hubRepo, "no-such-file.txt") },
       TEST_TOKEN,
     );
     expect(outside.status).toBe(404);
     expect(await outside.text()).toMatch(/File not found/);
+  });
+
+  it("lets a person's terminal on the worker open a file outside the worker's folders", async () => {
+    const outside = tmp("band-relay-outside-");
+    writeFileSync(join(outside, "settings.json"), "{}\n");
+    // A short command line: the terminal redraws a long one and can swallow the Enter.
+    const body = JSON.stringify({
+      worktreeId: WT_A,
+      filePath: join(outside, "settings.json"),
+      focus: false,
+    });
+    writeFileSync(join(outside, "body.json"), body);
+    writeFileSync(
+      join(outside, "open.sh"),
+      `curl -s -w ' opened:%{http_code}:done\\n' -X POST "$BAND_SERVER_URL/trpc/editor.openFile" -H "Cookie: band_token=$BAND_TOKEN" -H 'content-type: application/json' -d @${join(outside, "body.json")}\n`,
+    );
+    const created = await m<{ terminalId: string }>("terminal.create", { worktreeId: WT_A });
+    const socket = await TerminalSocket.open(server, {
+      worktreeId: WT_A,
+      terminalId: created.terminalId,
+      token: TEST_TOKEN,
+    });
+    try {
+      socket.type(`sh ${join(outside, "open.sh")}\r`);
+      await socket.waitForOutput(":done", 20_000).catch(() => undefined);
+      expect(socket.output).toContain("opened:200:done");
+    } finally {
+      await socket.close();
+    }
   });
 
   it("formats a file with the config on the worker", async () => {

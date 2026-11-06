@@ -1,29 +1,49 @@
 import { Button, Input } from "@band-app/ui";
 import { useEffect, useState } from "react";
 import { invoke } from "../../../lib/desktop-ipc";
+import { isDesktop } from "../../../lib/is-desktop";
+import { HubUpdateControls } from "../HubUpdateControls";
 import { SettingsRow } from "./SettingsRow";
 
 interface HubChoiceView {
   mode: "local" | "remote";
   url: string;
   hasToken: boolean;
+  /** The local hub runs as a service on this Mac. */
+  localService?: boolean;
 }
 
 type SetResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Rows for the Settings dialog's Hub section (desktop app only): the hub this
- * window talks to. Local runs the hub bundled with the app. Remote connects to
- * a hub at another URL with its token and starts nothing locally. Applying a
+ * Rows for the Settings dialog's Hub section. The update controls show for an admin on every
+ * client. The hub picker is desktop only: the hub this window talks to. Local runs the hub
+ * bundled with the app. Remote connects to a hub at another URL with its token and starts nothing locally. Applying a
  * change reloads the window, so it is not part of the dialog's Save.
  */
 export function HubSettings() {
+  return (
+    <>
+      {isDesktop ? <HubChoiceRows /> : null}
+      <SettingsRow
+        variant="stacked"
+        label="Updates"
+        description="The hub's version, the latest release and how the hub updates. A worker installs the hub's version once the hub runs it. Workers have the same controls in Settings > Workers."
+      >
+        <HubUpdateControls inSettings />
+      </SettingsRow>
+    </>
+  );
+}
+
+function HubChoiceRows() {
   const [mode, setMode] = useState<"local" | "remote">("local");
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
   const [saved, setSaved] = useState<HubChoiceView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stopLocal, setStopLocal] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +73,12 @@ export function HubSettings() {
     setError(null);
     try {
       // The saved token never reaches this window, so a new URL needs the token typed in.
-      const result = await invoke<SetResult>("hub_set_choice", { mode, url, token });
+      const result = await invoke<SetResult>("hub_set_choice", {
+        mode,
+        url,
+        token,
+        stopLocal: mode === "remote" && stopLocal,
+      });
       if (!result.ok) setError(result.error);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -67,7 +92,7 @@ export function HubSettings() {
       <SettingsRow
         htmlFor="hub-mode"
         label="Hub"
-        description="Local runs the hub bundled with this app. Remote connects to a hub on another machine and starts nothing here."
+        description="Local runs the hub bundled with this app as a background service, so it keeps running when the app quits. Remote connects to a hub on another machine and starts nothing here."
       >
         <select
           id="hub-mode"
@@ -104,6 +129,24 @@ export function HubSettings() {
               onChange={(e) => setToken(e.target.value)}
             />
           </div>
+        </SettingsRow>
+      ) : null}
+      {mode === "remote" && saved.localService ? (
+        <SettingsRow
+          htmlFor="hub-local-service"
+          label="Hub on this Mac"
+          description="The local hub keeps running in the background unless you stop it. Switching back to Local starts it again."
+        >
+          <select
+            id="hub-local-service"
+            data-testid="settings__hub-local-service"
+            className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+            value={stopLocal ? "stop" : "keep"}
+            onChange={(e) => setStopLocal(e.target.value === "stop")}
+          >
+            <option value="keep">Keep running</option>
+            <option value="stop">Stop it</option>
+          </select>
         </SettingsRow>
       ) : null}
       <SettingsRow variant="stacked">

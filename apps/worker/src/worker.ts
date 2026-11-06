@@ -35,6 +35,7 @@ import { WorkerCli } from "./cli.ts";
 import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from "./config.ts";
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerDirectMethods } from "./direct.ts";
+import { createExtensionHost, registerExtensionMethods } from "./extensions.ts";
 import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
 import { LeaseGuard } from "./lease.ts";
 import { registerAgentMethods } from "./methods-agents.ts";
@@ -101,6 +102,8 @@ export interface WorkerOptions {
   serviceManager?: ServiceManager | null;
   /** How long a worker the hub refused for its version waits before it gives up. Default 5 minutes. */
   versionRetryMs?: number;
+  /** Extension service host settings to override, such as a faster restart for a test. */
+  extensions?: { restartBackoffMs?: number };
 }
 
 /** The hub refused this worker's version. It waits, so a service manager's restart does not redial every few seconds. */
@@ -168,8 +171,8 @@ export class Worker {
    */
   static async start(config: WorkerConfig, options: WorkerOptions = {}): Promise<Worker> {
     await ensureStateDir(config.stateDir);
-    // A plugin's availability probe can run an external tool (the simulator one runs
-    // `xcrun simctl help`, up to 20 s on a cold macOS runner). It starts here, beside the token
+    // A plugin's availability probe can run an external tool (one may run
+    // a tool, up to 20 s on a cold macOS runner). It starts here, beside the token
     // exchange and the capability probes, so the hello waits only for what is left of it.
     const plugins = WorkerPlugins.start({ stateDir: config.stateDir, log });
     plugins.catch(() => undefined);
@@ -197,6 +200,7 @@ export class Worker {
     const agentHolder = createWorkerAgentHolder(config.stateDir, options.persistentAgents === true);
     const host = new LocalHost({
       terminalBackend: () => backend,
+      resources: { selfKind: "worker", stateDir: () => config.stateDir },
       ...(agentHolder ? { agentHolder } : {}),
       repos: {
         mappingsFile: () => join(config.stateDir, "repos.json"),
@@ -281,7 +285,14 @@ export class Worker {
       plugins: runningPlugins,
       ...(agentHolder ? { agentHolder } : {}),
     };
+    ctx.extensions = createExtensionHost(ctx, {
+      workerId,
+      workerVersion: WORKER_VERSION,
+      bundledHas: (id) => runningPlugins.has(id),
+      ...options.extensions,
+    });
     const registrar = new Registrar(ctx);
+    registerExtensionMethods(registrar, ctx);
     registrar.json(METHOD_LEASE_RENEW, (a) => {
       const p = a as unknown as LeaseRenewParams;
       if (typeof p.ttlMs !== "number" || !Number.isFinite(p.ttlMs) || p.ttlMs <= 0) {

@@ -48,10 +48,11 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("hostRequests.") ||
       path.startsWith("runners.") ||
       path.startsWith("accountUsage.") ||
-      // The Simulator tab is a person's; an agent uses the simulator_* tools.
-      path.startsWith("simulators.") ||
+      // The machine's process table and disk use are a person's page, not an agent's tool.
+      path.startsWith("resources.") ||
       path.startsWith("voice.") ||
       path.startsWith("extensions.") ||
+      path.startsWith("editors.") ||
       path.startsWith("provisioning.") ||
       // Writes ~/.claude/settings.json on a host; only a person's click may.
       path.startsWith("hooks.")
@@ -59,8 +60,14 @@ function discoverProcedures(): ProcedureInfo[] {
       continue;
     // `worktree.previewUrl` returns a bearer URL for a worktree's files.
     if (path === "worktree.previewUrl") continue;
+    // `worktree.downloadUrl` returns a bearer URL for one worktree file.
+    if (path === "worktree.downloadUrl") continue;
+    // `worktree.externalPreviewUrl` returns a bearer URL for files outside any worktree.
+    if (path === "worktree.externalPreviewUrl") continue;
     // `worktree.directAccess` mints a bearer token for a worker's loopback listener.
     if (path === "worktree.directAccess") continue;
+    // These read and write any file a worker's path policy allows, outside the worktree.
+    if (path === "worktree.readExternalFile" || path === "worktree.saveExternalFile") continue;
     // `environment.validate` reads a directory the caller names on the hub's disk.
     if (path === "environment.validate") continue;
     // `repos.addFromWorker` reads folders on a worker the caller names.
@@ -105,7 +112,7 @@ function createMcpServer(req: IncomingMessage): McpServer {
   });
 
   const procedures = discoverProcedures();
-  const ctx = createContext({ req });
+  const ctx = createContext({ req, agent: true });
   const caller = appRouter.createCaller(ctx);
 
   for (const proc of procedures) {

@@ -8,6 +8,7 @@ import { RpcError } from "@band-app/link";
 import { describeHost, type Registrar, type WorkerContext } from "./context.ts";
 import { PathDeniedError } from "./path-policy.ts";
 import {
+  asParams,
   compact,
   num,
   optBool,
@@ -108,6 +109,7 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     await host.worktree.remove({ repoPath: await path(a, "repoPath"), path: worktreePath });
     policy.invalidateWorktrees();
     await ctx.plugins?.releasePath(worktreePath);
+    await ctx.extensions?.releasePath(worktreePath);
   });
   r.json("worktree.list", async (a) => host.worktree.list(await path(a, "repoPath")));
 
@@ -188,6 +190,15 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
       mode: optMode(a),
     });
   });
+  // Person-only single-file access outside the worker's folders. The hub calls these only for a
+  // device-token request (`editor.openFile`, `worktree.readExternalFile | saveExternalFile`). They skip
+  // the path policy on purpose, refuse links and non-regular files, and never create a file. They
+  // are not in `DIRECT_PROCEDURES` and the relay never reaches a link method.
+  r.json("fs.external.stat", async (a) => host.external.stat(str(a, "path")));
+  r.bytes("fs.external.readFile", async (a) => host.external.readFile(str(a, "path")));
+  r.json("fs.external.writeFile", async (a) => {
+    await host.external.writeFile(str(a, "path"), await readWriteData(ctx, a.data));
+  });
   r.json("fs.glob", async (a) => {
     checkGlobPattern(str(a, "pattern"));
     return host.fs.glob(str(a, "pattern"), await path(a, "cwd"));
@@ -224,6 +235,20 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     return host.fs.copy(from, to, { recursive, exclusive: optBool(a, "exclusive") });
   });
   r.json("fs.du", async (a) => host.fs.du(await path(a, "path")));
+
+  // Memory and CPU of this machine and its Band processes. The worker reads only its own table.
+  r.json("resources.snapshot", () => host.resources.snapshot());
+  r.json("resources.storage", async (a) => {
+    const raw = a.worktrees;
+    if (!Array.isArray(raw)) throw invalid("worktrees must be an array");
+    const worktrees: { id: string; path: string }[] = [];
+    for (const entry of raw) {
+      const e = asParams(entry);
+      // A folder outside the roots is refused like any other path.
+      worktrees.push({ id: str(e, "id"), path: await path(e, "path") });
+    }
+    return host.resources.storage({ worktrees });
+  });
 
   // ---- scripts ------------------------------------------------------------
 

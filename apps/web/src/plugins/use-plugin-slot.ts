@@ -1,3 +1,4 @@
+import type { PanelManifest } from "@band-app/plugin-api";
 import type { WorktreePanel, WorktreeSideTab } from "@band-app/plugin-api/client";
 import { useQuery } from "@tanstack/react-query";
 import { GitPullRequest } from "lucide-react";
@@ -5,6 +6,7 @@ import { useMemo } from "react";
 import { toWorktreeId, useRepos } from "@/dashboard";
 import { PullRequestPanel } from "../components/review/PullRequestPanel";
 import { useReviewProvider } from "../components/review/review-query";
+import { useExtensions } from "../lib/extensions";
 import { trpc } from "../lib/trpc-client";
 import { BUNDLED_CLIENT_PLUGINS } from "./bundled-client-plugins";
 
@@ -62,22 +64,39 @@ export interface PanelContribution {
   panel: WorktreePanel;
 }
 
-/** The id of a plugin panel's center tab: `plugin:<plugin id>:<panel id>`. */
+/**
+ * The id of a plugin panel's center tab: `plugin:<plugin id>:<panel id>`. An extension's panel
+ * passes `ext:<extension id>` as the plugin id and gets `ext:<extension id>:<panel id>`.
+ */
 export function pluginPanelTabId(pluginId: string, panelId: string): string {
-  return `plugin:${pluginId}:${panelId}`;
+  return isExtensionPanelOwner(pluginId)
+    ? `${pluginId}:${panelId}`
+    : `plugin:${pluginId}:${panelId}`;
 }
 
-/** The plugin and panel ids in a tab id made by {@link pluginPanelTabId}, or null. */
+/** Whether a panel's owner id (`ext:<extension id>`) names an extension and not a bundled plugin. */
+export function isExtensionPanelOwner(pluginId: string): boolean {
+  return pluginId.startsWith("ext:");
+}
+
+/** The extension id in an owner id made as `ext:<extension id>`. */
+export function extensionIdOfOwner(pluginId: string): string {
+  return pluginId.slice("ext:".length);
+}
+
+/** The owner and panel ids in a tab id made by {@link pluginPanelTabId}, or null. */
 export function parsePluginPanelTabId(id: string): { pluginId: string; panelId: string } | null {
-  const [prefix, pluginId, panelId, ...rest] = id.split(":");
-  if (prefix !== "plugin" || !pluginId || !panelId || rest.length > 0) return null;
-  return { pluginId, panelId };
+  const [prefix, owner, panelId, ...rest] = id.split(":");
+  if (!owner || !panelId || rest.length > 0) return null;
+  if (prefix === "plugin") return { pluginId: owner, panelId };
+  if (prefix === "ext") return { pluginId: `ext:${owner}`, panelId };
+  return null;
 }
 
 /** The contribution a plugin panel tab id names, whether or not the worker offers it now. */
 export function findPanelContribution(id: string): PanelContribution | null {
   const parsed = parsePluginPanelTabId(id);
-  if (!parsed) return null;
+  if (!parsed || isExtensionPanelOwner(parsed.pluginId)) return null;
   const plugin = BUNDLED_CLIENT_PLUGINS.find((p) => p.id === parsed.pluginId);
   const panel = plugin?.contributions["worktree.panels"]?.find((p) => p.id === parsed.panelId);
   return plugin && panel ? { pluginId: plugin.id, panel } : null;
@@ -113,4 +132,37 @@ export function useWorktreePanels(worktreeId: string): PanelContribution[] {
         .map((panel) => ({ pluginId: plugin.id, panel })),
     );
   }, [plugins.data, host]);
+}
+
+export interface ExtensionPanelOffer {
+  extensionId: string;
+  extensionName: string;
+  panel: PanelManifest;
+}
+
+/**
+ * The panels of installed extensions that a worktree's worker can serve: the worker is online and
+ * reports the panel's capability, which it does only while the extension's service runs there.
+ */
+export function useExtensionPanels(worktreeId: string): ExtensionPanelOffer[] {
+  const { repos } = useRepos();
+  const { list } = useExtensions();
+  const hosts = useQuery({
+    queryKey: ["hosts.list"],
+    queryFn: async () => (await trpc.workers.list.query()).hosts,
+  });
+  const hostId = repos
+    .flatMap((repo) =>
+      repo.worktrees.map((wt) => ({ id: toWorktreeId(repo.name, wt.name, wt.hostId), wt })),
+    )
+    .find((entry) => entry.id === worktreeId)?.wt.hostId;
+  const host = hosts.data?.find((h) => h.id === (hostId ?? "local"));
+  return useMemo(() => {
+    if (!list || !host || host.status !== "online") return [];
+    return list.extensions.flatMap((extension) =>
+      extension.contributes.panels
+        .filter((panel) => host.capabilities.includes(panel.capability))
+        .map((panel) => ({ extensionId: extension.id, extensionName: extension.name, panel })),
+    );
+  }, [list, host]);
 }

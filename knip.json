@@ -5,7 +5,13 @@
   "ignoreBinaries": ["wrangler"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs", "scripts/xterm-patches/regenerate.mjs", "runners/*/*.mjs"],
+      "entry": [
+        "scripts/*.mjs",
+        "scripts/ci/*.mjs",
+        "scripts/ci/tests/*.test.mjs",
+        "scripts/xterm-patches/regenerate.mjs",
+        "runners/*/*.mjs"
+      ],
       "ignoreDependencies": [
         "@band-app/cli",
         "@tanstack/react-query",
@@ -137,9 +143,6 @@
     "plugins/github": {
       "entry": ["src/server/index.ts"],
       "project": ["src/**/*.{ts,tsx}"]
-    },
-    "plugins/simulator": {
-      "ignoreDependencies": ["serve-sim"]
     }
   }
 }

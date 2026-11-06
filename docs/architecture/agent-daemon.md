@@ -112,3 +112,7 @@ Unavoidable, unchanged: reboot or shutdown, ephemeral sleep, the daemon crashing
 ## Security
 
 The daemon runs as the worker's user. Socket 0600 in a 0700 directory, token hello, endpoint ownership checks from the kit. The launch environment lives only in daemon memory. It is never written to disk, never logged, and `list` and the pid record carry the hash, not the values.
+
+## Owned chats
+
+`SpawnParams.owned` (optional, protocol version unchanged) marks the agent of a chat the worker owns. The daemon treats any subscribed worker as watching it, whether or not the worker's link to the hub is up. A daemon that predates the field ignores it and applies the hub-run rule. The worker's handle for an owned agent acknowledges output itself, since no hub does. Reattaching after a restart is a later step.

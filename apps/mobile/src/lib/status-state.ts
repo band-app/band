@@ -1,3 +1,5 @@
+import type { MergeQueueLike } from "@band-app/client/merge";
+
 /**
  * The agent and branch status of every worktree, built from the hub's `status.stream` events.
  * The reducer is pure: `applyStatusEvent` returns a new state and never mutates the old one.
@@ -36,6 +38,9 @@ export interface PullRequestLike {
   url: string;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  /** Absent in rows stored before the merge queue was read. */
+  mergeQueue?: MergeQueueLike | null;
+  autoMerge?: { enabledAt: string | null; method: string | null } | null;
 }
 
 export interface CiStatusLike {

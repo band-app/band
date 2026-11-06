@@ -91,6 +91,7 @@ export function setLocalTerminalBackend(backend: TerminalBackend): TerminalBacke
 
 export const hostRegistry = new HostRegistry(
   new LocalHost({
+    resources: { selfKind: "hub" },
     // `gh` is the GitHub plugin's tool: with that plugin disabled the host never runs it. The
     // import is dynamic because the services import this registry.
     ghEnabled: async () => {

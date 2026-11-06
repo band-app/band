@@ -46,10 +46,17 @@ export const Channels = {
   pickFolder: "pick_folder",
   pickFile: "pick_file",
   pickSaveFile: "pick_save_file",
+  // Files on this Mac opened from Finder or the picker (see services/local-files.ts)
+  readLocalFile: "read_local_file",
+  saveLocalFile: "save_local_file",
+  // Bytes of a local PDF, image or video for a preview, and a grant to show a local HTML file's folder
+  readLocalBinary: "read_local_binary",
+  localPreviewGrant: "local_preview_grant",
+  // Paths the OS asked Band to open; the renderer drains them (see services/open-file-queue.ts)
+  takeOpenFiles: "take_open_files",
   revealInFinder: "reveal_in_finder",
   checkAppExists: "check_app_exists",
   openWithApp: "open_with_app",
-  revealSimulator: "reveal_simulator",
   installCli: "install_cli",
   openExternal: "open_external",
 
@@ -119,6 +126,10 @@ export const Events = {
   systemResumed: "system-resumed",
   /** Pushed with `{ onBattery }` when the Mac moves between AC and battery power. */
   powerStateChanged: "power-state-changed",
+  /** Pushed with the swipe direction when macOS reports a swipe gesture on the window. */
+  windowSwipe: "window-swipe",
+  /** Pushed when the OS hands Band a file to open. The renderer then calls `take_open_files`. */
+  openFilesRequested: "open-files-requested",
   browserUrlChanged: "browser-url-changed",
   browserTitleChanged: "browser-title-changed",
   /** Emitted when a tab's page WebContents goes away (its `<webview>` was

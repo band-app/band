@@ -1,0 +1,28 @@
+# mq1 (S1): a worktree whose PR is in the merge queue shows a queued badge with its position.
+appId: app.getband.mobile
+name: mq1 the merge queue position on the worktree row
+---
+- runFlow: subflows/pair-link.yaml
+- runFlow:
+    when:
+      notVisible:
+        id: home__search
+    commands:
+      - tapOn:
+          id: home__search-toggle
+- tapOn:
+    id: home__search
+- eraseText: 60
+- inputText: widgets-feat-queued
+- extendedWaitUntil:
+    visible:
+      id: worktree__pr-widgets-feat-queued
+      text: "#61"
+    timeout: 30000
+- assertVisible:
+    id: worktree__queue-widgets-feat-queued
+    text: ".*queue 2"
+- assertVisible:
+    id: home__worktree-widgets-feat-queued
+    text: ".*In merge queue · position 2.*"
+- takeScreenshot: mq1-list-queued

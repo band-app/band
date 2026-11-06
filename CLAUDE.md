@@ -19,6 +19,10 @@ This repo uses **integration tests** as the primary testing approach. Do not wri
 
 Rules TEST-36 to TEST-45 in `.claude/testing-criteria.md` cover flaky-test patterns (waiting for the wrong thing, `.first()` on multi-instance kinds, bare timeouts, leaking work between tests). Read them before writing or fixing a test.
 
+CI retries a failed test once, only when `CI` is set (Playwright `retries: 1`, vitest `retry: 1` in the hub and web configs). A test that passes on the retry does not fail the job and is reported as flaky: the `flaky-report` job in `ci.yml` prints it in the run summary and, on `merge_group` and `push`, files or updates one issue per test (`flaky: <file> › <test name>`, label `flaky`, one line per run) through `scripts/ci/report-flaky.mjs`. The producers are Playwright's JSON reporter and `scripts/ci/vitest-flaky-reporter.mjs`, both writing under `BAND_FLAKY_DIR`. A test that fails both attempts fails the job. The node:test suites (`packages/*`, `apps/worker`) have no retry. Local runs and `pnpm flake-guard` never retry.
+
+Quarantine: a test that flaked 3 or more times in 7 days goes on `.github/flaky-quarantine.txt` (`<file> › <describe> › <test>  # <issue>`). `BAND_FLAKY_QUARANTINE` (`exclude` by default in CI, `only`, or `off` by default locally) makes the hub, web unit and web e2e configs skip the listed tests; the `test-quarantine` job sets `only` and has `continue-on-error`, and nothing waits for it. The fix PR removes the line. `scripts/ci/tests/report-flaky.test.mjs` (`node --test scripts/ci/tests/*.test.mjs`) tests the report and the filters.
+
 ### Why Integration Tests
 
 Unit tests with heavy mocking verify that your mocks work, not that your system works. Integration tests exercise the real system through its public interfaces — the same way a client or user would interact with it.
@@ -77,9 +81,26 @@ An agent session runs in a Band worker, so its environment carries the worker's 
 
 ### Where tests run
 
-Pull requests run the Linux jobs only: lint, the hub suite in 3 shards, the web unit and package suites, the web e2e suite, the remote-loopback job, Docker and k8s (kind). No macOS job runs on a pull request. The merge queue and pushes to main run the macOS jobs in full: the CLI integration tests, the whole hub suite in 2 shards, with the web unit and package suites in shard 1 (`web-macos`), the iOS simulator build and both desktop e2e jobs. A macOS-only break therefore fails in the queue, before it reaches main. A test that needs macOS to fail is still written as an ordinary test, with no list to join.
+Pull requests run the Linux jobs only: lint, the hub suite in 2 shards, the web unit and package suites, the web e2e suite, the remote-loopback job (one shard, listed files only), Docker and k8s (kind). No macOS job runs on a pull request.
 
-Each `web-macos` shard runs its half of the hub suite with `vitest run --shard=N/2` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+The web e2e job on a pull request runs only the specs the change affects, plus a smoke set (`scripts/ci/affected-e2e.mjs`, tested by `scripts/ci/affected-e2e.test.mjs` against the changed-file lists of real PRs). A changed spec runs. A changed page object, fixture or helper under `apps/web/e2e/` runs every spec that imports it, directly or through another page object. A changed `.ts` or `.tsx` file under `apps/web/src/` runs the specs whose page objects or specs mention one of its `data-testid`s (a file with none borrows the ids of what imports it, two levels up). A change to the hub, workers, the CLI, `packages/`, `plugins/`, `apps/web/package.json`, the e2e config, the lockfile or the CI files, a source file the mapping cannot place, or an error in the script runs every spec. Changes under `apps/mobile`, `apps/desktop`, `docs/` and the hub's own tests run only the smoke set. A selection of more than 40 specs runs in 3 shards, a smaller one in one. Pushes to main and the merge queue always run every spec (the nightly run starts only macOS jobs), so a mapping the script missed fails in the queue and not on the PR.
+
+The merge queue starts a macOS job only when the change touches code that behaves differently there. `scripts/ci/macos-changes.sh` holds the path lists (`scripts/ci/macos-changes.test.mjs` tests them, run it with `node --test scripts/ci/macos-changes.test.mjs`):
+
+- `cli-macos` (CLI integration tests): `apps/cli/`, and the worktree sync files behind the `/var/folders` path bug.
+- `machine-macos`: `packages/host-local/`, `packages/link/`, the worker's service, terminal, agent, update and lease code, and the hub test files listed in `scripts/ci/macos-hub-tests.txt`. It runs those hub files and the host-local, link and worker package tests, not the whole hub suite.
+- `desktop-macos`: `apps/desktop/`, the bundled worker, the direct path and `apps/web/e2e-desktop/`. `desktop-packaged-macos` runs two specs of the packaged app as a smoke check, only when `electron-builder.yml`, `apps/desktop/`, `apps/worker/scripts/` or the lockfile changed.
+- `mobile-ios`: `apps/mobile/` and the packages it imports.
+
+A change to `ci.yml` or the filter script starts every job, the full-suite jobs included. A push to main starts none, because the merge queue tested that commit. `scripts/check-ci-green.sh` accepts the queue's `merge_group` run of the same SHA for the release gate.
+
+The nightly run (`schedule` in `ci.yml` at 02:30 UTC, also `workflow_dispatch`) runs every macOS job in full: the whole hub suite on macOS in 2 shards with the web unit and package suites in shard 1 (`web-macos`), the whole packaged desktop e2e and the CLI suite. A macOS-only break outside the filtered paths first shows up there. Look at the Actions tab, workflow CI, event "schedule". A test that needs macOS to fail is still written as an ordinary test, with no list to join.
+
+In the nightly run each `web-macos` shard runs its half of the hub suite with `vitest run --shard=N/2` after its own `pnpm build:web`, not `pnpm --filter @band-app/server test`, so the `pretest` build does not repeat. Locally, `pnpm --filter @band-app/server test` still builds first.
+
+Hub test files run in parallel: `apps/hub/vitest.config.ts` uses the `forks` pool with 3 workers (`BAND_TEST_WORKERS` overrides it), because every server, worker and daemon a test starts has a random port and its own temp HOME. No file opts out. A new test must not use a fixed port, a path outside its temp HOME, or the real `~/.band`; run it with `--no-file-parallelism` to find a collision.
+
+The remote-loopback job runs only the files in `apps/hub/tests/loopback-files.txt`, the ones that import `helpers/test-host` (their behaviour depends on where the worktree lives). `scripts/check-loopback-files.sh` runs in `pnpm lint` and fails when a file that imports `helpers/test-host` is missing from the list, or the list names a file that does not exist. A test that should run on a loopback worker imports from `test-host` and goes in the list.
 
 ### Exceptions
 
@@ -101,7 +122,7 @@ The pre-push hook also runs `scripts/flake-guard.mjs`. It repeats each test file
 
 **Always run `/review-and-apply` before pushing code.** This invokes the `review-and-apply` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
 
-PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a skip counts as a pass) on that branch before it squash-merges. Pull requests run Linux jobs, Docker and k8s (kind) only: every macOS job has `github.event_name != 'pull_request'`, so the macOS jobs first run in the merge queue, and a macOS-only failure surfaces there. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
+PRs merge through GitHub's merge queue: once a PR is approved and its checks are green, run `gh pr merge <n> --auto --squash`. The queue builds a temporary branch of the PR on top of main and waits for `Lint, Test & Build` and `macOS, Docker & k8s` (the macOS, Docker image and k8s (kind) jobs, where a skip counts as a pass) on that branch before it squash-merges. Pull requests run Linux jobs, Docker and k8s (kind) only: every macOS job has `github.event_name != 'pull_request'`, so the macOS jobs first run in the merge queue, and only for the paths they cover (see Where tests run). A macOS-only failure elsewhere surfaces in the nightly run. Do not merge by hand, and do not update the branch or rebase to chase main; the queue tests against current main for you.
 
 ## Issue tracking
 
@@ -202,7 +223,6 @@ Each feature area's architecture note lives in `.claude/rules/architecture/<name
 - `desktop-hub-picker`: desktop hub picker
 - `browser-profiles`: browser profiles
 - `plugins`: plugins
-- `plugin-worker-half-and-the-simulator`: plugin worker half and the simulator
 - `worktree-groups`: worktree groups
 - `extensions`: extensions
 - `html-visual-edit`: HTML visual edit
@@ -218,4 +238,6 @@ Each feature area's architecture note lives in `.claude/rules/architecture/<name
 - `client-state`: client state
 - `agent-daemon`: agent daemon
 - `web-server-vs-terminal-daemon`: Web Server vs Terminal Daemon
-
+- `opening-files`: opening files
+- `plugin-worker-half`: plugin worker half
+- `resources-page`: resources page

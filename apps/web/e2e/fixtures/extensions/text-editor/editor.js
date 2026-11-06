@@ -8,6 +8,11 @@ const encoder = new TextEncoder();
 let port = null;
 let baseline = "";
 
+function setLayout(value) {
+  document.body.dataset.layout = value;
+  document.getElementById("layout").textContent = value;
+}
+
 function setStatus(value) {
   status.textContent = value;
 }
@@ -45,6 +50,33 @@ function save() {
   setStatus("saving");
 }
 
+// The selection goes to Band as `selection` (extension protocol, optional), debounced.
+let selectionTimer = null;
+function reportSelection() {
+  clearTimeout(selectionTimer);
+  selectionTimer = setTimeout(() => {
+    const start = text.selectionStart ?? 0;
+    const end = text.selectionEnd ?? 0;
+    const selection =
+      end > start
+        ? {
+            address: `chars:${start}-${end}`,
+            kind: "text",
+            label: `chars ${start}-${end}`,
+            text: text.value.slice(start, end),
+          }
+        : null;
+    port?.postMessage({ type: "selection", selection });
+  }, 250);
+}
+for (const type of ["select", "keyup", "mouseup", "input"]) {
+  text.addEventListener(type, reportSelection);
+}
+// A touch selection (iOS long press, drag handles) fires `selectionchange` and no mouse event.
+document.addEventListener("selectionchange", () => {
+  if (document.activeElement === text) reportSelection();
+});
+
 text.addEventListener("input", setDirty);
 text.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
@@ -66,12 +98,20 @@ function answerMcp(message) {
     return;
   }
   if (message.method === "tools/call") {
+    const name = message.params?.name;
+    const args = message.params?.arguments ?? {};
+    if (name === "set_text") {
+      text.value = String(args.text ?? "");
+      setDirty();
+      reportSelection();
+    }
+    if (name === "save_text") save();
     port.postMessage({
       type: "mcp",
       message: {
         jsonrpc: "2.0",
         id: message.id,
-        result: { content: [{ type: "text", text: text.value }] },
+        result: { content: [{ type: "text", text: name === "set_text" ? "ok" : text.value }] },
       },
     });
     return;
@@ -93,6 +133,7 @@ window.addEventListener("message", (event) => {
         load(msg.file.bytes);
         text.disabled = msg.file.readOnly;
         document.body.dataset.mode = msg.theme?.mode ?? "";
+        setLayout(msg.layout ?? "none");
         report();
         setStatus("ready");
         port.postMessage({ type: "ready" });
@@ -111,6 +152,9 @@ window.addEventListener("message", (event) => {
         break;
       case "requestSave":
         save();
+        break;
+      case "layout":
+        setLayout(msg.layout);
         break;
       case "theme":
         document.body.dataset.mode = msg.mode ?? "";

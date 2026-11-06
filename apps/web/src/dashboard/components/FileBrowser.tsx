@@ -42,6 +42,7 @@ import { OpenWithItems } from "../../components/extensions/OpenWithItems";
 import { writeClipboardText } from "../../lib/clipboard";
 import { useAdapter, useCapabilities } from "../context";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
+import { DragGrantCache, downloadUrlData } from "../lib/drag-out";
 import { getFileIcon, getFolderIcon } from "../lib/file-icon";
 import { joinWorktreePath } from "../lib/worktree-path";
 import type { FileEntry } from "../types";
@@ -137,6 +138,8 @@ interface TreeDnd {
   /** Folder the current drag would land in, or null when nothing is hovered. */
   dropTarget: string | null;
   onDragStart: (path: string, kind: EntryKind, e: React.DragEvent) => void;
+  /** A file row was hovered or pressed: get its download grant ready for a drag. */
+  onPrepareDrag: (path: string, kind: EntryKind) => void;
   onDragEnd: () => void;
   onDragOver: (folder: string, e: React.DragEvent) => void;
   onDrop: (folder: string, e: React.DragEvent) => void;
@@ -496,7 +499,11 @@ function TreeNode({
       // runs (it sees the pointerdown / right-click and opens this row's
       // menu); only propagation to the parent is killed.
       onContextMenu={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        dnd.onPrepareDrag(entryPath, kind);
+      }}
+      onPointerEnter={() => dnd.onPrepareDrag(entryPath, kind)}
       draggable
       onDragStart={(e) => dnd.onDragStart(entryPath, kind, e)}
       onDragEnd={dnd.onDragEnd}
@@ -1493,15 +1500,30 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     clearExpandTimer();
   }, [clearExpandTimer]);
 
+  const dragGrants = useMemo(
+    () =>
+      new DragGrantCache((path) => {
+        if (!adapter.getWorktreeDownloadUrl) return Promise.reject(new Error("unsupported"));
+        return adapter.getWorktreeDownloadUrl(worktreeId, path);
+      }),
+    [adapter, worktreeId],
+  );
+
   const dnd = useMemo<TreeDnd>(
     () => ({
       dropTarget,
+      onPrepareDrag(path, kind) {
+        if (kind === "file") dragGrants.prepare(path);
+      },
       onDragStart(path, kind, e) {
         dragSourceRef.current = { path, kind };
         e.dataTransfer.setData(DRAG_MIME, JSON.stringify({ path, kind }));
         // Dragging into an editor or terminal drops the relative path as text.
         e.dataTransfer.setData("text/plain", path);
         e.dataTransfer.effectAllowed = "copyMove";
+        // Other apps (Finder, the desktop) get the real file when a grant is ready.
+        const grant = kind === "file" ? dragGrants.peek(path) : null;
+        if (grant) e.dataTransfer.setData("DownloadURL", downloadUrlData(path, grant));
       },
       onDragEnd: endDrag,
       onDragOver(folder, e) {
@@ -1547,6 +1569,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     [
       canTransferInto,
       clearExpandTimer,
+      dragGrants,
       dropTarget,
       endDrag,
       ensureDirExpanded,

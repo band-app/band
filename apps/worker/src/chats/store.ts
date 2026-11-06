@@ -7,6 +7,8 @@
  *   launch the hub gave it, for starting the agent while the hub is away;
  * - `id_blocks`: the event ids the hub leased the worker;
  * - `queued_messages`: messages waiting for a running turn;
+ * - `chat_wire_state`: what a rebuilt ACP client needs to carry on with a chat's agent, written in
+ *   the transaction that logs the events parsed from the agent's output (see `WireState`);
  * - `forwards`: ids of requests the hub forwarded, so a resend runs once;
  * - `meta`: the next event id and the replication ack.
  *
@@ -18,6 +20,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { ChatEventQueries, type ChatLogDb } from "@band-app/chat-runtime/log";
+import type { OpenRequest } from "@band-app/chat-runtime/wire-tap";
 import type { ChatLaunchReply, OwnedChatInfo } from "@band-app/link";
 
 const SCHEMA = `
@@ -56,6 +59,17 @@ CREATE TABLE IF NOT EXISTS queued_messages (
   seq integer NOT NULL,
   payload text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_wire_state (
+  chat_id text PRIMARY KEY,
+  agent_id text,
+  session_id text,
+  spec_hash text,
+  stdout_offset integer NOT NULL,
+  stderr_offset integer NOT NULL,
+  next_request_id integer NOT NULL,
+  state text NOT NULL,
+  updated_at integer NOT NULL
+);
 CREATE TABLE IF NOT EXISTS forwards (
   forward_id text PRIMARY KEY,
   reply text NOT NULL,
@@ -87,6 +101,41 @@ export interface OwnedChatRecord {
   seeded: boolean;
 }
 
+/**
+ * What a rebuilt client needs to carry on with a chat's agent. Nothing reads it back yet. It never
+ * holds the launch spec (the environment carries secrets), only the hash of it.
+ */
+export interface WireState {
+  /** The agent daemon's id for the agent process. */
+  agentId: string | null;
+  sessionId: string | null;
+  /** `launchSpecHash` of the launch the agent was started with. */
+  specHash: string | null;
+  /** Bytes of the agent's stdout up to the end of the last line whose events are logged. */
+  stdoutOffset: number;
+  /** Bytes of stderr read. Diagnostics only: no event comes from stderr. */
+  stderrOffset: number;
+  /** The JSON-RPC id the client's next request takes. */
+  nextRequestId: number;
+  /** The id of the open `session/prompt`, when a turn waits on the agent. */
+  promptRequestId: number | string | null;
+  /** Client requests the agent has not answered, `session/prompt` included. */
+  openClientRequests: OpenRequest[];
+  /** Agent requests (permission, form) the client has not answered, with the agent's ids. */
+  openAgentRequests: Array<OpenRequest & { requestId?: string }>;
+  /** The turn in progress. The messages behind it are in `queued_messages`. */
+  turn: { seq: number; taskId: string; startedAt: number } | null;
+  /** The session's log revision the client writes. */
+  revision: number;
+  /** Background-work holds of the agent process. */
+  work: {
+    holds: Array<[string, { reason: string; until: number; untilCompleted?: boolean }]>;
+    taskToolCalls: string[];
+  };
+  /** Mode, model, config options, commands, usage and title as the live session last said. */
+  live: unknown;
+}
+
 /** Forwarded requests kept for dedup: a resend comes within minutes, so a day is plenty. */
 const FORWARD_KEEP_MS = 24 * 60 * 60_000;
 
@@ -114,28 +163,79 @@ export class ChatStore {
     db.exec("PRAGMA busy_timeout = 5000");
     db.exec(SCHEMA);
     const store = new ChatStore(db);
-    store.drizzle = drizzle({ client: db }) as unknown as ChatLogDb;
+    const orm = drizzle({ client: db }) as unknown as ChatLogDb;
+    // The event log opens its own transactions. While a batch is open they join it.
+    const ownTransaction = orm.transaction.bind(orm);
+    orm.transaction = ((fn: (tx: ChatLogDb) => unknown, config?: unknown) =>
+      store.inTransaction
+        ? fn(orm)
+        : (ownTransaction as (f: unknown, c?: unknown) => unknown)(
+            fn,
+            config,
+          )) as typeof orm.transaction;
+    store.drizzle = orm;
     store.loadIds();
     db.prepare("DELETE FROM forwards WHERE at < ?").run(Date.now() - FORWARD_KEEP_MS);
     return store;
   }
 
   close(): void {
+    while (this.depth > 0) this.commitBatch();
     if (this.current()) this.setMeta("next_id", this.next);
     this.db.close();
   }
 
-  /** Runs `fn` in one transaction. */
+  /** Depth of open `BEGIN`s: a nested call joins the outer transaction. */
+  private depth = 0;
+  private afterCommitHooks: Array<() => void> = [];
+
+  /** Runs `fn` in one transaction, or joins the one that is open. */
   transaction<T>(fn: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
+    if (this.depth > 0) return fn();
+    this.beginBatch();
     try {
       const out = fn();
-      this.db.exec("COMMIT");
+      this.commitBatch();
       return out;
     } catch (err) {
-      this.db.exec("ROLLBACK");
+      this.rollbackBatch();
       throw err;
     }
+  }
+
+  /**
+   * Opens a transaction that outlives the call: the events parsed from a batch of agent output and
+   * the client's state commit together in {@link commitBatch}. Writes made while it is open join it.
+   */
+  beginBatch(): void {
+    if (this.depth++ > 0) return;
+    this.db.exec("BEGIN IMMEDIATE");
+  }
+
+  commitBatch(): void {
+    if (this.depth === 0) return;
+    if (--this.depth > 0) return;
+    this.db.exec("COMMIT");
+    const hooks = this.afterCommitHooks;
+    this.afterCommitHooks = [];
+    for (const hook of hooks) hook();
+  }
+
+  private rollbackBatch(): void {
+    this.depth = 0;
+    this.afterCommitHooks = [];
+    this.db.exec("ROLLBACK");
+  }
+
+  /** Whether a transaction is open. */
+  get inTransaction(): boolean {
+    return this.depth > 0;
+  }
+
+  /** Runs `fn` once the open transaction commits, or now when none is open. */
+  afterCommit(fn: () => void): void {
+    if (this.depth > 0) this.afterCommitHooks.push(fn);
+    else fn();
   }
 
   // ---- meta ----------------------------------------------------------------
@@ -261,7 +361,68 @@ export class ChatStore {
   dropChat(chatId: string, deleteLog: boolean): void {
     this.db.prepare("DELETE FROM owned_chats WHERE chat_id = ?").run(chatId);
     this.db.prepare("DELETE FROM queued_messages WHERE chat_id = ?").run(chatId);
+    this.clearWireState(chatId);
     if (deleteLog) this.events.deleteForChat(chatId);
+  }
+
+  // ---- wire state ----------------------------------------------------------
+
+  saveWireState(chatId: string, state: WireState): void {
+    const { agentId, sessionId, specHash, stdoutOffset, stderrOffset, nextRequestId, ...rest } =
+      state;
+    this.db
+      .prepare(
+        `INSERT INTO chat_wire_state
+           (chat_id, agent_id, session_id, spec_hash, stdout_offset, stderr_offset, next_request_id, state, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(chat_id) DO UPDATE SET
+           agent_id = excluded.agent_id, session_id = excluded.session_id,
+           spec_hash = excluded.spec_hash, stdout_offset = excluded.stdout_offset,
+           stderr_offset = excluded.stderr_offset, next_request_id = excluded.next_request_id,
+           state = excluded.state, updated_at = excluded.updated_at`,
+      )
+      .run(
+        chatId,
+        agentId,
+        sessionId,
+        specHash,
+        stdoutOffset,
+        stderrOffset,
+        nextRequestId,
+        JSON.stringify(rest),
+        Date.now(),
+      );
+  }
+
+  wireState(chatId: string): WireState | undefined {
+    const row = this.db.prepare("SELECT * FROM chat_wire_state WHERE chat_id = ?").get(chatId) as
+      | {
+          agent_id: string | null;
+          session_id: string | null;
+          spec_hash: string | null;
+          stdout_offset: number;
+          stderr_offset: number;
+          next_request_id: number;
+          state: string;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      ...(JSON.parse(row.state) as Omit<
+        WireState,
+        "agentId" | "sessionId" | "specHash" | "stdoutOffset" | "stderrOffset" | "nextRequestId"
+      >),
+      agentId: row.agent_id,
+      sessionId: row.session_id,
+      specHash: row.spec_hash,
+      stdoutOffset: row.stdout_offset,
+      stderrOffset: row.stderr_offset,
+      nextRequestId: row.next_request_id,
+    };
+  }
+
+  clearWireState(chatId: string): void {
+    this.db.prepare("DELETE FROM chat_wire_state WHERE chat_id = ?").run(chatId);
   }
 
   // ---- queue ---------------------------------------------------------------

@@ -1,0 +1,28 @@
+# Hub test files the `machine-macos` job runs (paths relative to apps/hub).
+# They cover what differs on macOS: terminals, PTYs, the terminal and agent
+# daemons, process trees, power state and macOS-only branches (`darwin`).
+# A change to any of them, or to this list, also turns the job on
+# (scripts/ci/macos-changes.sh).
+tests/agent-daemon.test.ts
+tests/build-output.test.ts
+tests/chat-continue-in-terminal.test.ts
+tests/host-battery-polling.test.ts
+tests/pty-error-hints.test.ts
+tests/resources-machines.test.ts
+tests/resources.test.ts
+tests/terminal-cold-restore.test.ts
+tests/terminal-config.test.ts
+tests/terminal-daemon-build-mismatch.test.ts
+tests/terminal-daemon-flood.test.ts
+tests/terminal-daemon-launch-retry.test.ts
+tests/terminal-daemon-nodepty-preflight.test.ts
+tests/terminal-daemon-restart.test.ts
+tests/terminal-echo-during-branch-poll.test.ts
+tests/terminal-output-flow.test.ts
+tests/terminal-output.test.ts
+tests/terminal-pool-nudge-resize.test.ts
+tests/terminal-pool-spawn-dedup.test.ts
+tests/terminal-restart-daemon.test.ts
+tests/terminal-shell-fallback.test.ts
+tests/terminal-ws.test.ts
+tests/tunnel-install-platform.test.ts

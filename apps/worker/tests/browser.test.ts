@@ -10,10 +10,11 @@ import { call, cleanup, startHub, startWorker, type TestHub, type TestWorker } f
 
 const chromium = findChromium();
 
-// RemoteHost gives browser.open 60 s (packages/host-remote/src/remote-host.ts), because a Chromium that hangs
-// on its first start is killed after 20 s and started again, which can take 44 s in all. The link's default
-// 30 s would end the call mid-retry and hide the browser's own error.
-const OPEN_TIMEOUT_MS = 60_000;
+// RemoteHost gives browser.open 150 s (packages/host-remote/src/remote-host.ts), because a Chromium that hangs
+// on its first start is killed after 20 s and started again, which takes 44 s in all, and one that keeps
+// writing files is given up to three times each attempt's budget. The link's default 30 s would end the
+// call mid-retry and hide the browser's own error.
+const OPEN_TIMEOUT_MS = 150_000;
 // The first page of a fresh Chromium starts its renderer and GPU processes, which a loaded runner can
 // take many seconds for, so the title is polled until a deadline, not a fixed number of times. A CI run
 // of #1009 saw the poll outlast 100 rounds of 50 ms while every later page loaded in under a second.
@@ -178,7 +179,10 @@ describe("browser over the link", {
     cleanup(w.root, w.stateDir);
   });
 
-  it("reads the title of a page on the worker's localhost", async () => {
+  // The package script's 90 s per-test limit would end a slow launch before the open call's own timeout does.
+  it("reads the title of a page on the worker's localhost", {
+    timeout: OPEN_TIMEOUT_MS + TITLE_TIMEOUT_MS,
+  }, async () => {
     const info = await openBrowser(w.session, "wt-a");
     assert.ok(info.pid > 0);
     assert.ok(info.profileDir.startsWith(join(w.stateDir, "browser")));

@@ -159,6 +159,11 @@ test.beforeEach(async () => {
       groupId: want.groupId,
     });
   }
+  // A drop in a gap stores a sort order, so start every test from the seeded one.
+  await trpcMutate(server.url, TOKEN, "worktrees.reorder", {
+    scope: "siblings",
+    order: Object.keys(LAYOUT).map(toWorktree),
+  });
 });
 
 test.afterAll(async () => {
@@ -302,6 +307,55 @@ test("S6: the drag preview is the row's own card, and the target shows the drop"
   });
   await sidebar.dropHeld();
   await expect.poll(async () => (await placements())["lib-x"]?.origin).toBe("lib-main");
+});
+
+test("S7: dropping in the gap above a top-level row reorders the group, and the order stays after a reload", async ({
+  page,
+}) => {
+  const { sidebar } = await open(page);
+  await sidebar.dragToWorktree("lib-y", "app-main", "top");
+  const expected = ["0:lib-y", "0:app-main", "1:app-parent", "2:app-kid", "0:lib-x"];
+  await expect.poll(async () => (await sidebar.sections())[TEAM_A]).toEqual(expected);
+  await sidebar.reload();
+  await expect.poll(async () => (await sidebar.sections())[TEAM_A]).toEqual(expected);
+});
+
+test("S7: dropping above a sibling swaps two children and keeps the parent", async ({ page }) => {
+  await trpcMutate(server.url, TOKEN, "worktrees.setOrigin", {
+    repo: "lib",
+    name: "x",
+    origin: "app-parent",
+  });
+  const { sidebar } = await open(page);
+  await expect
+    .poll(async () => (await sidebar.sections())[TEAM_A])
+    .toEqual(["0:app-main", "1:app-parent", "2:app-kid", "2:lib-x", "0:lib-y"]);
+  await sidebar.dragToWorktree("lib-x", "app-kid", "top");
+  await expect
+    .poll(async () => (await sidebar.sections())[TEAM_A])
+    .toEqual(["0:app-main", "1:app-parent", "2:lib-x", "2:app-kid", "0:lib-y"]);
+  expect((await placements())["lib-x"]).toEqual({ origin: "app-parent", groupId: TEAM_A });
+});
+
+test("S7: dropping a worktree from another group into a gap joins that group at that position", async ({
+  page,
+}) => {
+  await trpcMutate(server.url, TOKEN, "worktrees.setGroup", {
+    worktreeId: "lib-y",
+    groupId: TEAM_B,
+  });
+  const { sidebar } = await open(page);
+  await sidebar.dragToWorktree("lib-y", "lib-x", "top");
+  await expect
+    .poll(async () => (await placements())["lib-y"])
+    .toEqual({
+      origin: null,
+      groupId: TEAM_A,
+    });
+  const expected = ["0:app-main", "1:app-parent", "2:app-kid", "0:lib-y", "0:lib-x"];
+  await expect.poll(async () => (await sidebar.sections())[TEAM_A]).toEqual(expected);
+  await sidebar.reload();
+  await expect.poll(async () => (await sidebar.sections())[TEAM_A]).toEqual(expected);
 });
 
 const pin = (repo: string, name: string) =>

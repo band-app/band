@@ -1,6 +1,7 @@
 import type { UsageReader } from "@band-app/coding-agent";
 import type { Environment, EnvironmentIssue } from "@band-app/environment";
 import type { TerminalBackend } from "./pty";
+import type { HostResources } from "./resources";
 
 /**
  * A machine that owns worktrees. Every git, file, process, PTY, search, LSP
@@ -21,6 +22,12 @@ export interface Host {
   readonly git: HostGit;
   readonly worktree: HostWorktree;
   readonly fs: HostFs;
+  /**
+   * Single files anywhere on the machine, for a person's `band open` and external
+   * tabs. Unlike `fs` it is not limited to the worker's folders, so only a call
+   * made for a device token may reach it (the relay and the direct path do not).
+   */
+  readonly external: HostExternalFiles;
   /** Which folder holds each repo on this host, and how a repo gets there. */
   readonly repos: HostRepos;
   readonly search: HostSearch;
@@ -34,6 +41,8 @@ export interface Host {
   readonly desktop: HostDesktop;
   /** Speech-to-text calls to a server this host can reach, such as one on its loopback. */
   readonly speech: HostSpeech;
+  /** Memory, CPU and disk use of the machine and of its Band processes. */
+  readonly resources: HostResources;
   /** Same interface the hub's terminal service already uses. */
   readonly pty: TerminalBackend;
   readonly scripts: HostScripts;
@@ -57,6 +66,11 @@ export interface Host {
    * no worker plugins.
    */
   readonly plugins?: HostPlugins;
+  /**
+   * The worker services of installed extensions. Only a remote host has it: the hub's own machine
+   * runs none.
+   */
+  readonly extensions?: HostExtensions;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +94,7 @@ export interface HostCapabilities {
    * Absent from the hub's own host and older workers.
    */
   chatOwnership?: boolean;
-  /** One key per worker plugin the host runs, named by the plugin id (`simulator`). */
+  /** One key per worker plugin the host runs, named by the plugin id. */
   [plugin: string]: boolean | undefined;
 }
 
@@ -309,6 +323,39 @@ export interface FsStat {
   mtimeMs: number;
 }
 
+/** What {@link HostExternalFiles.stat} found at a path. */
+export type ExternalFileStat =
+  | { outcome: "missing" }
+  | { outcome: "denied" }
+  | {
+      outcome: "ok";
+      /** The path with every symlink resolved. */
+      canonicalPath: string;
+      /** The kind of entry the path points at, links followed. */
+      kind: FsEntryKind;
+      /** True when the path itself is a symbolic link. */
+      symlink: boolean;
+      size: number;
+      /** Whether the worker's user may read it. */
+      readable: boolean;
+      /** Whether the worker's user may write it. */
+      writable: boolean;
+    };
+
+export interface HostExternalFiles {
+  /** Never rejects for a missing path or a permission problem; those are outcomes. */
+  stat(path: string): Promise<ExternalFileStat>;
+  /** Reads a regular file, not a link. Rejects with the OS error code (`EACCES`). */
+  readFile(path: string): Promise<Uint8Array>;
+  /**
+   * Streams a regular file, not a link, optionally a byte range (inclusive ends). Rejects with the
+   * OS error code or "Symbolic links are not allowed" before the first chunk.
+   */
+  readStream(path: string, range?: { start: number; end: number }): Stream<Uint8Array>;
+  /** Replaces an existing regular file, not a link. Never creates one. */
+  writeFile(path: string, data: string | Uint8Array): Promise<void>;
+}
+
 export interface FsEntry {
   name: string;
   kind: FsEntryKind;
@@ -496,6 +543,18 @@ export interface AgentStdio {
    * survives the link and the worker restarting. The same `agentId` reattaches it.
    */
   held?: { agentId: string; specHash: string | null };
+  /**
+   * Stops using the process and leaves it running. Set for a held agent, which the worker's agent
+   * daemon keeps. Without it the only way to let go of the agent is `kill`.
+   */
+  release?(): void;
+  /**
+   * Tells the agent daemon the worker has stored the output up to these byte offsets, so it may
+   * drop it. Set for a held agent. Until then the daemon keeps every byte for a reattach.
+   */
+  ack?(offsets: { stdout: number; stderr: number }): void;
+  /** Bytes of stderr the worker has read from a held agent so far. */
+  stderrOffset?(): number;
   /** The process holds a GitHub token from the hub's vault in its environment. */
   ghToken?: boolean;
   /**
@@ -511,7 +570,11 @@ export interface HostAcp {
   /** The launch for an agent, or a message saying why it can't start (for example, not installed). */
   resolveLaunch(def: AcpAgentDefinition): Promise<AcpLaunch | string>;
   /** Starts the adapter in `cwd`. Rejects when the process cannot start. */
-  spawn(launch: AcpLaunch, cwd: string, options?: { held?: boolean }): Promise<AgentStdio>;
+  spawn(
+    launch: AcpLaunch,
+    cwd: string,
+    options?: { held?: boolean; owned?: boolean },
+  ): Promise<AgentStdio>;
 }
 
 /** What it takes to start a stdio MCP server (plan step 4.4). */
@@ -873,6 +936,37 @@ export interface DirectGrant {
   token: string;
   /** Epoch ms after which the listener refuses the token. */
   expiresAt: number;
+}
+
+/** One extension the worker should run (`extensions.sync`). */
+export interface HostExtensionItem {
+  id: string;
+  version: string;
+  /** SHA-256 of the extension's `.tar.gz`, hex. */
+  sha256: string;
+}
+
+/** One worker service of an extension and where it stands on a worker. */
+export interface HostExtensionServiceState {
+  extensionId: string;
+  serviceId: string;
+  capability: string;
+  version: string;
+  state: "running" | "restarting" | "stopped" | "failed" | "not-eligible";
+  reason?: string;
+}
+
+export interface HostExtensionStates {
+  services: HostExtensionServiceState[];
+  /** Extensions the worker could not set up at all, with the reason. */
+  problems: Array<{ extensionId: string; reason: string }>;
+}
+
+export interface HostExtensions {
+  /** Makes the worker's running set equal `items` and returns the states. */
+  sync(items: HostExtensionItem[]): Promise<HostExtensionStates>;
+  /** The states now, without changing anything. */
+  status(): Promise<HostExtensionStates>;
 }
 
 export interface HostPlugins {

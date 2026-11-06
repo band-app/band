@@ -218,7 +218,8 @@ export class ChatOwner {
 
   close(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    for (const rt of this.runtimes.values()) rt.stop();
+    // The worker is going away, not the chats: agents in the daemon keep running.
+    for (const rt of this.runtimes.values()) rt.release();
     this.runtimes.clear();
     this.store.close();
   }

@@ -13,6 +13,7 @@ import { describeHostVersion } from "../../services/_utils/host-version";
 import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";
 import { agentLoginService } from "../../services/agent-login-service";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
+import { extensionWorkerService } from "../../services/extension-worker-service";
 import {
   AgentCommandError,
   hostAgentCommandService,
@@ -94,17 +95,32 @@ export const hostsRouter = t.router({
       const latest = releaseCheckService.status().latest;
       return {
         hosts: await Promise.all(
-          hosts.map(async (h) => ({
-            ...h,
-            sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
-            ...describeHostVersion(h, HUB_VERSION, latest),
-            update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
-            // Command names and paths are admin detail, like the update error above.
-            agentCommands: ctx.admin ? h.agentCommands : {},
-            agentCommandStates: (await hostAgentCommandService.states(h, ctx.admin)).map((state) =>
-              ctx.admin ? state : { ...state, override: null, effective: null },
-            ),
-          })),
+          hosts.map(async (h) => {
+            const services = await extensionWorkerService.viewFor(h.id, h.status === "online");
+            // The row's capabilities come from the worker's hello. A service that starts later
+            // adds its capability, which is what the "+" menu offers an extension panel for.
+            const running = services.filter((v) => v.state === "running").map((v) => v.capability);
+            return {
+              ...h,
+              capabilities: [...new Set([...h.capabilities, ...running])],
+              sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+              // The reason can hold the service's stderr, so it is admin detail.
+              extensionServices: services.map((v) =>
+                ctx.admin || v.state === "running" || v.state === "not-eligible"
+                  ? v
+                  : { ...v, reason: "see an admin for details" },
+              ),
+              ...describeHostVersion(h, HUB_VERSION, latest),
+              update: redactUpdateError(workerUpdateService.statusOf(h.id), ctx.admin),
+              autoUpdate: workerUpdateService.isAuto(h.id),
+              autoUpdateDeferredSince: workerUpdateService.deferredSince(h.id),
+              // Command names and paths are admin detail, like the update error above.
+              agentCommands: ctx.admin ? h.agentCommands : {},
+              agentCommandStates: (await hostAgentCommandService.states(h, ctx.admin)).map(
+                (state) => (ctx.admin ? state : { ...state, override: null, effective: null }),
+              ),
+            };
+          }),
         ),
       };
     }),
@@ -164,7 +180,10 @@ export const hostsRouter = t.router({
         const st = hubUpdateService.status();
         return {
           ...st,
-          // The log tail can name paths and registries, so only an admin sees it.
+          // The log tail, the backup path and the build-in state can name paths and registries, so only an admin sees them.
+          logTail: ctx.admin ? st.logTail : "",
+          lastRun: ctx.admin ? st.lastRun : null,
+          builtInBlockedReason: ctx.admin ? st.builtInBlockedReason : null,
           error: st.error && !ctx.admin ? "The hub update failed." : st.error,
         };
       })(),
@@ -251,6 +270,24 @@ export const hostsRouter = t.router({
       }
     }),
 
+  /**
+   * Turns the automatic update of one worker on or off. A worker with it on installs the hub's
+   * version by itself when it is behind and no agent the restart would end runs on it.
+   */
+  setAutoUpdate: adminProcedure
+    .input(z.object({ hostId: z.string().min(1), auto: z.boolean() }))
+    .mutation(({ input }) => {
+      try {
+        workerUpdateService.setAuto(input.hostId, input.auto);
+      } catch (err) {
+        if (err instanceof WorkerUpdateError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        throw err;
+      }
+      return { hostId: input.hostId, auto: input.auto };
+    }),
+
   /** Dismisses a failed update, so the Update button is offered again. */
   dismissUpdate: adminProcedure
     .input(z.object({ hostId: z.string().min(1) }))
@@ -286,6 +323,8 @@ export const hostsRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: `No worker "${input.hostId}"` });
       }
       emit({ kind: "host-status-changed", hostId: input.hostId });
+      // A worker that drops to restricted stops its extension services, and one raised starts them.
+      void extensionWorkerService.syncHost(input.hostId);
       return { hostId: input.hostId, trust: input.trust };
     }),
 

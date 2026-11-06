@@ -1,11 +1,13 @@
 import { execFile, spawn } from "node:child_process";
-import { createReadStream, watch as fsWatch } from "node:fs";
+import { createReadStream, constants as fsConstants, watch as fsWatch } from "node:fs";
 import {
+  access,
   cp,
   glob as fsGlob,
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   realpath,
@@ -15,7 +17,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { getUsageReader } from "@band-app/coding-agent";
 import type {
   AcpAgentDefinition,
@@ -26,6 +28,7 @@ import type {
   ClaudeDefaults,
   ExecOptions,
   ExecResult,
+  ExternalFileStat,
   FileChange,
   FsEntryKind,
   FsStat,
@@ -34,11 +37,13 @@ import type {
   HostAgentEnv,
   HostBrowser,
   HostDesktop,
+  HostExternalFiles,
   HostFs,
   HostGit,
   HostInfo,
   HostLsp,
   HostMcp,
+  HostResources,
   HostScripts,
   HostSearch,
   HostSpeech,
@@ -78,6 +83,7 @@ import { prependBinDirs } from "./process/path";
 import { isOnBattery } from "./process/power";
 import { probeTools } from "./process/tools";
 import { browseFolder, defaultReposDir, LocalRepos } from "./repos/host-repos";
+import { LocalResources } from "./resources/resources";
 import { listFiles, streamMatches } from "./search/ripgrep-client";
 import { loadEnvironment, loadScriptCommand } from "./setup/repo-config";
 import { prepareScriptRun } from "./setup/script-run";
@@ -118,6 +124,12 @@ export interface LocalHostOptions {
    * passes one. Without it, agents are this process's children and die with it.
    */
   agentHolder?: AgentHolder;
+  /**
+   * What `host.resources` describes. `selfKind` says whether this process is the hub or a worker,
+   * and `stateDir` is the folder it keeps its state and the terminal daemon's run dir in. A worker
+   * passes its state dir; the default is `<BAND_HOME>` for a worker.
+   */
+  resources?: { selfKind?: "hub" | "worker"; stateDir?: () => string };
 }
 
 /**
@@ -137,6 +149,7 @@ export class LocalHost implements Host {
     list: (repoPath): Promise<WorktreeInfo[]> => listWorktrees(repoPath),
   };
   readonly fs: HostFs = { ...localFs, browse: (path) => browseFolder(path) };
+  readonly external: HostExternalFiles = localExternal;
   readonly repos: LocalRepos;
   readonly search: HostSearch = {
     stream: (query: SearchQuery, root: string): Stream<SearchMatch> =>
@@ -155,7 +168,8 @@ export class LocalHost implements Host {
       const adapterVersion = adapterVersionOf(launch);
       return adapterVersion ? { ...launch, adapterVersion } : launch;
     },
-    spawn: (launch, cwd, options) => this.spawnAgent(launch, cwd, options?.held === true),
+    spawn: (launch, cwd, options) =>
+      this.spawnAgent(launch, cwd, options?.held === true, options?.owned === true),
   };
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),
@@ -170,6 +184,7 @@ export class LocalHost implements Host {
   };
   readonly desktop: HostDesktop = { open: () => openDesktop() };
   readonly speech: HostSpeech = { transcribe: (req) => transcribeLocally(req) };
+  readonly resources: HostResources;
   readonly scripts: HostScripts = {
     command: (worktree) => scriptCommand(this, worktree),
     runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
@@ -208,15 +223,24 @@ export class LocalHost implements Host {
       mappingsFile: options.repos?.mappingsFile ?? (() => join(bandHome(), "repo-mappings.json")),
       reposDir: options.repos?.reposDir ?? defaultReposDir,
     });
+    this.resources = new LocalResources({
+      selfKind: options.resources?.selfKind ?? "worker",
+      stateDir: options.resources?.stateDir ?? bandHome,
+    });
     // The first probe takes about half a second (seven processes). Starting it
     // now keeps the first `hosts.list` after boot from waiting on it.
     void this.toolVersions();
   }
 
   /** Starts an agent in the agent daemon when this host has one, else as this process's child. */
-  private async spawnAgent(launch: AcpLaunch, cwd: string, held: boolean): Promise<AgentStdio> {
-    // Only the hub's `acp.spawn` asks for a held agent: it acknowledges the output and reattaches.
-    // A worker-owned chat reads its agent directly and would block at the buffer cap.
+  private async spawnAgent(
+    launch: AcpLaunch,
+    cwd: string,
+    held: boolean,
+    owned: boolean,
+  ): Promise<AgentStdio> {
+    // The hub's `acp.spawn` asks for a held agent: it acknowledges the output and reattaches. A
+    // worker-owned chat asks too (`owned`), and its handle acknowledges what the chat has read.
     const holder = held ? this.options.agentHolder : undefined;
     if (!holder) return spawnAgentProcess(launch, cwd);
     let agentId: string;
@@ -234,6 +258,7 @@ export class LocalHost implements Host {
         specHash: launch.specHash ?? null,
         adapterVersion: launch.adapterVersion ?? null,
         ghToken: Boolean(launch.env.GH_TOKEN),
+        ...(owned ? { owned: true } : {}),
       });
       agentId = record.agentId;
     } catch (err) {
@@ -455,6 +480,80 @@ function kindOf(entry: {
   if (entry.isFile()) return "file";
   return "other";
 }
+
+function errnoOf(err: unknown): string | undefined {
+  return (err as NodeJS.ErrnoException | undefined)?.code;
+}
+
+async function canAccess(path: string, mode: number): Promise<boolean> {
+  try {
+    await access(path, mode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Refuses anything but a regular file that is not a link, so a write never follows or creates. */
+async function assertPlainFile(path: string): Promise<void> {
+  if (!isAbsolute(path) || path.includes("\0")) throw new Error("Absolute path required");
+  const stats = await lstat(path);
+  if (stats.isSymbolicLink()) throw new Error("Symbolic links are not allowed");
+  if (!stats.isFile()) throw new Error("Not a regular file");
+}
+
+const localExternal: HostExternalFiles = {
+  async stat(path): Promise<ExternalFileStat> {
+    if (!isAbsolute(path) || path.includes("\0")) throw new Error("Absolute path required");
+    try {
+      const symlink = (await lstat(path)).isSymbolicLink();
+      const canonicalPath = await realpath(path);
+      const stats = await stat(canonicalPath);
+      return {
+        outcome: "ok",
+        canonicalPath,
+        kind: kindOf(stats),
+        symlink,
+        size: stats.size,
+        readable: await canAccess(canonicalPath, fsConstants.R_OK),
+        writable: await canAccess(canonicalPath, fsConstants.W_OK),
+      };
+    } catch (err) {
+      const code = errnoOf(err);
+      if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP")
+        return { outcome: "missing" };
+      if (code === "EACCES" || code === "EPERM") return { outcome: "denied" };
+      throw err;
+    }
+  },
+  async readFile(path) {
+    await assertPlainFile(path);
+    // O_NOFOLLOW closes the window between the lstat above and the open.
+    return new Uint8Array(
+      await readFile(path, { flag: fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW }),
+    );
+  },
+  async *readStream(path, range) {
+    await assertPlainFile(path);
+    // O_NOFOLLOW closes the window between the lstat above and the open.
+    const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      for await (const chunk of handle.createReadStream({ ...range, autoClose: false })) {
+        const buffer = chunk as Buffer;
+        yield new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      }
+    } finally {
+      await handle.close();
+    }
+  },
+  async writeFile(path, data) {
+    await assertPlainFile(path);
+    // No O_CREAT, so a file removed since the check is not created; O_NOFOLLOW refuses a swapped-in link.
+    await writeFile(path, data, {
+      flag: fsConstants.O_WRONLY | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+    });
+  },
+};
 
 const localFs: Omit<HostFs, "browse"> = {
   async stat(path, options): Promise<FsStat> {

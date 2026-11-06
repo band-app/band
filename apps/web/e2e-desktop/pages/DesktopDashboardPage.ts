@@ -5,13 +5,19 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CenterTabStrip } from "../../e2e/pages/CenterTabStrip";
 import { ChatPanePage } from "../../e2e/pages/ChatPanePage";
+import { FileViewerPage } from "../../e2e/pages/FileViewerPage";
 import { TerminalSurface } from "../../e2e/pages/TerminalSurface";
 
 export class DesktopDashboardPage {
   readonly chat: ChatPanePage;
+  readonly tabStrip: CenterTabStrip;
+  readonly fileViewer: FileViewerPage;
 
   constructor(private readonly page: Page) {
+    this.tabStrip = new CenterTabStrip(page);
+    this.fileViewer = new FileViewerPage(page);
     // Cross-origin hub auth comes from the preload, so no token is passed.
     this.chat = new ChatPanePage(page, "app://placeholder", "");
   }
@@ -30,23 +36,19 @@ export class DesktopDashboardPage {
     return urls;
   }
 
-  /** The Simulator tab's screen. Its `data-route` is `direct`, `hub` or `pending`. */
-  get remoteScreen(): Locator {
-    return this.page.getByTestId("remote-screen");
+  /** The tab of a file inside the open worktree, by its worktree-relative path. */
+  fileTab(path: string): Locator {
+    return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
-  /** Waits until the Simulator tab's screen connects by the given route. */
-  async waitForRemoteScreenRoute(route: "direct" | "hub", timeout = 360_000): Promise<void> {
-    await test.step(`Wait for the simulator screen to stream ${route === "direct" ? "from this Mac" : "through the hub"}`, async () => {
-      await expect(this.remoteScreen).toHaveAttribute("data-route", route, { timeout });
-    });
+  /** The tab of a file on this Mac that is outside every worktree (read and saved by the app). */
+  localFileTab(absolutePath: string): Locator {
+    return this.page.getByTestId(`center-file-tab--desktop:${absolutePath}`);
   }
 
-  /** Waits until the Simulator tab's screen shows frames. */
-  async waitForRemoteScreenLive(timeout = 360_000): Promise<void> {
-    await test.step("Wait for the simulator screen to go live", async () => {
-      await expect(this.remoteScreen).toHaveAttribute("data-phase", "live", { timeout });
-    });
+  /** The notice line the dashboard shows for a message such as a refused folder drop. */
+  noticeContaining(text: string): Locator {
+    return this.page.getByTestId("toast-host__notice--info").filter({ hasText: text });
   }
 
   /** The window's current `app://` URL. */
@@ -125,6 +127,15 @@ export class DesktopDashboardPage {
         }
       ).__BAND_DESKTOP__;
       return await bridge.invoke("pick_folder");
+    });
+  }
+
+  /** Click a worktree's card in the sidebar, an in-app navigation that adds to worktree history. */
+  async switchWorktree(repoName: string, worktreeId: string): Promise<void> {
+    await test.step(`Switch to worktree ${worktreeId}`, async () => {
+      const card = this.page.getByTestId(`repo-list__worktree-card--${worktreeId}`);
+      if (!(await card.isVisible())) await this.repoHeader(repoName).click();
+      await card.dispatchEvent("click");
     });
   }
 

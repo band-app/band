@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MERGE_METHODS, mergeMethodLabel, mergeStatus, relativeTime } from "../src/merge.ts";
+import {
+  MERGE_METHODS,
+  mergeMethodLabel,
+  mergeStatus,
+  queueBadgeLabel,
+  queueEstimate,
+  queueLine,
+  relativeTime,
+} from "../src/merge.ts";
 
 const open = (mergeState: string) => mergeStatus({ state: "open", mergeState });
 
@@ -74,5 +82,41 @@ describe("relativeTime", () => {
     assert.equal(relativeTime("2024-01-02T10:00:00Z", now), "2 years ago");
     assert.equal(relativeTime("2026-01-02T10:00:00Z", now), "now");
     assert.equal(relativeTime("not a date", now), "not a date");
+  });
+});
+
+describe("merge queue", () => {
+  const queue = {
+    state: "awaiting_checks" as const,
+    position: 2,
+    total: 3,
+    estimatedTimeToMerge: 300,
+  };
+
+  it("words the entry like the web's Checks panel", () => {
+    assert.equal(queueLine(queue), "In merge queue, position 2 of 3 (awaiting checks)");
+    assert.equal(
+      queueLine({ state: "queued", position: 1 }),
+      "In merge queue, position 1 (queued)",
+    );
+    assert.equal(queueBadgeLabel(queue), "In merge queue · position 2");
+  });
+
+  it("formats the estimate", () => {
+    assert.equal(queueEstimate(300), "about 5 min");
+    assert.equal(queueEstimate(30), "less than a minute");
+    assert.equal(queueEstimate(5400), "about 1 h 30 min");
+    assert.equal(queueEstimate(null), null);
+    assert.equal(queueEstimate(0), null);
+  });
+
+  it("offers no merge for a queued PR and still does for an open clean one", () => {
+    const queued = mergeStatus({ state: "open", mergeState: "clean", mergeQueue: queue });
+    assert.equal(queued.canMerge, false);
+    assert.equal(queued.queued, true);
+    assert.equal(queued.label, "In merge queue");
+    const open = mergeStatus({ state: "open", mergeState: "clean" });
+    assert.equal(open.canMerge, true);
+    assert.equal(open.queued, undefined);
   });
 });

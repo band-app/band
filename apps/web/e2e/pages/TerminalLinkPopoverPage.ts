@@ -16,6 +16,24 @@ export class TerminalLinkPopoverPage {
     this.openInSystemBrowser = page.getByTestId("terminal-link-popover__open-system");
   }
 
+  /** The popover's top-left corner in viewport pixels. */
+  async corner(): Promise<{ x: number; y: number }> {
+    // The popover animates in: read the corner once it stops moving.
+    let last = "";
+    await expect
+      .poll(async () => {
+        const box = await this.popover.boundingBox();
+        const now = box ? `${box.x},${box.y}` : "";
+        const settled = now !== "" && now === last;
+        last = now;
+        return settled;
+      })
+      .toBe(true);
+    const box = await this.popover.boundingBox();
+    if (!box) throw new Error("the link popover is not open");
+    return { x: box.x, y: box.y };
+  }
+
   async copy(): Promise<void> {
     await test.step("Copy the link", async () => {
       await this.copyButton.click();

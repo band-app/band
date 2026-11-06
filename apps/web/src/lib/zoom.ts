@@ -163,3 +163,30 @@ export function zoomOut(): void {
 export function zoomReset(): void {
   applyZoomLevel(DEFAULT_ZOOM);
 }
+
+/**
+ * Convert a length measured in viewport pixels (`clientX`, `getBoundingClientRect`, a dnd-kit
+ * pointer delta) to the CSS pixels an element under the `<html>` zoom takes in `left`, `top`
+ * or `transform`. The zoom scales those CSS pixels again, so a bare viewport value lands at
+ * value × zoom.
+ */
+export function viewportToCssPx(value: number, zoom = getCurrentZoomLevel()): number {
+  return value / zoom;
+}
+
+/** Offsets in viewport pixels, as dnd-kit hands them out. */
+export interface ViewportOffset {
+  x: number;
+  y: number;
+  scaleX?: number;
+  scaleY?: number;
+}
+
+/** The same transform with its offsets in CSS pixels, for a style under the `<html>` zoom. */
+export function viewportTransformToCss<T extends ViewportOffset>(
+  transform: T | null,
+  zoom = getCurrentZoomLevel(),
+): T | null {
+  if (!transform) return transform;
+  return { ...transform, x: transform.x / zoom, y: transform.y / zoom };
+}

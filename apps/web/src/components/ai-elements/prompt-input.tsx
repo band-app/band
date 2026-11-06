@@ -3,7 +3,6 @@ import { cn } from "@band-app/ui";
 import { CircleStop, CornerDownLeft, FileIcon, Loader2, Plus, X } from "lucide-react";
 import type {
   ComponentProps,
-  DragEvent,
   FormEvent,
   FormEventHandler,
   HTMLAttributes,
@@ -11,7 +10,9 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { buildLineReference, type ChatInsertDetail } from "@/dashboard";
+import { dragHasFiles, planDrop } from "../../lib/chat-file-drop";
 import { clientStorage } from "../../lib/client-state";
 
 let fileIdCounter = 0;
@@ -86,6 +87,7 @@ export const PromptInput = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [micRecording, setMicRecording] = useState(false);
   const draftStorageKey = draftKey ? `band-draft:${draftKey}` : null;
   const [hasText, setHasText] = useState(() => readDraft(draftStorageKey).trim().length > 0);
   const [inputValue, setInputValue] = useState(() => readDraft(draftStorageKey));
@@ -170,26 +172,82 @@ export const PromptInput = ({
     [onSubmit, fileEntries, draftStorageKey],
   );
 
-  const handleDragOver = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
+  /** Inserts text at the textarea's cursor, on its own line(s). */
+  const insertAtCursor = useCallback((text: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const lead = before === "" || before.endsWith("\n") ? "" : "\n";
+    const tail = after === "" || after.startsWith("\n") ? "" : "\n";
+    const inserted = `${lead}${text}${tail}`;
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    nativeSetter?.call(textarea, before + inserted + after);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = before.length + inserted.length;
   }, []);
 
-  const handleDragLeave = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
+  // The whole chat pane is the drop target, not just the composer. A native
+  // listener on the pane (the form's closest `[data-chat-pane]`) sees drags
+  // over the message list too.
+  const [paneEl, setPaneEl] = useState<HTMLElement | null>(null);
+  const [paneDragging, setPaneDragging] = useState(false);
+  useEffect(() => {
+    setPaneEl((formRef.current?.closest("[data-chat-pane]") as HTMLElement | null) ?? null);
   }, []);
 
-  const handleDrop = useCallback(
-    (e: DragEvent) => {
+  useEffect(() => {
+    const target: HTMLElement | null = paneEl ?? formRef.current;
+    if (!target) return;
+    const onOver = (e: globalThis.DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
+      setIsDragging(true);
+      setPaneDragging(true);
+    };
+    const onLeave = (e: globalThis.DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      if (e.relatedTarget instanceof Node && target.contains(e.relatedTarget)) return;
       setIsDragging(false);
-      if (e.dataTransfer.files.length > 0) {
-        addFiles(e.dataTransfer.files);
-      }
-    },
-    [addFiles],
-  );
+      setPaneDragging(false);
+    };
+    const onDropEvent = (e: globalThis.DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      setPaneDragging(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length === 0) return;
+      void planDrop(files, worktreeIdRef.current).then((plan) => {
+        if (plan.attach.length > 0) addFiles(plan.attach);
+        if (plan.paths.length > 0) insertAtCursor(plan.paths.join("\n"));
+        setNotice(plan.notice);
+      });
+    };
+    const reset = () => {
+      setIsDragging(false);
+      setPaneDragging(false);
+    };
+    target.addEventListener("dragenter", onOver);
+    target.addEventListener("dragover", onOver);
+    target.addEventListener("dragleave", onLeave);
+    target.addEventListener("drop", onDropEvent);
+    window.addEventListener("dragend", reset);
+    return () => {
+      target.removeEventListener("dragenter", onOver);
+      target.removeEventListener("dragover", onOver);
+      target.removeEventListener("dragleave", onLeave);
+      target.removeEventListener("drop", onDropEvent);
+      window.removeEventListener("dragend", reset);
+    };
+  }, [paneEl, addFiles, insertAtCursor]);
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
@@ -305,9 +363,6 @@ export const PromptInput = ({
       data-testid="prompt-input__form"
       className={cn("relative flex w-full flex-col gap-1", className)}
       onSubmit={handleSubmit}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
       onPaste={handlePaste}
       ref={formRef}
       {...props}
@@ -327,9 +382,22 @@ export const PromptInput = ({
           setCommandHint,
           notice,
           setNotice,
+          micRecording,
+          setMicRecording,
         }}
       >
         {children}
+        {paneDragging &&
+          paneEl &&
+          createPortal(
+            <div
+              data-testid="chat-pane__drop-overlay"
+              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/60 bg-background/80 text-sm font-medium text-primary"
+            >
+              Drop to attach
+            </div>,
+            paneEl,
+          )}
       </PromptInputContext.Provider>
     </form>
   );
@@ -350,6 +418,9 @@ interface PromptInputContextValue {
   /** A line shown full width between the field and the settings row (a dictation error). */
   notice: string | null;
   setNotice: (notice: string | null) => void;
+  /** The mic is recording; Send hides and the listening group takes its place. */
+  micRecording: boolean;
+  setMicRecording: (recording: boolean) => void;
 }
 
 const PromptInputContext = createContext<PromptInputContextValue>({
@@ -366,6 +437,8 @@ const PromptInputContext = createContext<PromptInputContextValue>({
   setCommandHint: () => {},
   notice: null,
   setNotice: () => {},
+  micRecording: false,
+  setMicRecording: () => {},
 });
 
 export function usePromptInputContext() {
@@ -420,7 +493,11 @@ function FilePreview({ file, onRemove }: { file: File; onRemove: () => void }) {
   const isImage = file.type.startsWith("image/");
 
   return (
-    <div className="group/file relative flex items-center gap-2 rounded-md border border-border/50 bg-muted/50 px-2 py-1.5">
+    <div
+      data-testid="prompt-input__attachment"
+      data-file-name={file.name}
+      className="group/file relative flex items-center gap-2 rounded-md border border-border/50 bg-muted/50 px-2 py-1.5"
+    >
       {isImage ? (
         <img
           src={URL.createObjectURL(file)}
@@ -507,7 +584,7 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
         className={cn(
           // Match the icon-button shell used by SessionHistoryMenu / ModeMenu /
           // AgentModelMenu in the action row so all affordances line up.
-          "inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
           className,
         )}
         aria-label="Attach files"
@@ -649,16 +726,18 @@ export const PromptInputSubmit = ({
   onStop,
   ...props
 }: PromptInputSubmitProps) => {
-  const { hasContent } = useContext(PromptInputContext);
+  const { hasContent, micRecording } = useContext(PromptInputContext);
   const isSubmitting = status === "submitted";
   const isStreaming = status === "streaming";
-  const isBusy = isSubmitting || isStreaming;
 
   // One button at a time. Typed text or an attachment always gets Send, even
   // while a turn runs (the server queues it); an empty input during a turn
   // gets Stop.
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div
+      className={cn("flex shrink-0 items-center gap-1", micRecording && "invisible")}
+      aria-hidden={micRecording || undefined}
+    >
       {isStreaming && !hasContent ? (
         <button
           type="button"
@@ -689,12 +768,7 @@ export const PromptInputSubmit = ({
           disabled={!hasContent}
           className={cn(
             "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md transition-colors",
-            hasContent
-              ? cn(
-                  "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
-                  isBusy ? "text-primary" : "text-foreground",
-                )
-              : "text-muted-foreground",
+            hasContent ? "text-foreground hover:bg-accent" : "text-muted-foreground",
             className,
           )}
           {...props}

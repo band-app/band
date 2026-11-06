@@ -9,6 +9,7 @@ import {
   TERMINAL_LINK_MENU_EVENT,
   type TerminalLinkMenuDetail,
 } from "../lib/terminal-links";
+import { viewportToCssPx } from "../lib/zoom";
 
 const COPIED_MS = 1500;
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
@@ -52,7 +53,7 @@ export function TerminalLinkPopover({ worktreeId }: { worktreeId: string }) {
         <span
           aria-hidden
           className="pointer-events-none fixed size-0"
-          style={{ left: menu.x, top: menu.y }}
+          style={{ left: viewportToCssPx(menu.x), top: viewportToCssPx(menu.y) }}
         />
       </PopoverAnchor>
       <PopoverContent

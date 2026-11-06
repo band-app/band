@@ -23,6 +23,15 @@ brew install --cask band-app/band/band
 
 Or download `Band-<version>-apple-silicon.dmg` from the [latest release](https://github.com/band-app/band/releases/latest), open it and drag Band to Applications. The app starts its own hub and runs worktrees on this Mac. Nothing else is needed, except `git` and the coding agents you want to use. Install and log in to those yourself.
 
+### The local hub is a background service
+
+In local mode the app installs its hub as a launchd user agent, `app.band.hub` (`~/Library/LaunchAgents/app.band.hub.plist`), on the first start. The agent runs the bundled hub with the app's own executable, so no Node install is needed. It uses `~/.band` as before, and the port and admin token come from `~/.band/settings.json`. The plist holds no secret. Output goes to `~/.band/server.log`.
+
+- Quitting the app does not stop the hub. A browser, the phone app and the CLI keep working. Terminals also keep running, because the terminal daemon is not stopped when the hub restarts.
+- After an app update, the first start restarts the hub service, waits until it answers, and then restarts the worker service if the app installed one. Both services run the new bundle from then on.
+- In Settings > Hub, choosing a remote hub asks whether to keep the local hub running (the default) or stop it. Stop boots the service out and removes its plist, so it does not start at the next login. Switching back to Local installs and starts it again.
+- To remove it by hand, run `launchctl bootout gui/$(id -u)/app.band.hub` and delete the plist.
+
 ### The `band` CLI
 
 The app bundles the `band` CLI. Two ways to put it on your PATH:
@@ -64,3 +73,5 @@ A worker is a computer that runs worktrees and agents for a hub. Add one with a 
 ## Updating
 
 See [Updates](updates.md) for the desktop app, workers and the hub, and for the version rules between them.
+
+An npm hub run by systemd or launchd can update itself. If you use an `update.sh` script and a timer, see [Move from update.sh and the timer](updates.md#move-from-updatesh-and-the-timer).

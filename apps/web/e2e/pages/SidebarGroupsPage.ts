@@ -259,6 +259,46 @@ export class SidebarGroupsPage extends SidebarPinsDragPage {
     });
   }
 
+  /**
+   * Drags a worktree's row onto a group's header in steps and, while the button is down, reads
+   * how far the drag preview sits from where it should be: the row's top-left corner plus the
+   * pointer's travel. Returns the largest gap in pixels seen over the drag.
+   */
+  async dragToGroupMeasuringPreview(worktreeId: string, groupId: string): Promise<number> {
+    return await test.step(`Drag ${worktreeId} onto ${groupId} and measure the preview`, async () => {
+      const row = this.row(worktreeId);
+      await row.scrollIntoViewIfNeeded();
+      const from = await row.boundingBox();
+      const to = await this.groupHeader(groupId).boundingBox();
+      expect(from).not.toBeNull();
+      expect(to).not.toBeNull();
+      const startX = from!.x + Math.min(40, from!.width / 2);
+      const startY = from!.y + from!.height / 2;
+      const endX = to!.x + Math.min(40, to!.width / 2);
+      const endY = to!.y + to!.height / 2;
+      const preview = this.groupsPage.getByTestId("repo-list__drag-overlay");
+      let worst = 0;
+      await this.groupsPage.mouse.move(startX, startY);
+      await this.groupsPage.mouse.down();
+      await this.groupsPage.mouse.move(startX + 12, startY + 12, { steps: 4 });
+      const steps = 6;
+      for (let i = 1; i <= steps; i++) {
+        const x = startX + 12 + ((endX - startX - 12) * i) / steps;
+        const y = startY + 12 + ((endY - startY - 12) * i) / steps;
+        await this.groupsPage.mouse.move(x, y);
+        await expect(preview).toBeVisible();
+        const box = await preview.boundingBox();
+        expect(box).not.toBeNull();
+        const gapX = Math.abs(box!.x - (from!.x + (x - startX)));
+        const gapY = Math.abs(box!.y - (from!.y + (y - startY)));
+        worst = Math.max(worst, gapX, gapY);
+      }
+      await this.groupsPage.mouse.up();
+      await this.settleAfterDrag();
+      return worst;
+    });
+  }
+
   get moveChildrenDialog(): Locator {
     return this.groupsPage.getByTestId("group-move-dialog");
   }

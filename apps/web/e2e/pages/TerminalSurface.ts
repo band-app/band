@@ -65,6 +65,37 @@ export class TerminalSurface {
     }, this.worktreeId);
   }
 
+  /**
+   * The terminal's size in cells, the wrapper's and the xterm container's boxes in CSS pixels
+   * and the window size, as JSON text. A spec attaches it when the terminal's output check
+   * fails, so a CI failure shows whether the terminal was laid out at 8 columns.
+   */
+  async describeLayout(): Promise<string> {
+    const layout = await this.page.evaluate((id) => {
+      const cache = (
+        globalThis as unknown as {
+          __bandTerminalCache__?: Map<string, { worktreeId: string; getTerminal(): unknown }>;
+        }
+      ).__bandTerminalCache__;
+      const entry = [...(cache?.values() ?? [])].find((e) => e.worktreeId === id);
+      const term = entry?.getTerminal() as { cols: number; rows: number } | null;
+      const box = (el: Element | null) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { width: r.width, height: r.height };
+      };
+      const wrapper = document.querySelector('[data-testid="terminal-wrapper"]');
+      return {
+        cols: term?.cols ?? null,
+        rows: term?.rows ?? null,
+        wrapper: box(wrapper),
+        xterm: box(wrapper?.querySelector(".xterm") ?? null),
+        window: { innerWidth: window.innerWidth, innerHeight: window.innerHeight },
+      };
+    }, this.worktreeId);
+    return JSON.stringify(layout, null, 2);
+  }
+
   /** The terminal's size in cells; null until xterm has loaded. */
   async readSize(): Promise<{ cols: number; rows: number } | null> {
     return await this.page.evaluate((id) => {

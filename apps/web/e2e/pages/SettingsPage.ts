@@ -47,6 +47,7 @@ export type SettingsNavId =
   | "agent-logins"
   | "voice"
   | "mcp"
+  | "extensions"
   | "agent-hooks"
   | "context"
   | "runners"

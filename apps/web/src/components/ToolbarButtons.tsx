@@ -109,7 +109,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
             <DialogTitle>Resources</DialogTitle>
           </DialogHeader>
           <div className="flex-1 min-h-0">
-            <ResourcesPage />
+            <ResourcesPage onNavigate={() => setShowResourcesDialog(false)} />
           </div>
         </DialogContent>
       </Dialog>

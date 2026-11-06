@@ -48,9 +48,13 @@ import {
   loadHubChoice,
   saveHubChoice,
 } from "./services/hub-choice.js";
+import { HubService } from "./services/hub-service.js";
 import { KeepAwakeController } from "./services/keep-awake.js";
+import { LocalPreviewRegistry } from "./services/local-preview.js";
 import { createLogger } from "./services/log.js";
+import { OpenFileQueue } from "./services/open-file-queue.js";
 import { killPort } from "./services/port.js";
+import { scriptLaunchRefusal } from "./services/script-launch-guard.js";
 import { createTestSecretStore, setSecretStore } from "./services/secret-store.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
 import { applyTestProfile } from "./services/test-profile.js";
@@ -67,6 +71,15 @@ import { createMainWindow } from "./window.js";
 // sessionData, logs and crash dumps to a test directory, so a test instance never shares the
 // real app's profile (Electron resolves it from the account home, not `$HOME`). The app does
 // not call `requestSingleInstanceLock`, `setAsDefaultProtocolClient` or `setLoginItemSettings`.
+{
+  // Before anything else starts: a script argument without ELECTRON_RUN_AS_NODE must not boot the app.
+  const refusal = scriptLaunchRefusal(process.argv, app.isPackaged);
+  if (refusal) {
+    process.stderr.write(refusal);
+    process.exit(64);
+  }
+}
+
 applyTestProfile(app);
 
 const log = createLogger("desktop");
@@ -102,6 +115,15 @@ interface AppState {
 
 /** One per process: the blocker outlives the window and is released on quit. */
 const keepAwake = new KeepAwakeController(powerSaveBlocker);
+
+// Finder's Open With and `open -a Band <file>` deliver paths here, possibly before the app is
+// ready or any window exists. They wait in the queue until the renderer drains them.
+const openFiles = new OpenFileQueue();
+const localPreview = new LocalPreviewRegistry();
+app.on("open-file", (event, path) => {
+  event.preventDefault();
+  openFiles.push(path);
+});
 
 /** powerMonitor listeners survive window close; wire them at most once. */
 let powerEventsWired = false;
@@ -143,6 +165,12 @@ const updates = new UpdateController({
       win.webContents.send(Events.updaterStatusChanged, status);
     }
   },
+});
+
+/** The local hub, run as the launchd agent `app.band.hub` so it outlives the app. */
+const hubService = new HubService({
+  appVersion: app.getVersion(),
+  isPackaged: app.isPackaged,
 });
 
 /** The worker this Mac may run for a remote hub, from the bundle in this app. */
@@ -280,7 +308,14 @@ async function connectHub(choice: HubChoice): Promise<string> {
   });
   let token: string;
   const runningToken = state.managed.isRunning() ? tryGetToken() : null;
-  if (runningToken) {
+  if (hubService.supported) {
+    const started = await hubService.ensureRunning({
+      webDir: state.webDir,
+      port: getConfiguredPort(),
+    });
+    state.port = started.port;
+    token = started.token;
+  } else if (runningToken) {
     // Switching back to local while the hub we spawned is still up.
     token = runningToken;
   } else {
@@ -308,14 +343,14 @@ async function connectHub(choice: HubChoice): Promise<string> {
 let switchingHub = false;
 
 /** Starts a switch after the IPC reply. False while another one runs, which the picker reports. */
-function scheduleHubSwitch(choice: HubChoice): boolean {
+function scheduleHubSwitch(choice: HubChoice, opts: { stopLocal: boolean }): boolean {
   if (switchingHub) return false;
   switchingHub = true;
-  setImmediate(() => void switchHub(choice));
+  setImmediate(() => void switchHub(choice, opts));
   return true;
 }
 
-async function switchHub(choice: HubChoice): Promise<void> {
+async function switchHub(choice: HubChoice, opts: { stopLocal: boolean }): Promise<void> {
   const win = state.mainWindow;
   if (!win || win.isDestroyed()) {
     switchingHub = false;
@@ -328,8 +363,10 @@ async function switchHub(choice: HubChoice): Promise<void> {
       if (!state.uiDir) {
         throw new Error("The UI build was not found, which a remote hub needs. Run `pnpm build`.");
       }
+      // The local hub service keeps running unless the person chose to stop it.
+      if (opts.stopLocal) hubService.stop();
       await state.managed.kill();
-      if (app.isPackaged) await killPort(state.port);
+      if (app.isPackaged && !hubService.supported) await killPort(state.port);
     }
     const url = await connectHub(choice);
     state.hubChoice = choice;
@@ -414,15 +451,15 @@ async function cleanupOnce(): Promise<void> {
   state.stopUpdateChecks = null;
   state.unregisterIpc?.();
   state.browserManager?.destroyAll();
+  // The hub service keeps running after the app quits. Only a hub this run spawned as its own
+  // child (a platform with no launchd) stops here.
+  const spawnedHub = state.managed.isRunning();
   await state.managed.kill();
 
-  // Only force-free the port in packaged builds where we own the server
-  // (never with a remote hub selected, when there is no local server).
+  // Only force-free the port in packaged builds where we own the server.
   // In dev the orchestrating script (or an external dev:web invocation)
   // owns it — blindly killing 3456 could nuke another Band instance.
-  // A hub this run spawned is also ours with a remote choice saved: "Use local"
-  // on the unreachable-hub page starts one and keeps the saved remote choice.
-  if (app.isPackaged && (state.hubChoice.mode === "local" || state.managed.isRunning())) {
+  if (app.isPackaged && spawnedHub) {
     await killPort(state.port);
   }
 }
@@ -518,6 +555,7 @@ async function bootstrap(): Promise<void> {
       createAppHandler(state.uiDir, {
         host: () => state.appHost,
         hubOrigin: () => state.rendererHub?.url ?? null,
+        localPreview: (pathname) => localPreview.serve(pathname),
       }),
     );
   }
@@ -620,6 +658,7 @@ async function bootstrap(): Promise<void> {
       getChoice: () => state.hubChoice,
       // The reload replaces the page that asked, so it runs after the reply.
       switchTo: scheduleHubSwitch,
+      localServiceInstalled: () => hubService.isInstalled(),
     },
     managed: state.managed,
     browserManager: state.browserManager,
@@ -630,8 +669,20 @@ async function bootstrap(): Promise<void> {
     },
     updates,
     keepAwake,
+    openFiles,
+    localPreview,
+  });
+  // Tell the page when a path arrives. A path queued earlier is drained by the page on start.
+  const stopOpenFileEvents = openFiles.onPush(() => {
+    const win = state.mainWindow;
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send(Events.openFilesRequested);
   });
   state.unregisterIpc = () => {
+    stopOpenFileEvents();
     unregisterIpc();
     unregisterHubConfig();
   };

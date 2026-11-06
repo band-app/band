@@ -68,9 +68,14 @@ export const editorRouter = t.router({
           path: ["lineEnd"],
         }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // An agent's call names its chat (the relay sets the header from an agent's token; the MCP
+      // endpoint sets `ctx.agent`). It keeps to the worker's folders. A person's device token and a
+      // person's terminal (a relay call with a terminal id and no chat) do not: a terminal already
+      // gives the worker user's full shell.
+      const caller = ctx.agent || ctx.chatId ? "agent" : "person";
       try {
-        return await editorService.openFile(input);
+        return await editorService.openFile({ ...input, caller });
       } catch (err) {
         if (err instanceof EditorOpenError) {
           throw new TRPCError({ code: err.code, message: err.message });

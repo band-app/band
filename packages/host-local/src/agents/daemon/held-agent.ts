@@ -142,6 +142,16 @@ export class HeldAgentProcess implements AgentStdio {
     (stream === "stdout" ? this.stdout : this.stderr).push(fresh);
   }
 
+  /** Releases output the reader has stored. A failure leaves the bytes in the daemon, which is safe. */
+  ack(offsets: { stdout: number; stderr: number }): void {
+    if (this.done) return;
+    void this.holder.ack(this.record.agentId, offsets).catch(() => undefined);
+  }
+
+  stderrOffset(): number {
+    return this.next.stderr;
+  }
+
   private finish(exit: AgentExit): void {
     if (this.done) return;
     this.done = true;

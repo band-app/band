@@ -1,10 +1,14 @@
 import type { FileEditorManifest } from "@band-app/plugin-api";
 import { Button, Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
-import { CircleAlert, Loader2 } from "lucide-react";
+import { CircleAlert, Loader2, Save } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useAdapter } from "../../dashboard/context";
+import { useIsDesktop } from "../../hooks/useIsDesktop";
+import { getClientId } from "../../lib/activity-reporter";
 import { fileName, setExtensionDirty } from "../../lib/extensions";
 import { hubFetch, hubUrl } from "../../lib/hub-config";
+import { isDesktop } from "../../lib/is-desktop";
+import { trpc } from "../../lib/trpc-client";
 
 /** What a caller (the agent tools, later) can do with an open editor tab. */
 export interface ExtensionEditorHandle {
@@ -19,6 +23,43 @@ interface Props {
   editor: FileEditorManifest;
   /** The tab is the selected one in a group that is on screen. */
   visible: boolean;
+  /** Forces the compact layout (the iOS embed route). Otherwise it follows the viewport. */
+  compact?: boolean;
+}
+
+/** How often the tab tells the hub it is still open, so a hub restart does not lose it. */
+const REGISTER_KEEPALIVE_MS = 60_000;
+
+type EditorLayout = "compact" | "regular";
+
+/** The selection an editor reports. Anything that is not shaped like one is dropped. */
+function parseSelection(value: unknown): {
+  address: string;
+  kind: string;
+  label: string;
+  text?: string;
+  rect?: { x: number; y: number; width: number; height: number };
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.address !== "string" || typeof v.kind !== "string" || typeof v.label !== "string") {
+    return null;
+  }
+  const rect = v.rect as Record<string, unknown> | undefined;
+  const validRect =
+    rect &&
+    ["x", "y", "width", "height"].every(
+      (k) => typeof rect[k] === "number" && Number.isFinite(rect[k] as number),
+    );
+  return {
+    address: v.address.slice(0, 1000),
+    kind: v.kind.slice(0, 64),
+    label: v.label.slice(0, 300),
+    ...(typeof v.text === "string" ? { text: v.text } : {}),
+    ...(validRect
+      ? { rect: rect as unknown as { x: number; y: number; width: number; height: number } }
+      : {}),
+  };
 }
 
 const MCP_TIMEOUT_MS = 60_000;
@@ -47,7 +88,7 @@ const THEME_TOKENS = [
   "link",
 ] as const;
 
-function readTheme(): { mode: "dark" | "light"; tokens: Record<string, string> } {
+export function readTheme(): { mode: "dark" | "light"; tokens: Record<string, string> } {
   const root = document.documentElement;
   const style = getComputedStyle(root);
   const tokens: Record<string, string> = {};
@@ -103,10 +144,14 @@ function toBytes(value: unknown): Uint8Array | null {
  * a `MessageChannel` it hands over with `band:hello`.
  */
 export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function ExtensionEditor(
-  { worktreeId, filePath, extensionId, editor, visible },
+  { worktreeId, filePath, extensionId, editor, visible, compact },
   ref,
 ) {
   const adapter = useAdapter();
+  const wide = useIsDesktop();
+  const layout: EditorLayout = compact === true || !(wide || isDesktop) ? "compact" : "regular";
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const portRef = useRef<MessagePort | null>(null);
@@ -127,6 +172,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
   const [saveError, setSaveError] = useState<string | null>(null);
   /** The file changed on disk while this tab has unsaved edits. */
   const [conflict, setConflict] = useState<Uint8Array | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   const fetchBytes = useCallback(async (): Promise<Uint8Array> => {
     const res = await hubFetch(fileRoute(worktreeId, filePath));
@@ -146,6 +192,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
   const markDirty = useCallback(
     (dirty: boolean) => {
       dirtyRef.current = dirty;
+      setDirty(dirty);
       setExtensionDirty(worktreeId, filePath, dirty);
     },
     [worktreeId, filePath],
@@ -229,6 +276,21 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
           if (bytes) void save(bytes);
           break;
         }
+        case "selection": {
+          const selection = data.selection === null ? null : parseSelection(data.selection);
+          if (data.selection !== null && selection === null) break;
+          trpc.editors.setSelection
+            .mutate({
+              clientId: getClientId(),
+              worktreeId,
+              file: filePath,
+              extensionId,
+              editorId: editor.id,
+              selection,
+            })
+            .catch(() => {});
+          break;
+        }
         case "mcp": {
           const message = data.message as { id?: string | number } | undefined;
           const entry = message?.id !== undefined ? pendingMcp.current.get(message.id) : undefined;
@@ -243,7 +305,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
           break;
       }
     },
-    [markDirty, save],
+    [markDirty, save, worktreeId, filePath, extensionId, editor.id],
   );
 
   const handshake = useCallback(async () => {
@@ -267,6 +329,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
           type: "init",
           file: { name, path: filePath, mime: mimeFor(name), bytes: copy, readOnly: false },
           theme: readTheme(),
+          layout: layoutRef.current,
         },
         [copy],
       );
@@ -275,25 +338,111 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
     }
   }, [filePath, fetchBytes, onMessage]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      mcp: (message) =>
-        new Promise((resolve, reject) => {
-          if (!portRef.current) {
-            reject(new Error("The editor is not ready"));
-            return;
-          }
-          const timer = window.setTimeout(() => {
-            pendingMcp.current.delete(message.id);
-            reject(new Error("The editor did not answer in time"));
-          }, MCP_TIMEOUT_MS);
-          pendingMcp.current.set(message.id, { resolve, reject, timer });
-          portRef.current.postMessage({ type: "mcp", message });
-        }),
-    }),
+  const mcp = useCallback(
+    (message: { id: string | number; [key: string]: unknown }): Promise<unknown> =>
+      new Promise((resolve, reject) => {
+        if (!portRef.current) {
+          reject(new Error("The editor is not ready"));
+          return;
+        }
+        const timer = window.setTimeout(() => {
+          pendingMcp.current.delete(message.id);
+          reject(new Error("The editor did not answer in time"));
+        }, MCP_TIMEOUT_MS);
+        pendingMcp.current.set(message.id, { resolve, reject, timer });
+        portRef.current.postMessage({ type: "mcp", message });
+      }),
     [],
   );
+
+  useImperativeHandle(ref, () => ({ mcp }), [mcp]);
+
+  // Tell the editor when the layout changes (a window resized to or from phone width).
+  useEffect(() => {
+    if (ready) post({ type: "layout", layout });
+  }, [ready, layout, post]);
+
+  // Agent access: the hub knows this tab while it is ready and open, and sends it editor calls.
+  const tabIdentity = useCallback(
+    () => ({
+      clientId: getClientId(),
+      worktreeId,
+      file: filePath,
+      extensionId,
+      editorId: editor.id,
+    }),
+    [worktreeId, filePath, extensionId, editor.id],
+  );
+  useEffect(() => {
+    if (!ready) return;
+    const identity = tabIdentity();
+    const register = () =>
+      void trpc.editors.register.mutate({ ...identity, dirty: dirtyRef.current }).catch(() => {});
+    register();
+    const timer = window.setInterval(register, REGISTER_KEEPALIVE_MS);
+    return () => {
+      window.clearInterval(timer);
+      void trpc.editors.unregister
+        .mutate({
+          clientId: identity.clientId,
+          worktreeId: identity.worktreeId,
+          file: identity.file,
+          extensionId: identity.extensionId,
+        })
+        .catch(() => {});
+    };
+  }, [ready, tabIdentity]);
+  const registeredDirtyRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!ready) {
+      registeredDirtyRef.current = null;
+      return;
+    }
+    // The first run is covered by the keepalive effect's immediate register.
+    const first = registeredDirtyRef.current === null;
+    registeredDirtyRef.current = dirty;
+    if (first) return;
+    void trpc.editors.register.mutate({ ...tabIdentity(), dirty }).catch(() => {});
+  }, [ready, dirty, tabIdentity]);
+  useEffect(() => {
+    if (!ready) return;
+    return adapter.subscribeStatusEvents((event) => {
+      if (event.kind !== "editor-call" || event.clientId !== getClientId()) return;
+      const request = event.editorRequest as
+        | {
+            callId?: string;
+            file?: string;
+            extensionId?: string;
+            message?: Record<string, unknown>;
+          }
+        | undefined;
+      if (
+        !request?.callId ||
+        !request.message ||
+        event.worktreeId !== worktreeId ||
+        request.file !== filePath ||
+        request.extensionId !== extensionId ||
+        (typeof request.message.id !== "string" && typeof request.message.id !== "number")
+      ) {
+        return;
+      }
+      const callId = request.callId;
+      const id = request.message.id;
+      const answer = (message: Record<string, unknown>) =>
+        void trpc.editors.result
+          .mutate({ clientId: getClientId(), callId, message })
+          .catch(() => {});
+      mcp({ ...request.message, id }).then(
+        (reply) => answer(reply as Record<string, unknown>),
+        (err) =>
+          answer({
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32000, message: err instanceof Error ? err.message : String(err) },
+          }),
+      );
+    });
+  }, [ready, adapter, worktreeId, filePath, extensionId, mcp]);
 
   // Another window saved, or something else changed the file: the file watch reports its folder.
   useEffect(() => {
@@ -388,6 +537,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
       data-extension-id={extensionId}
       data-editor-id={editor.id}
       data-ready={ready ? "true" : "false"}
+      data-layout={layout}
       className="relative flex h-full w-full flex-col overflow-hidden outline-none"
     >
       {conflict && (
@@ -450,6 +600,28 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
           </div>
         )}
       </div>
+      {layout === "compact" && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-border bg-background px-3 py-1.5">
+          <span
+            className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+            data-testid="extension-editor__dirty"
+            data-dirty={dirty ? "true" : "false"}
+          >
+            {fileName(filePath)}
+            {dirty ? " · unsaved changes" : ""}
+          </span>
+          <Button
+            size="sm"
+            variant={dirty ? "default" : "outline"}
+            disabled={!ready || !dirty}
+            data-testid="extension-editor__save"
+            onClick={() => post({ type: "requestSave" })}
+          >
+            <Save className="size-3.5" aria-hidden="true" />
+            Save
+          </Button>
+        </div>
+      )}
     </div>
   );
 });

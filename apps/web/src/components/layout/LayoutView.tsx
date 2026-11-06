@@ -25,6 +25,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { beginLayoutResize, endLayoutResize } from "../../lib/layout-resizing";
+import { useFileDropTarget } from "../../lib/use-file-drop-target";
 import {
   type BranchNode,
   computeGeometry,
@@ -88,6 +89,11 @@ export interface LayoutReactProps {
   paneMode?: boolean;
   /** Smallest size of a group on either axis, in px. */
   minGroupSize?: number;
+  /**
+   * Makes every group's tab strip open files dragged from the file manager as
+   * tabs (desktop app only). Called with a short notice, such as for a dropped folder.
+   */
+  fileDropNotify?: (message: string) => void;
   onReady: (api: LayoutApi) => void;
 }
 
@@ -95,6 +101,8 @@ interface LayoutContextValue extends Omit<LayoutReactProps, "onReady"> {
   api: LayoutApi;
   minGroupSize: number;
 }
+
+const noop = () => {};
 
 const LayoutContext = createContext<LayoutContextValue | null>(null);
 
@@ -134,6 +142,7 @@ export function LayoutReact(props: LayoutReactProps) {
     kind,
     disableDnd,
     paneMode,
+    fileDropNotify,
     minGroupSize = 100,
   } = props;
   const [api] = useState(() => new LayoutApi());
@@ -175,6 +184,7 @@ export function LayoutReact(props: LayoutReactProps) {
       kind,
       disableDnd,
       paneMode,
+      fileDropNotify,
     }),
     [
       api,
@@ -189,6 +199,7 @@ export function LayoutReact(props: LayoutReactProps) {
       kind,
       disableDnd,
       paneMode,
+      fileDropNotify,
     ],
   );
 
@@ -341,6 +352,7 @@ const GroupView = memo(function GroupView({
   const elRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
+  const fileDrop = useFileDropTarget(ctx.fileDropNotify ?? noop);
 
   useLayoutEffect(() => {
     group.setElement(elRef.current);
@@ -454,7 +466,12 @@ const GroupView = memo(function GroupView({
         visibility: hidden ? "hidden" : undefined,
       }}
     >
-      <div className="band-layout-header" data-testid="layout-header">
+      <div
+        className="band-layout-header"
+        data-testid="layout-header"
+        data-file-drop-over={fileDrop.over ? "" : undefined}
+        {...(ctx.fileDropNotify ? fileDrop.handlers : {})}
+      >
         {Prefix && (
           <div className="band-layout-pre-actions">
             <Prefix {...actionProps} />
