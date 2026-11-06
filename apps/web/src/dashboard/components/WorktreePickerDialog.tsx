@@ -60,7 +60,7 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
   const { isPinned, toggle: togglePinned } = usePinnedWorktrees();
 
   const [query, setQuery] = useState("");
-  // Scroll mode: opened by holding Cmd (Alt off macOS) and scrolling. The
+  // Scroll mode: opened by holding Cmd+Shift (Alt+Shift off macOS) and scrolling. The
   // highlight follows the wheel and releasing the modifier opens it.
   const [scrollMode, setScrollMode] = useState(false);
   const [highlight, setHighlight] = useState<string | undefined>(undefined);
@@ -150,8 +150,16 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
   // scrolling.
   useEffect(() => {
     const mac = isMacPlatform();
-    const modHeld = (e: { metaKey: boolean; altKey: boolean; ctrlKey: boolean }) =>
+    const baseHeld = (e: { metaKey: boolean; altKey: boolean; ctrlKey: boolean }) =>
       mac ? e.metaKey && !e.ctrlKey : e.altKey && !e.ctrlKey && !e.metaKey;
+    // Opening needs Shift too, so a stray Cmd+scroll never opens the switcher.
+    // Once open in scroll mode, releasing Shift keeps it open.
+    const modHeld = (e: {
+      metaKey: boolean;
+      altKey: boolean;
+      ctrlKey: boolean;
+      shiftKey: boolean;
+    }) => baseHeld(e) && (e.shiftKey || scrollModeRef.current);
     const commit = () => {
       if (!scrollModeRef.current || !openRef.current) return;
       const entry = entriesRef.current[indexRef.current];
@@ -172,7 +180,9 @@ export function WorktreePickerDialog({ open, onOpenChange }: WorktreePickerDialo
         return;
       }
       const unit = e.deltaMode === 1 ? LINE_HEIGHT_PX : e.deltaMode === 2 ? 400 : 1;
-      accRef.current += e.deltaY * unit;
+      // Shift turns a vertical wheel into horizontal deltas on macOS and Chromium.
+      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      accRef.current += delta * unit;
       const steps = Math.trunc(accRef.current / WHEEL_STEP_PX);
       if (steps === 0) return;
       accRef.current -= steps * WHEEL_STEP_PX;
