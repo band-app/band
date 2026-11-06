@@ -82,8 +82,8 @@ export async function handleChatSubmit(
   // choices are, so it can show the prompt and send again.
   let continued: ContinuedFrom | undefined;
   try {
-    // A chat its worker owns waits for that worker instead: the message goes to the outbox.
-    const gate = chatOwnershipService.isOwned(chatId)
+    // A chat its worker owns waits for that worker (online, or offline within its lease) instead: the message goes to the outbox.
+    const gate = chatOwnershipService.waitsForOwner(chatId)
       ? { worktreeId, continued: undefined }
       : await followService.gate(worktreeId, { chatId, agentId: codingAgentId });
     worktreeId = gate.worktreeId;

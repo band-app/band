@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ChatEvent } from "@band-app/shared/chat-events";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { agentText, maxId, openStream, TEST_TOKEN, turnEnded } from "./helpers/acp-chat";
-import { startWorld, type Worker, type World } from "./helpers/checkpoint-world";
+import { LEASE_MS, startWorld, type Worker, type World } from "./helpers/checkpoint-world";
 import { waitFor } from "./helpers/wait-for";
 
 interface LogRow {
@@ -309,7 +309,8 @@ describe("requests from the hub side (S4)", () => {
   it("delivers a message sent while the worker is offline once, after it reconnects", async () => {
     // Let the wake-up's turn finish first, so the count below is only this message.
     await waitQuiet(wt, chatId);
-    await w.killWorker(owner);
+    // Within the lease the owner may still be running the chat, so the message waits for it.
+    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
     const sent = await sendViaHub(wt, chatId, "sent while offline");
     expect(sent).toMatchObject({ ok: true, queued: true });
     const queued = await w.q<{ messages: Array<{ text: string }> }>("queue.get", {
@@ -494,9 +495,11 @@ describe("restore while the owner is offline (S6)", () => {
       { label: "a checkpoint to restore from", timeoutMs: 30_000 },
     );
     const sessionId = (await getChat(chatId))?.activeSessionId;
-    await w.killWorker(owner);
+    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
     const waiting = await sendViaHub(wt, chatId, "sent before the restore");
     expect(waiting).toMatchObject({ ok: true, queued: true });
+    // A restore waits for the owner's lease to run out.
+    await new Promise((r) => setTimeout(r, LEASE_MS + 700));
 
     const result = await w.m<{ worktreeId: string }>("checkpoints.restore", {
       worktreeId: wt,
@@ -545,7 +548,7 @@ describe("a worker that stops owning chats (S9)", () => {
     const chatId = "take-back-chat";
     await w.turn(wt, chatId, "owned first");
     expect((await getChat(chatId))?.ownerHostId).toBe(owner.hostId);
-    await w.killWorker(owner);
+    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
     expect(await sendViaHub(wt, chatId, "waited for the worker")).toMatchObject({ queued: true });
 
     // The same machine comes back with a build that does not own chats.
