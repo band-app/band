@@ -28,6 +28,8 @@ export function createContext(opts?: {
   req?: { headers: HeaderBag };
   admin?: boolean;
   tokenId?: string;
+  /** The MCP endpoint serves agents only, so it sets this whatever headers came. */
+  agent?: boolean;
 }) {
   return {
     chatId: readHeader(opts?.req?.headers, CHAT_ID_HEADER),
@@ -35,6 +37,7 @@ export function createContext(opts?: {
     terminalId: readHeader(opts?.req?.headers, TERMINAL_ID_HEADER),
     admin: opts?.admin === true,
     tokenId: opts?.tokenId,
+    agent: opts?.agent === true,
   };
 }
 
