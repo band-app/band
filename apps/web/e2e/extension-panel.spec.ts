@@ -177,7 +177,7 @@ test("S1: the + menu offers the panel on the worker that runs the service, not o
   await expect(panel.menuItem).toHaveCount(0);
 });
 
-test("S2: frames arrive in the panel, input waits for Take control, and a call returns", async ({
+test("S2: frames arrive in the panel, there is no Take control, input and a call work at once", async ({
   page,
 }) => {
   const panel = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "screen");
@@ -185,34 +185,23 @@ test("S2: frames arrive in the panel, input waits for Take control, and a call r
   await panel.openFromMenu();
   await expect(panel.frames).toHaveText("3");
   await expect(panel.callResult).toHaveText('{"hello":"panel"}');
-  await expect(panel.mode).toHaveText("View only");
-
-  // Input before control is dropped by the hub: nothing comes back.
-  await panel.sendButton.click();
-  await expect(panel.echoes).toHaveCount(0);
-
-  await panel.takeControl();
-  await expect(panel.mode).toHaveText("Controlling");
+  await expect(panel.controlButton).toHaveCount(0);
   await expect(panel.pageMode).toHaveText("control");
+
   await panel.sendButton.click();
   await expect(panel.echoes).toHaveCount(1);
   await expect(panel.echoes.first()).toHaveText("echo:tap");
 });
 
-test("S8: a panel with defaultControl starts in control and Release stops input; one without starts view-only", async ({
+test("S8: a panel with defaultControl behaves the same: no button, input works", async ({
   page,
 }) => {
   const auto = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "auto");
   await auto.open(worktreeA);
   await auto.openFromMenu();
   await expect(auto.frames).toHaveText("3");
-  await expect(auto.mode).toHaveText("Controlling");
+  await expect(auto.controlButton).toHaveCount(0);
   await expect(auto.pageMode).toHaveText("control");
-  await auto.sendButton.click();
-  await expect(auto.echoes).toHaveCount(1);
-
-  await auto.controlButton.click();
-  await expect(auto.mode).toHaveText("View only");
   await auto.sendButton.click();
   await expect(auto.echoes).toHaveCount(1);
 });

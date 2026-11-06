@@ -384,8 +384,13 @@ export function useWorktreeTabs(worktreeId: string) {
 
   /** Starts a chat with `agentId` (undefined for the default agent) and shows it. */
   const create = useCallback(
-    async (agentId: string | undefined) => {
-      const result = await client.agentSessions.launch.mutate({ worktreeId, agentId, mode: "gui" });
+    async (agentId: string | undefined, prompt?: string) => {
+      const result = await client.agentSessions.launch.mutate({
+        worktreeId,
+        agentId,
+        prompt,
+        mode: "gui",
+      });
       const chatId = result.chatId;
       if (!chatId) throw new Error(result.notice ?? "The hub started no chat.");
       setCreated((c) => (c.includes(chatId) ? c : [...c, chatId]));
@@ -403,21 +408,34 @@ export function useWorktreeTabs(worktreeId: string) {
     [client, worktreeId, write, queryClient, chatsKey],
   );
 
-  /** Opens a shell in this worktree and shows it. */
-  const createTerminal = useCallback(async () => {
-    const { terminalId } = await client.terminal.create.mutate({ worktreeId });
-    setCreatedTerms((c) => (c.includes(terminalId) ? c : [...c, terminalId]));
-    chosen.current = true;
-    setActive(terminalId);
-    const tabsNow = viewRef.current.tabs;
-    write(
-      tabsNow.some((t) => t.id === terminalId)
-        ? tabsNow
-        : [...tabsNow, { id: terminalId, kind: "term" as const }],
-      terminalId,
-    );
-    void queryClient.invalidateQueries({ queryKey: terminalsKey });
-  }, [client, worktreeId, write, queryClient, terminalsKey]);
+  /**
+   * Opens a shell in this worktree and shows it. `command` runs as the shell starts, and
+   * `typeText` is written at its prompt without Enter (a quick command with Append Enter off).
+   */
+  const createTerminal = useCallback(
+    async (start?: { command?: string; typeText?: string }) => {
+      const { terminalId } = await client.terminal.create.mutate({
+        worktreeId,
+        command: start?.command,
+      });
+      setCreatedTerms((c) => (c.includes(terminalId) ? c : [...c, terminalId]));
+      chosen.current = true;
+      setActive(terminalId);
+      const tabsNow = viewRef.current.tabs;
+      write(
+        tabsNow.some((t) => t.id === terminalId)
+          ? tabsNow
+          : [...tabsNow, { id: terminalId, kind: "term" as const }],
+        terminalId,
+      );
+      void queryClient.invalidateQueries({ queryKey: terminalsKey });
+      // The tab is already shown, so a failed send leaves a visible terminal, not a hidden one.
+      if (start?.typeText) {
+        await client.terminal.send.mutate({ terminalId, data: start.typeText });
+      }
+    },
+    [client, worktreeId, write, queryClient, terminalsKey],
+  );
 
   return {
     ready,

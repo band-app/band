@@ -4,9 +4,9 @@
  * it, each over its own way of opening the stream.
  *
  * The plugin's text messages go down as text frames and its bytes as binary frames. A session
- * starts view-only: every message from the viewer is dropped, except the mode request
- * `{"type":"control","enabled":true}`, until the viewer asks for control. Binary frames from the
- * viewer are always dropped.
+ * passes the viewer's text messages to the plugin from the start. The legacy mode request
+ * `{"type":"control",...}` is accepted and ignored. Binary frames from the viewer are always
+ * dropped.
  */
 
 import { createLogger } from "@band-app/logger";
@@ -24,15 +24,14 @@ export interface PluginStreamLink {
   close(): void;
 }
 
-/** A text frame the viewer sends to switch between view-only and control, as the desktop viewer does. */
-function parseModeRequest(text: string): boolean | null {
+/** The legacy mode request a page may still send. It has no effect. */
+function isModeRequest(text: string): boolean {
   try {
     const msg = JSON.parse(text) as { type?: unknown; enabled?: unknown };
-    if (msg.type === "control" && typeof msg.enabled === "boolean") return msg.enabled;
+    return msg.type === "control" && typeof msg.enabled === "boolean";
   } catch {
-    // Not JSON, so not a request.
+    return false;
   }
-  return null;
 }
 
 /**
@@ -45,7 +44,6 @@ export async function bridgePluginStream(
   open: () => Promise<PluginStreamLink>,
   onOpenFailed: (message: string) => void,
 ): Promise<void> {
-  let controlling = false;
   let stream: PluginStreamLink | null = null;
 
   ws.on("message", (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
@@ -53,13 +51,8 @@ export async function bridgePluginStream(
     const text = (Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as Buffer)).toString(
       "utf8",
     );
-    const enabled = parseModeRequest(text);
-    if (enabled !== null) {
-      controlling = enabled;
-      log.debug("%s is now %s", label, enabled ? "controlled" : "view-only");
-      return;
-    }
-    if (controlling && stream && text.length <= MAX_INPUT_BYTES) stream.send(text);
+    if (isModeRequest(text)) return;
+    if (stream && text.length <= MAX_INPUT_BYTES) stream.send(text);
   });
   ws.once("close", () => stream?.close());
 

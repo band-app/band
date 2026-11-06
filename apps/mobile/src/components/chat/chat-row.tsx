@@ -1,5 +1,6 @@
 import type { Entry } from "@band-app/client/transcript";
 import type { ChatEventFile } from "@band-app/shared/chat-events";
+import { parseSelectionBlock } from "@band-app/shared/editor-selection-block";
 import { useRouter } from "expo-router";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react-native";
 import { memo, useEffect, useRef, useState } from "react";
@@ -180,6 +181,37 @@ function CopyButton({ row }: { row: ChatRow }) {
   );
 }
 
+/** The user's text, with a kept editor selection shown as a chip; a tap shows the selected text. */
+function UserText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const parsed = parseSelectionBlock(text);
+  const body = parsed ? parsed.body : text;
+  return (
+    <>
+      {body.trim() ? <Markdown text={body} /> : null}
+      {parsed ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={parsed.chipLabel}
+          disabled={!parsed.text}
+          onPress={() => setOpen((v) => !v)}
+          style={styles.selectionChip}
+          testID="chat__selection-chip"
+        >
+          <Text style={styles.selectionChipText} numberOfLines={1}>
+            {parsed.chipLabel}
+          </Text>
+        </Pressable>
+      ) : null}
+      {parsed?.text && open ? (
+        <Text style={styles.selectionText} testID="chat__selection-text">
+          {parsed.text}
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
 function Body({ row }: { row: ChatRow }) {
   switch (row.kind) {
     case "user":
@@ -192,7 +224,7 @@ function Body({ row }: { row: ChatRow }) {
             {row.message.files?.map((file) => (
               <FileView key={file.url} file={file} />
             ))}
-            {row.message.text.trim() ? <Markdown text={row.message.text} /> : null}
+            <UserText text={row.message.text} />
           </View>
           <CopyButton row={row} />
         </View>
@@ -266,6 +298,16 @@ export const ChatRowView = memo(
 );
 
 const styles = StyleSheet.create({
+  selectionChip: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.muted,
+    borderRadius: 12,
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  selectionChipText: { color: colors.foreground, fontSize: 13 },
+  selectionText: { color: colors.mutedForeground, fontSize: 13, marginTop: 4 },
   row: { paddingHorizontal: 16, paddingVertical: 6 },
   muted: { color: colors.mutedForeground, fontSize: 15 },
   userWrap: { alignItems: "flex-end", paddingTop: 8 },

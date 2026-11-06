@@ -24,7 +24,7 @@ export function pluginStreamTarget(
 
 /**
  * Bridges a viewer's WebSocket to a plugin's live stream on the worktree's worker (see
- * `bridgePluginStream` for the view-only rule). The hub carries every frame, so it asks the plugin
+ * `bridgePluginStream` for the input rule). The hub carries every frame, so it asks the plugin
  * for the `hub` profile: smaller frames at a capped rate. A stream the worker cannot open closes
  * the socket with code 4001 and the reason.
  */

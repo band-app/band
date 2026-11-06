@@ -90,6 +90,8 @@ import {
   getLspLanguageId,
   getStoredViewMode,
   isMacPlatform,
+  type QuickCommand,
+  QuickCommandsMenu,
   readAgentMode,
   releaseLspClient,
   SearchBar,
@@ -207,7 +209,7 @@ import {
   SidebarGutter,
   useWorktreeChrome,
 } from "./DesktopTitleBar";
-import { ExtensionEditor } from "./extensions/ExtensionEditor";
+import { ExtensionEditor, reportEditorTabClosed } from "./extensions/ExtensionEditor";
 import { ExtensionPanel } from "./extensions/ExtensionPanel";
 import { OpenWithItems } from "./extensions/OpenWithItems";
 import {
@@ -2393,6 +2395,8 @@ interface LeafActions {
   worktreeId: string;
   /** Opens a plugin panel's tab, or selects it when it is already open. */
   onAddPanel: (pluginId: string, panelId: string, groupId?: string) => void;
+  /** Runs a saved quick command: a terminal tab running it, or an agent started with its prompt. */
+  onRunQuickCommand: (command: QuickCommand, groupId?: string) => void;
   onClose: (id: string, kind: LeafKind) => void;
   openFile: (
     filePath: string,
@@ -3080,6 +3084,7 @@ const LeftHeaderActions = memo(function LeftHeaderActions(props: LayoutHeaderAct
   return (
     <div className="flex h-full items-center px-0.5">
       <NewTabMenu apiId={props.containerApi.id} groupId={props.group.id} />
+      <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
     </div>
   );
 });
@@ -3199,6 +3204,19 @@ function PluginPanelItems({
         </DropdownMenuItem>
       ))}
     </>
+  );
+}
+
+function QuickCommandsTabButton({ apiId, groupId }: { apiId: string; groupId: string }) {
+  const worktreeId = leafActionsByApiId.get(apiId)?.current?.worktreeId;
+  if (!worktreeId) return null;
+  return (
+    <QuickCommandsMenu
+      worktreeId={worktreeId}
+      onRun={(command) =>
+        leafActionsByApiId.get(apiId)?.current?.onRunQuickCommand(command, groupId)
+      }
+    />
   );
 }
 
@@ -3769,7 +3787,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
   // creates the chat or spawns the agent's CLI first, so the pane never
   // mounts before its chat row (with the picked agent) or its PTY exists.
   const launchAgent = useCallback(
-    (position: AddPanelOptions["position"], agentId?: string) => {
+    (position: AddPanelOptions["position"], agentId?: string, prompt?: string) => {
       const mode = readAgentMode();
       const pending = pendingLeafPositionsRef.current;
       const chatId = newChatId();
@@ -3778,7 +3796,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       pending.set(chatId, position);
       pending.set(terminalId, position);
       trpc.agentSessions.launch
-        .mutate({ worktreeId, agentId, mode, chatId, terminalId })
+        .mutate({ worktreeId, agentId, prompt, mode, chatId, terminalId })
         .then((result) => {
           const api = apiRef.current;
           if (!api) return;
@@ -3881,6 +3899,38 @@ export const WorktreeCenter = memo(function WorktreeCenter({
     [worktreeId],
   );
 
+  const handleRunQuickCommand = useCallback(
+    (command: QuickCommand, groupId?: string) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const position = groupId ? { referenceGroup: groupId } : undefined;
+      if (command.action === "agent") {
+        launchAgent(position, command.agentId, command.prompt);
+        return;
+      }
+      const id = newTerminalId();
+      addTermLeaf(api, worktreeId, id, { autoFocus: true }, position);
+      // With Enter the shell runs it as the terminal starts. Without, the text waits at the prompt.
+      trpc.terminal.create
+        .mutate({
+          worktreeId,
+          id,
+          command: command.appendEnter ? command.command : undefined,
+        })
+        .then((created) => {
+          announceIfMoved(worktreeId, created.worktreeId);
+          if (!command.appendEnter) {
+            return trpc.terminal.send.mutate({ terminalId: id, data: command.command });
+          }
+        })
+        .catch((err) => {
+          console.error("[WorktreeCenter] quick command failed:", err);
+          promptOnHostOffline(err);
+        });
+    },
+    [worktreeId, launchAgent],
+  );
+
   // Actually remove a leaf (panel + any server-side instance). Shared by the
   // normal close path and the "Close without saving" confirm button. For a
   // `file` leaf, also drop its persisted editor state so the next open starts
@@ -3908,6 +3958,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       } else if (kind === "browser") {
         trpc.browsers.remove.mutate({ browserId: id }).catch(() => {});
       } else if (kind === "file") {
+        reportEditorTabClosed(worktreeId, id.slice(5));
         closedFileLeaves.add(closedFileLeafKey(worktreeId, id.slice(5)));
         removeFileTabState(worktreeId, id.slice(5));
       }
@@ -4228,6 +4279,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
     onSplit: () => {},
     worktreeId,
     onAddPanel: () => {},
+    onRunQuickCommand: () => {},
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
@@ -4241,6 +4293,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
     onSplit: handleSplit,
     worktreeId,
     onAddPanel: handleAddPanel,
+    onRunQuickCommand: handleRunQuickCommand,
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,

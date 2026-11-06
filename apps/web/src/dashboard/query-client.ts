@@ -13,6 +13,7 @@ export const queryKeys = {
   repos: ["repos"] as const,
   settings: ["settings"] as const,
   groups: ["groups"] as const,
+  quickCommands: ["quickCommands"] as const,
   browserProfiles: ["browserProfiles"] as const,
   repoBrowserProfiles: ["repoBrowserProfiles"] as const,
 };

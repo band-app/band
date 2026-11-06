@@ -53,6 +53,8 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("voice.") ||
       path.startsWith("extensions.") ||
       path.startsWith("editors.") ||
+      // A saved command is text a person later runs in a shell; an agent must not plant one.
+      path.startsWith("quickCommands.") ||
       path.startsWith("provisioning.") ||
       // Writes ~/.claude/settings.json on a host; only a person's click may.
       path.startsWith("hooks.")

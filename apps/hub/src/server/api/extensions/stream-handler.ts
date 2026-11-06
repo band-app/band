@@ -29,8 +29,8 @@ export function extensionStreamTarget(pathname: string): ExtensionStreamTarget |
 /**
  * Bridges a viewer's WebSocket to a stream of an extension's worker service on the worktree's
  * worker. The query names the panel (`panel`, whose capability picks the service), the stream
- * (`name`) and its JSON object params (`params`); the hub adds `profile: "hub"`. The viewer is view-only until it asks for control
- * (`bridgePluginStream`). Only a person's device token reaches this route: the relay lists no such
+ * (`name`) and its JSON object params (`params`); the hub adds `profile: "hub"`. Input from the viewer reaches the service from the
+ * start (`bridgePluginStream`). Only a person's device token reaches this route: the relay lists no such
  * route, so an agent gets 403.
  */
 export async function handleExtensionStream(

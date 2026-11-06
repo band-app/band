@@ -38,6 +38,8 @@ export {
 } from "./components/LanguagePickerDialog";
 export { NewWorktreeDialog } from "./components/NewWorktreeForm";
 export { PdfPreview } from "./components/PdfPreview";
+export { QuickCommandDialog } from "./components/QuickCommandDialog";
+export { QuickCommandsMenu } from "./components/QuickCommandsMenu";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
 export { RepoAvatar } from "./components/RepoAvatar";
 export { RepoList } from "./components/RepoList";
@@ -80,6 +82,12 @@ export {
 } from "./hooks/use-group-last-worktree";
 export { useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
+export {
+  useQuickCommandMutations,
+  useQuickCommands,
+  useQuickCommandsFor,
+  useRepoNameOfWorktree,
+} from "./hooks/use-quick-commands";
 export {
   useCreateWorktree,
   useRemoveRepo,
@@ -186,6 +194,8 @@ export type {
   HostHooks,
   ListWorktreeBranchesResult,
   NotificationSettings,
+  QuickCommand,
+  QuickCommandInput,
   RepoAvatarInfo,
   RepoInfo,
   RepoKind,

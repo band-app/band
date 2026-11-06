@@ -754,6 +754,16 @@ export async function termList(state, worktreeId) {
   return (await trpcQuery(state, "terminal.list", { worktreeId })).terminals;
 }
 
+/** The quick commands the hub holds. */
+export async function listQuickCommands(state) {
+  return (await trpcQuery(state, "quickCommands.list", undefined)).commands;
+}
+
+/** Saves a quick command the way the web does. */
+export async function createQuickCommand(state, input) {
+  return (await trpc(state, "quickCommands.create", input)).command;
+}
+
 /** Waits up to `timeoutMs` for `check` to be true. */
 export async function waitFor(check, what, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
