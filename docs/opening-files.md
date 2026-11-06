@@ -20,6 +20,16 @@ A terminal on the worker counts as a person: its relay call names a terminal and
 
 `band open` says why a path fails: "File not found", "Not a regular file" (a directory or device) or "Permission denied".
 
+## Previews of external files
+
+An external tab previews the same file types as a worktree file.
+
+- PDF, image and video. The viewer fetches `GET /api/external-file/<worktreeId>?path=<absolute path>` with the device token in a header and shows the answer as a Blob URL, so no token goes in a URL. The hub streams the bytes through `worktree.host.external.readStream` (the worker method `fs.external.readStream`), refuses links and anything but a regular file, and answers single-range `Range` requests (206, or 416 past the end). Files above 256 MB are refused in the pane with a message, because a Blob holds the whole file in memory. A request carrying `x-band-chat-id`, `x-band-worktree-id` or `x-band-terminal-id` gets 403, and the relay lists no such route.
+- HTML. The Visual button (Preview mode) loads the page in a sandboxed iframe (scripts only, no same-origin). `worktree.externalPreviewUrl` returns `/api/external-preview/<worktreeId>/<grant>/<path>`, where the grant is an HMAC (purpose string `external-preview-v1`, valid for one hour) over the worktree id and the absolute folder of the file. Relative CSS, images and scripts load from that folder and below. A path with `..`, an encoded slash, a link that resolves outside the folder, another folder's grant, another worktree's grant, or a tampered or expired grant gets 403 or 400. Preview mode is read-only. Visual editing stays for worktree files.
+- Desktop files (from Finder, a drop or Cmd+O). The main process reads the bytes (`read_local_binary`, regular files, no symbolic link, 100 MB at most). For HTML, `local_preview_grant` records the file's real folder under a random token (one hour, at most 50 at a time) and the `app://` handler serves that folder at `/__local-preview/<token>/<name>` with the same limits as the hub route. Media inside a previewed page does not support seeking on this path.
+- An older worker that lacks `fs.external.readStream` makes the hub answer 501, and the pane shows "This worker is too old to preview files outside the worktree. Update it." A failed preview shows an error line, never a blank pane.
+
+
 ## From Finder (desktop app)
 
 Band appears in Finder's Open With menu for text and source files (plain text, source code, JSON, XML, YAML, HTML, CSS, shell scripts, Markdown). Its rank is Alternate, so it never becomes the default app for any of them.

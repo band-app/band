@@ -265,6 +265,21 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       );
     });
 
+    it("streams an external file, with a range, and refuses a link or a folder", async () => {
+      const dir = join(fixture.workDir, "external-stream");
+      await host.fs.mkdir(dir, { recursive: true });
+      await host.fs.writeFile(join(dir, "f.txt"), "abcdef");
+      const read = async (path: string, range?: { start: number; end: number }) => {
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of host.external.readStream(path, range)) chunks.push(chunk);
+        return text(Buffer.concat(chunks));
+      };
+      assert.equal(await read(join(dir, "f.txt")), "abcdef");
+      assert.equal(await read(join(dir, "f.txt"), { start: 1, end: 3 }), "bcd");
+      await assert.rejects(read(dir));
+      await assert.rejects(read(join(dir, "missing")));
+    });
+
     it("stops a watch when the consumer stops iterating", async () => {
       const dir = join(fixture.workDir, "watched-break");
       await host.fs.mkdir(dir, { recursive: true });

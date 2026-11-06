@@ -347,6 +347,11 @@ export interface HostExternalFiles {
   stat(path: string): Promise<ExternalFileStat>;
   /** Reads a regular file, not a link. Rejects with the OS error code (`EACCES`). */
   readFile(path: string): Promise<Uint8Array>;
+  /**
+   * Streams a regular file, not a link, optionally a byte range (inclusive ends). Rejects with the
+   * OS error code or "Symbolic links are not allowed" before the first chunk.
+   */
+  readStream(path: string, range?: { start: number; end: number }): Stream<Uint8Array>;
   /** Replaces an existing regular file, not a link. Never creates one. */
   writeFile(path: string, data: string | Uint8Array): Promise<void>;
 }

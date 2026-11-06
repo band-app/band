@@ -59,6 +59,12 @@ async function seedWorld(): Promise<World> {
   writeFileSync(join(repoB, "b.ts"), "export const fromBeta = 1;\n");
   writeFileSync(join(outside, "notes.ts"), "export const outsideMarker = 1;\n");
   writeFileSync(join(outside, "one.txt"), "dropped one\n");
+  writeFileSync(join(outside, "doc.pdf"), "%PDF-1.1\n%%EOF\n");
+  writeFileSync(
+    join(outside, "page.html"),
+    '<!doctype html><link rel="stylesheet" href="style.css"><h1>Local page</h1>\n',
+  );
+  writeFileSync(join(outside, "style.css"), "h1 { color: rgb(0, 128, 0); }\n");
   writeFileSync(join(outside, "two.txt"), "dropped two\n");
   seedState(home, {
     repos: [
@@ -145,4 +151,25 @@ test("S7: files dropped on the tab strip each open in a new tab", async () => {
 
   await expect(dashboard.localFileTab(one)).toBeVisible({ timeout: 30_000 });
   await expect(dashboard.localFileTab(two)).toBeVisible({ timeout: 30_000 });
+});
+
+test("S6: a PDF and an HTML file from this Mac preview, the HTML with its stylesheet", async () => {
+  const world = await seedWorld();
+  const { dashboard, app } = await launch(world);
+  await dashboard.openWorktree(WORKTREE_A);
+
+  const pdf = join(world.outside, "doc.pdf");
+  await app.emitOpenFile(pdf);
+  await expect(dashboard.localFileTab(pdf)).toBeVisible({ timeout: 30_000 });
+  await expect(dashboard.fileViewer.pdfFrame).toBeVisible({ timeout: 30_000 });
+  // The page's CSP allows a blob: frame but not a fetch of it, so the source is checked, not the bytes.
+  expect(await dashboard.fileViewer.pdfFrame.getAttribute("src")).toMatch(/^blob:/);
+
+  const html = join(world.outside, "page.html");
+  await app.emitOpenFile(html);
+  await expect(dashboard.localFileTab(html)).toBeVisible({ timeout: 30_000 });
+  await dashboard.fileViewer.showHtmlPreview();
+  const heading = dashboard.fileViewer.externalHtmlHeading("Local page");
+  await expect(heading).toBeVisible({ timeout: 30_000 });
+  await expect(heading).toHaveCSS("color", "rgb(0, 128, 0)");
 });

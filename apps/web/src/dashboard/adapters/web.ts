@@ -35,6 +35,9 @@ import type {
   WorktreeStatus,
 } from "../types";
 
+/** A preview of an external file is held in memory as a Blob, so a larger file is refused. */
+const MAX_PREVIEW_BLOB_BYTES = 256 * 1024 * 1024;
+
 const wsClient = createWSClient({
   url: () => {
     return hubWsUrl("/trpc");
@@ -596,6 +599,37 @@ export class WebDashboardAdapter implements DashboardAdapter {
       worktreeId: ctx.worktreeId,
       absolutePath,
     })) as FileContentResult;
+  }
+
+  async readExternalBlob(absolutePath: string, ctx: ExternalFileContext): Promise<Blob> {
+    if (ctx.source === "desktop") throw new Error("Open this file in the desktop app");
+    const route = `/api/external-file/${encodeURIComponent(ctx.worktreeId)}?path=${encodeURIComponent(absolutePath)}`;
+    const res = await hubFetch(route);
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).trim();
+      throw new Error(
+        res.status === 404
+          ? `File not found: ${absolutePath}`
+          : detail || `Could not read the file (${res.status})`,
+      );
+    }
+    const length = Number(res.headers.get("content-length"));
+    if (length > MAX_PREVIEW_BLOB_BYTES) {
+      await res.body?.cancel();
+      throw new Error(
+        `File is too large to preview (${Math.ceil(length / (1024 * 1024))} MB, the limit is ${MAX_PREVIEW_BLOB_BYTES / (1024 * 1024)} MB)`,
+      );
+    }
+    return await res.blob();
+  }
+
+  async getExternalHtmlPreviewUrl(absolutePath: string, ctx: ExternalFileContext): Promise<string> {
+    if (ctx.source === "desktop") throw new Error("Open this file in the desktop app");
+    const { url } = (await this.trpc.worktree.externalPreviewUrl.query({
+      worktreeId: ctx.worktreeId,
+      absolutePath,
+    })) as { url: string };
+    return hubUrl(url);
   }
 
   async resolveWorktreePath(

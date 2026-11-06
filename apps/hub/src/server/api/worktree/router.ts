@@ -3,6 +3,10 @@ import { PathsService } from "@band-app/worktree-ops/resolve-path";
 import { commitShaSchema, filePathSchema, resolvePathInput } from "@band-app/worktree-ops/schemas";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import {
+  externalPreviewUrl,
+  isPlainAbsolutePath,
+} from "../../services/_utils/external-preview-link";
 import { worktreeDownloadUrl } from "../../services/_utils/worktree-download-link";
 import { worktreePreviewUrl } from "../../services/_utils/worktree-preview-link";
 import { diffService } from "../../services/diff-service";
@@ -373,6 +377,23 @@ export const worktreeRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Worktree not found" });
       }
       return { url: worktreePreviewUrl(input.worktreeId, input.path) };
+    }),
+
+  /** A signed URL for an HTML file outside the worktree; the grant covers the file's folder. */
+  externalPreviewUrl: publicProcedure
+    .input(z.object({ worktreeId: z.string().min(1), absolutePath: z.string().min(1) }))
+    .query(({ input, ctx }) => {
+      // Same refusal as /api/external-file: an agent never mints a grant for files outside its folders.
+      if (ctx.agent || ctx.chatId || ctx.worktreeId || ctx.terminalId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Agents cannot preview external files" });
+      }
+      if (!worktreeService.resolve(input.worktreeId)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Worktree not found" });
+      }
+      if (!isPlainAbsolutePath(input.absolutePath)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Absolute path required" });
+      }
+      return { url: externalPreviewUrl(input.worktreeId, input.absolutePath) };
     }),
 
   /** A signed URL (5 minutes, one file) that a drag out of the Explorer hands to another app. */

@@ -95,6 +95,40 @@ export async function readLocalFile(path: unknown): Promise<LocalFileResult> {
   }
 }
 
+/** The largest file a preview reads into memory (PDF, image, video). */
+export const MAX_LOCAL_BINARY_SIZE = 100 * 1024 * 1024;
+
+/**
+ * The bytes of a file for a preview, with the same limits as `readLocalFile` (no symlink on the
+ * final component, regular files only) and a cap of {@link MAX_LOCAL_BINARY_SIZE}.
+ */
+export async function readLocalBinary(path: unknown): Promise<{ bytes: Uint8Array; size: number }> {
+  assertPath(path);
+  let fh: Awaited<ReturnType<typeof open>>;
+  try {
+    fh = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  } catch (err) {
+    throw mapFsError(err);
+  }
+  try {
+    const stats = await fh.stat();
+    if (stats.isDirectory()) throw new Error("Cannot operate on a directory");
+    if (!stats.isFile()) throw new Error("Not a regular file");
+    if (stats.size > MAX_LOCAL_BINARY_SIZE) {
+      throw new Error(
+        `File is too large to preview (${Math.ceil(stats.size / (1024 * 1024))} MB, the limit is ${MAX_LOCAL_BINARY_SIZE / (1024 * 1024)} MB)`,
+      );
+    }
+    const buffer = await fh.readFile();
+    return {
+      bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+      size: stats.size,
+    };
+  } finally {
+    await fh.close();
+  }
+}
+
 /** Writes back an existing regular file. Never creates one and never follows a symlink. */
 export async function saveLocalFile(path: unknown, content: unknown): Promise<{ ok: true }> {
   assertPath(path);

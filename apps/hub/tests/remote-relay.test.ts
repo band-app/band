@@ -384,6 +384,10 @@ beforeAll(async () => {
             absolutePath: "/etc/hosts",
             content: "x",
           }),
+          post("external-preview-url", "/trpc/worktree.externalPreviewUrl", {
+            worktreeId: WT_A,
+            absolutePath: "/etc/hosts",
+          }),
           // An agent may open a tab only for a file the worker's path policy allows.
           post("open-external", "/trpc/editor.openFile", {
             worktreeId: WT_A,
@@ -434,6 +438,9 @@ beforeAll(async () => {
           probe("file-range", "/api/worktree-file/proj-main/hello.txt", {
             headers: { Range: "bytes=0-4" },
           }),
+          // A file outside the worktree, and a folder grant for its HTML, are for a person's token.
+          probe("external-file", `/api/external-file/${WT_A}?path=/etc/hosts`),
+          probe("external-preview", `/api/external-preview/${WT_A}/1.x.y/etc/hosts`),
           // The desktop route (plan step 7.1) is for a person's device token. The relay lists no
           // route for it, so no host id gets an agent through, including the hub's own.
           probe("desktop-local", "/api/hosts/local/desktop"),
@@ -677,6 +684,9 @@ describe("the worker relay (S2)", () => {
     expect(by("download-url")?.status).toBe(403);
     expect(by("set-unread")?.status).toBe(403);
     expect(by("read-external")?.status).toBe(403);
+    expect(by("external-preview-url")?.status).toBe(403);
+    expect(by("external-file")?.status).toBe(403);
+    expect(by("external-preview")?.status).toBe(403);
     expect(by("save-external")?.status).toBe(403);
     expect(by("open-external")?.status).toBe(400);
     expect(by("open-external")?.body).toContain(

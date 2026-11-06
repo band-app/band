@@ -11,7 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import {
+  MAX_LOCAL_BINARY_SIZE,
   MAX_LOCAL_FILE_SIZE,
+  readLocalBinary,
   readLocalFile,
   saveLocalFile,
 } from "../src/main/services/local-files.ts";
@@ -111,5 +113,30 @@ describe("OpenFileQueue", () => {
     queue.push("/after.txt");
     assert.equal(pushes, 1);
     assert.deepEqual(queue.take(), ["/ok.txt", "/after.txt"]);
+  });
+});
+
+describe("readLocalBinary", () => {
+  test("returns the bytes of a binary file", async () => {
+    const file = join(dir, "doc.pdf");
+    writeFileSync(file, Buffer.from([0x25, 0x50, 0x00, 0xff]));
+    const result = await readLocalBinary(file);
+    assert.deepEqual([...result.bytes], [0x25, 0x50, 0x00, 0xff]);
+    assert.equal(result.size, 4);
+  });
+
+  test("refuses a relative path, a directory, a missing file and a symlink", async () => {
+    await assert.rejects(readLocalBinary("doc.pdf"), /Absolute path required/);
+    await assert.rejects(readLocalBinary(dir), /directory/);
+    await assert.rejects(readLocalBinary(join(dir, "nope.pdf")), /File not found/);
+    const target = join(dir, "real.pdf");
+    writeFileSync(target, "x");
+    const link = join(dir, "link.pdf");
+    symlinkSync(target, link);
+    await assert.rejects(readLocalBinary(link), /Symbolic links/);
+  });
+
+  test("keeps the preview cap at 100 MB", () => {
+    assert.equal(MAX_LOCAL_BINARY_SIZE, 100 * 1024 * 1024);
   });
 });

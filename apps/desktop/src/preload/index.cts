@@ -60,6 +60,8 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "pick_save_file",
   "read_local_file",
   "save_local_file",
+  "read_local_binary",
+  "local_preview_grant",
   "take_open_files",
   "reveal_in_finder",
   "check_app_exists",

@@ -8,6 +8,30 @@ import type {
 import type { FileContentResult } from "../types";
 import { WebCapabilities, WebDashboardAdapter } from "./web";
 
+const PREVIEW_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  webp: "image/webp",
+  ico: "image/x-icon",
+  bmp: "image/bmp",
+  avif: "image/avif",
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  ogv: "video/ogg",
+  pdf: "application/pdf",
+};
+
+function mimeOf(path: string): string {
+  return (
+    PREVIEW_MIME[path.slice(path.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream"
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Shell detection — the Electron preload (`apps/desktop/src/preload/index.cts`)
 // exposes `window.__BAND_DESKTOP__`. Anything else is a regular browser tab.
@@ -79,6 +103,29 @@ export class DesktopDashboardAdapter extends WebDashboardAdapter {
   ): Promise<FileContentResult> {
     if (ctx.source !== "desktop") return super.readExternalFile(absolutePath, ctx);
     return desktopInvoke<FileContentResult>("read_local_file", { path: absolutePath });
+  }
+
+  override async readExternalBlob(absolutePath: string, ctx: ExternalFileContext): Promise<Blob> {
+    if (ctx.source !== "desktop") return super.readExternalBlob(absolutePath, ctx);
+    const { bytes } = await desktopInvoke<{ bytes: Uint8Array; size: number }>(
+      "read_local_binary",
+      {
+        path: absolutePath,
+      },
+    );
+    return new Blob([bytes as BlobPart], { type: mimeOf(absolutePath) });
+  }
+
+  override async getExternalHtmlPreviewUrl(
+    absolutePath: string,
+    ctx: ExternalFileContext,
+  ): Promise<string> {
+    if (ctx.source !== "desktop") return super.getExternalHtmlPreviewUrl(absolutePath, ctx);
+    const { path } = await desktopInvoke<{ path: string }>("local_preview_grant", {
+      path: absolutePath,
+    });
+    // The main process serves it under the same `app://` host the page was loaded from.
+    return `${window.location.origin}${path}`;
   }
 
   override async saveExternalFile(

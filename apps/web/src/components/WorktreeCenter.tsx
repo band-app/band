@@ -1472,7 +1472,7 @@ function WorktreeFileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
   const keepAttached =
     !untitled &&
     (getFilePreviewType(filePathRaw) === "pdf" ||
-      (!external && isHtmlFile(filePathRaw) && viewMode === "preview"));
+      (isHtmlFile(filePathRaw) && viewMode === "preview"));
   useEffect(() => {
     api.setRenderer(keepAttached ? "always" : "onlyWhenVisible");
   }, [api, keepAttached]);
@@ -1716,7 +1716,7 @@ function WorktreeFileLeaf({ params, api }: LayoutPanelProps<FileLeafParams>) {
                 >
                   <Eye className="size-3.5" />
                 </button>
-                {fileActions?.showVisualToggle && viewMode === "preview" && (
+                {fileActions?.showVisualToggle && viewMode === "preview" && !external && (
                   <button
                     type="button"
                     onClick={() => setHtmlEditing((v) => !v)}
