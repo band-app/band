@@ -64,6 +64,8 @@ function discoverProcedures(): ProcedureInfo[] {
     if (path === "worktree.previewUrl") continue;
     // `worktree.downloadUrl` returns a bearer URL for one worktree file.
     if (path === "worktree.downloadUrl") continue;
+    // `worktree.externalPreviewUrl` returns a bearer URL for files outside any worktree.
+    if (path === "worktree.externalPreviewUrl") continue;
     // `worktree.directAccess` mints a bearer token for a worker's loopback listener.
     if (path === "worktree.directAccess") continue;
     // These read and write any file a worker's path policy allows, outside the worktree.

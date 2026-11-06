@@ -41,6 +41,11 @@ import {
   extensionStreamTarget,
   handleExtensionStream,
 } from "./src/server/api/extensions/stream-handler.ts";
+import {
+  EXTERNAL_FILE_PREFIX,
+  handleExternalFile,
+  handleExternalPreview,
+} from "./src/server/api/external-file.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import {
@@ -84,6 +89,7 @@ import {
 } from "./src/server/infra/usage-scanner/usage-scanner.ts";
 import { parseByteRange } from "./src/server/services/_utils/byte-range.ts";
 import { attachmentDisposition } from "./src/server/services/_utils/content-disposition.ts";
+import { EXTERNAL_PREVIEW_PREFIX } from "./src/server/services/_utils/external-preview-link.ts";
 import { openHostedFile } from "./src/server/services/_utils/hosted-file.ts";
 import {
   annotateHtmlForEdit,
@@ -1124,6 +1130,12 @@ async function main() {
       return;
     }
 
+    // Signed folder grant for an HTML file outside a worktree: /api/external-preview/<worktreeId>/<grant>/<path...>.
+    if (req.method === "GET" && req.url?.startsWith(EXTERNAL_PREVIEW_PREFIX)) {
+      await handleExternalPreview(req, res);
+      return;
+    }
+
     // Signed one-file download: /api/worktree-download/<worktreeId>/<expiry>.<signature>/<path...>.
     // Before the device-token check, because a file manager fetching a drag
     // cannot send it; the signature names one file and expires in 5 minutes.
@@ -1219,6 +1231,12 @@ async function main() {
         ? join("shared", parsed.worktreeId, parsed.chatId)
         : join("shared", parsed.worktreeId);
       serveStaticFile(res, bandHome(), subdir, encodedName);
+      return;
+    }
+
+    // Bytes of a file outside the worktree (PDF, image, video preview of an external tab).
+    if (req.method === "GET" && req.url?.startsWith(EXTERNAL_FILE_PREFIX)) {
+      await handleExternalFile(req, res);
       return;
     }
 

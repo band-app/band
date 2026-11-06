@@ -7,6 +7,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   realpath,
@@ -524,6 +525,19 @@ const localExternal: HostExternalFiles = {
     return new Uint8Array(
       await readFile(path, { flag: fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW }),
     );
+  },
+  async *readStream(path, range) {
+    await assertPlainFile(path);
+    // O_NOFOLLOW closes the window between the lstat above and the open.
+    const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      for await (const chunk of handle.createReadStream({ ...range, autoClose: false })) {
+        const buffer = chunk as Buffer;
+        yield new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      }
+    } finally {
+      await handle.close();
+    }
   },
   async writeFile(path, data) {
     await assertPlainFile(path);

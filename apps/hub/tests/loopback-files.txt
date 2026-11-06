@@ -15,6 +15,7 @@ cronjobs-via.test.ts
 cronjobs.test.ts
 environment.test.ts
 extensions.test.ts
+external-file-routes.test.ts
 file-watcher.test.ts
 format-trpc.test.ts
 hook-host-routing.test.ts

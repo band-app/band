@@ -18,6 +18,9 @@ import { extname, join, normalize, sep } from "node:path";
 
 export const APP_SCHEME = "app";
 
+/** Path prefix under which the main process serves a local HTML file's folder (see local-preview.ts). */
+export const LOCAL_PREVIEW_PREFIX = "/__local-preview/";
+
 /**
  * Each hub gets its own host, so each has its own origin and its own
  * localStorage, drafts and tabs: `app://local` for the bundled hub and
@@ -173,6 +176,8 @@ export interface AppHandlerOptions {
   host: () => string;
   /** The current hub's origin, for the CSP's `connect-src`. Null before a hub is chosen. */
   hubOrigin: () => string | null;
+  /** Answers a request under {@link LOCAL_PREVIEW_PREFIX}. Without it that prefix is a 404. */
+  localPreview?: (pathname: string) => Promise<Response>;
 }
 
 /** The `protocol.handle("app", …)` callback for the UI build in `uiDir`. */
@@ -186,6 +191,11 @@ export function createAppHandler(
       return new Response("Method not allowed", { status: 405 });
     }
     if (url.host !== opts.host()) return new Response("Not found", { status: 404 });
+    if (url.pathname.startsWith(LOCAL_PREVIEW_PREFIX)) {
+      return opts.localPreview
+        ? opts.localPreview(url.pathname)
+        : new Response("Not found", { status: 404 });
+    }
     // Only a remote hub's pages may reach this machine's worker on loopback.
     const csp = buildCsp(opts.hubOrigin(), { loopback: opts.host() !== LOCAL_APP_HOST });
 

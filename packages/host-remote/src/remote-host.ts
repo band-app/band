@@ -202,6 +202,8 @@ export class RemoteHost implements Host {
   readonly external: HostExternalFiles = {
     stat: (path) => this.rpc.call("fs.external.stat", { path }),
     readFile: (path) => this.rpc.callBytes("fs.external.readFile", { path }),
+    readStream: (path, range) =>
+      this.streamOf("fs.external.readStream", { path, start: range?.start, end: range?.end }),
     writeFile: (path, data) => this.writeFile(path, data, undefined, "fs.external.writeFile"),
   };
   readonly fs: HostFs = {

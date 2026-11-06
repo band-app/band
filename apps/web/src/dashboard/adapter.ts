@@ -276,6 +276,20 @@ export interface DashboardAdapter {
   saveExternalFile?(absolutePath: string, content: string, ctx: ExternalFileContext): Promise<void>;
 
   /**
+   * The bytes of an external file (PDF, image, video) as a Blob for a preview. A worker file comes
+   * from the hub with the device token in a header, a desktop file from the main process. Rejects
+   * with a message when the file is too large, gone, or the worker is too old.
+   */
+  readExternalBlob?(absolutePath: string, ctx: ExternalFileContext): Promise<Blob>;
+
+  /**
+   * A URL a sandboxed iframe can load an external HTML file from, with the files in its folder
+   * resolving beside it. A worker file gets a signed hub grant, a desktop file a grant from the
+   * main process. Neither URL carries the hub's token.
+   */
+  getExternalHtmlPreviewUrl?(absolutePath: string, ctx: ExternalFileContext): Promise<string>;
+
+  /**
    * Format `content` using Prettier as if it were the file at `filePath`
    * inside `worktreeId`. Pure function — the server doesn't read or write
    * the file. Returns `{ skipped: true, reason }` when Prettier has no

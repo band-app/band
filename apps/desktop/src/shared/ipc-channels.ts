@@ -49,6 +49,9 @@ export const Channels = {
   // Files on this Mac opened from Finder or the picker (see services/local-files.ts)
   readLocalFile: "read_local_file",
   saveLocalFile: "save_local_file",
+  // Bytes of a local PDF, image or video for a preview, and a grant to show a local HTML file's folder
+  readLocalBinary: "read_local_binary",
+  localPreviewGrant: "local_preview_grant",
   // Paths the OS asked Band to open; the renderer drains them (see services/open-file-queue.ts)
   takeOpenFiles: "take_open_files",
   revealInFinder: "reveal_in_finder",

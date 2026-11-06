@@ -35,7 +35,8 @@ import type {
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
 import type { KeepAwakeController } from "../services/keep-awake.js";
-import { readLocalFile, saveLocalFile } from "../services/local-files.js";
+import { readLocalBinary, readLocalFile, saveLocalFile } from "../services/local-files.js";
+import type { LocalPreviewRegistry } from "../services/local-preview.js";
 import { createLogger } from "../services/log.js";
 import type { OpenFileQueue } from "../services/open-file-queue.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
@@ -84,6 +85,8 @@ export interface RegisterOptions {
   keepAwake: KeepAwakeController;
   /** Paths the OS asked the app to open, drained by the renderer. */
   openFiles: OpenFileQueue;
+  /** Folders of local HTML files the page may show, served under `app://`. */
+  localPreview: LocalPreviewRegistry;
 }
 
 /**
@@ -147,6 +150,10 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.readLocalFile, (args: { path?: unknown }) => readLocalFile(args?.path));
   handle(Channels.saveLocalFile, (args: { path?: unknown; content?: unknown }) =>
     saveLocalFile(args?.path, args?.content),
+  );
+  handle(Channels.readLocalBinary, (args: { path?: unknown }) => readLocalBinary(args?.path));
+  handle(Channels.localPreviewGrant, (args: { path?: unknown }) =>
+    opts.localPreview.grant(args?.path),
   );
   handle(Channels.takeOpenFiles, () => opts.openFiles.take());
   handle(Channels.revealInFinder, (args: RevealInFinderArgs) => revealInFinder(args.path));

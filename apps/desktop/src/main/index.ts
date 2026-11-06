@@ -49,6 +49,7 @@ import {
   saveHubChoice,
 } from "./services/hub-choice.js";
 import { KeepAwakeController } from "./services/keep-awake.js";
+import { LocalPreviewRegistry } from "./services/local-preview.js";
 import { createLogger } from "./services/log.js";
 import { OpenFileQueue } from "./services/open-file-queue.js";
 import { killPort } from "./services/port.js";
@@ -117,6 +118,7 @@ const keepAwake = new KeepAwakeController(powerSaveBlocker);
 // Finder's Open With and `open -a Band <file>` deliver paths here, possibly before the app is
 // ready or any window exists. They wait in the queue until the renderer drains them.
 const openFiles = new OpenFileQueue();
+const localPreview = new LocalPreviewRegistry();
 app.on("open-file", (event, path) => {
   event.preventDefault();
   openFiles.push(path);
@@ -537,6 +539,7 @@ async function bootstrap(): Promise<void> {
       createAppHandler(state.uiDir, {
         host: () => state.appHost,
         hubOrigin: () => state.rendererHub?.url ?? null,
+        localPreview: (pathname) => localPreview.serve(pathname),
       }),
     );
   }
@@ -650,6 +653,7 @@ async function bootstrap(): Promise<void> {
     updates,
     keepAwake,
     openFiles,
+    localPreview,
   });
   // Tell the page when a path arrives. A path queued earlier is drained by the page on start.
   const stopOpenFileEvents = openFiles.onPush(() => {
