@@ -153,6 +153,8 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames).not.toContain("band_workers_updateHub");
     // Credentials stay out of agent reach.
     expect(toolNames.filter((n) => n.startsWith("band_vault_"))).toEqual([]);
+    // Saved quick commands run in a person's shell, so an agent can neither read nor plant one.
+    expect(toolNames.filter((n) => n.startsWith("band_quickCommands_"))).toEqual([]);
     expect(toolNames.filter((n) => n.startsWith("band_agentLogins_"))).toEqual([]);
     // So does the bearer token for a worker's loopback listener.
     expect(toolNames).not.toContain("band_worktree_directAccess");

@@ -198,7 +198,12 @@ export function TerminalPanel({
             counter-zoom and hosts xterm) is appended here on `attach` and moved
             to the parking container on `detach`. `absolute` makes it the
             positioned containing block for the wrapper's `inset: 0`. */}
-        <TerminalSelectionContextMenu getTerminal={entry.getTerminal} disabled={touchScreen}>
+        <TerminalSelectionContextMenu
+          getTerminal={entry.getTerminal}
+          worktreeId={worktreeId}
+          sendInput={entry.sendInput}
+          disabled={touchScreen}
+        >
           <div
             ref={liveRef}
             className="absolute inset-x-2 top-2 overflow-hidden"

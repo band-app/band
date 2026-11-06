@@ -37,6 +37,8 @@ import {
   STREAM_LINES,
   stopTurn,
   termList,
+  listQuickCommands,
+  createQuickCommand,
   termOpen,
   termOutput,
   termSend,
@@ -305,6 +307,22 @@ function startControlServer(hub, chats, udid, notes) {
         if (live.length !== want || listed.length !== want) {
           throw new Error(`${live.length} live terminals and ${listed.length} terminal tabs, expected ${want}`);
         }
+      } else if (url.pathname === "/quick-command-seed") {
+        // A terminal quick command scoped to `repo` (or every repo without it), saved like the web does.
+        await createQuickCommand(hub, {
+          label: url.searchParams.get("label") ?? "Seeded",
+          repo: url.searchParams.get("repo") || null,
+          action: "terminal",
+          command: url.searchParams.get("command") ?? "true",
+          appendEnter: url.searchParams.get("enter") !== "0",
+        });
+      } else if (url.pathname === "/quick-command-expect") {
+        // The hub holds `n` quick commands labelled `label`, or none when `n=0`.
+        const label = url.searchParams.get("label") ?? "";
+        const want = Number(url.searchParams.get("n") ?? 1);
+        const have = (await listQuickCommands(hub)).filter((c) => c.label === label);
+        notes.push(`quickCommands.list holds ${have.length} named ${label}`);
+        if (have.length !== want) throw new Error(`the hub holds ${have.length} quick commands named ${label}, expected ${want}`);
       } else if (url.pathname === "/content-size") {
         // The simulator's Dynamic Type size, e.g. large (the default) or extra-large.
         execFileSync("xcrun", ["simctl", "ui", udid, "content_size", url.searchParams.get("size") ?? "large"]);

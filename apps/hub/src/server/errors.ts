@@ -305,3 +305,19 @@ export class WorktreeGroupNotFoundError extends Error {
     this.name = "WorktreeGroupNotFoundError";
   }
 }
+
+/** Thrown by `QuickCommandService` for an unknown id. The router maps it to 404. */
+export class QuickCommandNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Quick command not found: ${id}`);
+    this.name = "QuickCommandNotFoundError";
+  }
+}
+
+/** Thrown by `QuickCommandService` for input it refuses. The router maps it to 400. */
+export class QuickCommandInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QuickCommandInvalidError";
+  }
+}
