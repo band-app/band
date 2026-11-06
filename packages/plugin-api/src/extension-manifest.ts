@@ -56,6 +56,39 @@ export const workerServiceSchema = z
   .strict();
 
 /**
+ * A worktree panel: a page in the center "+" menu, not tied to a file. Band offers it when the
+ * worktree's worker reports `capability` (the service must be running there).
+ */
+export const panelSchema = z
+  .object({
+    id: idSchema,
+    label: z.string().min(1).max(100),
+    /** A lucide icon name. Unknown names fall back to a generic icon. */
+    icon: z.string().min(1).max(50).optional(),
+    entry: entrySchema,
+    /** The `capability` of one of this extension's worker services. */
+    capability: idSchema,
+  })
+  .strict();
+
+/**
+ * An agent tool of the built-in `band` MCP server, named `<extension id>_<name>`. A worker service
+ * answers it: Band calls `method` on the service `service` of the worktree's worker.
+ */
+export const toolSchema = z
+  .object({
+    name: z.string().regex(/^[a-z][A-Za-z0-9_]{0,40}$/, "A tool name is letters, digits and _"),
+    description: z.string().min(1).max(2000),
+    inputSchema: z.record(z.unknown()).default({ type: "object", properties: {} }),
+    /** The `id` of one of this extension's worker services. */
+    service: idSchema,
+    method: z.string().min(1).max(100),
+    /** `false` leaves the tool out of the agent's list. */
+    agent: z.boolean().default(true),
+  })
+  .strict();
+
+/**
  * `band-extension.json`. The hub validates the manifest with this schema before it serves the
  * extension's files. An unknown key is an error.
  */
@@ -71,13 +104,45 @@ export const extensionManifestSchema = z
       .object({
         fileEditors: z.array(fileEditorSchema).default([]),
         workerServices: z.array(workerServiceSchema).default([]),
+        panels: z.array(panelSchema).default([]),
+        tools: z.array(toolSchema).default([]),
       })
       .strict()
       .default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((manifest, ctx) => {
+    const services = manifest.contributes.workerServices;
+    const capabilities = new Set(services.map((s) => s.capability));
+    const serviceIds = new Set(services.map((s) => s.id));
+    manifest.contributes.panels.forEach((panel, i) => {
+      if (!capabilities.has(panel.capability)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["contributes", "panels", i, "capability"],
+          message: `No worker service reports the capability ${panel.capability}`,
+        });
+      }
+    });
+    manifest.contributes.tools.forEach((tool, i) => {
+      if (!serviceIds.has(tool.service)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["contributes", "tools", i, "service"],
+          message: `No worker service has the id ${tool.service}`,
+        });
+      }
+    });
+    const dup = (names: string[]) => names.find((n, i) => names.indexOf(n) !== i);
+    const panelDup = dup(manifest.contributes.panels.map((p) => p.id));
+    if (panelDup) ctx.addIssue({ code: "custom", message: `Duplicate panel id ${panelDup}` });
+    const toolDup = dup(manifest.contributes.tools.map((t) => t.name));
+    if (toolDup) ctx.addIssue({ code: "custom", message: `Duplicate tool name ${toolDup}` });
+  });
 
 export type FileEditorManifest = z.infer<typeof fileEditorSchema>;
+export type PanelManifest = z.infer<typeof panelSchema>;
+export type ToolManifest = z.infer<typeof toolSchema>;
 export type WorkerServiceManifest = z.infer<typeof workerServiceSchema>;
 export type ExtensionManifest = z.infer<typeof extensionManifestSchema>;
 

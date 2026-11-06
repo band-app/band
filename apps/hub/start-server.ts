@@ -37,6 +37,10 @@ import {
   EXT_INSTALL_PATH,
   handleExtensionInstall,
 } from "./src/server/api/extensions/install-handler.ts";
+import {
+  extensionStreamTarget,
+  handleExtensionStream,
+} from "./src/server/api/extensions/stream-handler.ts";
 import { handleMcpProxy, MCP_PROXY_PREFIX } from "./src/server/api/mcp-proxy/handler.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import {
@@ -1629,6 +1633,14 @@ async function main() {
     if (desktopHost !== null) {
       desktopWss.handleUpgrade(req, socket, head, (ws) => {
         void handleDesktopConnection(ws, req, desktopHost);
+      });
+      return;
+    }
+
+    const extensionStream = extensionStreamTarget(url.pathname);
+    if (extensionStream !== null) {
+      pluginStreamWss.handleUpgrade(req, socket, head, (ws) => {
+        void handleExtensionStream(ws, req, extensionStream);
       });
       return;
     }

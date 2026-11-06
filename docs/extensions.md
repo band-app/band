@@ -214,9 +214,57 @@ defineWorkerService({
 
 ### Limits
 
-- Panels, agent tools and the browser-side stream viewer come in a later change. Today `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) reach a service.
+- Panels and tools are described above. `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) still reach a service directly.
 - A service's scopes (the worktrees it served) are kept in memory, so `worktree.release { reason: "removed" }` does not reach a worktree the service last served before a restart.
-||||||| 766a2bef
+
+## Panels
+
+An extension can add a worktree panel: a page in the center "+" menu that is not tied to a file. Declare it next to the worker service that feeds it:
+
+```json
+"contributes": {
+  "workerServices": [{ "id": "main", "entry": "service.mjs", "capability": "screen" }],
+  "panels": [{ "id": "screen", "label": "Screen", "icon": "monitor", "entry": "panel.html", "capability": "screen" }]
+}
+```
+
+`capability` must be the capability of one of the extension's own services. The menu offers the panel when the worktree's worker is online and its service runs there, so a restricted worker, a worker that fails `requires` and the hub's own machine show nothing. `icon` is one of `globe`, `terminal`, `monitor`, `smartphone`, `image`, `box`, `play`, `activity`; any other name gets a puzzle icon. The tab stays mounted while hidden and is saved with the other center tabs.
+
+The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like an editor, so it has no Band cookie, token or storage. Band posts `{ type: "band:hello", extensionApi: 1 }` with one transferred `MessagePort`. Everything else goes over that port.
+
+From Band to the page:
+
+- `init { worktreeId, theme, layout, visible }`, sent once. The page answers `{ type: "ready" }`.
+- `stream.opened { id }`, `stream.frame { id, data }` (an `ArrayBuffer`), `stream.message { id, text }` and `stream.closed { id, code, reason }`.
+- `call.result { id, result }` and `call.error { id, message }`.
+- `control { enabled }`, `visible { visible }` and `layout { layout }`.
+
+From the page to Band:
+
+- `stream.open { id, name, params }` opens the stream `name` of the service. A panel may hold 4 streams. Ids are the page's own strings.
+- `stream.send { id, message }` sends a text message to the service.
+- `stream.close { id }`.
+- `call { id, method, params }` calls `method` of the service on this worktree's worker and answers with `call.result` or `call.error`.
+
+A stream is view-only. The hub drops everything the page sends until the person presses Take control in Band's own toolbar above the frame. The page cannot press it. Releasing control returns the stream to view-only, and a stream that opens while the person has control starts in control mode. Binary messages from the page are always dropped.
+
+Frames go from the service through the worker, the link and the hub to the browser. The hub route is `/api/extensions/<extension id>/worktrees/<worktree id>/stream?panel=<panel id>&name=<stream>&params=<json>`. It takes any device token and closes with code 4001 and a reason when the panel, the service or the worker is missing. Agents never reach it: the worker relay lists neither the route nor `extensions.panelCall`, and the MCP endpoint leaves `extensions.*` out.
+
+## Tools
+
+An extension can give agents tools that its worker service answers:
+
+```json
+"tools": [{
+  "name": "echo",
+  "description": "Echoes its arguments back",
+  "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } } },
+  "service": "main",
+  "method": "echo"
+}]
+```
+
+Band adds each tool to the built-in `band` MCP server as `<extension id>_<name>`, for example `echo-service_echo`. A call goes to `method` on the service `service`, on the worker of the calling chat's worktree, with the call's arguments as `params`. The service's JSON result is the tool result. No tab has to be open. The arguments cannot name another worktree. When the chat's worker does not run the service, the tool answers an error that names the worker. `"agent": false` leaves the tool out of the agent's list. `inputSchema` is a JSON Schema and is advertised as written. The service validates its own arguments.
 
 ## Agent access
 

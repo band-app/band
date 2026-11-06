@@ -440,6 +440,18 @@ beforeAll(async () => {
           // A plugin's live stream (the simulator's screen) is for a person's device token too, and
           // so are the procedures that open the Simulator tab.
           probe("plugin-stream", `/api/plugins/simulator/worktrees/${WT_A}/stream`),
+          // An extension panel's stream and its service calls are for a person's device token as
+          // well: the relay lists neither the route nor the procedure.
+          probe(
+            "extension-panel-stream",
+            `/api/extensions/echo-service/worktrees/${WT_A}/stream?panel=screen&name=screen`,
+          ),
+          post("extension-panel-call", "/trpc/extensions.panelCall", {
+            extensionId: "echo-service",
+            panelId: "screen",
+            worktreeId: WT_A,
+            method: "echo",
+          }),
           post("simulators-open", "/trpc/simulators.open", { worktreeId: WT_A }),
           probe(
             "simulators-status",
@@ -674,6 +686,8 @@ describe("the worker relay (S2)", () => {
     expect(by("desktop-local")?.status).toBe(403);
     expect(by("desktop-worker")?.status).toBe(403);
     expect(by("plugin-stream")?.status).toBe(403);
+    expect(by("extension-panel-stream")?.status).toBe(403);
+    expect(by("extension-panel-call")?.status).toBe(403);
     expect(by("simulators-open")?.status).toBe(403);
     expect(by("simulators-status")?.status).toBe(403);
     expect(by("voice-transcribe")?.status).toBe(403);
