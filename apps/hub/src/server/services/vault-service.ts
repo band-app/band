@@ -363,16 +363,26 @@ export class VaultService {
   /**
    * The plaintext credential of any item, for the MCP proxy. An OAuth item
    * yields its access token, refreshed first when `forceRefresh` is set (the
-   * upstream just answered 401) or when it is about to expire.
+   * upstream just answered 401) or when it is about to expire. `rejected` is the
+   * access token that upstream refused: when the stored one already differs,
+   * another request refreshed meanwhile and no second refresh runs (refresh
+   * tokens rotate, so a redundant refresh is wasted and can race).
    */
   async getCredential(
     id: string,
     forceRefresh = false,
+    rejected?: string,
   ): Promise<{ kind: VaultKind; value: string }> {
     const row = this.queries.find(id);
     if (!row) throw new VaultNotFoundError();
     if (row.kind === "oauth") {
-      if (forceRefresh && row.metadata.canRefresh) await this.refresh(id);
+      if (forceRefresh && row.metadata.canRefresh) {
+        const stale =
+          rejected === undefined ||
+          (JSON.parse(decrypt(this.getKey(), id, row.encrypted)) as OAuthSecret).accessToken ===
+            rejected;
+        if (stale) await this.refresh(id);
+      }
       return { kind: row.kind, value: await this.getAccessToken(id) };
     }
     this.queries.update(id, { lastUsedAt: Date.now() });

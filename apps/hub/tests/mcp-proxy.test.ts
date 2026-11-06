@@ -470,6 +470,29 @@ describe("an OAuth upstream (S3)", () => {
     }
   });
 
+  it("refreshes once when several requests hit the dead token together", async () => {
+    const { token } = await issue(["oauth-notes"]);
+    const clients = await Promise.all([1, 2, 3].map(() => connect("oauth-notes", token)));
+    try {
+      const refreshesBefore = oauth.tokenRequests.filter(
+        (r) => r.grant_type === "refresh_token",
+      ).length;
+      oauth.expireAccessTokens();
+      // Refresh tokens rotate, so a second refresh for the same dead token is wasted, and it
+      // races the first one when its 401 arrives after that refresh finished.
+      const results = await Promise.all(
+        clients.map((c, i) => c.callTool({ name: "echo", arguments: { text: `n${i}` } })),
+      );
+      expect(results.map((r) => r.content)).toEqual(
+        clients.map((_, i) => [{ type: "text", text: `echo:n${i}` }]),
+      );
+      const refreshes = oauth.tokenRequests.filter((r) => r.grant_type === "refresh_token");
+      expect(refreshes.length).toBe(refreshesBefore + 1);
+    } finally {
+      await Promise.all(clients.map((c) => c.close()));
+    }
+  });
+
   it("answers 502 without leaking anything when the refresh fails", async () => {
     const { token } = await issue(["oauth-notes"]);
     oauth.expireAccessTokens();

@@ -519,9 +519,11 @@ export class McpProxyService {
   async credentialHeaders(
     server: McpServerView,
     forceRefresh = false,
+    rejectedHeaders?: Record<string, string>,
   ): Promise<{ headers: Record<string, string>; refreshable: boolean }> {
     if (!server.vaultItemId) return { headers: {}, refreshable: false };
-    const credential = await vaultService.getCredential(server.vaultItemId, forceRefresh);
+    const rejected = rejectedHeaders?.authorization?.replace(/^Bearer /, "");
+    const credential = await vaultService.getCredential(server.vaultItemId, forceRefresh, rejected);
     if (credential.kind === "oauth") {
       return { headers: { authorization: `Bearer ${credential.value}` }, refreshable: true };
     }
