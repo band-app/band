@@ -16,7 +16,9 @@ import {
 export interface HubIpcDeps {
   getChoice: () => HubChoice;
   /** Schedules the switch and returns true, or returns false while another switch runs. */
-  switchTo: (choice: HubChoice) => boolean;
+  switchTo: (choice: HubChoice, opts: { stopLocal: boolean }) => boolean;
+  /** Whether the local hub service is installed on this Mac. */
+  localServiceInstalled: () => boolean;
 }
 
 export type HubSetResult = { ok: true } | { ok: false; error: string };
@@ -27,7 +29,7 @@ export function hubHandlers(deps: HubIpcDeps): Array<[string, (args: unknown) =>
     [
       Channels.hubGetChoice,
       (): HubChoiceView => {
-        return viewHubChoice(deps.getChoice());
+        return { ...viewHubChoice(deps.getChoice()), localService: deps.localServiceInstalled() };
       },
     ],
     [
@@ -40,7 +42,8 @@ export function hubHandlers(deps: HubIpcDeps): Array<[string, (args: unknown) =>
           const reachable = await checkRemoteHub(choice.url, choice.token);
           if (!reachable.ok) return reachable;
         }
-        if (!deps.switchTo(choice)) {
+        const stopLocal = (args as { stopLocal?: unknown }).stopLocal === true;
+        if (!deps.switchTo(choice, { stopLocal })) {
           return {
             ok: false,
             error: "A hub switch is already in progress. Try again in a moment.",

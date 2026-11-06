@@ -137,9 +137,9 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   {
     id: "hub",
     title: "Hub",
-    subtitle: "Which hub this desktop app talks to.",
+    subtitle: "Updates for the hub, and which hub this desktop app talks to.",
     group: "Set up",
-    desktopOnly: true,
+    adminOnly: true,
   },
   {
     id: "web-server",
@@ -862,8 +862,8 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                     </SettingsSection>
                   ) : null}
 
-                  {/* ── Hub (desktop app only) ─────────────────────── */}
-                  {isDesktop && active === "hub" ? (
+                  {/* ── Hub (admins; the hub picker inside is desktop only) ── */}
+                  {isAdmin && active === "hub" ? (
                     <SettingsSection title="Hub">
                       <HubSettings />
                     </SettingsSection>

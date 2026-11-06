@@ -413,8 +413,10 @@ export class TerminalService {
    * deletion path — the caller is responsible for tearing down the layout
    * tree via {@link deleteLayout} as well.
    */
-  async killWorktree(worktreeId: string): Promise<void> {
-    const backend = this.ptyOf(this.hostOfWorktree(worktreeId));
+  async killWorktree(worktreeId: string, host?: Host): Promise<void> {
+    // The caller passes the host it resolved before deleting the worktree's row,
+    // because afterwards `hostFor` no longer finds it and answers `local`.
+    const backend = this.ptyOf(host ?? this.hostOfWorktree(worktreeId));
     const entries = await backend.list(worktreeId);
     await backend.killWorktree(worktreeId);
     for (const entry of entries) {
@@ -441,6 +443,24 @@ export class TerminalService {
     for (const worktreeId of deleted) {
       log.info({ worktreeId }, "killing terminals of a deleted worktree");
       await this.killWorktree(worktreeId);
+    }
+  }
+
+  /**
+   * Kill the terminals on one worker whose worktree the hub has no row for. Runs when the
+   * worker connects: its worktree may have been removed while it was offline, or its
+   * terminals may have outlived a removal before `killWorktree` took the captured host.
+   */
+  async reconcileHost(host: Host): Promise<void> {
+    const entries = await this.ptyOf(host).listAll();
+    const deleted = new Set(
+      entries
+        .map((entry) => entry.worktreeId)
+        .filter((worktreeId) => !worktreeService.resolve(worktreeId)),
+    );
+    for (const worktreeId of deleted) {
+      log.info({ worktreeId, hostId: host.id }, "killing terminals of a deleted worktree");
+      await this.killWorktree(worktreeId, host);
     }
   }
 

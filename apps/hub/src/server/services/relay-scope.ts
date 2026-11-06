@@ -134,6 +134,8 @@ const NEVER_FOR_AGENTS = (procedure: string): boolean =>
   procedure === "hosts.hubInterruptions" ||
   procedure === "workers.dismissHubUpdate" ||
   procedure === "workers.updateAll" ||
+  procedure === "workers.setAutoUpdate" ||
+  procedure === "hosts.setAutoUpdate" ||
   procedure === "workers.checkForUpdates" ||
   procedure === "hosts.checkForUpdates" ||
   procedure === "hosts.updateHub" ||

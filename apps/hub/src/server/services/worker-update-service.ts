@@ -16,6 +16,7 @@ import { HUB_VERSION } from "./_utils/hub-version";
 import { agentSessionService } from "./agent-session-service";
 import { hubUpdateService } from "./hub-update-service";
 import { releaseCheckService } from "./release-check-service";
+import { settingsService } from "./settings-service";
 import { emit } from "./watcher-service";
 import { workerLinkService } from "./worker-link-service";
 import { worktreeService } from "./worktree-service";
@@ -25,6 +26,13 @@ const log = createLogger("worker-update");
 /** npm can take a while on a slow link. */
 const INSTALL_TIMEOUT_MS = 11 * 60_000;
 const RESTART_TIMEOUT_MS = 3 * 60_000;
+const DEFAULT_AUTO_POLL_MS = 60_000;
+const DEFAULT_MAX_DEFER_H = 6;
+
+function envNumber(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 export type WorkerUpdateState = "installing" | "restarting" | "failed";
 
@@ -61,6 +69,94 @@ export class WorkerUpdateService {
   private readonly queries = new TokenQueries();
 
   private all: UpdateAllStatus = { running: false, results: [] };
+  /** When the automatic update first found each worker busy. In memory: a hub restart restarts the wait. */
+  private readonly deferred = new Map<string, number>();
+  private autoTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * The workers set to update automatically. Kept in `settings.workerUpdate.autoHostIds` (no
+   * migration, and the same place as the hub's own `hubUpdate.auto`). An id of a removed worker
+   * stays until the next write and does nothing.
+   */
+  autoHostIds(): string[] {
+    const ids = (settingsService.get() as { workerUpdate?: { autoHostIds?: unknown } }).workerUpdate
+      ?.autoHostIds;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  }
+
+  isAuto(hostId: string): boolean {
+    return this.autoHostIds().includes(hostId);
+  }
+
+  /** When the automatic update started waiting for this worker's agents, or null. */
+  deferredSince(hostId: string): number | null {
+    return this.deferred.get(hostId) ?? null;
+  }
+
+  setAuto(hostId: string, auto: boolean): void {
+    const row = this.queries.findHost(hostId);
+    if (!row || hostId === "local")
+      throw new WorkerUpdateError("not-found", `No worker "${hostId}"`);
+    const others = this.autoHostIds().filter((id) => id !== hostId);
+    settingsService.update({
+      workerUpdate: { autoHostIds: auto ? [...others, hostId] : others },
+    } as Parameters<typeof settingsService.update>[0]);
+    if (!auto) this.deferred.delete(hostId);
+    emit({ kind: "host-status-changed", hostId });
+  }
+
+  startAuto(): void {
+    if (this.autoTimer) return;
+    this.autoTimer = setInterval(
+      () => this.autoTick(),
+      envNumber("BAND_WORKER_UPDATE_AUTO_POLL_MS", DEFAULT_AUTO_POLL_MS),
+    );
+    this.autoTimer.unref();
+  }
+
+  stopAuto(): void {
+    if (this.autoTimer) clearInterval(this.autoTimer);
+    this.autoTimer = null;
+  }
+
+  /**
+   * One pass of the automatic update. A worker is updated when it is online, set to update
+   * automatically, behind the hub (the target is the hub's own version, never a newer release, so
+   * the hub updates first), able to restart itself and not already updating or failed. With an
+   * agent on it that the restart would end (held agents survive, so they do not count) it waits,
+   * starting a clock on the first deferral, and goes ahead once none run or the limit passes.
+   */
+  autoTick(): void {
+    try {
+      const auto = new Set(this.autoHostIds());
+      for (const id of [...this.deferred.keys()]) if (!auto.has(id)) this.deferred.delete(id);
+      if (auto.size === 0) return;
+      const latest = releaseCheckService.status().latest;
+      for (const row of this.queries.listHosts(1000)) {
+        if (row.id === "local" || !auto.has(row.id) || row.status !== "online") continue;
+        const view = describeHostVersion(row, HUB_VERSION, latest);
+        if (view.versionState !== "behind" || !view.canUpdate) continue;
+        if (view.updateTarget !== HUB_VERSION) continue;
+        // A running or failed update is left to the admin (Retry or Dismiss).
+        if (this.updates.has(row.id)) continue;
+        if (this.interruptions(row.id).length > 0) {
+          const since = this.deferred.get(row.id) ?? Date.now();
+          this.deferred.set(row.id, since);
+          const limit =
+            envNumber("BAND_WORKER_UPDATE_MAX_DEFER_H", DEFAULT_MAX_DEFER_H) * 3_600_000;
+          if (Date.now() - since < limit) continue;
+        }
+        this.deferred.delete(row.id);
+        this.update(row.id).catch((err) => {
+          log.warn(
+            `automatic update of worker ${row.id} failed to start: ${err instanceof Error ? err.message : err}`,
+          );
+        });
+      }
+    } catch (err) {
+      log.warn(`automatic worker update pass failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   allStatus(): UpdateAllStatus {
     return this.all;
@@ -170,6 +266,12 @@ export class WorkerUpdateService {
     }
     if (!view.updateTarget) {
       throw new WorkerUpdateError("not-updatable", "The worker is already up to date");
+    }
+    if (view.updateBlockedReason) {
+      throw new WorkerUpdateError(
+        "not-updatable",
+        `This worker cannot update itself: ${view.updateBlockedReason}`,
+      );
     }
     if (!view.serviceManager) {
       throw new WorkerUpdateError(

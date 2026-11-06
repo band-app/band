@@ -67,7 +67,11 @@ import type {
 } from "@band-app/shared/chat-events";
 import { worktreeIdIsOnHost } from "@band-app/shared/worktree-id";
 import { ChatEventQueries, type ChatEventRow } from "../infra/db/queries/chat-events";
-import { ChatForwardQueries, type ChatForwardRow } from "../infra/db/queries/chat-forwards";
+import {
+  ChatForwardQueries,
+  type ChatForwardRow,
+  type HeldEventsSummary,
+} from "../infra/db/queries/chat-forwards";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { emitTurnEnded } from "./_utils/turn-events";
@@ -81,6 +85,7 @@ import {
 } from "./chat-status-service";
 import type { SubmitOrQueueResult, SubmitTaskOptions, TaskInfo } from "./task-service";
 import { hasRunningTask, taskService } from "./task-service";
+import { workerLeaseService } from "./worker-lease-service";
 import { worktreeService } from "./worktree-service";
 
 const log = createLogger("chat-ownership");
@@ -98,6 +103,8 @@ const HISTORY_MAX_ROWS = 1000;
 interface LiveMirror extends ChatLiveState {
   hostId: string;
 }
+
+export type { HeldEventsSummary };
 
 export class ChatOwnershipService {
   private readonly events = new ChatEventQueries();
@@ -228,6 +235,9 @@ export class ChatOwnershipService {
     for (const row of this.forwards.pendingForChat(chatId)) {
       // The old owner may be running it right now; its answer decides (`deliverOne`).
       if (this.inFlight.has(row.id)) continue;
+      // Requests addressed to the chat's current owner (its `chat.own`, messages already sent
+      // to it) stay where they are.
+      if (row.hostId === this.ownerOf(chatId)) continue;
       if (row.method === METHOD_CHAT_FORWARD) this.reroute(row);
       // A release still waiting for an earlier owner goes out: that host must drop the chat.
       else if (row.method !== METHOD_CHAT_RELEASE) this.forwards.remove(row.id);
@@ -243,6 +253,40 @@ export class ChatOwnershipService {
 
   isOwned(chatId: string): boolean {
     return this.ownerOf(chatId) !== undefined;
+  }
+
+  /**
+   * Whether a message for the chat waits in the outbox for its owner: the owner is online, or it
+   * is offline with a lease that has not run out and may still be running the chat. Once the
+   * lease is over the owner has fenced, and the chat is gated like a hub-run one.
+   */
+  waitsForOwner(chatId: string): boolean {
+    const owner = this.ownerOf(chatId);
+    if (!owner) return false;
+    if (this.sessions.get(owner)?.attached) return true;
+    return workerLeaseService.remainingMs(owner) > 0;
+  }
+
+  // ---- events held from a former owner ----------------------------------------
+
+  /** What a former owner logged after the chat moved, or null when nothing is held. */
+  heldSummary(chatId: string): HeldEventsSummary | null {
+    return this.forwards.heldSummary(chatId);
+  }
+
+  /** The held rows as chat events, in the order the worker logged them. */
+  heldTranscript(chatId: string): ChatEvent[] {
+    const rows = this.forwards.heldRows(chatId);
+    return rowsToEvents(
+      rows.map((r) => ({ ...r, event: r.event as LoggedChatEvent })) as ChatEventRow[],
+    );
+  }
+
+  /** Deletes the held rows. Returns how many were removed. */
+  discardHeld(chatId: string): number {
+    const count = this.forwards.heldCount(chatId);
+    this.forwards.dropHolds(chatId);
+    return count;
   }
 
   /** Whether a host is online now with a build that owns chats. */
@@ -310,6 +354,9 @@ export class ChatOwnershipService {
       // A turn the old owner was running ends here: its own end, logged as the worker stops the
       // agent, is kept apart now that the chat has moved.
       this.closeOpenTurn(chatId);
+      // The restored worktree's worker runs the chat when it can, before the waiting messages
+      // follow, so they go to it and the hub starts no agent of its own.
+      this.ownerFor(chatId);
       // Messages that waited for the old owner (often offline after a restore) follow the chat
       // now, instead of when that host comes back. The caller has already moved the chat.
       this.rerouteAll(chatId);
