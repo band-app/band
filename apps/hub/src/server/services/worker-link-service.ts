@@ -46,6 +46,7 @@ import { followService } from "./follow-service";
 import { gitCredentialService } from "./git-credential-service";
 import { placementService } from "./placement-service";
 import { repoService } from "./repo-service";
+import { terminalService } from "./terminal-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { workerLeaseService } from "./worker-lease-service";
@@ -320,9 +321,16 @@ export class WorkerLinkService {
     // A request a runner fulfilled with this host can finish now.
     placementService.onHostOnline(workerId);
     // Worktrees removed while the worker was away still have a checkout on it.
-    void worktreeService.finishPendingRemovals(workerId).catch((err) => {
-      log.warn(`pending removals on ${workerId}: ${err instanceof Error ? err.message : err}`);
-    });
+    void worktreeService
+      .finishPendingRemovals(workerId)
+      .catch((err) => {
+        log.warn(`pending removals on ${workerId}: ${err instanceof Error ? err.message : err}`);
+      })
+      // Terminals of worktrees the hub no longer has outlive their removal on a worker.
+      .then(() => terminalService.reconcileHost(this.remoteHost(workerId)))
+      .catch((err) => {
+        log.warn(`terminal sweep on ${workerId}: ${err instanceof Error ? err.message : err}`);
+      });
   }
 
   private setStatus(workerId: string, status: HostRow["status"], lastSeenAt?: number): void {
