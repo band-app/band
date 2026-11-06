@@ -229,6 +229,27 @@ describe("external files for a worktree on a remote worker", () => {
     expect(readFileSync(dotfile, "utf-8")).toBe('{"a":2}\n');
   });
 
+  it("resolves a path outside every root for the Quick Open probe, and a path inside the worktree", async () => {
+    const outside = tmp("band-extfile-remote-probe-");
+    const file = join(outside, "report.html");
+    writeFileSync(file, "<p>hi</p>\n");
+    const probe = async (path: string) =>
+      trpcData(await trpcQuery(server.url, "worktree.resolvePath", { worktreeId, path }, TOKEN));
+
+    expect(await probe(file)).toMatchObject({ exists: true, isFile: true, external: true });
+    expect(await probe(join(outside, "missing.html"))).toMatchObject({
+      exists: false,
+      external: true,
+    });
+    expect(await probe(join(outside))).toMatchObject({ exists: true, isFile: false });
+    expect(await probe("docs/book.xlsx")).toMatchObject({
+      exists: true,
+      isFile: true,
+      external: false,
+      worktreeRelativePath: "docs/book.xlsx",
+    });
+  });
+
   it("opens a file in another root the worker serves", async () => {
     const file = join(secondRootDir, "README.md");
     writeFileSync(file, "# other root\n");

@@ -33,12 +33,32 @@ export class PathsService {
   async resolvePath(input: { worktreeId: string; filePath: string }): Promise<ResolvePathResult> {
     const worktree = this.worktrees.resolve(input.worktreeId);
     if (!worktree) throw new WorktreeNotFoundError(input.worktreeId);
-    const resolved = await resolveTarget(worktree.host.fs, worktree.worktree.path, input.filePath);
+    // The probe serves a person (Quick Open, a chat or terminal link), so it reads through
+    // `host.external`: the worker's user decides what exists, not the worker's roots. An agent's
+    // `band open` still goes through `resolveTarget` and the path policy.
+    const { external } = worktree.host;
+    const root = worktree.worktree.path;
+    const target = isAbsolute(input.filePath)
+      ? resolve(input.filePath)
+      : resolve(root, input.filePath);
+    const [stat, rootStat] = await Promise.all([external.stat(target), external.stat(root)]);
+    const canonicalRoot = (rootStat.outcome === "ok" ? rootStat.canonicalPath : root).replace(
+      /\/+$/,
+      "",
+    );
+    const canonicalTarget = stat.outcome === "ok" ? stat.canonicalPath : target;
+    const inside =
+      canonicalTarget === canonicalRoot || canonicalTarget.startsWith(`${canonicalRoot}${sep}`);
+    const relativePath = inside
+      ? (canonicalTarget === canonicalRoot ? "" : canonicalTarget.slice(canonicalRoot.length + 1))
+          .split(sep)
+          .join("/")
+      : null;
     return {
-      exists: resolved.exists,
-      isFile: resolved.isFile,
-      external: !resolved.inside,
-      worktreeRelativePath: resolved.inside ? resolved.relativePath : null,
+      exists: stat.outcome === "ok",
+      isFile: stat.outcome === "ok" && stat.kind === "file",
+      external: !inside,
+      worktreeRelativePath: relativePath,
     };
   }
 }
