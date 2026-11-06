@@ -20,6 +20,92 @@ function jsonText(value: unknown, isError = false) {
   };
 }
 
+/** Decoded size cap for one image block in a tool result. */
+const MAX_TOOL_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Most content blocks one tool result may hold. */
+const MAX_TOOL_BLOCKS = 8;
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg"]);
+
+type ToolContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
+/** Whether a service result has the `{ content: [...] }` shape of an MCP tool result. */
+function isContentResult(value: unknown): value is { content: unknown[] } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    Array.isArray((value as { content?: unknown }).content)
+  );
+}
+
+/** The problem with a content block, or null when it is a valid text or image block. */
+function contentBlockProblem(block: unknown, index: number): string | null {
+  const at = `content[${index}]`;
+  if (typeof block !== "object" || block === null) return `${at} is not an object`;
+  const b = block as Record<string, unknown>;
+  if (b.type === "text") {
+    return typeof b.text === "string" ? null : `${at} is a text block without a text string`;
+  }
+  if (b.type === "image") {
+    // Check the length before the regex scans the string.
+    if (
+      typeof b.data === "string" &&
+      b.data.length > Math.ceil((MAX_TOOL_IMAGE_BYTES * 4) / 3) + 4
+    ) {
+      return `${at} is an image over the size cap; the limit is ${MAX_TOOL_IMAGE_BYTES}`;
+    }
+    if (typeof b.data !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(b.data)) {
+      return `${at} is an image block without base64 data`;
+    }
+    if (typeof b.mimeType !== "string" || !IMAGE_TYPES.has(b.mimeType)) {
+      return `${at} has image type ${String(b.mimeType)}; only image/png and image/jpeg are allowed`;
+    }
+    const decoded =
+      Math.floor((b.data.length * 3) / 4) -
+      (b.data.endsWith("==") ? 2 : b.data.endsWith("=") ? 1 : 0);
+    if (decoded > MAX_TOOL_IMAGE_BYTES) {
+      return `${at} is an image of ${decoded} bytes; the limit is ${MAX_TOOL_IMAGE_BYTES}`;
+    }
+    return null;
+  }
+  return `${at} has block type ${String(b.type)}; only text and image blocks are allowed`;
+}
+
+/**
+ * Turns a service result into an MCP tool result. A result of the shape
+ * `{ content: [text | image blocks] }` passes through as is. Any other result is JSON text, as
+ * before. A `{ content }` result with a bad block is a tool error that names the problem.
+ */
+function toolResultFor(result: unknown) {
+  if (isContentResult(result)) {
+    if (result.content.length > MAX_TOOL_BLOCKS) {
+      return jsonText(
+        {
+          error: `The tool returned an invalid result: content has ${result.content.length} blocks; the limit is ${MAX_TOOL_BLOCKS}`,
+        },
+        true,
+      );
+    }
+    for (const [i, block] of result.content.entries()) {
+      const problem = contentBlockProblem(block, i);
+      if (problem)
+        return jsonText({ error: `The tool returned an invalid result: ${problem}` }, true);
+    }
+    // Rebuild each block from the checked fields, so extra keys never reach the agent.
+    const content = (result.content as ToolContentBlock[]).map(
+      (b): ToolContentBlock =>
+        b.type === "text"
+          ? { type: "text", text: b.text }
+          : { type: "image", data: b.data, mimeType: b.mimeType },
+    );
+    return { content };
+  }
+  return jsonText(result ?? null);
+}
+
 export async function registerExtensionTools(server: McpServer, chatId: string): Promise<void> {
   const schemas = new Map<string, Record<string, unknown>>();
   const { extensions } = await extensionService.list();
@@ -52,7 +138,7 @@ export async function registerExtensionTools(server: McpServer, chatId: string):
                 args ?? {},
                 { worktreeKey: chat.worktreeId, worktreePath: resolved.worktree.path },
               );
-              return jsonText(result ?? null);
+              return toolResultFor(result);
             } catch (err) {
               return jsonText({ error: err instanceof Error ? err.message : String(err) }, true);
             }

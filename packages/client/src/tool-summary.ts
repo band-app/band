@@ -286,7 +286,7 @@ export type ImageContent = Extract<
 export interface ToolDetails {
   /** File edits, as old and new text. */
   diffs: DiffContent[];
-  /** Pictures the call returned, such as a simulator screenshot. */
+  /** Pictures the call returned, such as a screenshot. */
   images: ImageContent[];
   texts: string[];
   /** Plans and thinking come back as prose to render as markdown; other text is raw output. */
@@ -319,9 +319,4 @@ export function hasToolDetails(entry: ToolEntry): boolean {
     entry.rawInput !== undefined ||
     entry.rawOutput !== undefined
   );
-}
-
-/** Whether the call is one of the simulator plugin's tools (`simulator_tap`, `simulator_screenshot`, ...). */
-export function isSimulatorTool(entry: ToolEntry): boolean {
-  return /(^|[_\s.-])simulator_[a-z_]+/.test(entry.name ?? entry.title);
 }

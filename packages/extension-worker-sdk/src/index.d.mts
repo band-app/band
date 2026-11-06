@@ -20,6 +20,27 @@ export interface ServiceInit {
   stateDir: string;
 }
 
+/**
+ * How a stream is carried. Band adds `profile` to the `params` of every stream open, after the
+ * viewer's own params: `"direct"` when the frames go straight to the desktop app on this machine
+ * (full size and rate are fine), `"hub"` when the hub carries them (send smaller frames, 15 per
+ * second at most).
+ */
+export type StreamProfile = "direct" | "hub";
+
+/** One block of a tool result. Images are PNG or JPEG, at most 5 MB decoded. */
+export type ToolContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: "image/png" | "image/jpeg" };
+
+/**
+ * A call that backs an agent tool may return this to give the agent text and images. Any other
+ * result reaches the agent as JSON text.
+ */
+export interface ToolContentResult {
+  content: ToolContentBlock[];
+}
+
 /** A live two-way stream the service opened for the hub. */
 export interface ServiceStream {
   /** Sends a message to the viewer. */
@@ -40,7 +61,7 @@ export interface WorkerServiceDefinition {
   streams?: Record<
     string,
     (
-      params: any,
+      params: { profile: StreamProfile; [key: string]: unknown },
       scope: ServiceScope,
       stream: ServiceStream,
     ) =>

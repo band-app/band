@@ -171,8 +171,8 @@ export class Worker {
    */
   static async start(config: WorkerConfig, options: WorkerOptions = {}): Promise<Worker> {
     await ensureStateDir(config.stateDir);
-    // A plugin's availability probe can run an external tool (the simulator one runs
-    // `xcrun simctl help`, up to 20 s on a cold macOS runner). It starts here, beside the token
+    // A plugin's availability probe can run an external tool (one may run
+    // a tool, up to 20 s on a cold macOS runner). It starts here, beside the token
     // exchange and the capability probes, so the hello waits only for what is left of it.
     const plugins = WorkerPlugins.start({ stateDir: config.stateDir, log });
     plugins.catch(() => undefined);

@@ -13,7 +13,6 @@ const script = fileURLToPath(new URL("./macos-changes.sh", import.meta.url));
 const NAMES = [
   "cli",
   "macos-machine",
-  "simulator",
   "desktop",
   "desktop-package",
   "mobile",
@@ -69,7 +68,6 @@ test("S1: change touching apps/desktop (#1094) sets desktop", () => {
   const out = run("merge_group", fixture(1094));
   assert.equal(out.desktop, "true");
   assert.equal(out["full-suite"], "false");
-  assert.equal(out.simulator, "false");
   assert.equal(out.cli, "false");
   assert.equal(out.mobile, "false");
 });
@@ -84,12 +82,6 @@ test("S1: terminals in host-local set macos-machine", () => {
 test("macos-machine also follows the listed hub tests", () => {
   assert.equal(run("merge_group", ["apps/hub/tests/terminal-ws.test.ts"])["macos-machine"], "true");
   assert.equal(run("merge_group", ["apps/hub/tests/vault.test.ts"])["macos-machine"], "false");
-});
-
-test("S1: plugins/simulator sets simulator", () => {
-  const out = run("merge_group", ["plugins/simulator/src/worker/stream.ts"]);
-  assert.equal(out.simulator, "true");
-  assert.equal(out["macos-machine"], "false");
 });
 
 test("S1: apps/cli/src sets cli", () => {

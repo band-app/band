@@ -60,6 +60,8 @@ interface Worker {
   home: string;
   child: ChildProcess;
   worktreeId: string;
+  /** A second worktree on the same worker, for a direct token that must not open it. */
+  otherWorktreeId: string;
   httpLog: string;
 }
 
@@ -80,6 +82,40 @@ const q = <T>(procedure: string, input?: unknown) =>
 
 const SCENARIO = {
   turns: [
+    {
+      match: "^images",
+      steps: [
+        { mcpCall: { name: "img-ok", server: "band", tool: "echo-service_shot", fullBody: true } },
+        {
+          mcpCall: {
+            name: "img-block",
+            server: "band",
+            tool: "echo-service_badblock",
+            fullBody: true,
+          },
+        },
+        {
+          mcpCall: {
+            name: "img-mime",
+            server: "band",
+            tool: "echo-service_badmime",
+            fullBody: true,
+          },
+        },
+        {
+          mcpCall: { name: "img-huge", server: "band", tool: "echo-service_huge", fullBody: true },
+        },
+        {
+          mcpCall: {
+            name: "img-plain",
+            server: "band",
+            tool: "echo-service_plain",
+            fullBody: true,
+          },
+        },
+        { say: "done" },
+      ],
+    },
     {
       match: "^tools",
       steps: [
@@ -154,8 +190,15 @@ async function startWorker(label: string): Promise<Worker> {
     hostId: issued.hostId,
     hostRepoPath: join(root, "proj"),
   });
+  await m("worktrees.create", {
+    repo: "proj",
+    branch: `other-${label}`,
+    hostId: issued.hostId,
+    hostRepoPath: join(root, "proj"),
+  });
   return {
     hostId: issued.hostId,
+    otherWorktreeId: toWorktreeId("proj", `other-${label}`, issued.hostId),
     home,
     child,
     httpLog,
@@ -219,7 +262,11 @@ afterAll(async () => {
 function parse(body: string) {
   const json = body.includes("data:") ? body.slice(body.indexOf("data:") + 5).trim() : body;
   return JSON.parse(json.split("\n")[0]) as {
-    result?: { content?: { text?: string }[]; isError?: boolean; tools?: { name: string }[] };
+    result?: {
+      content?: { type?: string; text?: string; data?: string; mimeType?: string }[];
+      isError?: boolean;
+      tools?: { name: string }[];
+    };
   };
 }
 const httpLog = (w: Worker): Array<{ name: string; status: number; body: string }> =>
@@ -230,12 +277,12 @@ const httpLog = (w: Worker): Array<{ name: string; status: number; body: string 
         .map((l) => JSON.parse(l))
     : [];
 
-async function runTools(w: Worker, chatId: string) {
+async function runTools(w: Worker, chatId: string, text = "tools") {
   const stream = await openStream(server.url, chatId, { until: turnEnded, timeoutMs: 40_000 });
   const res = await fetch(`${server.url}/api/chats/${chatId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
-    body: JSON.stringify({ worktreeId: w.worktreeId, text: "tools" }),
+    body: JSON.stringify({ worktreeId: w.worktreeId, text }),
   });
   if (!res.ok) throw new Error(`send failed: ${res.status} ${await res.text()}`);
   await stream.events;
@@ -253,6 +300,40 @@ describe("extension panels and tools", () => {
     const echo = parse(lines.find((l) => l.name === "echo")?.body ?? "").result;
     expect(echo?.isError).toBeUndefined();
     expect(JSON.parse(echo?.content?.[0]?.text ?? "null")).toEqual({ text: "hi" });
+  }, 90_000);
+
+  it("S3: an image block in a tool result reaches the agent as an image; bad shapes are tool errors", async () => {
+    const lines = await runTools(a, "chat-images-on-a", "images");
+    const result = (name: string) => parse(lines.find((l) => l.name === name)?.body ?? "").result;
+
+    const ok = result("img-ok");
+    expect(ok?.isError).toBeUndefined();
+    expect(ok?.content?.[0]).toEqual({ type: "text", text: "1x1 at scale 1" });
+    expect(ok?.content?.[1]?.type).toBe("image");
+    expect(ok?.content?.[1]?.mimeType).toBe("image/png");
+    expect(
+      Buffer.from(ok?.content?.[1]?.data ?? "", "base64")
+        .subarray(1, 4)
+        .toString(),
+    ).toBe("PNG");
+
+    const block = result("img-block");
+    expect(block?.isError).toBe(true);
+    expect(block?.content?.[0]?.text).toContain("block type audio");
+    const mime = result("img-mime");
+    expect(mime?.isError).toBe(true);
+    expect(mime?.content?.[0]?.text).toContain("image/gif");
+    const huge = result("img-huge");
+    expect(huge?.isError).toBe(true);
+    expect(huge?.content?.[0]?.text).toContain("the limit is 5242880");
+
+    // A result that merely has a `content` key beside other keys stays JSON text.
+    const plain = result("img-plain");
+    expect(plain?.isError).toBeUndefined();
+    expect(JSON.parse(plain?.content?.[0]?.text ?? "null")).toEqual({
+      content: "just a string",
+      other: 1,
+    });
   }, 90_000);
 
   it("S3: a chat on a worker without the service gets an error naming the worker", async () => {
@@ -284,8 +365,6 @@ describe("extension panels and tools", () => {
 
     // View-only: the input is dropped.
     ws.send("before");
-    await new Promise((r) => setTimeout(r, 500));
-    expect(received.some((r) => r.startsWith("echo:"))).toBe(false);
 
     ws.send(JSON.stringify({ type: "control", enabled: true }));
     ws.send("after");
@@ -296,6 +375,104 @@ describe("extension panels and tools", () => {
     expect(received).not.toContain("echo:before");
     ws.close();
   }, 60_000);
+
+  it("S2: the service sees profile hub through the hub and direct on the worker's loopback listener", async () => {
+    // Through the hub: the page's own params cannot choose the profile.
+    const params = encodeURIComponent(JSON.stringify({ profile: "direct" }));
+    const hubUrl = `${server.url.replace("http", "ws")}/api/extensions/echo-service/worktrees/${encodeURIComponent(
+      a.worktreeId,
+    )}/stream?panel=screen&name=profile&params=${params}`;
+    const viaHub = new WebSocket(hubUrl, { headers: { Cookie: `band_token=${TEST_TOKEN}` } });
+    const hubFrames: string[] = [];
+    viaHub.on("message", (data) => hubFrames.push(data.toString()));
+    await waitFor(() => (hubFrames.length >= 1 ? true : undefined), {
+      label: "the hub stream's first frame",
+      timeoutMs: 20_000,
+    });
+    expect(hubFrames[0]).toBe("profile:hub");
+    viaHub.close();
+
+    // On the loopback listener, with the token the hub issued for this worktree.
+    const access = await m<{ port: number; token: string } | null>("worktree.directAccess", {
+      worktreeId: a.worktreeId,
+      hostId: a.hostId,
+    });
+    if (!access) throw new Error("no direct access");
+    const base = (worktreeId: string) =>
+      `ws://127.0.0.1:${access.port}/plugins/echo/stream?worktreeId=${encodeURIComponent(
+        worktreeId,
+      )}&name=profile&params=${encodeURIComponent(JSON.stringify({ profile: "hub" }))}`;
+    const protocols = ["band", `band-token.${access.token}`];
+    const origin = { origin: "app://h-0123456789ab" };
+
+    const direct = new WebSocket(base(a.worktreeId), protocols, { headers: origin });
+    const frames: string[] = [];
+    let closedWith = "";
+    direct.on("message", (data) => frames.push(data.toString()));
+    direct.on("close", (code, reason) => {
+      closedWith = `closed ${code} ${reason.toString()}`;
+    });
+    direct.on("unexpected-response", (_req, res) => {
+      closedWith = `HTTP ${res.statusCode}`;
+    });
+    direct.on("error", (err) => {
+      closedWith = `error ${err.message}`;
+    });
+    await waitFor(
+      () => {
+        if (closedWith) throw new Error(`the direct stream ended: ${closedWith}`);
+        return frames.length >= 1 ? true : undefined;
+      },
+      { label: "the direct stream's first frame", timeoutMs: 20_000 },
+    );
+    expect(frames[0]).toBe("profile:direct");
+
+    // View-only until control; binary input is dropped even with control.
+    direct.send("before");
+    direct.send(JSON.stringify({ type: "control", enabled: true }));
+    direct.send(Buffer.from([7]));
+    direct.send("after");
+    await waitFor(() => (frames.includes("echo:after") ? true : undefined), {
+      label: "input after control",
+      timeoutMs: 20_000,
+    });
+    expect(frames).not.toContain("echo:before");
+    expect(frames).not.toContain("echo:07");
+    direct.close();
+
+    // Refusals: a bad token, a wrong origin, a wrong host, another worktree, a bad stream name.
+    const status = (url: string, subprotocols: string[], headers: Record<string, string>) =>
+      new Promise<number | "open">((resolve, reject) => {
+        const ws = new WebSocket(url, subprotocols, { headers });
+        ws.once("open", () => {
+          ws.close();
+          resolve("open");
+        });
+        ws.once("unexpected-response", (_req, res) => {
+          resolve(res.statusCode ?? 0);
+          ws.terminate();
+        });
+        ws.once("error", reject);
+      });
+    expect(await status(base(a.worktreeId), ["band", "band-token.bwd_unknown"], origin)).toBe(401);
+    expect(await status(base(a.worktreeId), ["band", `band-token.${TEST_TOKEN}`], origin)).toBe(
+      401,
+    );
+    expect(await status(base(a.worktreeId), protocols, { origin: "https://evil.example" })).toBe(
+      403,
+    );
+    expect(await status(base(a.worktreeId), protocols, { ...origin, host: "evil.example" })).toBe(
+      421,
+    );
+    expect(await status(base(a.otherWorktreeId), protocols, origin)).toBe(403);
+    expect(
+      await status(
+        base(a.worktreeId).replace("name=profile", "name=bad%20name"),
+        protocols,
+        origin,
+      ),
+    ).toBe(400);
+  }, 90_000);
 
   it("a stream for an unknown panel closes with 4001 and a reason", async () => {
     const url = `${server.url.replace("http", "ws")}/api/extensions/echo-service/worktrees/${encodeURIComponent(

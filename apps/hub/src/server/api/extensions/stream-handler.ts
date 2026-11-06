@@ -29,7 +29,7 @@ export function extensionStreamTarget(pathname: string): ExtensionStreamTarget |
 /**
  * Bridges a viewer's WebSocket to a stream of an extension's worker service on the worktree's
  * worker. The query names the panel (`panel`, whose capability picks the service), the stream
- * (`name`) and its JSON params (`params`). The viewer is view-only until it asks for control
+ * (`name`) and its JSON object params (`params`); the hub adds `profile: "hub"`. The viewer is view-only until it asks for control
  * (`bridgePluginStream`). Only a person's device token reaches this route: the relay lists no such
  * route, so an agent gets 403.
  */
@@ -43,10 +43,15 @@ export async function handleExtensionStream(
   const name = url.searchParams.get("name") ?? "";
   const label = `${target.extensionId} stream of ${target.worktreeId}`;
   const fail = (message: string) => ws.close(4001, message.slice(0, 120));
-  let params: unknown = {};
+  let params: Record<string, unknown> = {};
   try {
     const raw = url.searchParams.get("params");
-    if (raw) params = JSON.parse(raw);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      fail("params is not a JSON object");
+      return;
+    }
+    params = parsed as Record<string, unknown>;
   } catch {
     fail("params is not JSON");
     return;
@@ -65,7 +70,13 @@ export async function handleExtensionStream(
   await bridgePluginStream(
     ws,
     label,
-    () => pluginHost.openStream(panel.capability, target.worktreeId, name, params),
+    // The hub carries every frame, so the service gets the `hub` profile (smaller frames, capped
+    // rate). The viewer cannot choose it: `profile` is set after the viewer's params.
+    () =>
+      pluginHost.openStream(panel.capability, target.worktreeId, name, {
+        ...params,
+        profile: "hub",
+      }),
     fail,
   );
 }

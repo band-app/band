@@ -2,7 +2,7 @@
 # They cover what differs on macOS: terminals, PTYs, the terminal and agent
 # daemons, process trees, power state and macOS-only branches (`darwin`).
 # A change to any of them, or to this list, also turns the job on
-# (scripts/ci/macos-changes.sh). The simulator tests have their own job.
+# (scripts/ci/macos-changes.sh).
 tests/agent-daemon.test.ts
 tests/build-output.test.ts
 tests/chat-continue-in-terminal.test.ts

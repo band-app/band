@@ -31,7 +31,6 @@ import type {
   OpenWithAppArgs,
   PickSaveFileArgs,
   RevealInFinderArgs,
-  RevealSimulatorArgs,
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
 import type { KeepAwakeController } from "../services/keep-awake.js";
@@ -53,7 +52,6 @@ import {
   pickFolder,
   pickSaveFile,
   revealInFinder,
-  revealSimulator,
 } from "./macos-shell.js";
 import { createRendererErrorReporter, type RendererErrorReport } from "./renderer-errors.js";
 import { guardedHandler } from "./sender-guard.js";
@@ -157,7 +155,6 @@ export function registerIpc(opts: RegisterOptions): () => void {
   );
   handle(Channels.takeOpenFiles, () => opts.openFiles.take());
   handle(Channels.revealInFinder, (args: RevealInFinderArgs) => revealInFinder(args.path));
-  handle(Channels.revealSimulator, (args: RevealSimulatorArgs) => revealSimulator(args.udid));
   handle(Channels.checkAppExists, (args: CheckAppExistsArgs) => checkAppExists(args.appName));
   handle(Channels.openWithApp, (args: OpenWithAppArgs) => openWithApp(args.path, args.appName));
   handle(Channels.installCli, (args: InstallCliArgs) =>

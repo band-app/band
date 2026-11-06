@@ -898,7 +898,7 @@ function BrowserLeaf({ params, api }: LayoutPanelProps<BrowserLeafParams>) {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin panel leaf (a `worktree.panels` contribution, e.g. the Simulator)
+// Plugin panel leaf (a `worktree.panels` contribution, e.g. an extension's screen)
 // ---------------------------------------------------------------------------
 
 interface PluginLeafParams {
@@ -3163,7 +3163,7 @@ function extensionPanelIcon(name: string | undefined): typeof Globe {
   return (name && EXTENSION_PANEL_ICONS[name]) || Puzzle;
 }
 
-/** The "+" menu entries of the plugin panels the worktree's worker can serve (the Simulator). */
+/** The "+" menu entries of the plugin panels the worktree's worker can serve. */
 function PluginPanelItems({
   worktreeId,
   onPick,

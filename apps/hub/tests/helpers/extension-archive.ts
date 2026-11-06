@@ -45,6 +45,14 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
                 entry: "panel.html",
                 capability: options.capability ?? "echo",
               },
+              {
+                id: "auto",
+                label: "Echo auto",
+                icon: "monitor",
+                entry: "panel.html",
+                capability: options.capability ?? "echo",
+                defaultControl: true,
+              },
             ],
             tools: [
               {
@@ -54,6 +62,18 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
                 service: "main",
                 method: "echo",
               },
+              ...[
+                ["shot", "imageResult"],
+                ["badblock", "badBlockResult"],
+                ["badmime", "badMimeResult"],
+                ["huge", "hugeImageResult"],
+                ["plain", "plainResult"],
+              ].map(([name, method]) => ({
+                name,
+                description: `Returns ${method}`,
+                service: "main",
+                method,
+              })),
               {
                 name: "hidden",
                 description: "Not for agents",

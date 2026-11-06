@@ -852,7 +852,6 @@ jobs:
   #   - `cli-macos`: the CLI integration tests (`cli`).
   #   - `machine-macos`: the hub tests listed in scripts/ci/macos-hub-tests.txt
   #     plus the host-local and worker package tests (`macos-machine`).
-  #   - `simulator-macos`: the two iOS simulator tests (`simulator`).
   #   - `desktop-macos`: the Electron e2e (`desktop`), and
   #     `desktop-packaged-macos`: a smoke run of the packaged app when its
   #     packaging inputs changed (`desktop-package`).
@@ -884,7 +883,6 @@ jobs:
     outputs:
       cli: ${{ steps.filter.outputs.cli }}
       macos-machine: ${{ steps.filter.outputs.macos-machine }}
-      simulator: ${{ steps.filter.outputs.simulator }}
       docker: ${{ steps.filter.outputs.docker }}
       desktop: ${{ steps.filter.outputs.desktop }}
       desktop-package: ${{ steps.filter.outputs.desktop-package }}
@@ -1705,166 +1703,6 @@ jobs:
           path: apps/cli/target
           key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
 
-  simulator-macos:
-    name: Simulator Tests (macOS)
-    runs-on: macos-latest
-    # A hung test must not hold the job for the 6 hour default. Each test adds a
-    # cold device boot (about 3 to 6 minutes on a runner).
-    timeout-minutes: 45
-    needs: macos-changes
-    if: github.event_name != 'pull_request' && needs.macos-changes.outputs.simulator == 'true'
-    env:
-      NODE_OPTIONS: "--max-old-space-size=6144"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      # Same restore/save split and trust gate as the `check` job; keep each
-      # Restore/Save pair's path & key in lock-step. The CLI target cache has
-      # its own key: this job release-builds the CLI while `cli-macos` fills
-      # `cargo-cli-macOS-*` with a test-profile build, and whichever saved
-      # first would leave the other compiling from scratch every run. The
-      # fallback restore-key still reuses that cache's dependencies.
-      - name: Restore Cargo registry cache
-        id: cache-cargo-registry
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-registry-${{ runner.os }}-
-
-      - name: Restore CLI release target cache
-        id: cache-cargo-cli
-        uses: actions/cache/restore@v5
-        with:
-          path: apps/cli/target
-          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
-          restore-keys: |
-            cargo-cli-release-${{ runner.os }}-
-            cargo-cli-${{ runner.os }}-
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Resolve pnpm store path
-        id: pnpm-store
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore pnpm store cache
-        id: cache-pnpm-store
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
-
-      # macos-latest ships node-pty's darwin prebuild, so (unlike the ubuntu
-      # job) no explicit `node-gyp` install is needed — matches release.yml.
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Save pnpm store cache
-        if: |
-          steps.cache-pnpm-store.outputs.cache-hit != 'true' &&
-          ((github.event_name != 'pull_request' &&
-            github.event_name != 'pull_request_target') ||
-           github.event.pull_request.head.repo.full_name == github.repository)
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-
-      # Some web tests (e.g. `cli-skills.test.ts`) shell out to a real `band`
-      # binary, so build it first, as `check`, release.yml and nightly.yml do.
-      - name: Build CLI
-        run: cargo build --release --manifest-path apps/cli/Cargo.toml
-
-      - name: Build web (needed by tests)
-        run: pnpm build:web
-
-      # The simulator tests boot real iOS simulators and skip on CI unless BAND_TEST_SIMULATOR=1.
-      # Only two cases run here, one device each at a time (BAND_SIMULATOR_MAX_BOOTED=1): the hub
-      # test that the stream carries frames and stays view-only until control (S4), and the e2e
-      # that the Simulator tab opens and shows the screen (S3, S6). The rest run locally.
-      - name: Build worker (simulator tests start the real binary)
-        run: pnpm --filter @band-app/worker build
-
-      - name: Test simulator stream (hub)
-        env:
-          BAND_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/band-test-artifacts
-          BAND_TEST_SIMULATOR: "1"
-          BAND_SIMULATOR_MAX_BOOTED: "1"
-        run: pnpm --filter @band-app/server exec vitest run tests/simulator-plugin.test.ts -t "stream carries"
-
-      - name: Install Playwright Chromium (simulator tab)
-        timeout-minutes: 10
-        run: node scripts/with-timeout.mjs 300 pnpm --filter @band-app/web exec playwright install chromium
-
-      - name: Test simulator tab (e2e)
-        env:
-          BAND_TEST_SIMULATOR: "1"
-          BAND_SIMULATOR_MAX_BOOTED: "1"
-        run: pnpm --filter @band-app/web exec playwright test e2e/simulator-panel.spec.ts -g "S3, S6"
-
-      - name: Upload hub failure logs
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: simulator-macos-failure-logs
-          path: ${{ runner.temp }}/band-test-artifacts/
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Upload Playwright failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-simulator-macos-test-results
-          path: apps/web/test-results/
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Save Cargo registry cache
-        if: |
-          always() &&
-          steps.cache-cargo-registry.outputs.cache-hit != 'true' &&
-          ((github.event_name != 'pull_request' &&
-            github.event_name != 'pull_request_target') ||
-           github.event.pull_request.head.repo.full_name == github.repository)
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Save CLI release target cache
-        if: |
-          steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
-          ((github.event_name != 'pull_request' &&
-            github.event_name != 'pull_request_target') ||
-           github.event.pull_request.head.repo.full_name == github.repository)
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: apps/cli/target
-          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
-
   # Builds apps/mobile for the iOS simulator (expo prebuild, pod install,
   # xcodebuild Release with the JS bundle embedded). The Maestro flows in
   # apps/mobile/e2e are not run here yet; agents and people run them locally
@@ -2057,7 +1895,6 @@ jobs:
       - cli-macos
       - web-macos
       - machine-macos
-      - simulator-macos
       - mobile-ios
       - desktop-macos
       - desktop-packaged-macos

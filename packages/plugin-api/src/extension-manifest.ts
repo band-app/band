@@ -68,6 +68,11 @@ export const panelSchema = z
     entry: entrySchema,
     /** The `capability` of one of this extension's worker services. */
     capability: idSchema,
+    /**
+     * Band takes control for the person as soon as a stream connects (and after each reconnect), so
+     * input reaches the service without pressing Take control. Release still works.
+     */
+    defaultControl: z.boolean().default(false),
   })
   .strict();
 

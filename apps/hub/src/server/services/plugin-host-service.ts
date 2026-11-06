@@ -139,7 +139,7 @@ export class PluginHost {
 
   /**
    * Calls a worker service of plugin `pluginId` for a worktree the caller names, on the worktree's
-   * own worker. For hub code that acts for a person (the simulator panel); an agent's tool calls
+   * own worker. For hub code that acts for a person (a plugin panel); an agent's tool calls
    * go through its `ToolContext` instead.
    */
   async callForWorktree(

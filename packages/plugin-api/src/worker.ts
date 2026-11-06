@@ -33,8 +33,8 @@ export type ReleaseReason = "removed" | "fenced" | "shutdown";
 export type StreamMessage = string | Uint8Array;
 
 /**
- * A live two-way stream between a plugin's viewer in the browser and its worker half (the
- * simulator's screen is one). The hub bridges it to a WebSocket and drops what a view-only viewer
+ * A live two-way stream between a plugin's viewer in the browser and its worker half (a
+ * remote screen is one). The hub bridges it to a WebSocket and drops what a view-only viewer
  * sends before it reaches the plugin.
  */
 export interface PluginStream {
