@@ -76,6 +76,7 @@ async function startAgentOn(w: StandInWorker, branch: string): Promise<string> {
   mkdirSync(path, { recursive: true });
   const db = new DatabaseSync(join(home, ".band", "band.db"));
   try {
+    db.exec("PRAGMA busy_timeout = 5000");
     db.prepare(
       "INSERT INTO worktrees (repo_name, name, branch, path, host_id) VALUES (?, ?, ?, ?, ?)",
     ).run(REPO, branch, branch, path, w.hostId);
