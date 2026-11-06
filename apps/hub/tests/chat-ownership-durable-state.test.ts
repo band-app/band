@@ -102,7 +102,11 @@ async function loggedTexts(worker: Worker, chatId: string): Promise<string[]> {
 }
 
 /** What the agent daemon still holds of an agent's stdout, with the offset of its first byte. */
-async function ringOf(worker: Worker, agentId: string): Promise<{ start: number; bytes: Buffer }> {
+async function ringOf(
+  worker: Worker,
+  agentId: string,
+  coverThrough = 0,
+): Promise<{ start: number; bytes: Buffer }> {
   const holder = new AgentHolder({
     entry: "unused",
     runDir: agentRunDir(worker.state),
@@ -122,8 +126,15 @@ async function ringOf(worker: Worker, agentId: string): Promise<{ start: number;
       },
     );
     if (!record) throw new Error(`no daemon holds agent ${agentId}`);
-    // The replay is sent before the reply, and the agent may still be writing. Let it settle.
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // The replay can trail the reply, and the agent may still be writing. Wait until the replay
+    // covers `coverThrough` and then stops growing.
+    let last = -1;
+    for (let i = 0; i < 50; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const end = parts.reduce((m, p) => Math.max(m, p.off + p.data.length), 0);
+      if (end >= coverThrough && end === last) break;
+      last = end;
+    }
     parts.sort((a, b) => a.off - b.off);
     const start = parts[0]?.off ?? 0;
     return { start, bytes: Buffer.concat(parts.map((p) => p.data)) };
@@ -170,7 +181,7 @@ describe("the offset in chats.db follows the committed events (S1, S3)", () => {
       expect(row?.spec_hash).toMatch(/^[0-9a-f]{64}$/);
       const logged = new Set(await loggedTexts(worker, chatId));
 
-      const ring = await ringOf(worker, row?.agent_id as string);
+      const ring = await ringOf(worker, row?.agent_id as string, stored);
       // S3: the daemon was never told to drop a byte this offset does not cover.
       expect(ring.start).toBeLessThanOrEqual(stored);
       // Not inside a line: the byte before the offset ends a line, unless the ring starts here.
@@ -278,7 +289,7 @@ describe("the open requests, the turn and the queue are stored (S2)", () => {
       db.close();
     }
     // S3: the permission request line is not acknowledged beyond what the log holds.
-    const ring = await ringOf(worker, row?.agent_id as string);
+    const ring = await ringOf(worker, row?.agent_id as string, row?.stdout_offset ?? 0);
     expect(ring.start).toBeLessThanOrEqual(row?.stdout_offset ?? 0);
   }, 180_000);
 });

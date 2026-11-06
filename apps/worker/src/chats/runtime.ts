@@ -335,9 +335,13 @@ export class ChatRuntime {
       {
         begin: () => store.beginBatch(),
         commit: (snapshot) => {
+          let saved = true;
           try {
             if (this.tap === tap) this.saveWire(tap, snapshot);
           } catch (err) {
+            // The events still commit, but the stored offset is now behind them: keep the daemon's
+            // bytes until a later batch stores the state.
+            saved = false;
             this.env.log.error({ chatId: this.chatId, err }, "could not store the client state");
           }
           try {
@@ -347,7 +351,7 @@ export class ChatRuntime {
             this.env.log.error({ chatId: this.chatId, err }, "could not commit the chat batch");
             return;
           }
-          if (this.tap === tap) tap.acknowledge();
+          if (saved && this.tap === tap) tap.acknowledge();
         },
         changed: () => this.persistSoon(),
       },
