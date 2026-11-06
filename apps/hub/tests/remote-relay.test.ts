@@ -377,6 +377,12 @@ beforeAll(async () => {
             auto: true,
           }),
           probe("hub-interruptions", "/trpc/workers.hubInterruptions"),
+          // Events a former owner logged after a chat moved are a person's to view or discard.
+          post("discard-held", "/trpc/follow.discardHeld", { chatId: "any-chat" }),
+          probe(
+            "held-transcript",
+            `/trpc/follow.heldTranscript?input=${encodeURIComponent(JSON.stringify({ chatId: "any-chat" }))}`,
+          ),
           // Unread is a person's reading state; an agent may not set it, even on its own worktree.
           post("set-unread", "/trpc/worktrees.setUnread", { worktreeId: WT_A, unread: true }),
           // External files are for a person's device token: a relay token reads or writes none.
@@ -679,6 +685,8 @@ describe("the worker relay (S2)", () => {
     expect(by("check-updates")?.status).toBe(403);
     expect(by("set-auto-update")?.status).toBe(403);
     expect(by("hub-interruptions")?.status).toBe(403);
+    expect(by("discard-held")?.status).toBe(403);
+    expect(by("held-transcript")?.status).toBe(403);
     expect(by("mcp-tokens")?.status).toBe(403);
     expect(by("direct-access")?.status).toBe(403);
     expect(by("download-url")?.status).toBe(403);
