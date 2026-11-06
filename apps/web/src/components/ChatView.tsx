@@ -10,6 +10,7 @@ import {
 import { groupEntries } from "@band-app/client/tool-summary";
 import type { ChatMessage, Entry } from "@band-app/client/transcript";
 import type { SessionState } from "@band-app/shared/chat-events";
+import { parseSelectionBlock } from "@band-app/shared/editor-selection-block";
 import {
   cn,
   DropdownMenu,
@@ -67,7 +68,7 @@ import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { AgentFailureCard } from "./chat/AgentFailureCard";
 import { ChatLoginMenu } from "./chat/ChatLoginMenu";
-import { EditorSelectionChip } from "./chat/EditorSelectionChip";
+import { EditorSelectionChip, SentSelectionChip } from "./chat/EditorSelectionChip";
 import { HeldEventsNotice } from "./chat/HeldEventsNotice";
 import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
@@ -609,11 +610,20 @@ export function ChatView({
               {message.files?.map((file) => (
                 <MessageFilePart key={file.url} part={{ type: "file", ...file }} />
               ))}
-              {message.text.trim() && (
-                <div data-chat-find-text="">
-                  <MessageResponse>{message.text}</MessageResponse>
-                </div>
-              )}
+              {(() => {
+                const parsed = parseSelectionBlock(message.text);
+                const body = parsed ? parsed.body : message.text;
+                return (
+                  <>
+                    {body.trim() && (
+                      <div data-chat-find-text="">
+                        <MessageResponse>{body}</MessageResponse>
+                      </div>
+                    )}
+                    {parsed && <SentSelectionChip label={parsed.chipLabel} text={parsed.text} />}
+                  </>
+                );
+              })()}
             </MessageContent>
             {!message.pending && (
               <MessageActions

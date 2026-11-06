@@ -663,6 +663,16 @@ export class ChatPanePage {
     return this.page.getByTestId("chat__selection-chip").filter({ visible: true });
   }
 
+  /** The read-only chip inside a sent user message whose text contains `text`. */
+  sentSelectionChip(text: string): Locator {
+    return this.userMessage(text).getByTestId("chat__sent-selection-chip");
+  }
+
+  /** The selected text popover of a sent message's chip. */
+  get sentSelectionText(): Locator {
+    return this.page.getByTestId("chat__sent-selection-text");
+  }
+
   async removeSelectionChip(): Promise<void> {
     await test.step("Remove the selection chip", async () => {
       await this.page.getByTestId("chat__selection-chip-remove").filter({ visible: true }).click();

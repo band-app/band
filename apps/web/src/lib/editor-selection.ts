@@ -2,11 +2,11 @@
  * The selection the person made in an extension editor tab (`editors.selection`), for the chat
  * composer's chip, and the text block a message carries when the chip is kept.
  */
+import { selectionBlockText, selectionLabel } from "@band-app/shared/editor-selection-block";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAdapter } from "../dashboard/context";
 import { queryClient } from "../dashboard/query-client";
-import { fileName } from "./extensions";
 import { trpc } from "./trpc-client";
 
 export interface EditorSelectionState {
@@ -47,16 +47,12 @@ export function useEditorSelection(worktreeId: string): EditorSelectionState | n
 
 /** The chip's text: "<label> · <file name>". */
 export function selectionChipLabel(state: EditorSelectionState): string {
-  return `${state.selection.label} · ${fileName(state.file)}`;
+  return selectionLabel(state.file, state.selection.label);
 }
 
 /** The block appended after the person's text, as the editor protocol contract defines it. */
 export function selectionMessageBlock(state: EditorSelectionState): string {
-  const { selection } = state;
-  // The editor frame supplies label and address; keep each on one line so it cannot forge headers.
-  const oneLine = (value: string) => value.replace(/[\r\n]+/g, " ");
-  const head = `Selected in ${oneLine(state.file)} (${state.extensionId}/${state.editorId}): ${oneLine(selection.label)}\nAddress: ${oneLine(selection.address)}`;
-  return selection.text ? `${head}\n${selection.text}` : head;
+  return selectionBlockText(state);
 }
 
 /** The message text with the selection block after it, separated by a blank line. */

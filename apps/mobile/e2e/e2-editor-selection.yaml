@@ -48,6 +48,12 @@ name: E2 editor selection reaches the agent
     visible:
       text: "Done."
     timeout: 20000
+# The sent message shows the selection as a chip, not the raw block.
+- assertVisible:
+    id: chat__selection-chip
+- assertNotVisible:
+    text: ".*Address:.*"
+- takeScreenshot: e2-sent-chip
 - runScript:
     file: scripts/hub-control.js
     env:

@@ -209,7 +209,7 @@ import {
   SidebarGutter,
   useWorktreeChrome,
 } from "./DesktopTitleBar";
-import { ExtensionEditor } from "./extensions/ExtensionEditor";
+import { ExtensionEditor, reportEditorTabClosed } from "./extensions/ExtensionEditor";
 import { ExtensionPanel } from "./extensions/ExtensionPanel";
 import { OpenWithItems } from "./extensions/OpenWithItems";
 import {
@@ -3958,6 +3958,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       } else if (kind === "browser") {
         trpc.browsers.remove.mutate({ browserId: id }).catch(() => {});
       } else if (kind === "file") {
+        reportEditorTabClosed(worktreeId, id.slice(5));
         closedFileLeaves.add(closedFileLeafKey(worktreeId, id.slice(5)));
         removeFileTabState(worktreeId, id.slice(5));
       }

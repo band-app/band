@@ -62,6 +62,8 @@ Tests that deviate from the integration-test doctrine in the root `CLAUDE.md`, a
 
 - `apps/web/tests/sidebar-drop.test.ts` calls `planParentDrop` (`apps/web/src/dashboard/lib/sidebar-drop.ts`) directly. They are pure functions (a worktree, a target and the list in, a reason, a plan or null out). The refusals (a drop onto itself or a descendant) are checked here so the spec needs only one case of each. The drops themselves are covered by `sidebar-grouping.spec.ts` through the real UI.
 
+- `packages/shared/tests/editor-selection-block.test.ts` calls `selectionBlockText` and `parseSelectionBlock` directly. They are pure functions (a message string in, a body and selection out), so there is no state to fake. The odd inputs (a missing address line, `Selected in` mid-line, empty body, multi-line text) are checked here, and `apps/web/e2e/extension-editor-agent.spec.ts` covers the chip in the real chat.
+
 
 - `apps/hub/tests/hub-version-unreleased.test.ts` calls `isUnreleasedVersion` and `updateTargetFor` directly. They are pure functions (a version string in, a boolean or target out). The hub's version is imported from `package.json` at build time, so no server can be started at a stamped nightly version such as `0.1.0-nightly.<date>.<sha>`, and `BAND_HUB_VERSION` accepts only plain MAJOR.MINOR.PATCH. `worker-versions-dev-hub.test.ts` covers the same rule through a real hub at `0.1.0`.
 
