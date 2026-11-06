@@ -49,3 +49,7 @@ A worktree whose owning worker is offline restores on another worker as any othe
 - The worker's chat runtime has no agent probe, one-shot calls, session catalog or learned Claude Code defaults. A chat with no session yet shows the hub's cached pickers.
 - A worker whose platform has no `node:sqlite` cannot own chats.
 - An existing desktop install picks up `--own-chats` when This Mac is added again or switched to the bundled worker.
+
+## The agent of an owned chat
+
+The worker starts the agent of an owned chat in its agent daemon ([agent daemon](architecture/agent-daemon.md)), marked `owned`. A worker restart (an app update, `launchctl kickstart -k`) leaves the agent running. Nothing reattaches to it yet, so the next message starts a new agent, and the daemon kills the old one once `BAND_AGENT_REATTACH_TIMEOUT_MS` plus 2 s pass with no worker watching it. A cut hub link does not count as unwatched for an owned agent, because the chat works without the hub. When the worker's lease runs out the daemon kills the agent, as for any held agent. A daemon from before this change ignores the `owned` field and kills the agent after the hub link has been down that long.

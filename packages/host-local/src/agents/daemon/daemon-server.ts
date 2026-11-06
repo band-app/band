@@ -197,8 +197,11 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     }
     for (const agent of held.values()) {
       if (agent.record.exit) continue;
-      // Watched means a worker whose link to the hub is up is subscribed.
-      const watched = [...agent.subscribers].some((client) => !client.hubDown);
+      // Watched means a worker whose link to the hub is up is subscribed. An owned agent does not
+      // need the hub, so any subscribed worker watches it.
+      const watched = [...agent.subscribers].some(
+        (client) => agent.record.owned === true || !client.hubDown,
+      );
       if (watched) {
         agent.unattachedSince = null;
       } else if (agent.unattachedSince === null) {
@@ -507,6 +510,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
           specHash: params.specHash,
           adapterVersion: params.adapterVersion,
           ghToken: params.ghToken,
+          ...(params.owned ? { owned: true } : {}),
           stdinWritten: 0,
           exit: null,
         },

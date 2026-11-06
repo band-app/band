@@ -134,6 +134,8 @@ export class AgentHolder {
   /** Stops streaming to the current listeners. The agent keeps running. */
   detach(agentId: string): void {
     this.listeners.delete(agentId);
+    // A closed holder has dropped its connections, which already tells the daemon.
+    if (this.closed) return;
     // The daemon starts its orphan clock once no worker watches the agent.
     void this.ownerOf(agentId)
       .then((client) => client?.request("detach", { agentId }))

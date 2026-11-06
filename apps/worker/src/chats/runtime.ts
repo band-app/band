@@ -321,8 +321,15 @@ export class ChatRuntime {
       });
       if (typeof resolved === "string") throw new Error(resolved);
       const env = await this.env.spawnEnv({ ...resolved.env, ...launch.env, ...launch.loginEnv });
+      // Held by the agent daemon when the worker has one, so the agent outlives a worker restart.
+      // `owned` tells the daemon the chat works without the hub.
+      const hostAcp = this.env.host.acp;
       const proc = await AcpAgentProcess.start(
-        this.env.host.acp,
+        {
+          resolveLaunch: (def) => hostAcp.resolveLaunch(def),
+          spawn: (spawnLaunch, spawnCwd) =>
+            hostAcp.spawn(spawnLaunch, spawnCwd, { held: true, owned: true }),
+        },
         { ...resolved, env, unsetEnv: launch.unsetEnv },
         launch.cwd,
         launch.agent.label,
@@ -715,6 +722,20 @@ export class ChatRuntime {
   private stopProcess(): void {
     for (const p of [...this.pending.values()]) p.cancel();
     this.process?.close();
+    this.process = null;
+    this.sessionId = null;
+    this.agentId = null;
+  }
+
+  /**
+   * Lets go of the agent without stopping it, for a worker that is shutting down: an agent the
+   * agent daemon holds keeps running. An agent that is the worker's own child is stopped.
+   */
+  release(): void {
+    this.generation++;
+    this.starting = null;
+    for (const p of [...this.pending.values()]) p.cancel();
+    this.process?.release();
     this.process = null;
     this.sessionId = null;
     this.agentId = null;

@@ -2,6 +2,8 @@ import type { AgentExit, AgentStdio } from "@band-app/host-api";
 import type { AgentHolder } from "./holder";
 import type { AgentRecord, AgentStreamName } from "./protocol";
 
+const ACK_DEBOUNCE_MS = 100;
+
 /** A byte queue that one consumer reads as an async iterable. Ends after the queued bytes are read. */
 class Pipe implements AsyncIterable<Uint8Array> {
   private readonly queue: Uint8Array[] = [];
@@ -59,11 +61,13 @@ export class HeldAgentProcess implements AgentStdio {
   private resolveExit!: (exit: AgentExit) => void;
   private readonly next: Record<AgentStreamName, number>;
   private done = false;
+  private ackTimer: NodeJS.Timeout | null = null;
 
   private constructor(
     private readonly holder: AgentHolder,
     readonly record: AgentRecord,
     offsets: { stdout: number; stderr: number },
+    private readonly autoAck: boolean,
   ) {
     this.next = { ...offsets };
     this.exit = new Promise((resolve) => {
@@ -76,6 +80,7 @@ export class HeldAgentProcess implements AgentStdio {
     holder: AgentHolder,
     agentId: string,
     offsets: { stdout: number; stderr: number },
+    options: { autoAck?: boolean } = {},
   ): Promise<HeldAgentProcess | null> {
     let handle: HeldAgentProcess | null = null;
     const pending: Array<() => void> = [];
@@ -91,7 +96,7 @@ export class HeldAgentProcess implements AgentStdio {
       },
     });
     if (!record) return null;
-    handle = new HeldAgentProcess(holder, record, offsets);
+    handle = new HeldAgentProcess(holder, record, offsets, options.autoAck === true);
     for (const run of pending) run();
     return handle;
   }
@@ -128,6 +133,8 @@ export class HeldAgentProcess implements AgentStdio {
    * watching for the worker, as when a new handle for the same agent replaces this one.
    */
   release(options: { detach?: boolean } = {}): void {
+    if (this.ackTimer) clearTimeout(this.ackTimer);
+    this.ackTimer = null;
     if (options.detach !== false) this.holder.detach(this.record.agentId);
     this.stdout.end();
     this.stderr.end();
@@ -140,6 +147,21 @@ export class HeldAgentProcess implements AgentStdio {
     const fresh = off < expected ? data.subarray(expected - off) : data;
     this.next[stream] = Math.max(expected, off) + fresh.length;
     (stream === "stdout" ? this.stdout : this.stderr).push(fresh);
+    if (this.autoAck) this.scheduleAck();
+  }
+
+  /**
+   * For a reader that is the worker itself (a chat it owns): nothing else acknowledges the output,
+   * so the daemon would stop reading the agent at its buffer cap. The reader consumes at once.
+   */
+  private scheduleAck(): void {
+    if (this.ackTimer) return;
+    this.ackTimer = setTimeout(() => {
+      this.ackTimer = null;
+      if (this.done) return;
+      void this.holder.ack(this.record.agentId, { ...this.next }).catch(() => undefined);
+    }, ACK_DEBOUNCE_MS);
+    this.ackTimer.unref();
   }
 
   private finish(exit: AgentExit): void {

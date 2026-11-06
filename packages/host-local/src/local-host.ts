@@ -167,7 +167,8 @@ export class LocalHost implements Host {
       const adapterVersion = adapterVersionOf(launch);
       return adapterVersion ? { ...launch, adapterVersion } : launch;
     },
-    spawn: (launch, cwd, options) => this.spawnAgent(launch, cwd, options?.held === true),
+    spawn: (launch, cwd, options) =>
+      this.spawnAgent(launch, cwd, options?.held === true, options?.owned === true),
   };
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),
@@ -231,9 +232,14 @@ export class LocalHost implements Host {
   }
 
   /** Starts an agent in the agent daemon when this host has one, else as this process's child. */
-  private async spawnAgent(launch: AcpLaunch, cwd: string, held: boolean): Promise<AgentStdio> {
-    // Only the hub's `acp.spawn` asks for a held agent: it acknowledges the output and reattaches.
-    // A worker-owned chat reads its agent directly and would block at the buffer cap.
+  private async spawnAgent(
+    launch: AcpLaunch,
+    cwd: string,
+    held: boolean,
+    owned: boolean,
+  ): Promise<AgentStdio> {
+    // The hub's `acp.spawn` asks for a held agent: it acknowledges the output and reattaches. A
+    // worker-owned chat asks too (`owned`), and its handle acknowledges what the chat has read.
     const holder = held ? this.options.agentHolder : undefined;
     if (!holder) return spawnAgentProcess(launch, cwd);
     let agentId: string;
@@ -251,6 +257,7 @@ export class LocalHost implements Host {
         specHash: launch.specHash ?? null,
         adapterVersion: launch.adapterVersion ?? null,
         ghToken: Boolean(launch.env.GH_TOKEN),
+        ...(owned ? { owned: true } : {}),
       });
       agentId = record.agentId;
     } catch (err) {
@@ -258,7 +265,12 @@ export class LocalHost implements Host {
       // Without a daemon the agent is a child of this process: it works, and dies with the worker.
       return spawnAgentProcess(launch, cwd);
     }
-    const handle = await HeldAgentProcess.attach(holder, agentId, { stdout: 0, stderr: 0 });
+    const handle = await HeldAgentProcess.attach(
+      holder,
+      agentId,
+      { stdout: 0, stderr: 0 },
+      { autoAck: owned },
+    );
     if (!handle) throw new Error("The agent daemon lost the agent it just started");
     return handle;
   }
