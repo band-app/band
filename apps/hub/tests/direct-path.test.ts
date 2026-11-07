@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { stopTerminalDaemons } from "../../worker/src/terminals";
 import { TEST_TOKEN } from "./helpers/acp-chat";
+import { installTsLsp, TS_LSP_KEY, waitForLanguageServer } from "./helpers/lsp-extension";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -294,6 +295,8 @@ beforeAll(async () => {
   makeRepo(join(root, "proj"));
   worker = startWorker();
   await waitForStatus("online");
+  await installTsLsp(server.url, TEST_TOKEN);
+  await waitForLanguageServer(server.url, TEST_TOKEN, hostId);
   WT_A = await createWorktree("feat-a");
   WT_B = await createWorktree("feat-b");
 }, 120_000);
@@ -895,7 +898,7 @@ class DirectLsp {
   }
 
   static async open(access: DirectAccess, worktreeId: string): Promise<DirectLsp> {
-    const url = `ws://127.0.0.1:${access.port}/lsp?worktreeId=${encodeURIComponent(worktreeId)}&lang=typescript`;
+    const url = `ws://127.0.0.1:${access.port}/lsp?worktreeId=${encodeURIComponent(worktreeId)}&lang=${encodeURIComponent(TS_LSP_KEY)}`;
     const ws = new WebSocket(url, ["band", `band-token.${access.token}`]);
     await new Promise<void>((resolve, reject) => {
       ws.once("open", () => resolve());
@@ -945,13 +948,9 @@ describe("language server on the direct path", () => {
   it("answers go-to-definition through the worker's own language server", async () => {
     const dir = worktreeDir("feat-a");
     mkdirSync(join(dir, "src"), { recursive: true });
-    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
+    mkdirSync(join(dir, "node_modules"), { recursive: true });
     const appModules = join(import.meta.dirname, "..", "node_modules");
     symlinkSync(realpathSync(join(appModules, "typescript")), join(dir, "node_modules/typescript"));
-    symlinkSync(
-      join(appModules, ".bin/typescript-language-server"),
-      join(dir, "node_modules/.bin/typescript-language-server"),
-    );
     writeFileSync(
       join(dir, "tsconfig.json"),
       JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
@@ -1010,7 +1009,7 @@ describe("file changes on the direct path", () => {
 
 describe("what the LSP and watch sockets refuse", () => {
   const routes = (worktreeId: string, port: number) => [
-    `ws://127.0.0.1:${port}/lsp?worktreeId=${encodeURIComponent(worktreeId)}&lang=typescript`,
+    `ws://127.0.0.1:${port}/lsp?worktreeId=${encodeURIComponent(worktreeId)}&lang=${encodeURIComponent(TS_LSP_KEY)}`,
     `ws://127.0.0.1:${port}/watch?worktreeId=${encodeURIComponent(worktreeId)}`,
   ];
 

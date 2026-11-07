@@ -250,6 +250,33 @@ defineWorkerService({
 - A service's scopes (the worktrees it served) are kept in memory. When a worktree is removed that the service has not served since it started, the worker sends `worktree.release` with an empty `worktreeKey` and the path, and the SDK calls `onReleasePath(path)`. A service that must act on such a worktree keeps its own index from key to path.
 - The worker passes one `BAND_*` variable to a service, `BAND_SIMULATOR_NAME_PREFIX`, which test runs set.
 
+## Language servers
+
+An extension can give the code viewer a language server. Band bundles none: without an extension, a file has no completions, hover or diagnostics. Install the official `typescript-lsp` extension from Settings > Extensions for TypeScript and JavaScript, and `python-lsp` for Python.
+
+```json
+"languageServers": [{
+  "id": "typescript",
+  "languages": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+  "files": ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mts", "*.cts", "*.mjs", "*.cjs"],
+  "command": "node_modules/typescript-language-server/lib/cli.mjs",
+  "args": ["--stdio"],
+  "rootMarkers": ["package.json", "tsconfig.json", "jsconfig.json"],
+  "requires": ["node"]
+}]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | The server id. The server's key is `<extension id>/<server id>`, which is the `lang` of the `/lsp` socket. |
+| `languages` | LSP languageIds the server handles. |
+| `files` | File name globs, matched like a file editor's `selector`. The code viewer opens a file against the first ready server whose globs match. |
+| `command` | A path inside the extension folder ending in `.js`, `.mjs` or `.cjs`, which the worker runs with its own node, or the name of a binary on the worker's PATH. |
+| `args`, `requires` | Arguments, and the worker facts or binaries the server needs. A missing binary shows as `needs <binary>` in `workers.list` (`languageServers[].reason`). |
+| `rootMarkers` | Files at the worktree root that mark a project. With none present the server refuses to start ("No project"). Empty means always. |
+
+The worker unpacks the extension like a worker service (see Worker services) and its LSP manager spawns one process per worktree and server in the worktree's folder, with the worktree's `node_modules/.bin` first on the PATH. Framing, sharing between editors, the path policy, the lease fence and removal of the worktree work as before. `workers.list` returns `languageServers` for each worker (key, languages, files, state `ready` or `unavailable`, reason), and the code viewer reads it. A restricted worker and the hub's own machine run no language servers. `initializationOptions` is not supported yet.
+
 ## Panels
 
 An extension can add a worktree panel: a page in the center "+" menu that is not tied to a file. Declare it next to the worker service that feeds it:

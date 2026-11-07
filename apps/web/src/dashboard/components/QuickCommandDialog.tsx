@@ -22,7 +22,7 @@ import {
   Switch,
   Textarea,
 } from "@band-app/ui";
-import { ChevronDown, CircleAlert } from "lucide-react";
+import { Bot, ChevronDown, CircleAlert, SquareTerminal } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useQuickCommandMutations } from "../hooks/use-quick-commands";
 import { useRepos } from "../hooks/use-repos";
@@ -171,8 +171,26 @@ export function QuickCommandDialog({
                 value={action}
                 onChange={setAction}
                 options={[
-                  { value: "terminal", label: "Terminal" },
-                  { value: "agent", label: "Agent" },
+                  {
+                    value: "terminal",
+                    label: null,
+                    icon: (
+                      <span title="Terminal" className="inline-flex">
+                        <SquareTerminal aria-hidden="true" />
+                      </span>
+                    ),
+                    ariaLabel: "Terminal",
+                  },
+                  {
+                    value: "agent",
+                    label: null,
+                    icon: (
+                      <span title="Agent" className="inline-flex">
+                        <Bot aria-hidden="true" />
+                      </span>
+                    ),
+                    ariaLabel: "Agent",
+                  },
                 ]}
               />
             </div>
@@ -221,7 +239,6 @@ export function QuickCommandDialog({
                   </SelectContent>
                 </Select>
               )}
-              <span>Drag corner to resize</span>
             </div>
           </div>
 
@@ -298,7 +315,6 @@ export function QuickCommandDialog({
             data-testid="quick-command-dialog__save"
           >
             Save
-            <span className="ml-1.5 text-xs opacity-70">⌘ Enter</span>
           </Button>
         </DialogFooter>
       </DialogContent>

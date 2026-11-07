@@ -19,38 +19,6 @@ import { directLspTarget, markDirectDown } from "../../lib/direct-worker";
 import { HubWebSocket, hubWsUrl } from "../../lib/hub-config";
 
 // ---------------------------------------------------------------------------
-// LSP language ID mapping (CodeMirror language name -> LSP languageId)
-// ---------------------------------------------------------------------------
-const LSP_LANGUAGE_IDS: Record<string, string> = {
-  typescript: "typescript",
-  tsx: "typescriptreact",
-  javascript: "javascript",
-  jsx: "javascriptreact",
-};
-
-/**
- * Languages that have an LSP server configured on the backend.
- * Used to determine whether to create an LSP extension for a file.
- */
-export const LSP_SUPPORTED_LANGUAGES = new Set(Object.keys(LSP_LANGUAGE_IDS));
-
-/**
- * Map a CodeMirror language name to the backend `lang` parameter
- * used in the WebSocket URL (e.g., tsx -> typescript).
- */
-export function toLspServerLang(cmLanguage: string): string | null {
-  switch (cmLanguage) {
-    case "typescript":
-    case "tsx":
-    case "javascript":
-    case "jsx":
-      return "typescript";
-    default:
-      return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Cross-file navigation support
 // ---------------------------------------------------------------------------
 
@@ -885,11 +853,4 @@ export function toFileUri(worktreePath: string, relativePath?: string): string {
   const root = `file://${worktreePath}`;
   if (!relativePath) return root;
   return `${root}/${relativePath}`;
-}
-
-/**
- * Get the LSP language ID for a CodeMirror language name.
- */
-export function getLspLanguageId(cmLanguage: string): string | undefined {
-  return LSP_LANGUAGE_IDS[cmLanguage];
 }

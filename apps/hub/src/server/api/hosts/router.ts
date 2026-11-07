@@ -104,6 +104,9 @@ export const hostsRouter = t.router({
               ...h,
               capabilities: [...new Set([...h.capabilities, ...running])],
               sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+              languageServers: extensionWorkerService
+                .languageServersFor(h.id, h.status === "online")
+                .map((v) => (ctx.admin || v.state === "ready" ? v : { ...v, reason: undefined })),
               // The reason can hold the service's stderr, so it is admin detail.
               extensionServices: services.map((v) =>
                 ctx.admin || v.state === "running" || v.state === "not-eligible"

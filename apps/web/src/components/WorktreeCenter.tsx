@@ -87,7 +87,6 @@ import {
   formatShortcut,
   getFileIcon,
   getFilePreviewType,
-  getLspLanguageId,
   getStoredViewMode,
   isMacPlatform,
   type QuickCommand,
@@ -99,7 +98,6 @@ import {
   storeViewMode,
   type TerminalInsertDetail,
   toFileUri,
-  toLspServerLang,
   useAdapter,
   useCapabilities,
   useDashboardStore,
@@ -148,6 +146,7 @@ import {
 import { desktopFilePath, ioPathOf, isDesktopFilePath } from "../lib/external-source";
 import { hubUrl } from "../lib/hub-config";
 import { isDesktop } from "../lib/is-desktop";
+import { useLanguageServerFor } from "../lib/language-servers";
 import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
@@ -1254,23 +1253,6 @@ function useLeafFind(
 // WS url, so several leaves on one worktree share a language server; each
 // effect run releases exactly the reference it acquired.
 
-// Maps a file extension to the CodeMirror language name used by the LSP layer.
-const LSP_EXT_LANG_MAP: Record<string, string> = {
-  ts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "jsx",
-  mts: "typescript",
-  cts: "typescript",
-  mjs: "javascript",
-  cjs: "javascript",
-};
-
-function fileCmLang(filePath: string): string | undefined {
-  const ext = filePath.split(".").pop()?.toLowerCase();
-  return ext ? LSP_EXT_LANG_MAP[ext] : undefined;
-}
-
 type LspExtensionFactory = (
   wsUrl: string,
   rootUri: string,
@@ -1292,28 +1274,29 @@ function useLeafLsp(
   // can hold hundreds of MB) and re-acquires it when shown again.
   const coldParked = useWorktreeColdParked(worktreeId);
 
-  // Only TS/JS-family files have a mapped server language.
-  const lspServerLang = useMemo(() => {
-    if (!settings.enableLSP || coldParked || disabled) return null;
-    const cmLang = fileCmLang(filePath);
-    return cmLang ? toLspServerLang(cmLang) : null;
-  }, [filePath, disabled, settings.enableLSP, coldParked]);
+  // The worktree's worker says which language server, if any, serves this file.
+  const server = useLanguageServerFor(
+    worktreeId,
+    filePath,
+    !settings.enableLSP || coldParked || disabled,
+  );
+  const lspServerKey = server?.key ?? null;
+  const lspLanguageId = server?.languageId ?? "";
 
   const lspWsUrl = useMemo(
-    () => (lspServerLang ? buildLspWsUrl(worktreeId, lspServerLang) : null),
-    [worktreeId, lspServerLang],
+    () => (lspServerKey ? buildLspWsUrl(worktreeId, lspServerKey) : null),
+    [worktreeId, lspServerKey],
   );
 
   useEffect(() => {
     setLspExtension(null);
     if (!lspWsUrl || !worktreePath) return;
     let cancelled = false;
-    const cmLang = fileCmLang(filePath);
     const created = create(
       lspWsUrl,
       toFileUri(worktreePath),
       toFileUri(worktreePath, filePath),
-      (cmLang && getLspLanguageId(cmLang)) || "",
+      lspLanguageId,
       worktreeId,
     );
     created
@@ -1329,7 +1312,7 @@ function useLeafLsp(
         () => {},
       );
     };
-  }, [lspWsUrl, worktreePath, filePath, worktreeId, create]);
+  }, [lspWsUrl, lspLanguageId, worktreePath, filePath, worktreeId, create]);
 
   return lspExtension;
 }
@@ -3083,7 +3066,6 @@ const LeftHeaderActions = memo(function LeftHeaderActions(props: LayoutHeaderAct
   return (
     <div className="flex h-full items-center px-0.5">
       <NewTabMenu apiId={props.containerApi.id} groupId={props.group.id} />
-      <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
     </div>
   );
 });
@@ -3115,24 +3097,26 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
   // Mobile / tabs-only: single full-screen group. The active
   // tab's actions fold behind a ⋮ menu so the narrow tab strip stays uncluttered.
   if (mobileByApiId.has(props.containerApi.id)) {
-    if (!renderLeafActions) return null;
     return (
       <div className="flex h-full items-center px-1" data-testid="worktree-center__toolbar">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Tab actions"
-              data-testid="worktree-center__tab-actions-button"
-              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <MoreVertical className="size-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-0 p-1">
-            <div className="flex items-center gap-0.5">{renderLeafActions()}</div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {renderLeafActions && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Tab actions"
+                data-testid="worktree-center__tab-actions-button"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <MoreVertical className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-0 p-1">
+              <div className="flex items-center gap-0.5">{renderLeafActions()}</div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
       </div>
     );
   }
@@ -3140,6 +3124,8 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
   return (
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="worktree-center__toolbar">
       {renderLeafActions?.()}
+      {/* Last action button; the collapsed sidepanel's expand toggle keeps the window's corner. */}
+      <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
       {edges.top && edges.right && chrome?.onToggleRightPanel && !chrome.rightPanelVisible && (
         <RightPanelToggle onToggle={chrome.onToggleRightPanel} visible={false} />
       )}

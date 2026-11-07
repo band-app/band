@@ -10,19 +10,21 @@
  * "No Repo". The proxy now closes a connection's open documents when it
  * disconnects.
  *
- * Real server, real language server: the fixture repo's `node_modules` links
- * to the `typescript-language-server` and `typescript` this app installs,
- * which is where the LSP manager looks (`<worktree>/node_modules/.bin`).
+ * Real server, real worker, real language server: the TypeScript server comes
+ * from a `typescript-lsp` extension installed on the hub (`helpers/lsp-extension.ts`),
+ * and the fixture repo's `node_modules` links to the `typescript` this app installs.
  */
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { createTsLspRepo } from "./fixtures/ts-lsp-repo";
+import { installTsLsp, TS_LSP_KEY, waitForLanguageServer } from "./helpers/lsp-extension";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
-import { testWorktreeId } from "./helpers/test-host";
+import { LOOPBACK_HOST_ID } from "./helpers/test-host";
 
 const TOKEN = "lsp-reconnect-token";
 const REPO = "lsp-reconnect-repo";
@@ -50,7 +52,10 @@ beforeAll(async () => {
     ],
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN, enableLSP: true });
-  server = await startServer({ tmpHome });
+  // Language servers run on workers only.
+  server = await startServer({ tmpHome, remoteHost: true });
+  await installTsLsp(server.url, TOKEN);
+  await waitForLanguageServer(server.url, TOKEN, LOOPBACK_HOST_ID);
 }, 60_000);
 
 afterAll(async () => {
@@ -83,7 +88,7 @@ class LspSocket {
   static async open(cookie?: string, idBase = 0): Promise<LspSocket> {
     const url = new URL(server.url);
     const ws = new WebSocket(
-      `ws://${url.host}/lsp?worktreeId=${encodeURIComponent(testWorktreeId(REPO, "main"))}&lang=typescript`,
+      `ws://${url.host}/lsp?worktreeId=${encodeURIComponent(toWorktreeId(REPO, "main", LOOPBACK_HOST_ID))}&lang=${encodeURIComponent(TS_LSP_KEY)}`,
       cookie ? { headers: { Cookie: cookie } } : {},
     );
     await new Promise<void>((resolve, reject) => {

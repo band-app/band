@@ -26,7 +26,6 @@
     "@xterm/addon-unicode11": "0.10.0-beta.300",
     "@xterm/headless": "6.1.0-beta.302",
     "node-pty": "^1.1.0",
-    "typescript-language-server": "^5.1.3",
     "zod": "^3.25.67"
   },
   "devDependencies": {

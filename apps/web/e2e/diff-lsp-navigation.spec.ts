@@ -11,26 +11,32 @@
  *     in the theme's `--link` colour, in light and dark themes, in both the
  *     diff and the editor.
  *
- * The language server is real: the fixture repo is a small TypeScript
- * repo whose `node_modules` links to the `typescript-language-server` and
- * `typescript` packages this app installs, which is where the server's LSP
- * manager looks for them (`<worktree>/node_modules/.bin`). Nothing in Band is
- * mocked; the server spawns the language server as it does for a user.
+ * The language server is real: the worktree lives on a real `band-worker`, a
+ * `typescript-lsp` extension is installed on the hub (`hub/tests/helpers/lsp-extension.ts`),
+ * and the fixture repo's `node_modules` links to the `typescript` package this
+ * app installs. Nothing in Band is mocked; the worker spawns the language
+ * server as it does for a user.
  */
 
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
 import { createTsLspRepo } from "../../hub/tests/fixtures/ts-lsp-repo";
+import { installTsLsp, waitForLanguageServer } from "../../hub/tests/helpers/lsp-extension";
 import {
   cleanupTmpHome,
   createTmpHome,
   resetClientState,
   type ServerHandle,
+  seedHostWorktree,
   seedSettings,
   seedState,
   startServer,
 } from "./helpers/server";
+import { trpcMutateData } from "./helpers/trpc";
+import { startWorker, type WorkerHandle } from "./helpers/worker";
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 
 // Wide enough for the desktop layout and a side-by-side split.
@@ -38,6 +44,7 @@ test.use({ viewport: { width: 1800, height: 800 } });
 
 const TOKEN = "e2e-diff-lsp-navigation-token";
 const REPO_NAME = "lsp-diff-repo";
+const HOST_ID = "h-lspdiff";
 const BRANCH = "main";
 // The `--link` token in `styles/globals.css`, as the browser computes it.
 const LINK_COLOUR = {
@@ -88,14 +95,17 @@ interface ServerContext {
   worktreeId: string;
   /** The fixture repo's one commit. */
   commitSha: string;
+  worker?: WorkerHandle;
+  workerDirs: string[];
 }
 
 function bootServer(theme: "light" | "dark"): ServerContext {
   const ctx: ServerContext = {
     server: undefined as unknown as ServerHandle,
     tmpHome: "",
-    worktreeId: toWorktreeId(REPO_NAME, BRANCH, "local"),
+    worktreeId: toWorktreeId(REPO_NAME, BRANCH, HOST_ID),
     commitSha: "",
+    workerDirs: [],
   };
   test.beforeAll(async () => {
     ctx.tmpHome = createTmpHome();
@@ -112,19 +122,57 @@ function bootServer(theme: "light" | "dark"): ServerContext {
           name: REPO_NAME,
           path: repoPath,
           defaultBranch: BRANCH,
-          worktrees: [{ branch: BRANCH, path: repoPath }],
+          worktrees: [],
         },
       ],
     });
     seedSettings(ctx.tmpHome, { tokenSecret: TOKEN, enableLSP: true, theme });
     ctx.server = await startServer({ tmpHome: ctx.tmpHome });
+    // The worktree lives on a worker, which runs the language server. Its root holds the repo.
+    const issued = await trpcMutateData<{ token: string }>(
+      ctx.server.url,
+      TOKEN,
+      "tokens.issueWorkerBootstrap",
+      { hostName: "lsp-worker", labels: [], hostId: HOST_ID },
+    );
+    const dir = (prefix: string) => {
+      const d = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+      ctx.workerDirs.push(d);
+      return d;
+    };
+    ctx.worker = startWorker({
+      env: {
+        BAND_HUB_URL: ctx.server.url,
+        BAND_BOOTSTRAP_TOKEN: issued.token,
+        BAND_WORKER_ID: HOST_ID,
+      },
+      root: ctx.tmpHome,
+      stateDir: dir("band-e2e-lsp-state-"),
+      home: dir("band-e2e-lsp-home-"),
+    });
+    await installTsLsp(ctx.server.url, TOKEN);
+    await waitForLanguageServer(ctx.server.url, TOKEN, HOST_ID);
+    seedHostWorktree(ctx.tmpHome, {
+      repo: REPO_NAME,
+      name: BRANCH,
+      branch: BRANCH,
+      path: repoPath,
+      hostId: HOST_ID,
+    });
+    // The hub also lists its own checkout of the default branch. The worker's copy is the one shown.
+    await trpcMutateData(ctx.server.url, TOKEN, "repos.update", {
+      name: REPO_NAME,
+      primaryHostId: HOST_ID,
+    });
   });
   // UI state lives on the server now: start each test from none, like the
   // fresh localStorage each test's browser context used to give it.
   test.beforeEach(() => resetClientState(ctx.tmpHome));
 
   test.afterAll(async () => {
+    await ctx.worker?.kill();
     if (ctx.server) await ctx.server.close();
+    for (const d of ctx.workerDirs) cleanupTmpHome(d);
     if (ctx.tmpHome) cleanupTmpHome(ctx.tmpHome);
   });
   return ctx;
