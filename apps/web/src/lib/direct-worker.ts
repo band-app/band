@@ -207,6 +207,19 @@ export async function directPluginStreamTarget(
   };
 }
 
+/** Why a stream for `worktreeId` goes through the hub, in words for a tooltip. */
+export async function directUnavailableReason(worktreeId: string): Promise<string> {
+  if (!isDesktop) return "Browser tabs always reach the worker through the hub.";
+  const hostId = await localWorkerId();
+  if (!hostId) return "This computer is not a worker of this hub.";
+  if (!worktreeIdIsOnHost(worktreeId, hostId)) return "This worktree is on another worker.";
+  const entry = entries.get(worktreeId);
+  if (entry && Date.now() < entry.downUntil) {
+    return "The worker's local listener did not answer. Direct is tried again shortly.";
+  }
+  return "The hub offered no direct access for this worktree. Direct is tried again shortly.";
+}
+
 /** Where a language server socket for `worktreeId` and `lang` connects directly, or null for the hub. */
 export async function directLspTarget(
   worktreeId: string,

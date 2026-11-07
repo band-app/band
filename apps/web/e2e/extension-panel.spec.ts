@@ -194,6 +194,16 @@ test("S2: frames arrive in the panel, there is no Take control, input and a call
   await expect(panel.echoes.first()).toHaveText("echo:tap");
 });
 
+test("a stream through the hub shows a via hub marker with the reason", async ({ page }) => {
+  const panel = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "screen");
+  await panel.open(worktreeA);
+  await panel.openFromMenu();
+  await expect(panel.frames).toHaveText("3");
+  await expect(panel.viaHubMarker).toBeVisible();
+  await panel.viaHubMarker.click();
+  await expect(panel.viaHubReason).toContainText("hub");
+});
+
 test("S8: a panel with defaultControl behaves the same: no button, input works", async ({
   page,
 }) => {
