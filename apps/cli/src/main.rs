@@ -68,6 +68,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: SubscriptionsCmd,
     },
+    /// List and call the tools of the built-in `band` MCP server
+    Tools {
+        #[command(subcommand)]
+        cmd: ToolsCmd,
+    },
     /// Manage worktree groups (the sections of the sidebar)
     Groups {
         #[command(subcommand)]
@@ -693,6 +698,33 @@ enum CronjobsCmd {
         key: String,
         /// Cronjob ID (e.g. `cj_1234567890`)
         id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolsCmd {
+    /// List the tools the `band` MCP server gives a chat
+    List {
+        /// Chat ID (defaults to `$BAND_CHAT_ID`)
+        #[arg(long)]
+        chat: Option<String>,
+        /// Worktree ID, for a terminal with no chat (defaults to `$BAND_WORKTREE_ID`)
+        #[arg(long)]
+        worktree: Option<String>,
+    },
+    /// Call one tool and print its result
+    Call {
+        /// Tool name, from `band tools list`
+        name: String,
+        /// Tool arguments as a JSON object (default `{}`)
+        #[arg(long, value_name = "JSON")]
+        json: Option<String>,
+        /// Chat ID (defaults to `$BAND_CHAT_ID`)
+        #[arg(long)]
+        chat: Option<String>,
+        /// Worktree ID, for a terminal with no chat (defaults to `$BAND_WORKTREE_ID`)
+        #[arg(long)]
+        worktree: Option<String>,
     },
 }
 
@@ -1324,6 +1356,17 @@ fn main() {
             ),
             CronjobsCmd::Delete { key, id } => cmd_cronjobs_delete(&key, &id),
             CronjobsCmd::Trigger { key, id } => cmd_cronjobs_trigger(&key, &id),
+        },
+        Commands::Tools { cmd } => match cmd {
+            ToolsCmd::List { chat, worktree } => {
+                cmd_tools_list(chat.as_deref(), worktree.as_deref())
+            }
+            ToolsCmd::Call {
+                name,
+                json,
+                chat,
+                worktree,
+            } => cmd_tools_call(&name, json.as_deref(), chat.as_deref(), worktree.as_deref()),
         },
         Commands::Subscriptions { cmd } => match cmd {
             SubscriptionsCmd::List { chat, worktree } => {
@@ -4305,6 +4348,175 @@ fn cmd_subscriptions_remove(id: &str) -> Result<CommandResult, String> {
     })
 }
 
+// --- Tools commands ---
+
+/// The `chatId` or `worktreeId` input for `tools.*`. An explicit `--worktree` wins over
+/// `$BAND_CHAT_ID`; otherwise a chat (flag, then env) wins over the worktree (flag, then env).
+fn tools_scope(chat: Option<&str>, worktree: Option<&str>) -> Result<serde_json::Value, String> {
+    let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let chat = chat.map(str::to_string).or_else(|| {
+        if worktree.is_some() {
+            None
+        } else {
+            env("BAND_CHAT_ID")
+        }
+    });
+    if let Some(chat) = chat {
+        return Ok(serde_json::json!({"chatId": chat}));
+    }
+    if let Some(worktree) = worktree
+        .map(str::to_string)
+        .or_else(|| env("BAND_WORKTREE_ID"))
+    {
+        return Ok(serde_json::json!({"worktreeId": worktree}));
+    }
+    Err(
+        "A chat or worktree is required. Pass --chat <id> or --worktree <id>, or run inside an agent chat ($BAND_CHAT_ID) or a worktree terminal ($BAND_WORKTREE_ID)"
+            .to_string(),
+    )
+}
+
+fn cmd_tools_list(chat: Option<&str>, worktree: Option<&str>) -> Result<CommandResult, String> {
+    let input = tools_scope(chat, worktree)?;
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("tools.list", &input)?;
+    let tools = data.as_array().cloned().unwrap_or_default();
+    let rows: Vec<[String; 2]> = tools
+        .iter()
+        .map(|tool| {
+            let text = |key: &str| tool.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let first_line = text("description").lines().next().unwrap_or("").to_string();
+            [text("name").to_string(), first_line]
+        })
+        .collect();
+    Ok(CommandResult {
+        text: format_table(&["NAME", "DESCRIPTION"], &rows),
+        json: serde_json::json!({"tools": tools}),
+    })
+}
+
+/// Decodes standard base64. `None` for anything that is not valid.
+fn decode_base64(data: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(data.len() / 4 * 3);
+    let mut bits: u32 = 0;
+    let mut count = 0;
+    for byte in data.trim_end_matches('=').bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'\n' | b'\r' => continue,
+            _ => return None,
+        };
+        bits = (bits << 6) | u32::from(value);
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            out.push(u8::try_from((bits >> count) & 0xff).ok()?);
+        }
+    }
+    Some(out)
+}
+
+/// Writes an image block to a new file in the system temp dir and returns its path.
+fn write_tool_image(block: &serde_json::Value, index: usize) -> Result<String, String> {
+    let mime = block.get("mimeType").and_then(|v| v.as_str()).unwrap_or("");
+    let ext = match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        other => {
+            return Err(format!(
+                "The tool returned an image of unsupported type {other}"
+            ))
+        }
+    };
+    let data = block.get("data").and_then(|v| v.as_str()).unwrap_or("");
+    let bytes = decode_base64(data).ok_or("The tool returned an image that is not valid base64")?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "band-tool-{}-{nanos}-{index}.{ext}",
+        std::process::id()
+    ));
+    // create_new refuses an existing path or a planted symlink; 0600 keeps a screenshot private.
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options
+        .open(&path)
+        .map_err(|e| format!("Cannot write {}: {e}", path.display()))?;
+    std::io::Write::write_all(&mut file, &bytes)
+        .map_err(|e| format!("Cannot write {}: {e}", path.display()))?;
+    Ok(path.display().to_string())
+}
+
+fn cmd_tools_call(
+    name: &str,
+    args_json: Option<&str>,
+    chat: Option<&str>,
+    worktree: Option<&str>,
+) -> Result<CommandResult, String> {
+    let args: serde_json::Value = match args_json {
+        None => serde_json::json!({}),
+        Some(raw) => {
+            let parsed: serde_json::Value =
+                serde_json::from_str(raw).map_err(|e| format!("--json is not valid JSON: {e}"))?;
+            if !parsed.is_object() {
+                return Err("--json must be a JSON object".to_string());
+            }
+            parsed
+        }
+    };
+    let mut input = tools_scope(chat, worktree)?;
+    input["name"] = serde_json::json!(name);
+    input["arguments"] = args;
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("tools.run", &input)?;
+    let content = data
+        .get("content")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut lines: Vec<String> = Vec::new();
+    for (i, block) in content.iter().enumerate() {
+        match block.get("type").and_then(|v| v.as_str()) {
+            Some("text") => {
+                lines.push(
+                    block
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                );
+            }
+            Some("image") => lines.push(write_tool_image(block, i)?),
+            Some(other) => lines.push(format!("[{other} content not shown]")),
+            None => {}
+        }
+    }
+    if data.get("isError").and_then(serde_json::Value::as_bool) == Some(true) {
+        let message = lines.join("\n");
+        return Err(if message.is_empty() {
+            format!("The tool {name} failed")
+        } else {
+            message
+        });
+    }
+    let mut text = lines.join("\n");
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    Ok(CommandResult {
+        text,
+        json: serde_json::Value::Array(content),
+    })
+}
+
 // --- Hosts commands ---
 
 /// The VERSION column of `workers list`: the worker's version, and what to do when it is not current.
@@ -6303,6 +6515,26 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--coalesce", "type": "number", "required": false, "description": "Seconds to hold events before waking the chat (default 30)"},
             ],
             "notes": "Exactly one of --pr, --branch, --webhook, --cron, --at. PR activity (reviews and comments) is one subscription; --ci adds a second one on the PR's head branch. Subscriptions last at most 180 days.\nJSON output: `{\"subscriptions\": [...]}`."
+        }),
+        serde_json::json!({
+            "name": "tools list",
+            "description": "List the tools of the built-in band MCP server for a chat or worktree",
+            "parameters": [
+                {"name": "--chat", "type": "string", "required": false, "description": "Chat ID (defaults to $BAND_CHAT_ID)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID, for a terminal with no chat (defaults to $BAND_WORKTREE_ID)"},
+            ],
+            "notes": "Text output: `NAME  DESCRIPTION` (space-padded table).\nJSON output: `{\"tools\": [{\"name\": \"...\", \"description\": \"...\", \"inputSchema\": {...}}]}`."
+        }),
+        serde_json::json!({
+            "name": "tools call",
+            "description": "Call one tool of the built-in band MCP server and print its result",
+            "parameters": [
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Tool name, from `band tools list`"},
+                {"name": "--json", "type": "string", "required": false, "description": "Tool arguments as a JSON object (default {})"},
+                {"name": "--chat", "type": "string", "required": false, "description": "Chat ID (defaults to $BAND_CHAT_ID)"},
+                {"name": "--worktree", "type": "string", "required": false, "description": "Worktree ID, for a terminal with no chat (defaults to $BAND_WORKTREE_ID)"},
+            ],
+            "notes": "Text output: the tool's text, and for an image the path of a file written under the system temp dir. A failed call or an isError result exits 1 with the message on stderr. Tools that need a chat refuse a worktree-only call.\nJSON output: the raw MCP content array."
         }),
         serde_json::json!({
             "name": "subscriptions remove",

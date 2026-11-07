@@ -396,6 +396,15 @@ An extension is a folder in `<BAND_HOME>/extensions/<id>/` on the hub with a `ba
 
 The `band` MCP server also gives a chat access to the editor tabs open in its own worktree: `band_editor_list`, `band_editor_open { file }`, `band_editor_selection` (what the user selected), and each editor's own tools as `<extension id>_<tool>` with a `file` argument. Edits stay unsaved in the tab and the user saves. When the user says "this" or "the selection", call `band_editor_selection` first.
 
+### List and call the tools of the `band` MCP server
+
+```sh
+band tools list [--chat <id> | --worktree <id>]
+band tools call <name> [--json '<args>'] [--chat <id> | --worktree <id>]
+```
+
+Both reach the tools the built-in `band` MCP server gives a chat, from a shell: `worktrees_create`, `band_editor_*`, each editor's tools and each extension's tools. The list comes from the hub, so a newly installed extension's tools appear with no CLI update. Scope is `$BAND_CHAT_ID`, else `$BAND_WORKTREE_ID`, or the flags (`--worktree` wins over `$BAND_CHAT_ID`). A terminal with only a worktree lists the same tools, and tools that need a chat refuse the call. `--json` takes a JSON object of arguments. `call` prints the tool's text. An image result is written to a file in the system temp dir and its path is printed. With `--output json`, `list` prints `{"tools": [{name, description, inputSchema}]}` and `call` prints the raw MCP content array. An unknown tool, invalid JSON or an error result exits 1 with the message on stderr. A call has the same effect as the MCP tool, and the same refusals. It works against the hub directly. Inside a remote worker's terminal the worker relay refuses it (403); use the MCP tools there.
+
 ### Proxy an MCP server through the hub
 
 ```sh

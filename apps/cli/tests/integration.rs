@@ -7007,3 +7007,232 @@ fn extensions_install_needs_a_source_or_official() {
 
     assert!(!out.status.success());
 }
+
+/// `band tools ...` against a mock hub, with extra environment variables.
+fn band_tools_against_mock(
+    tmp: &tempfile::TempDir,
+    mock: &MockHttpServer,
+    env: &[(&str, &str)],
+    args: &[&str],
+) -> std::process::Output {
+    let band_dir = tmp.path().join(".band");
+    fs::create_dir_all(&band_dir).ok();
+    seed_settings_only(&band_dir, &serde_json::json!({"tokenSecret": "mock-token"}));
+    let mut cmd = command(env!("CARGO_BIN_EXE_band"));
+    cmd.args(args)
+        .env("BAND_HOME", &band_dir)
+        .env("BAND_SERVER_URL", format!("http://127.0.0.1:{}", mock.port));
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("failed to execute band")
+}
+
+#[test]
+fn tools_list_prints_names_and_json_schemas() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reply = mock_trpc_reply(serde_json::json!([
+        {"name": "band_editor_list", "description": "List the editor tabs.\nMore.", "inputSchema": {"type": "object"}},
+        {"name": "wordcraft_insert", "description": "Insert text", "inputSchema": {"type": "object", "required": ["file"]}}
+    ]));
+
+    let mock = MockHttpServer::new(reply.clone());
+    let out = band_tools_against_mock(
+        &tmp,
+        &mock,
+        &[("BAND_CHAT_ID", "chat-1")],
+        &["tools", "list"],
+    );
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let path = mock.captured_path().unwrap();
+    assert!(path.starts_with("/trpc/tools.list?"), "{path}");
+    assert!(path.contains("chat-1"), "{path}");
+    let text = stdout(&out);
+    assert!(text.contains("band_editor_list"), "{text}");
+    assert!(text.contains("List the editor tabs."), "{text}");
+    assert!(!text.contains("More."), "{text}");
+
+    let mock = MockHttpServer::new(reply);
+    let out = band_tools_against_mock(
+        &tmp,
+        &mock,
+        &[("BAND_CHAT_ID", "chat-1")],
+        &["tools", "list", "--output", "json"],
+    );
+    let json = json_of(&out);
+    assert_eq!(json["tools"][1]["name"], "wordcraft_insert");
+    assert_eq!(json["tools"][1]["inputSchema"]["required"][0], "file");
+}
+
+#[test]
+fn tools_list_uses_the_worktree_when_there_is_no_chat() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(mock_trpc_reply(serde_json::json!([])));
+    let out = band_tools_against_mock(
+        &tmp,
+        &mock,
+        &[("BAND_WORKTREE_ID", "repo-main")],
+        &["tools", "list"],
+    );
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let path = mock.captured_path().unwrap();
+    assert!(
+        path.contains("worktreeId") && path.contains("repo-main"),
+        "{path}"
+    );
+    assert!(!path.contains("chatId"), "{path}");
+}
+
+#[test]
+fn tools_without_a_chat_or_worktree_say_what_to_pass() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockHttpServer::new(String::new());
+    let out = band_tools_against_mock(&tmp, &mock, &[], &["tools", "list"]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("--chat"), "{}", stderr(&out));
+}
+
+#[test]
+fn tools_call_prints_text_and_json_returns_the_content_array() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reply = mock_trpc_reply(serde_json::json!({
+        "isError": false,
+        "content": [{"type": "text", "text": "hello from the tool"}]
+    }));
+    let args = [
+        "tools",
+        "call",
+        "wordcraft_get",
+        "--json",
+        r#"{"file":"a.docx"}"#,
+    ];
+
+    let mock = MockHttpServer::new(reply.clone());
+    let out = band_tools_against_mock(&tmp, &mock, &[("BAND_CHAT_ID", "chat-1")], &args);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(mock.captured_path().unwrap(), "/trpc/tools.run");
+    assert_eq!(stdout(&out).trim(), "hello from the tool");
+
+    let mock = MockHttpServer::new(reply);
+    let mut json_args = args.to_vec();
+    json_args.extend(["--output", "json"]);
+    let out = band_tools_against_mock(&tmp, &mock, &[("BAND_CHAT_ID", "chat-1")], &json_args);
+    let json = json_of(&out);
+    assert_eq!(json[0]["type"], "text");
+    assert_eq!(json[0]["text"], "hello from the tool");
+}
+
+#[test]
+fn tools_call_writes_an_image_to_the_temp_dir_and_prints_its_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    // "PNG" bytes 0x89 'P' 'N' 'G'
+    let mock = MockHttpServer::new(mock_trpc_reply(serde_json::json!({
+        "isError": false,
+        "content": [{"type": "image", "mimeType": "image/png", "data": "iVBORw=="}]
+    })));
+    let out = band_tools_against_mock(
+        &tmp,
+        &mock,
+        &[("BAND_CHAT_ID", "chat-1")],
+        &["tools", "call", "simulator_screenshot"],
+    );
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let printed = stdout(&out);
+    let path = std::path::Path::new(printed.trim());
+    assert!(path.starts_with(std::env::temp_dir()), "{printed}");
+    assert_eq!(path.extension().unwrap(), "png");
+    assert_eq!(fs::read(path).unwrap(), vec![0x89, b'P', b'N', b'G']);
+    fs::remove_file(path).ok();
+}
+
+#[test]
+fn tools_call_exits_non_zero_with_the_tool_message() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // An error result.
+    let mock = MockHttpServer::new(mock_trpc_reply(serde_json::json!({
+        "isError": true,
+        "content": [{"type": "text", "text": "This tool needs a chat."}]
+    })));
+    let out = band_tools_against_mock(
+        &tmp,
+        &mock,
+        &[("BAND_WORKTREE_ID", "repo-main")],
+        &["tools", "call", "worktrees_create"],
+    );
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("This tool needs a chat."),
+        "{}",
+        stderr(&out)
+    );
+
+    // Invalid JSON never reaches the hub.
+    let mock = MockHttpServer::new(String::new());
+    let out = band_tools_against_mock(
+        &tmp,
+        &mock,
+        &[("BAND_CHAT_ID", "chat-1")],
+        &["tools", "call", "x", "--json", "{nope"],
+    );
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("not valid JSON"), "{}", stderr(&out));
+    assert!(mock.captured_path().is_none());
+}
+
+#[test]
+fn tools_call_reports_an_unknown_tool_from_the_hub() {
+    let tmp = tempfile::tempdir().unwrap();
+    let body = serde_json::json!({"error": {"message": "Unknown tool \"nope\"", "code": -32004, "data": {"code": "NOT_FOUND", "httpStatus": 404}}}).to_string();
+    let reply = format!(
+        "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mock = MockHttpServer::new(reply);
+    let out = band_tools_against_mock(
+        &tmp,
+        &mock,
+        &[("BAND_CHAT_ID", "chat-1")],
+        &["tools", "call", "nope"],
+    );
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("Unknown tool"), "{}", stderr(&out));
+}
+
+#[test]
+fn tools_list_and_call_run_against_a_real_hub_from_a_terminal() {
+    let env = TestEnv::new();
+    let worktree = "my-repo-main";
+
+    let out = env.band(&["tools", "list", "--worktree", worktree, "--output", "json"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let names: Vec<String> = json_of(&out)["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(names.contains(&"band_editor_list".to_string()), "{names:?}");
+    assert!(names.contains(&"worktrees_create".to_string()), "{names:?}");
+
+    let out = env.band(&["tools", "call", "band_editor_list", "--worktree", worktree]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(stdout(&out).contains("tabs"), "{}", stdout(&out));
+
+    // A tool that needs a chat refuses a terminal.
+    let out = env.band(&[
+        "tools",
+        "call",
+        "worktrees_create",
+        "--worktree",
+        worktree,
+        "--json",
+        r#"{"repo":"my-repo","branch":"x"}"#,
+    ]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("needs a chat"), "{}", stderr(&out));
+
+    let out = env.band(&["tools", "call", "no_such_tool", "--worktree", worktree]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("Unknown tool"), "{}", stderr(&out));
+}

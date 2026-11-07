@@ -20,6 +20,7 @@ import { pluginHost } from "../../services/plugin-host-service";
 import { worktreeService } from "../../services/worktree-service";
 import { registerEditorTools } from "./editor-tools";
 import { extensionInstructions, registerExtensionTools } from "./extension-tools";
+import { chatScope, NEEDS_CHAT, type ToolScope } from "./tool-scope";
 
 const createInput = z.object({
   repo: z.string().describe("Name of a repo registered with Band"),
@@ -53,7 +54,8 @@ function jsonText(value: unknown, isError = false) {
   };
 }
 
-async function createServer(chatId: string): Promise<McpServer> {
+/** Builds the `band` MCP server for one caller. The one place the tool set is assembled. */
+export async function createBandServer(scope: ToolScope): Promise<McpServer> {
   const instructions = await extensionInstructions();
   const server = new McpServer(
     { name: "band", version: "1.0.0" },
@@ -71,6 +73,8 @@ async function createServer(chatId: string): Promise<McpServer> {
     // biome-ignore lint/suspicious/noExplicitAny: arguments are validated by the schema above
     async (args: any) => {
       try {
+        const chatId = scope.chatId;
+        if (chatId === null) return jsonText({ error: NEEDS_CHAT }, true);
         const input = createInput.parse(args);
         const chat = chatService.get(chatId);
         if (!chat) return jsonText({ error: "This chat no longer exists" }, true);
@@ -128,9 +132,9 @@ async function createServer(chatId: string): Promise<McpServer> {
       }
     },
   );
-  registerPluginTools(server, chatId);
-  await registerEditorTools(server, chatId);
-  await registerExtensionTools(server, chatId);
+  registerPluginTools(server, scope);
+  await registerEditorTools(server, scope);
+  await registerExtensionTools(server, scope);
   return server;
 }
 
@@ -138,7 +142,7 @@ async function createServer(chatId: string): Promise<McpServer> {
  * Adds the tools bundled plugins registered. Each acts on the worktree of the chat whose session
  * token made the request, and the arguments cannot name another one.
  */
-function registerPluginTools(server: McpServer, chatId: string): void {
+function registerPluginTools(server: McpServer, scope: ToolScope): void {
   for (const { pluginId, tool } of pluginHost.agentTools()) {
     server.registerTool(
       tool.name,
@@ -150,6 +154,8 @@ function registerPluginTools(server: McpServer, chatId: string): void {
       // biome-ignore lint/suspicious/noExplicitAny: arguments are validated by the schema above
       async (args: any) => {
         try {
+          const chatId = scope.chatId;
+          if (chatId === null) return jsonText({ error: NEEDS_CHAT }, true);
           const chat = chatService.get(chatId);
           const resolved = chat?.worktreeId ? worktreeService.resolve(chat.worktreeId) : null;
           if (!chat || !resolved) return jsonText({ error: "This chat has no worktree" }, true);
@@ -181,7 +187,7 @@ export async function handleBandTools(
   chatId: string,
 ): Promise<void> {
   try {
-    const created = await createServer(chatId);
+    const created = await createBandServer(chatScope(chatId));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
       transport.close().catch(() => {});

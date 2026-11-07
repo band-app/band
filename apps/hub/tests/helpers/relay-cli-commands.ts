@@ -96,5 +96,7 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "env status": "reads a repo's image builds, which a worker has no need to see",
   "terminals restart-daemon": "ends every terminal on the hub's machine",
   "skills install": "local to the machine, calls no hub procedure",
+  "tools list": "the relay does not carry tools.list yet, so it works on the hub's own worker only",
+  "tools call": "the relay does not carry tools.run yet, so it works on the hub's own worker only",
   schema: "prints the CLI's own schema, calls no hub procedure",
 };

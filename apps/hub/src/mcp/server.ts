@@ -38,6 +38,8 @@ function discoverProcedures(): ProcedureInfo[] {
     // holding a device token must not be able to mint or list others.
     if (
       path.startsWith("tokens.") ||
+      // The `band` MCP server's own tools, which an MCP client already has.
+      path.startsWith("tools.") ||
       path.startsWith("vault.") ||
       path.startsWith("agentLogins.") ||
       path.startsWith("checkpoints.") ||
