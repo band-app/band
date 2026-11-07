@@ -37,7 +37,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, SearchBar } from "@/dashboard";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { useEditorSelection, withSelectionBlock } from "../lib/editor-selection";
+import {
+  markSelectionConsumed,
+  useUnconsumedEditorSelection,
+  withSelectionBlock,
+} from "../lib/editor-selection";
 import { groupModelsByProvider, modelNameWithoutProvider } from "../lib/model-providers";
 import { useToastObstruction } from "../lib/toast-obstructions";
 import { trpc } from "../lib/trpc-client";
@@ -387,12 +391,9 @@ export function ChatView({
     return () => window.removeEventListener("band:new-chat-session", onNewChat);
   }, [visible, wsActive, handleNewSession]);
 
-  // The person's selection in an open editor tab rides along as a chip. Removing it drops it for
-  // one message; a new selection brings it back.
-  const editorSelection = useEditorSelection(worktreeId);
-  const [selectionDismissed, setSelectionDismissed] = useState<number | null>(null);
-  const shownSelection =
-    editorSelection && editorSelection.updatedAt !== selectionDismissed ? editorSelection : null;
+  // The person's selection in an open editor tab rides along as a chip. A selection is attached to one
+  // message at most, and removing the chip drops it until a new selection arrives.
+  const shownSelection = useUnconsumedEditorSelection(worktreeId);
   const shownSelectionRef = useRef(shownSelection);
   shownSelectionRef.current = shownSelection;
 
@@ -403,13 +404,13 @@ export function ChatView({
       // The server queues the message when a turn is already running.
       try {
         await send(withSelectionBlock(message.text, carried), message.files);
-        // A removed chip applies to one message; the next one carries the selection again.
-        setSelectionDismissed(null);
+        // The selection rode along once; it is not offered again until the editor reports a new one.
+        if (carried) markSelectionConsumed(worktreeId, carried);
       } catch (err) {
         console.error("[ChatView] send failed:", err);
       }
     },
-    [send],
+    [send, worktreeId],
   );
 
   const handleCancelQueued = useCallback(
@@ -800,7 +801,7 @@ export function ChatView({
             {shownSelection && (
               <EditorSelectionChip
                 state={shownSelection}
-                onRemove={() => setSelectionDismissed(shownSelection.updatedAt)}
+                onRemove={() => markSelectionConsumed(worktreeId, shownSelection)}
               />
             )}
             <PromptInputBody>
