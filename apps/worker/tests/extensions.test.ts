@@ -17,11 +17,13 @@ import { serviceSpawnSpec } from "../src/extensions.ts";
 import {
   call,
   cleanup,
+  git,
   makeRepo,
   startHub,
   startWorker,
   type TestHub,
   type TestWorker,
+  tmpDir,
   waitFor,
 } from "./helpers.ts";
 
@@ -53,6 +55,19 @@ describe("serviceSpawnSpec", () => {
     assert.equal(spec.command, "/Applications/Band.app/Contents/MacOS/Band");
     assert.deepEqual(spec.args, ["/ext/service.mjs"]);
     assert.equal(spec.env.ELECTRON_RUN_AS_NODE, "1");
+  });
+
+  it("passes the simulator test name prefix and no other BAND_* variable", () => {
+    const spec = serviceSpawnSpec("/ext/service.mjs", {
+      env: { ...env, BAND_SIMULATOR_NAME_PREFIX: "band-test-x-1" },
+      execPath: "/usr/bin/node",
+      electron: false,
+    });
+    assert.deepEqual(
+      Object.keys(spec.env).filter((k) => k.startsWith("BAND_")),
+      ["BAND_SIMULATOR_NAME_PREFIX"],
+    );
+    assert.equal(spec.env.BAND_SIMULATOR_NAME_PREFIX, "band-test-x-1");
   });
 
   it("leaves it unset under plain Node and passes no BAND_*, GIT_CONFIG_* or token variable", () => {
@@ -153,6 +168,19 @@ describe("extension worker services", () => {
     await sync(item(a));
     assert.equal(fetches, before);
     assert.equal(await rpc("pid"), pid);
+  });
+
+  it("tells a service a worktree was removed even when it never served that worktree", async () => {
+    const outside = tmpDir("band-worker-outside-");
+    try {
+      const worktree = join(outside, "feature");
+      git(repo, "worktree", "add", "-q", "-b", "feature", worktree);
+      await call(w.session, "repos.map", { remoteUrl: `file://${repo}`, path: repo });
+      await call(w.session, "worktree.remove", { repoPath: repo, path: worktree });
+      assert.ok((await rpc<string[]>("released")).includes(`:path:${worktree}`));
+    } finally {
+      cleanup(outside);
+    }
   });
 
   it("refuses an archive that does not match its sha256", async () => {

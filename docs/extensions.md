@@ -191,7 +191,7 @@ Control messages are NDJSON on the service's stdin (worker to service) and stdou
 | `call { method, params, worktreeKey, worktreePath }` | Returns the JSON result. |
 | `stream.open { streamId, name, params, worktreeKey, worktreePath }` | Opens a live stream. |
 | `stream.close { streamId }` | The viewer left. |
-| `worktree.release { worktreeKey, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). |
+| `worktree.release { worktreeKey, worktreePath, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). For a removed worktree the service did not serve since it started, `worktreeKey` is `""` and only `worktreePath` is set. |
 | `stop` | Exit after finishing up. The worker kills the process after 3 s. |
 
 The service sends the notification `stream.end { streamId }` to end a stream. Stream data does not use stdio. It goes over file descriptor 3, a pipe the worker opens beside stdio, as binary frames: a 4-byte big-endian length, a 4-byte stream id, a kind byte (0 text, 1 bytes) and the payload, in both directions. The hub reaches a service with the same `plugin.call` and `plugin.stream` link methods as a bundled worker plugin.
@@ -224,7 +224,8 @@ defineWorkerService({
       return { onMessage: (m) => stream.send(m), onClose: () => {} };
     },
   },
-  onRelease: (worktreeKey, reason) => {},
+  onRelease: (worktreeKey, reason, worktreePath) => {},
+  onReleasePath: (worktreePath) => {}, // a removed worktree this run never served
   onStop: () => {},
 });
 ```
@@ -234,7 +235,8 @@ defineWorkerService({
 ### Limits
 
 - Panels and tools are described above. `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) still reach a service directly.
-- A service's scopes (the worktrees it served) are kept in memory, so `worktree.release { reason: "removed" }` does not reach a worktree the service last served before a restart.
+- A service's scopes (the worktrees it served) are kept in memory. When a worktree is removed that the service has not served since it started, the worker sends `worktree.release` with an empty `worktreeKey` and the path, and the SDK calls `onReleasePath(path)`. A service that must act on such a worktree keeps its own index from key to path.
+- The worker passes one `BAND_*` variable to a service, `BAND_SIMULATOR_NAME_PREFIX`, which test runs set.
 
 ## Panels
 
