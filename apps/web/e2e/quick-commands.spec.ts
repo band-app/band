@@ -190,3 +190,57 @@ test("S7: Settings lists, searches and deletes quick commands", async ({ page })
   await qc.deleteFromSettings("Typed only");
   await expect(qc.settingsRows()).toHaveCount(0);
 });
+
+test("S1b: the button stays at the far right when a tab opens", async ({ page }) => {
+  const qc = new QuickCommandsPage(page, server.url, TOKEN);
+  await qc.goto(BAND);
+  const before = await qc.buttonX();
+  expect(before).toBeGreaterThan(await qc.newTabButtonRightEdge());
+  const edges = await qc.headerButtonEdges();
+  for (const other of edges.others) expect(edges.quick).toBeGreaterThanOrEqual(other);
+  await qc.openTerminalTab();
+  await expect.poll(() => qc.buttonX()).toBe(before);
+});
+
+test("S8: the edit button opens the dialog without running the command", async ({ page }) => {
+  await create({
+    label: "Edit me",
+    repo: null,
+    action: "terminal",
+    command: "echo SHOULD_NOT_RUN",
+    appendEnter: true,
+  });
+  const qc = new QuickCommandsPage(page, server.url, TOKEN);
+  await qc.goto(BAND);
+  await qc.editFromMenu("Edit me");
+  await expect(qc.dialog.getByTestId("quick-command-dialog__label")).toHaveValue("Edit me");
+  await expect(qc.dialog).not.toContainText("Drag corner");
+  await expect(qc.saveButton).not.toContainText("Enter");
+  await expect(qc.actionToggle("Terminal")).toBeChecked();
+  await expect(qc.actionToggle("Agent")).not.toBeChecked();
+  expect(await qc.terminalScreens()).not.toContain("SHOULD_NOT_RUN");
+});
+
+test("S8b: ArrowRight on a row opens its Edit dialog by keyboard", async ({ page }) => {
+  await create({
+    label: "Keyboard edit",
+    repo: null,
+    action: "terminal",
+    command: "echo KB_SHOULD_NOT_RUN",
+    appendEnter: true,
+  });
+  const qc = new QuickCommandsPage(page, server.url, TOKEN);
+  await qc.goto(BAND);
+  await qc.editWithKeyboard("Keyboard edit");
+  await expect(qc.dialog.getByTestId("quick-command-dialog__label")).toHaveValue("Keyboard edit");
+});
+
+test("Phone: the button is visible and last in the header at phone width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  const qc = new QuickCommandsPage(page, server.url, TOKEN);
+  await qc.goto(BAND);
+  await expect(qc.button).toBeVisible();
+  const edges = await qc.headerButtonEdges();
+  for (const other of edges.others) expect(edges.quick).toBeGreaterThanOrEqual(other);
+  expect(edges.quick).toBeLessThanOrEqual(390);
+});

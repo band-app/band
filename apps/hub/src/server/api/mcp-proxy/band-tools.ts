@@ -19,7 +19,7 @@ import { hostTrustService } from "../../services/host-trust-service";
 import { pluginHost } from "../../services/plugin-host-service";
 import { worktreeService } from "../../services/worktree-service";
 import { registerEditorTools } from "./editor-tools";
-import { registerExtensionTools } from "./extension-tools";
+import { extensionInstructions, registerExtensionTools } from "./extension-tools";
 import { chatScope, NEEDS_CHAT, type ToolScope } from "./tool-scope";
 
 const createInput = z.object({
@@ -56,7 +56,11 @@ function jsonText(value: unknown, isError = false) {
 
 /** Builds the `band` MCP server for one caller. The one place the tool set is assembled. */
 export async function createBandServer(scope: ToolScope): Promise<McpServer> {
-  const server = new McpServer({ name: "band", version: "1.0.0" });
+  const instructions = await extensionInstructions();
+  const server = new McpServer(
+    { name: "band", version: "1.0.0" },
+    instructions ? { instructions } : undefined,
+  );
   server.registerTool(
     "worktrees_create",
     {

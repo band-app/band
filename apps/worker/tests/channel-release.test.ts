@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { RemoteHost } from "@band-app/host-remote";
 import {
+  type ExtensionsFetchReply,
+  METHOD_EXTENSIONS_FETCH,
+  METHOD_EXTENSIONS_SYNC,
+} from "@band-app/link";
+import { makeTarGz } from "../../hub/tests/helpers/make-tar.ts";
+import {
+  call,
   cleanup,
   startHub,
   startWorker,
@@ -35,6 +43,43 @@ describe("link channels are released", () => {
     hub.server.on("session", (session) => host.attachSession(session));
     w = await startWorker(hub);
     workerId = w.worker.workerId;
+    // A language server comes from an extension, so install one that answers `initialize`.
+    const manifest = {
+      id: "stub-lsp",
+      name: "Stub language server",
+      version: "1.0.0",
+      extensionApi: 1,
+      contributes: {
+        languageServers: [
+          { id: "lsp", languages: ["plaintext"], files: ["*.txt"], command: "server.mjs" },
+        ],
+      },
+    };
+    const bytes = makeTarGz([
+      { name: "stub-lsp/", type: "5" },
+      { name: "stub-lsp/band-extension.json", data: JSON.stringify(manifest) },
+      {
+        name: "stub-lsp/server.mjs",
+        data: readFileSync(
+          new URL("../../../packages/host-local/tests/fixtures/stub-lsp.mjs", import.meta.url),
+          "utf8",
+        ),
+      },
+    ]);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    w.session.handle(METHOD_EXTENSIONS_FETCH, () => {
+      const ch = w.session.openChannel("payload");
+      ch.discardIncoming();
+      ch.send(bytes).then(
+        () => ch.end(),
+        () => undefined,
+      );
+      const reply: ExtensionsFetchReply = { sha256, size: bytes.length, chan: ch.id };
+      return reply;
+    });
+    await call(w.session, METHOD_EXTENSIONS_SYNC, {
+      items: [{ id: "stub-lsp", version: "1.0.0", sha256 }],
+    });
   });
   after(async () => {
     await w.worker.stop();
@@ -114,7 +159,7 @@ describe("link channels are released", () => {
     for (let i = 0; i < 100; i++) {
       const connection = await host.lsp.connect({
         worktreeId: "release-lsp",
-        lang: "typescript",
+        lang: "stub-lsp/lsp",
         root: w.root,
       });
       connection.close();

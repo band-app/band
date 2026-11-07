@@ -6,12 +6,14 @@ import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { encodeStreamFrame, StreamFrameReader } from "@band-app/extension-worker-sdk/protocol";
+import { type LanguageServerSpec, stopStaleServers } from "@band-app/host-local/lsp/lsp-manager";
 import {
   type ExtensionServiceState,
   type ExtensionsFetchParams,
   type ExtensionsFetchReply,
   type ExtensionsSyncParams,
   type ExtensionsSyncReply,
+  type LanguageServerState,
   METHOD_EXTENSIONS_CHANGED,
   METHOD_EXTENSIONS_FETCH,
   METHOD_EXTENSIONS_STATUS,
@@ -52,7 +54,11 @@ const RESERVED_CAPABILITIES = new Set([
 ]);
 const CRASH_WINDOW_MS = 5 * 60_000;
 
-/** Variables a service inherits. Nothing else, so no `BAND_*` or `GIT_CONFIG_*` reaches it. */
+/**
+ * Variables a service inherits. Nothing else, so no `BAND_*` or `GIT_CONFIG_*` reaches it, except
+ * `BAND_SIMULATOR_NAME_PREFIX`: test runs set it so the simulator service names its devices with
+ * a prefix that is never a person's.
+ */
 const INHERITED_ENV = [
   "PATH",
   "HOME",
@@ -65,6 +71,7 @@ const INHERITED_ENV = [
   "TZ",
   "DISPLAY",
   "XDG_RUNTIME_DIR",
+  "BAND_SIMULATOR_NAME_PREFIX",
 ] as const;
 
 export interface SpawnSpec {
@@ -342,6 +349,8 @@ export interface ExtensionHostOptions {
 export class ExtensionHost {
   private readonly services = new Map<string, Service>();
   private readonly problems = new Map<string, string>();
+  /** Language servers of the extensions synced now, by `<extension id>/<server id>`. */
+  private lsServers = new Map<string, { state: LanguageServerState; spec: LanguageServerSpec }>();
   private chain: Promise<unknown> = Promise.resolve();
   private fenced = false;
 
@@ -373,6 +382,12 @@ export class ExtensionHost {
     return false;
   }
 
+  /** The language servers the worker's LSP manager can start. Empty while the lease is fenced. */
+  languageServers(): LanguageServerSpec[] {
+    if (this.blocked) return [];
+    return [...this.lsServers.values()].map((v) => v.spec);
+  }
+
   states(): ExtensionsSyncReply {
     const services: ExtensionServiceState[] = [...this.services.values()].map((s) => ({
       extensionId: s.extensionId,
@@ -384,6 +399,7 @@ export class ExtensionHost {
     }));
     return {
       services,
+      languageServers: [...this.lsServers.values()].map((v) => v.state),
       problems: [...this.problems].map(([extensionId, reason]) => ({ extensionId, reason })),
     };
   }
@@ -476,7 +492,55 @@ export class ExtensionHost {
         log.warn({ extension: item.id, message }, "could not set up an extension");
       }
     }
+    await this.loadLanguageServers(params);
     return this.states();
+  }
+
+  /** Rebuilds the language server list from the manifests of the synced extensions. */
+  private async loadLanguageServers(params: ExtensionsSyncParams): Promise<void> {
+    const next = new Map<string, { state: LanguageServerState; spec: LanguageServerSpec }>();
+    for (const item of params.items) {
+      if (this.problems.has(item.id)) continue;
+      try {
+        const dir = await this.unpack(item.id, item.version, item.sha256);
+        const manifest = await readManifest(dir, item.id);
+        for (const def of manifest.contributes.languageServers) {
+          const key = `${item.id}/${def.id}`;
+          // Under Electron the worker runs a .mjs server with its own executable, so no node is needed.
+          const needed =
+            process.versions.electron !== undefined
+              ? def.requires.filter((r) => r !== "node")
+              : def.requires;
+          const why = checkRequires(needed, process.env.PATH);
+          const unavailable = why?.replace(/^(.+) is not on the PATH$/, "needs $1") ?? undefined;
+          next.set(key, {
+            spec: {
+              key,
+              dir,
+              command: def.command,
+              args: def.args,
+              rootMarkers: def.rootMarkers,
+              ...(unavailable ? { unavailable } : {}),
+            },
+            state: {
+              extensionId: item.id,
+              serverId: def.id,
+              key,
+              languages: def.languages,
+              files: def.files,
+              state: unavailable ? "unavailable" : "ready",
+              ...(unavailable ? { reason: unavailable } : {}),
+            },
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.problems.set(item.id, message);
+        this.options.log.warn({ extension: item.id, message }, "could not set up an extension");
+      }
+    }
+    this.lsServers = next;
+    stopStaleServers(this.languageServers());
   }
 
   private ineligible(def: WorkerServiceManifest): string | null {
@@ -728,14 +792,34 @@ export class ExtensionHost {
     }
   }
 
-  /** The worktree at `path` was removed: every service deletes its state for it. */
+  /**
+   * The worktree at `path` was removed: every running service deletes its state for it. A service
+   * that served the worktree in this run gets its key. Any other (it served the worktree before a
+   * restart, or never) gets `worktreeKey: ""` with the path, and maps the path to its own state.
+   */
   async releasePath(path: string): Promise<void> {
     for (const s of this.services.values()) {
+      if (!s.proc) continue;
+      let known = false;
       for (const [key, at] of [...s.scopes]) {
         if (at !== path) continue;
+        known = true;
         s.scopes.delete(key);
         await s.proc
-          ?.request("worktree.release", { worktreeKey: key, reason: "removed" }, 5000)
+          .request(
+            "worktree.release",
+            { worktreeKey: key, worktreePath: path, reason: "removed" },
+            5000,
+          )
+          .catch(() => undefined);
+      }
+      if (!known) {
+        await s.proc
+          .request(
+            "worktree.release",
+            { worktreeKey: "", worktreePath: path, reason: "removed" },
+            5000,
+          )
           .catch(() => undefined);
       }
     }

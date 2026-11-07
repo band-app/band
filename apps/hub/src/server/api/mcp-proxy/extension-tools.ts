@@ -106,6 +106,23 @@ function toolResultFor(result: unknown) {
   return jsonText(result ?? null);
 }
 
+/**
+ * The text the `band` MCP server sends as its `instructions`: one line per installed extension
+ * that declares an `agentHint`, prefixed with the extension id, ordered by id. A hint is author
+ * text that reaches every chat's system prompt, so newlines collapse to spaces. Returns undefined
+ * when no extension has a hint.
+ */
+export async function extensionInstructions(): Promise<string | undefined> {
+  const { extensions } = await extensionService.list();
+  const lines = extensions
+    .filter((e) => e.agentHint)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((e) => ({ id: e.id, hint: (e.agentHint ?? "").replace(/\s+/g, " ").trim() }))
+    .filter((e) => e.hint)
+    .map((e) => `- ${e.id}: ${e.hint}`);
+  return lines.length > 0 ? lines.join("\n") : undefined;
+}
+
 export async function registerExtensionTools(server: McpServer, scope: ToolScope): Promise<void> {
   const schemas = new Map<string, Record<string, unknown>>();
   const { extensions } = await extensionService.list();

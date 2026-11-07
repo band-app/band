@@ -170,49 +170,6 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   cp -RL "$PRETTIER_REAL"/* dist/node_modules/prettier/
 
   # -----------------------------------------------------------------------
-  # Bundle typescript-language-server + typescript for LSP support.
-  # typescript-language-server's cli.mjs is a self-contained bundle — it
-  # only imports Node built-ins at the top level.  It locates tsserver via
-  # createRequire(import.meta.url).resolve('typescript'), so typescript
-  # must be resolvable from within the package directory.
-  # -----------------------------------------------------------------------
-
-  # typescript-language-server package
-  TS_LSP_REAL="$(cd node_modules/typescript-language-server && pwd -P)"
-  mkdir -p dist/node_modules/typescript-language-server/lib
-  cp "$TS_LSP_REAL/package.json" dist/node_modules/typescript-language-server/
-  cp "$TS_LSP_REAL/lib/cli.mjs" dist/node_modules/typescript-language-server/lib/
-  cp "$TS_LSP_REAL/lib/cli.mjs.map" dist/node_modules/typescript-language-server/lib/ 2>/dev/null || true
-
-  # typescript package — needed by the language server for tsserver
-  TS_REAL="$(cd node_modules/typescript && pwd -P)"
-  mkdir -p dist/node_modules/typescript/lib
-  mkdir -p dist/node_modules/typescript/bin
-  cp "$TS_REAL/package.json" dist/node_modules/typescript/
-  cp "$TS_REAL/bin/tsserver" dist/node_modules/typescript/bin/
-  cp "$TS_REAL/lib/tsserver.js" dist/node_modules/typescript/lib/
-  cp "$TS_REAL/lib/_tsserver.js" dist/node_modules/typescript/lib/
-  cp "$TS_REAL/lib/typescript.js" dist/node_modules/typescript/lib/
-
-  # .bin shims — simple wrappers that work with any basedir (no hardcoded
-  # pnpm-store paths).  The LSP manager adds this directory to PATH.
-  mkdir -p dist/node_modules/.bin
-
-  cat > dist/node_modules/.bin/typescript-language-server <<'SHIM'
-#!/bin/sh
-basedir=$(dirname "$(echo "$0" | sed -e 's,\\,/,g')")
-exec node "$basedir/../typescript-language-server/lib/cli.mjs" "$@"
-SHIM
-  chmod +x dist/node_modules/.bin/typescript-language-server
-
-  cat > dist/node_modules/.bin/tsserver <<'SHIM'
-#!/bin/sh
-basedir=$(dirname "$(echo "$0" | sed -e 's,\\,/,g')")
-exec node "$basedir/../typescript/bin/tsserver" "$@"
-SHIM
-  chmod +x dist/node_modules/.bin/tsserver
-
-  # -----------------------------------------------------------------------
   # ACP adapters for Claude Code and Codex (issue #648). Band runs each as a
   # Node subprocess speaking the Agent Client Protocol over stdio (see
   # `packages/host-local/src/agents/acp-launch.ts`, which looks for them at

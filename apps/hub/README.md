@@ -67,8 +67,6 @@ dist/
 ├── openapi.json               # generated tRPC OpenAPI spec
 └── node_modules/              # only externalized native deps + helpers
     ├── node-pty/              # native PTY (.node + spawn-helper, NAPI — ABI-stable)
-    ├── typescript/
-    ├── typescript-language-server/
     └── @openai/codex/         # Codex SDK package.json (codex CLI is system-installed)
 ```
 

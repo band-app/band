@@ -1,12 +1,11 @@
 /**
  * A TypeScript git repo whose worktree can run a real language server.
  *
- * Band's LSP manager (`packages/host-local/src/lsp/lsp-manager.ts`) spawns
- * `typescript-language-server` from `<worktree>/node_modules/.bin` (or the
- * shell PATH), and the server loads `typescript` from the repo. The repo's
- * `node_modules` links both to the packages this app already installs, so a
- * test gets the real language server with no install step and nothing
- * mocked. `node_modules` is git-ignored so it never shows up as a change.
+ * The language server comes from the `typescript-lsp` extension a test installs
+ * (`helpers/lsp-extension.ts`), and the server loads `typescript` from the repo.
+ * The repo's `node_modules` links it to the package this app already installs, so
+ * a test gets the real language server with no install step and nothing mocked.
+ * `node_modules` is git-ignored so it never shows up as a change.
  */
 
 import { execFileSync } from "node:child_process";
@@ -60,14 +59,10 @@ export function createTsLspRepo(opts: {
     .trim();
   if (opts.working) write(opts.working);
 
-  mkdirSync(join(repoPath, "node_modules/.bin"), { recursive: true });
+  mkdirSync(join(repoPath, "node_modules"), { recursive: true });
   symlinkSync(
     realpathSync(join(APP_NODE_MODULES, "typescript")),
     join(repoPath, "node_modules/typescript"),
-  );
-  symlinkSync(
-    join(APP_NODE_MODULES, ".bin/typescript-language-server"),
-    join(repoPath, "node_modules/.bin/typescript-language-server"),
   );
   return sha;
 }

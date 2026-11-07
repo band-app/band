@@ -27,6 +27,12 @@ export class AppearancePage {
     await expect(this.root).toBeVisible();
   }
 
+  /** Opens the Appearance page of an already loaded app, without reloading it. */
+  async openInPlace(): Promise<void> {
+    await this.settings.openDialog("appearance");
+    await expect(this.root).toBeVisible();
+  }
+
   get root(): Locator {
     return this.settings.dialog.getByTestId("appearance");
   }

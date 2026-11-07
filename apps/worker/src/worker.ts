@@ -198,8 +198,11 @@ export class Worker {
     // Folders the worker creates itself are served whatever the roots, from the first call on.
     if (config.reposDir) await policy.allowManaged(config.reposDir);
     const agentHolder = createWorkerAgentHolder(config.stateDir, options.persistentAgents === true);
+    // Set below, once the context exists. Language servers come from installed extensions.
+    let extensionHost: ReturnType<typeof createExtensionHost> | undefined;
     const host = new LocalHost({
       terminalBackend: () => backend,
+      languageServers: () => extensionHost?.languageServers() ?? [],
       resources: { selfKind: "worker", stateDir: () => config.stateDir },
       ...(agentHolder ? { agentHolder } : {}),
       repos: {
@@ -291,6 +294,7 @@ export class Worker {
       bundledHas: (id) => runningPlugins.has(id),
       ...options.extensions,
     });
+    extensionHost = ctx.extensions;
     const registrar = new Registrar(ctx);
     registerExtensionMethods(registrar, ctx);
     registrar.json(METHOD_LEASE_RENEW, (a) => {

@@ -40,6 +40,66 @@ export class QuickCommandsPage {
     });
   }
 
+  /** Right edge of the quick-commands button and of every other header button in its group header. */
+  async headerButtonEdges(): Promise<{ quick: number; others: number[] }> {
+    const toolbar = this.page
+      .getByTestId("worktree-center__toolbar")
+      .filter({ visible: true })
+      .first();
+    const edge = async (l: Locator) => {
+      const box = await l.boundingBox();
+      if (!box) throw new Error("button has no box");
+      return box.x + box.width;
+    };
+    const quick = await edge(this.button);
+    const buttons = await toolbar.getByRole("button").all();
+    const others: number[] = [];
+    for (const b of buttons) {
+      if ((await b.getAttribute("data-testid")) === "quick-commands__button") continue;
+      others.push(await edge(b));
+    }
+    return { quick, others };
+  }
+
+  /** Open the Edit dialog with the keyboard: focus the row, press ArrowRight. */
+  async editWithKeyboard(label: string): Promise<void> {
+    await test.step(`Open the Edit dialog for ${label} with ArrowRight`, async () => {
+      await this.openMenu();
+      await this.menuItem(label).focus();
+      await this.page.keyboard.press("ArrowRight");
+      await expect(this.dialog).toBeVisible();
+    });
+  }
+
+  /** Left edge of the quick-commands button. */
+  async buttonX(): Promise<number> {
+    const box = await this.button.boundingBox();
+    if (!box) throw new Error("button has no box");
+    return box.x;
+  }
+
+  /** Open a new terminal tab from the "+" menu. */
+  async openTerminalTab(): Promise<void> {
+    await test.step("Open a terminal tab from +", async () => {
+      await this.page
+        .getByTestId("worktree-center__new-tab-button")
+        .filter({ visible: true })
+        .first()
+        .click();
+      await this.page.getByTestId("worktree-center__new-tab--term").click();
+    });
+  }
+
+  async newTabButtonRightEdge(): Promise<number> {
+    const box = await this.page
+      .getByTestId("worktree-center__new-tab-button")
+      .filter({ visible: true })
+      .first()
+      .boundingBox();
+    if (!box) throw new Error("new-tab button has no box");
+    return box.x + box.width;
+  }
+
   async openMenu(): Promise<void> {
     await test.step("Open the Quick commands menu", async () => {
       await this.button.click();
@@ -73,6 +133,18 @@ export class QuickCommandsPage {
       await this.menu.getByTestId("quick-commands__add").click();
       await expect(this.dialog).toBeVisible();
     });
+  }
+
+  async editFromMenu(label: string): Promise<void> {
+    await test.step(`Open the Edit dialog for ${label} from the menu`, async () => {
+      await this.openMenu();
+      await this.menuItem(label).getByTestId("quick-commands__edit").click();
+      await expect(this.dialog).toBeVisible();
+    });
+  }
+
+  actionToggle(name: "Terminal" | "Agent"): Locator {
+    return this.dialog.getByRole("radio", { name });
   }
 
   async fillTerminalCommand(opts: {

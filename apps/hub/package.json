@@ -43,8 +43,7 @@
     "@anthropic-ai/sdk": "1.1.0",
     "@vscode/ripgrep": "^1.18.0",
     "node-pty": "^1.1.0",
-    "prettier": "^3.8.3",
-    "typescript-language-server": "^5.1.3"
+    "prettier": "^3.8.3"
   },
   "devDependencies": {
     "@band-app/coding-agent": "workspace:^",
@@ -76,6 +75,7 @@
     "sirv": "^3.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
+    "typescript-language-server": "^5.1.3",
     "vite": "^7.0.0",
     "vitest": "^4.0.18",
     "ws": "^8.18.0",

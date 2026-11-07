@@ -59,6 +59,7 @@ import type {
   WorktreeInfo,
   WorktreeSpec,
 } from "@band-app/host-api";
+import { createLogger } from "@band-app/logger";
 import { resolveAcpLaunch } from "./agents/acp-launch";
 import { adapterVersionOf } from "./agents/adapter-version";
 import { spawnAgentProcess } from "./agents/agent-spawn";
@@ -76,7 +77,12 @@ import { installSkills } from "./agents/skills-install";
 import { ChromiumManager } from "./browser/chromium";
 import { desktopUnavailableReason, openDesktop } from "./desktop/desktop";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
-import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
+import {
+  connectLspServer,
+  killAllServers,
+  killWorktreeServers,
+  type LanguageServerSpec,
+} from "./lsp/lsp-manager";
 import { probeCapabilities } from "./process/capabilities";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
@@ -92,6 +98,8 @@ import { transcribeLocally } from "./speech/transcribe";
 import { findLatestClaudeSessionId } from "./terminals/claude-resume";
 import { readAccountUsage } from "./usage/account-usage";
 
+const log = createLogger("local-host");
+
 /** How long `info()` keeps the tool versions it probed. */
 const TOOLS_TTL_MS = 60_000;
 /** How long a capability report stays before the next `info()` refreshes it in the background. */
@@ -103,6 +111,11 @@ const EXEC_MAX_BUFFER = 50 * 1024 * 1024;
 export const LOCAL_HOST_ID = "local";
 
 export interface LocalHostOptions {
+  /**
+   * The language servers installed extensions contribute. Read on every connection. A host
+   * without them (the hub's own machine) has no language servers.
+   */
+  languageServers?: () => readonly LanguageServerSpec[];
   /**
    * The terminal backend `host.pty` returns. A function, because the hub picks
    * its backend at boot (and can replace it), after the host exists.
@@ -157,7 +170,7 @@ export class LocalHost implements Host {
     listFiles: (root) => listFiles(root),
   };
   readonly lsp: HostLsp = {
-    connect: (spec) => connectLspServer(spec),
+    connect: (spec) => connectLspServer(() => this.options.languageServers?.() ?? [], spec),
     killWorktree: async (worktreeId) => killWorktreeServers(worktreeId),
     killAll: async () => killAllServers(),
   };
@@ -174,9 +187,12 @@ export class LocalHost implements Host {
       const holder = this.options.agentHolder;
       if (!holder) return null;
       try {
-        return await HeldAgentProcess.attach(holder, agentId, offsets);
-      } catch {
-        // No daemon to ask: the agent is not held.
+        const held = await HeldAgentProcess.attach(holder, agentId, offsets);
+        if (!held)
+          log.warn({ agentId }, "no agent daemon holds the agent; it cannot be reattached");
+        return held;
+      } catch (err) {
+        log.warn({ agentId, err }, "could not reattach the agent");
         return null;
       }
     },

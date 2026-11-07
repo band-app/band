@@ -23,6 +23,7 @@ import {
 } from "./helpers/server";
 import { trpcMutate, trpcMutateData, trpcQuery } from "./helpers/trpc";
 import { startWorker, type WorkerHandle } from "./helpers/worker";
+import { AppearancePage } from "./pages/AppearancePage";
 import { ExtensionPanelPage } from "./pages/ExtensionPanelPage";
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -204,4 +205,25 @@ test("S8: a panel with defaultControl behaves the same: no button, input works",
   await expect(auto.pageMode).toHaveText("control");
   await auto.sendButton.click();
   await expect(auto.echoes).toHaveCount(1);
+});
+
+test("S9: a panel gets the theme in init and a theme message on each change", async ({ page }) => {
+  const panel = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "screen");
+  await panel.open(worktreeA);
+  await panel.openFromMenu();
+  await expect(panel.themeMode).not.toHaveText("none");
+
+  const appearance = new AppearancePage(page, server.url, TOKEN);
+  await appearance.openInPlace();
+  await appearance.chooseMode("light");
+  await expect(panel.themeMode).toHaveText("light");
+  const lightBackground = await panel.bodyBackground();
+
+  await appearance.chooseMode("dark");
+  await expect(panel.themeMode).toHaveText("dark");
+  await expect.poll(() => panel.bodyBackground()).not.toBe(lightBackground);
+
+  await appearance.setColor("background", "#123456");
+  await expect(panel.themeBackground).toContainText("#123456");
+  await expect.poll(() => panel.bodyBackground()).toBe("rgb(18, 52, 86)");
 });

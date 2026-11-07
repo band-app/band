@@ -28,8 +28,23 @@ export interface ExtensionServiceState {
   reason?: string;
 }
 
+/** A language server an extension contributes, as this worker can run it. */
+export interface LanguageServerState {
+  extensionId: string;
+  serverId: string;
+  /** `<extension id>/<server id>`, the `lang` of an `/lsp` connection. */
+  key: string;
+  languages: string[];
+  files: string[];
+  state: "ready" | "unavailable";
+  /** Why the server cannot run here, such as `needs node`. */
+  reason?: string;
+}
+
 export interface ExtensionsSyncReply {
   services: ExtensionServiceState[];
+  /** Absent from an older worker. */
+  languageServers?: LanguageServerState[];
   /** Extensions the worker could not set up at all (a failed download, a bad archive), with the reason. */
   problems: Array<{ extensionId: string; reason: string }>;
 }

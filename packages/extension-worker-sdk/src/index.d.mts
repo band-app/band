@@ -70,7 +70,16 @@ export interface WorkerServiceDefinition {
       | Promise<void | { onMessage?(message: StreamMessage): void; onClose?(): void }>
   >;
   /** A worktree was removed (state to delete) or the service lets it go (state to keep). */
-  onRelease?(worktreeKey: string, reason: "removed" | "fenced" | "shutdown"): void | Promise<void>;
+  onRelease?(
+    worktreeKey: string,
+    reason: "removed" | "fenced" | "shutdown",
+    worktreePath?: string,
+  ): void | Promise<void>;
+  /**
+   * A worktree was removed that this run of the service never served, so the worker has no key
+   * for it. Map the folder to your own state, such as an index you wrote when you served it.
+   */
+  onReleasePath?(worktreePath: string): void | Promise<void>;
   /** The worker asks the service to stop. It exits after this returns. */
   onStop?(): void | Promise<void>;
 }

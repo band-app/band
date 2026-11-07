@@ -191,7 +191,7 @@ Control messages are NDJSON on the service's stdin (worker to service) and stdou
 | `call { method, params, worktreeKey, worktreePath }` | Returns the JSON result. |
 | `stream.open { streamId, name, params, worktreeKey, worktreePath }` | Opens a live stream. |
 | `stream.close { streamId }` | The viewer left. |
-| `worktree.release { worktreeKey, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). |
+| `worktree.release { worktreeKey, worktreePath, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). For a removed worktree the service did not serve since it started, `worktreeKey` is `""` and only `worktreePath` is set. |
 | `stop` | Exit after finishing up. The worker kills the process after 3 s. |
 
 The service sends the notification `stream.end { streamId }` to end a stream. Stream data does not use stdio. It goes over file descriptor 3, a pipe the worker opens beside stdio, as binary frames: a 4-byte big-endian length, a 4-byte stream id, a kind byte (0 text, 1 bytes) and the payload, in both directions. The hub reaches a service with the same `plugin.call` and `plugin.stream` link methods as a bundled worker plugin.
@@ -224,7 +224,8 @@ defineWorkerService({
       return { onMessage: (m) => stream.send(m), onClose: () => {} };
     },
   },
-  onRelease: (worktreeKey, reason) => {},
+  onRelease: (worktreeKey, reason, worktreePath) => {},
+  onReleasePath: (worktreePath) => {}, // a removed worktree this run never served
   onStop: () => {},
 });
 ```
@@ -234,7 +235,35 @@ defineWorkerService({
 ### Limits
 
 - Panels and tools are described above. `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) still reach a service directly.
-- A service's scopes (the worktrees it served) are kept in memory, so `worktree.release { reason: "removed" }` does not reach a worktree the service last served before a restart.
+- A service's scopes (the worktrees it served) are kept in memory. When a worktree is removed that the service has not served since it started, the worker sends `worktree.release` with an empty `worktreeKey` and the path, and the SDK calls `onReleasePath(path)`. A service that must act on such a worktree keeps its own index from key to path.
+- The worker passes one `BAND_*` variable to a service, `BAND_SIMULATOR_NAME_PREFIX`, which test runs set.
+
+## Language servers
+
+An extension can give the code viewer a language server. Band bundles none: without an extension, a file has no completions, hover or diagnostics. Install the official `typescript-lsp` extension from Settings > Extensions for TypeScript and JavaScript, and `python-lsp` for Python.
+
+```json
+"languageServers": [{
+  "id": "typescript",
+  "languages": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+  "files": ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mts", "*.cts", "*.mjs", "*.cjs"],
+  "command": "node_modules/typescript-language-server/lib/cli.mjs",
+  "args": ["--stdio"],
+  "rootMarkers": ["package.json", "tsconfig.json", "jsconfig.json"],
+  "requires": ["node"]
+}]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | The server id. The server's key is `<extension id>/<server id>`, which is the `lang` of the `/lsp` socket. |
+| `languages` | LSP languageIds the server handles. |
+| `files` | File name globs, matched like a file editor's `selector`. The code viewer opens a file against the first ready server whose globs match. |
+| `command` | A path inside the extension folder ending in `.js`, `.mjs` or `.cjs`, which the worker runs with its own node, or the name of a binary on the worker's PATH. |
+| `args`, `requires` | Arguments, and the worker facts or binaries the server needs. A missing binary shows as `needs <binary>` in `workers.list` (`languageServers[].reason`). |
+| `rootMarkers` | Files at the worktree root that mark a project. With none present the server refuses to start ("No project"). Empty means always. |
+
+The worker unpacks the extension like a worker service (see Worker services) and its LSP manager spawns one process per worktree and server in the worktree's folder, with the worktree's `node_modules/.bin` first on the PATH. Framing, sharing between editors, the path policy, the lease fence and removal of the worktree work as before. `workers.list` returns `languageServers` for each worker (key, languages, files, state `ready` or `unavailable`, reason), and the code viewer reads it. A restricted worker and the hub's own machine run no language servers. `initializationOptions` is not supported yet.
 
 ## Panels
 
@@ -253,7 +282,8 @@ The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like 
 
 From Band to the page:
 
-- `init { worktreeId, theme, layout, visible }`, sent once. The page answers `{ type: "ready" }`.
+- `init { worktreeId, theme, layout, visible }`, sent once. `theme` is `{ mode, tokens }`, the same shape editors get. The page answers `{ type: "ready" }`.
+- `theme { mode, tokens }` whenever Band's theme changes (light or dark, Settings > Appearance edits), the same message editors get.
 - `stream.opened { id }`, `stream.frame { id, data }` (an `ArrayBuffer`), `stream.message { id, text }` and `stream.closed { id, code, reason }`.
 - `call.result { id, result }` and `call.error { id, message }`.
 - `control { enabled }`, `visible { visible }` and `layout { layout }`.
@@ -284,6 +314,10 @@ An extension can give agents tools that its worker service answers:
 ```
 
 Band adds each tool to the built-in `band` MCP server as `<extension id>_<name>`, for example `echo-service_echo`. A call goes to `method` on the service `service`, on the worker of the calling chat's worktree, with the call's arguments as `params`. The service's result is the tool result. A plain result is returned as JSON text. A result of the form `{ "content": [ ... ] }` is passed to the agent as the MCP tool result, with two block types: `{ "type": "text", "text": "..." }` and `{ "type": "image", "data": "<base64>", "mimeType": "image/png" | "image/jpeg" }`. An image is at most 5 MB decoded. Any other block type, another image type, bad base64 or an oversized image makes the call a tool error that names the problem. Images reach only the chat that made the call. No tab has to be open. The arguments cannot name another worktree. When the chat's worker does not run the service, the tool answers an error that names the worker. `"agent": false` leaves the tool out of the agent's list. `inputSchema` is a JSON Schema and is advertised as written. The service validates its own arguments.
+
+## Agent hint
+
+A manifest may set `"agentHint"`, a string of at most 300 characters. The built-in `band` MCP server sends one line per extension that has a hint (`- <extension id>: <hint>`, ordered by id) as its MCP `instructions`, so an agent sees the hint in its system prompt before it loads any tool. Newlines in a hint become spaces. An extension without a hint adds nothing. Use it for the one fact an agent needs to pick your tools, for example "Use simulator_* tools to drive the iOS Simulator".
 
 ## Agent access
 
