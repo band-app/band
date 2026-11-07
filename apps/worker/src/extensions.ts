@@ -47,7 +47,6 @@ const RESERVED_CAPABILITIES = new Set([
   "lsp",
   "pty",
   "acp",
-  "desktop",
   "direct",
   "chatOwnership",
 ]);

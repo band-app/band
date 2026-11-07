@@ -310,6 +310,8 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           title={panel.label}
           // Scripts only. Never `allow-same-origin`: the frame must not reach Band's cookies, storage or DOM.
           sandbox="allow-scripts"
+          // A panel may offer fullscreen (the Desktop panel does). The frame still has no same-origin access.
+          allowFullScreen
           onLoad={handshake}
           onError={() => setError("The panel failed to load")}
           className="absolute inset-0 size-full border-0 bg-background"
