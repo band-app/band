@@ -50,7 +50,7 @@ A change does not reload anything. The terminal listens for `band-theme-changed`
 
 Use a token, not a palette class or a color literal. `bg-blue-500`, `text-green-600 dark:text-green-400`, `#ff0000` and `rgba(...)` in `.ts` and `.tsx` files fail `node scripts/check-theme-tokens.mjs`, which runs in `pnpm lint`, `pnpm check` and CI. Pick the token by meaning: a passing check is `text-success`, a modified file's letter is `text-git-modified`, a selected row is `bg-selection`. A token a feature needs and the list lacks belongs in `globals.css`, with a light and a dark value.
 
-A color that must not follow the theme (a QR code's white background, a brand color, the remote desktop viewer's dark frame) takes a marker and a reason:
+A color that must not follow the theme (a QR code's white background, a brand color) takes a marker and a reason:
 
 - `// theme-lint-ignore-line: <reason>` on the line, or on the line above it
 - `// theme-lint-ignore-file: <reason>` in the first five lines of a file

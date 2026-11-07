@@ -36,7 +36,6 @@ import type {
   HostAcp,
   HostAgentEnv,
   HostBrowser,
-  HostDesktop,
   HostExternalFiles,
   HostFs,
   HostGit,
@@ -75,7 +74,6 @@ import { checkHooks, installHooks, removeHooks } from "./agents/hooks-install";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
 import { ChromiumManager } from "./browser/chromium";
-import { desktopUnavailableReason, openDesktop } from "./desktop/desktop";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
 import {
   connectLspServer,
@@ -208,7 +206,6 @@ export class LocalHost implements Host {
     connect: (worktreeId) => this.chromium.connect(worktreeId),
     close: (worktreeId) => this.chromium.close(worktreeId),
   };
-  readonly desktop: HostDesktop = { open: () => openDesktop() };
   readonly speech: HostSpeech = { transcribe: (req) => transcribeLocally(req) };
   readonly resources: HostResources;
   readonly scripts: HostScripts = {
@@ -411,7 +408,6 @@ export class LocalHost implements Host {
         lsp: true,
         pty: true,
         acp: true,
-        desktop: desktopUnavailableReason() === null,
       },
     };
   }

@@ -456,6 +456,7 @@ export class DirectListener {
           };
         },
         (message) => ws.close(DIRECT_FALLBACK_CLOSE_CODE, message.slice(0, 100)),
+        { binaryInput: url.searchParams.get("binaryInput") === "1" },
       );
     });
   }

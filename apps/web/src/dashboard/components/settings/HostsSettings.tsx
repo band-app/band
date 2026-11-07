@@ -12,7 +12,6 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Info, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { openDesktopViewer } from "../../../lib/desktop-viewer";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
@@ -56,7 +55,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   fsWatch: "File watching",
 };
 
-/** The capabilities a host reported, as words. "Desktop" means it has a display and a VNC server. */
+/** The capabilities a host reported, as words. "Desktop" means the desktop extension runs on it. */
 function capabilitySummary(host: HostList[number]): string {
   if (host.capabilities.length === 0) return "none reported";
   return host.capabilities.map((c) => CAPABILITY_LABELS[c] ?? c).join(", ");
@@ -380,18 +379,6 @@ export function HostsSettings() {
                         {TRUST_LABEL[host.trust]}
                       </span>
                     ))}
-                  {host.capabilities.includes("desktop") && host.status === "online" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Open desktop of ${host.name}`}
-                      data-testid="settings__host-open-desktop"
-                      onClick={() => openDesktopViewer(host.id)}
-                    >
-                      Open desktop
-                    </Button>
-                  )}
                   {host.id !== "local" && admin && host.status !== "disposed" && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

@@ -24,6 +24,7 @@ import type { Logger } from "@band-app/logger";
 import {
   type ExtensionManifest,
   extensionManifestSchema,
+  isAllowedServiceEnvName,
   type WorkerServiceManifest,
 } from "@band-app/plugin-api";
 import type { PluginStream, ReleaseReason, StreamMessage } from "@band-app/plugin-api/worker";
@@ -48,7 +49,6 @@ const RESERVED_CAPABILITIES = new Set([
   "lsp",
   "pty",
   "acp",
-  "desktop",
   "direct",
   "chatOwnership",
 ]);
@@ -301,6 +301,9 @@ class ServiceProcess {
 }
 
 type ServiceStateName = ExtensionServiceState["state"] | "starting";
+
+/** How long an agent or terminal start waits for a service's `worktreeEnv`. */
+const WORKTREE_ENV_TIMEOUT_MS = 10_000;
 
 interface Service {
   extensionId: string;
@@ -790,6 +793,41 @@ export class ExtensionHost {
     } catch (err) {
       throw new RpcError(RPC_INVALID_PARAMS, err instanceof Error ? err.message : String(err));
     }
+  }
+
+  /**
+   * The environment the running services add for an agent or terminal in a worktree: only names
+   * their manifest lists, only string values. A service that is not running, answers an error or
+   * takes more than {@link WORKTREE_ENV_TIMEOUT_MS} adds nothing. Never starts a service.
+   */
+  async worktreeEnv(worktreeKey: string, worktreePath: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const s of this.services.values()) {
+      const allowed = new Set(s.def.worktreeEnv);
+      if (allowed.size === 0 || s.state !== "running" || !s.proc) continue;
+      const path = worktreePath || s.scopes.get(worktreeKey) || "";
+      try {
+        const reply = (await s.proc.request(
+          "worktree.env",
+          { worktreeKey, worktreePath: path },
+          WORKTREE_ENV_TIMEOUT_MS,
+        )) as { env?: unknown } | null;
+        if (path) s.scopes.set(worktreeKey, path);
+        const env = reply?.env;
+        if (typeof env !== "object" || env === null) continue;
+        for (const [name, value] of Object.entries(env)) {
+          if (!allowed.has(name) || !isAllowedServiceEnvName(name)) continue;
+          if (typeof value !== "string" || value.length > 1024 || /[\0\r\n]/.test(value)) continue;
+          out[name] = value;
+        }
+      } catch (err) {
+        this.options.log.warn(
+          { extension: s.extensionId, message: err instanceof Error ? err.message : String(err) },
+          "worktreeEnv failed; adding nothing",
+        );
+      }
+    }
+    return out;
   }
 
   /**

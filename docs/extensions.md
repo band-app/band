@@ -173,6 +173,16 @@ A worker is eligible when its trust level is `standard` or `admin` and it is a c
 
 `workers.list` returns `extensionServices` for each worker, with `extensionId`, `serviceId`, `capability`, `version`, `state` (`running`, `restarting`, `stopped`, `failed` or `not-eligible`) and a `reason`. A restricted worker shows `not-eligible` with the reason `restricted`, and a service whose `requires` fail shows the failed requirement, such as `needs os=darwin, this worker has linux`.
 
+### Environment for a worktree's agents and terminals
+
+A service can give the agents and terminals of a worktree environment variables, for example the `DISPLAY` of a virtual screen it keeps per worktree. The manifest lists the names the service may set:
+
+```json
+{ "id": "main", "entry": "service.mjs", "capability": "desktop", "worktreeEnv": ["DISPLAY"] }
+```
+
+Before the worker starts an agent (`acp.spawn`, and a chat it owns) or a terminal (`pty.spawn`) in a worktree, it sends each running service of that kind `worktree.env { worktreeKey, worktreePath }` and adds the returned `env` object to the child's environment. The answer is filtered: a name the manifest does not list is ignored, a value must be a string of at most 1024 characters without a newline or NUL, and a service that fails, is not running, or takes more than 10 seconds adds nothing and the agent or terminal starts anyway. The manifest refuses names that start with `BAND_`, `GIT_`, `LD_`, `DYLD_`, `SSH_`, `GH_`, `GITHUB_`, `NPM_` or `NODE_`, `PATH`, `HOME`, `SHELL`, `USER`, `LOGNAME`, `TMPDIR`, `PWD`, `IFS`, and any name containing `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `API_KEY` or `PRIVATE`. The service's variables are applied last, so they win over the worker's own environment (a worker started with a `DISPLAY` of its own gets the worktree's). The call never starts a stopped service. Only standard and admin workers run services, so a restricted worker adds nothing. In the SDK this is the `worktreeEnv(scope)` handler.
+
 ### The process
 
 The worker starts `process.execPath <entry>` with the extension folder as the working directory. Under Electron (the desktop app's bundled worker) the spawn sets `ELECTRON_RUN_AS_NODE=1` itself, so it does not depend on what the worker inherited. The environment is an allowlist (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TMPDIR`, `TZ`, `DISPLAY`, `XDG_RUNTIME_DIR`). No `BAND_*`, `GIT_CONFIG_*` or token variable reaches the service.
@@ -191,6 +201,7 @@ Control messages are NDJSON on the service's stdin (worker to service) and stdou
 | `call { method, params, worktreeKey, worktreePath }` | Returns the JSON result. |
 | `stream.open { streamId, name, params, worktreeKey, worktreePath }` | Opens a live stream. |
 | `stream.close { streamId }` | The viewer left. |
+| `worktree.env { worktreeKey, worktreePath }` | Answers `{ env }`: variables for the agents and terminals of the worktree. See above. |
 | `worktree.release { worktreeKey, worktreePath, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). For a removed worktree the service did not serve since it started, `worktreeKey` is `""` and only `worktreePath` is set. |
 | `stop` | Exit after finishing up. The worker kills the process after 3 s. |
 
@@ -198,7 +209,7 @@ The service sends the notification `stream.end { streamId }` to end a stream. St
 
 ### Who can reach a service
 
-Same rule as a bundled worker plugin's stream. `GET /api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) accepts any device token, admin or not. Text messages from the viewer reach the service from the start. The old `{"type":"control",...}` frame is accepted and ignored. An agent never reaches a service: the worker relay lists no such route (WebSocket routes are not relayed), `extensions.callService` is admin only, and `extensions.*` is left out of the MCP endpoint and the relay.
+Same rule as a bundled worker plugin's stream. `GET /api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) accepts any device token, admin or not. Text messages from the viewer reach the service from the start. The old `{"type":"control",...}` frame is accepted and ignored. An agent never reaches a service: the worker relay lists no such route (WebSocket routes are not relayed), `extensions.callService` is admin only, and `extensions.*` is left out of the MCP endpoint and the relay. Any number of viewers may hold a stream of one panel at once (two devices): each gets its own stream to the service, and the hub does not refuse a second one.
 
 ### Keeping a worker in step
 
@@ -224,6 +235,7 @@ defineWorkerService({
       return { onMessage: (m) => stream.send(m), onClose: () => {} };
     },
   },
+  worktreeEnv: ({ worktreeKey }) => ({ DISPLAY: ":7" }),
   onRelease: (worktreeKey, reason, worktreePath) => {},
   onReleasePath: (worktreePath) => {}, // a removed worktree this run never served
   onStop: () => {},
@@ -277,6 +289,8 @@ An extension can add a worktree panel: a page in the center "+" menu that is not
 ```
 
 `capability` must be the capability of one of the extension's own services. The menu offers the panel when the worktree's worker is online and its service runs there, so a restricted worker, a worker that fails `requires` and the hub's own machine show nothing. `icon` is one of `globe`, `terminal`, `monitor`, `smartphone`, `image`, `box`, `play`, `activity`; any other name gets a puzzle icon. The tab stays mounted while hidden and is saved with the other center tabs. `"defaultControl"` is still accepted so existing manifests load, and has no effect: input is always on.
+
+A panel may set `"binaryInput": true` (default false) to send binary frames to the service, for a protocol such as VNC. The page sends them with `stream.send { id, message }` where `message` is an `ArrayBuffer` or typed array. The hub passes each binary frame (1 MiB at most) to the service, from the start like text frames. Without the flag every binary frame from the page is dropped, as before, and text frames behave the same either way.
 
 The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like an editor, so it has no Band cookie, token or storage. Band posts `{ type: "band:hello", extensionApi: 1 }` with one transferred `MessagePort`. Everything else goes over that port.
 

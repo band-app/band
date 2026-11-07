@@ -72,6 +72,10 @@ export function defineWorkerService(definition) {
         await entry?.onClose?.();
         return null;
       }
+      case "worktree.env": {
+        const env = (await definition.worktreeEnv?.(scopeOf(p))) ?? {};
+        return { env };
+      }
       case "worktree.release":
         if (p.worktreeKey) await definition.onRelease?.(p.worktreeKey, p.reason, p.worktreePath);
         else if (p.worktreePath) await definition.onReleasePath?.(p.worktreePath);

@@ -41,6 +41,27 @@ const requirementSchema = z
   .regex(/^[A-Za-z0-9._+@=-]+$/, "A requirement is `key=value` or a binary name");
 
 /**
+ * A variable a service may put in the environment of the agents and terminals of a worktree
+ * (`worktreeEnv`). Band's own variables, search paths, git, linker and credential-looking names
+ * are never allowed.
+ */
+export const SERVICE_ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
+const FORBIDDEN_ENV_NAME =
+  /^(BAND_|GIT_|LD_|DYLD_|SSH_|GH_|GITHUB_|NPM_|NODE_)|^(PATH|HOME|SHELL|USER|LOGNAME|TMPDIR|PWD|IFS)$|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|API_?KEY|PRIVATE/;
+
+/** Whether a service may set the environment variable `name` for a worktree. */
+export function isAllowedServiceEnvName(name: string): boolean {
+  return SERVICE_ENV_NAME.test(name) && !FORBIDDEN_ENV_NAME.test(name);
+}
+
+const serviceEnvNameSchema = z
+  .string()
+  .refine(
+    isAllowedServiceEnvName,
+    "Not a variable a service may set (no BAND_*, PATH, GIT_*, credentials)",
+  );
+
+/**
  * A process the worker runs for the extension. `entry` is a `.mjs` file in the extension folder.
  * The worker starts it on every eligible worker (standard or admin trust, `requires` met) and
  * reports `capability` once it runs.
@@ -52,6 +73,11 @@ export const workerServiceSchema = z
     requires: z.array(requirementSchema).default([]),
     /** What the worker reports in its capabilities while the service runs. The hub's `plugin.call` names it. */
     capability: idSchema,
+    /**
+     * Variables the service may add to the environment of the agents and terminals of a worktree
+     * on this worker, through its `worktreeEnv` handler. A variable not listed is ignored.
+     */
+    worktreeEnv: z.array(serviceEnvNameSchema).max(16).default([]),
   })
   .strict();
 
@@ -73,6 +99,11 @@ export const panelSchema = z
      * input.
      */
     defaultControl: z.boolean().default(false),
+    /**
+     * Binary frames from the page (1 MiB at most each) reach the service, as text frames do.
+     * Without it every binary frame from the page is dropped.
+     */
+    binaryInput: z.boolean().default(false),
   })
   .strict();
 

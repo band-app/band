@@ -121,28 +121,6 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
   r.json("lsp.killWorktree", (a) => host.lsp.killWorktree(str(a, "worktreeId")));
   r.json("lsp.killAll", () => host.lsp.killAll());
 
-  // ---- desktop ------------------------------------------------------------
-
-  // The channel carries the RFB stream: the hub's viewer writes to x11vnc and x11vnc's output comes back.
-  // Closing the channel drops the connection to x11vnc. `host.desktop.open` rejects, and so fails the
-  // call, when the host has no display or no x11vnc.
-  r.raw("desktop.open", async () => {
-    const duplex = await host.desktop.open();
-    let ch: Channel;
-    try {
-      ch = session.openChannel("desktop", {});
-    } catch (err) {
-      duplex.close();
-      throw err;
-    }
-    serve(ch, duplex.output, {
-      release: activity.hold(),
-      onInput: (chunk) => duplex.write(chunk),
-      onClosed: () => duplex.close(),
-    });
-    return { chan: ch.id };
-  });
-
   const mcpProcesses = new Set<McpStdio>();
 
   // ---- stdio MCP servers --------------------------------------------------
@@ -292,6 +270,12 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     }
     const ghEnv = await ghTokenEnv(ctx);
     if (ghEnv.GH_TOKEN) options = { ...options, env: { ...options?.env, ...ghEnv } };
+    // Variables an extension service gives this worktree's terminals (the DISPLAY of its desktop).
+    const extensionEnv =
+      (await ctx.extensions?.worktreeEnv(str(a, "worktreeId"), worktreeRoot)) ?? {};
+    if (Object.keys(extensionEnv).length > 0) {
+      options = { ...options, env: { ...options?.env, ...extensionEnv } };
+    }
     // The pool resolves `cwd` inside the worktree root, so check where that lands.
     if (options?.cwd !== undefined) await policy.resolve(resolve(worktreeRoot, options.cwd));
     return pty.spawn({

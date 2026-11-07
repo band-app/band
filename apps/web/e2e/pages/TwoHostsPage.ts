@@ -2,18 +2,16 @@
  * Page object for a repo whose same-named worktree lives on two hosts. A worktree id carries its
  * host (`<repo>-<branch>@<hostId>`), so the sidebar holds two cards of one name and the page has
  * to keep them apart. It owns the selection and URL reads and composes the other page objects
- * for the sidebar groupings, the file viewer, the Changes panel and the desktop viewer.
+ * for the sidebar groupings, the file viewer and the Changes panel.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { DesktopViewerPage } from "./DesktopViewerPage";
 import { SidebarGroupingPage } from "./SidebarGroupingPage";
 import { WorktreePage } from "./WorktreePage";
 
 export class TwoHostsPage {
   readonly worktree: WorktreePage;
   readonly sidebar: SidebarGroupingPage;
-  readonly desktop: DesktopViewerPage;
 
   constructor(
     private readonly page: Page,
@@ -22,7 +20,6 @@ export class TwoHostsPage {
   ) {
     this.worktree = new WorktreePage(page, baseUrl, token);
     this.sidebar = new SidebarGroupingPage(page);
-    this.desktop = new DesktopViewerPage(page);
   }
 
   /** Opens the worktree by URL (a full page load) and waits until it is the shown one. */

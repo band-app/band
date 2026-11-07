@@ -190,7 +190,7 @@ export class HubWebSocket extends WebSocket {
 
 /**
  * Like `HubWebSocket`, but a plain `WebSocket`, for libraries that inspect the channel's own
- * prototype (noVNC's `RFB` throws on a subclass).
+ * prototype.
  */
 export function createHubWebSocket(url: string | URL, protocols?: string | string[]): WebSocket {
   return new WebSocket(url, withTokenProtocol(protocols));

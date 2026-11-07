@@ -77,6 +77,15 @@ defineWorkerService({
       };
     },
   },
+  // The variables for a worktree's agents and terminals. Only the names the manifest lists
+  // (ECHO_DISPLAY, ECHO_UNSET) may pass; the worker drops the rest, and a non-string value.
+  worktreeEnv: (scope) => ({
+    ECHO_DISPLAY: `:${scope.worktreeKey.length}`,
+    ECHO_UNSET: 42,
+    ECHO_NOT_LISTED: "x",
+    PATH: "/evil",
+    BAND_TOKEN: "evil",
+  }),
   onRelease(key, reason) {
     released.push(`${key}:${reason}`);
   },

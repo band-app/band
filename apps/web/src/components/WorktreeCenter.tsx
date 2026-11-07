@@ -201,7 +201,6 @@ import {
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { discardWarning } from "./ChangesSections";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
-import { DesktopHeaderButton } from "./DesktopHeaderButton";
 import {
   CenterDragBar,
   RightPanelToggle,
@@ -3122,13 +3121,9 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
     );
   }
 
-  const activeWorktreeId = (props.group.activePanel?.params as { worktreeId?: string } | undefined)
-    ?.worktreeId;
-
   return (
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="worktree-center__toolbar">
       {renderLeafActions?.()}
-      {activeWorktreeId && <DesktopHeaderButton worktreeId={activeWorktreeId} />}
       {/* Last action button; the collapsed sidepanel's expand toggle keeps the window's corner. */}
       <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
       {edges.top && edges.right && chrome?.onToggleRightPanel && !chrome.rightPanelVisible && (

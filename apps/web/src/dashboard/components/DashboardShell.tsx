@@ -49,7 +49,6 @@ import {
 import { collapsibleKeys, ORIGIN_COLLAPSE_KEY } from "../lib/sidebar-grouping";
 import { useDashboardStore } from "../stores/index";
 import { AddRepoDialog } from "./AddRepoDialog";
-import { DesktopViewerDialog } from "./DesktopViewerDialog";
 import { GroupNameDialog } from "./GroupDialogs";
 import { OPEN_SETTINGS_SECTION_EVENT } from "./QuickCommandsMenu";
 import { RepoList } from "./RepoList";
@@ -679,7 +678,6 @@ export function DashboardShell({
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
 
-      <DesktopViewerDialog />
       <SettingsPage
         open={showSettingsDialog}
         onOpenChange={setShowSettingsDialog}

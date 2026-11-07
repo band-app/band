@@ -5,8 +5,8 @@
  *
  * The plugin's text messages go down as text frames and its bytes as binary frames. A session
  * passes the viewer's text messages to the plugin from the start. The legacy mode request
- * `{"type":"control",...}` is accepted and ignored. Binary frames from the viewer are always
- * dropped.
+ * `{"type":"control",...}` is accepted and ignored. Binary frames from the viewer are dropped,
+ * unless the panel declares `binaryInput`: then they reach the stream (1 MiB at most each).
  */
 
 import { createLogger } from "@band-app/logger";
@@ -17,10 +17,13 @@ const log = createLogger("plugin-stream");
 /** Most bytes the viewer may send in one message. Input messages are small JSON. */
 export const MAX_INPUT_BYTES = 64 * 1024;
 
+/** Most bytes one binary input message may carry (a clipboard paste in the RFB protocol). */
+export const MAX_BINARY_INPUT_BYTES = 1024 * 1024;
+
 /** A stream opened for one viewer. */
 export interface PluginStreamLink {
   messages: AsyncIterable<string | Uint8Array>;
-  send(message: string): void;
+  send(message: string | Uint8Array): void;
   close(): void;
 }
 
@@ -43,11 +46,17 @@ export async function bridgePluginStream(
   label: string,
   open: () => Promise<PluginStreamLink>,
   onOpenFailed: (message: string) => void,
+  options: { binaryInput?: boolean } = {},
 ): Promise<void> {
   let stream: PluginStreamLink | null = null;
 
   ws.on("message", (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
-    if (isBinary) return;
+    if (isBinary) {
+      if (!options.binaryInput || !stream) return;
+      const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as Buffer);
+      if (bytes.length <= MAX_BINARY_INPUT_BYTES) stream.send(new Uint8Array(bytes));
+      return;
+    }
     const text = (Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as Buffer)).toString(
       "utf8",
     );
