@@ -136,6 +136,11 @@ export const extensionManifestSchema = z
       .string()
       .regex(/^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/, "The version is letters, digits, . _ + -"),
     extensionApi: z.literal(EXTENSION_API_VERSION),
+    /**
+     * One standing instruction for agents. The built-in `band` MCP server sends it as part of its
+     * MCP `instructions`, so it reaches the system prompt of every chat. Keep it to one line.
+     */
+    agentHint: z.string().max(300).optional(),
     contributes: z
       .object({
         fileEditors: z.array(fileEditorSchema).default([]),

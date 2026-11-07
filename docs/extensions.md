@@ -315,6 +315,10 @@ An extension can give agents tools that its worker service answers:
 
 Band adds each tool to the built-in `band` MCP server as `<extension id>_<name>`, for example `echo-service_echo`. A call goes to `method` on the service `service`, on the worker of the calling chat's worktree, with the call's arguments as `params`. The service's result is the tool result. A plain result is returned as JSON text. A result of the form `{ "content": [ ... ] }` is passed to the agent as the MCP tool result, with two block types: `{ "type": "text", "text": "..." }` and `{ "type": "image", "data": "<base64>", "mimeType": "image/png" | "image/jpeg" }`. An image is at most 5 MB decoded. Any other block type, another image type, bad base64 or an oversized image makes the call a tool error that names the problem. Images reach only the chat that made the call. No tab has to be open. The arguments cannot name another worktree. When the chat's worker does not run the service, the tool answers an error that names the worker. `"agent": false` leaves the tool out of the agent's list. `inputSchema` is a JSON Schema and is advertised as written. The service validates its own arguments.
 
+## Agent hint
+
+A manifest may set `"agentHint"`, a string of at most 300 characters. The built-in `band` MCP server sends one line per extension that has a hint (`- <extension id>: <hint>`, ordered by id) as its MCP `instructions`, so an agent sees the hint in its system prompt before it loads any tool. Newlines in a hint become spaces. An extension without a hint adds nothing. Use it for the one fact an agent needs to pick your tools, for example "Use simulator_* tools to drive the iOS Simulator".
+
 ## Agent access
 
 An agent in a chat can list, open, read and edit the document of an editor tab in its own worktree. It never saves: the edit shows in the tab as unsaved changes, and the person saves.
