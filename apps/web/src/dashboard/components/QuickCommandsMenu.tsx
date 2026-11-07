@@ -5,7 +5,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@band-app/ui";
-import { Bot, Plus, Settings2, SquareTerminal, Zap } from "lucide-react";
+import { Bot, Pencil, Plus, Settings2, SquareTerminal, Zap } from "lucide-react";
 import { useState } from "react";
 import {
   useQuickCommandMutations,
@@ -40,6 +40,8 @@ export function QuickCommandsMenu({
   const { markRun } = useQuickCommandMutations();
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState<QuickCommand | null>(null);
   const shown = commands.filter((c) => c.label.toLowerCase().includes(query.trim().toLowerCase()));
 
   const run = (command: QuickCommand) => {
@@ -49,7 +51,13 @@ export function QuickCommandsMenu({
 
   return (
     <>
-      <DropdownMenu onOpenChange={(open) => open && setQuery("")}>
+      <DropdownMenu
+        open={menuOpen}
+        onOpenChange={(open) => {
+          setMenuOpen(open);
+          if (open) setQuery("");
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -61,9 +69,13 @@ export function QuickCommandsMenu({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          align="start"
+          align="end"
           side="bottom"
           className="w-64"
+          onCloseAutoFocus={(e) => {
+            // Opening the Edit dialog: let the dialog keep focus instead of the ⚡ trigger.
+            if (editing) e.preventDefault();
+          }}
           data-testid="quick-commands__menu"
         >
           {commands.length > 5 && (
@@ -85,9 +97,38 @@ export function QuickCommandsMenu({
               onClick={() => run(command)}
               data-testid="quick-commands__item"
               data-command-id={command.id}
+              className="pr-1"
+              onKeyDown={(e) => {
+                // Radix keeps focus on the row, so the pencil button is not reachable by Tab.
+                if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  setEditing(command);
+                }
+              }}
             >
               <QuickCommandIcon command={command} />
-              <span className="truncate">{command.label}</span>
+              <span className="min-w-0 flex-1 truncate">{command.label}</span>
+              <button
+                type="button"
+                aria-label={`Edit ${command.label}`}
+                data-testid="quick-commands__edit"
+                tabIndex={-1}
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  setEditing(command);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                  }
+                }}
+              >
+                <Pencil className="size-3.5" aria-hidden="true" />
+              </button>
             </DropdownMenuItem>
           ))}
           {commands.length === 0 && (
@@ -112,6 +153,12 @@ export function QuickCommandsMenu({
         </DropdownMenuContent>
       </DropdownMenu>
       <QuickCommandDialog open={adding} onOpenChange={setAdding} defaultRepo={repoName} />
+      <QuickCommandDialog
+        open={editing !== null}
+        onOpenChange={(open) => !open && setEditing(null)}
+        command={editing ?? undefined}
+        defaultRepo={repoName}
+      />
     </>
   );
 }

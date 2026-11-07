@@ -3067,7 +3067,6 @@ const LeftHeaderActions = memo(function LeftHeaderActions(props: LayoutHeaderAct
   return (
     <div className="flex h-full items-center px-0.5">
       <NewTabMenu apiId={props.containerApi.id} groupId={props.group.id} />
-      <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
     </div>
   );
 });
@@ -3099,24 +3098,26 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
   // Mobile / tabs-only: single full-screen group. The active
   // tab's actions fold behind a ⋮ menu so the narrow tab strip stays uncluttered.
   if (mobileByApiId.has(props.containerApi.id)) {
-    if (!renderLeafActions) return null;
     return (
       <div className="flex h-full items-center px-1" data-testid="worktree-center__toolbar">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Tab actions"
-              data-testid="worktree-center__tab-actions-button"
-              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <MoreVertical className="size-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-0 p-1">
-            <div className="flex items-center gap-0.5">{renderLeafActions()}</div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {renderLeafActions && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Tab actions"
+                data-testid="worktree-center__tab-actions-button"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <MoreVertical className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-0 p-1">
+              <div className="flex items-center gap-0.5">{renderLeafActions()}</div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
       </div>
     );
   }
@@ -3128,6 +3129,8 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="worktree-center__toolbar">
       {renderLeafActions?.()}
       {activeWorktreeId && <DesktopHeaderButton worktreeId={activeWorktreeId} />}
+      {/* Last action button; the collapsed sidepanel's expand toggle keeps the window's corner. */}
+      <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
       {edges.top && edges.right && chrome?.onToggleRightPanel && !chrome.rightPanelVisible && (
         <RightPanelToggle onToggle={chrome.onToggleRightPanel} visible={false} />
       )}
