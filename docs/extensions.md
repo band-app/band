@@ -253,7 +253,8 @@ The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like 
 
 From Band to the page:
 
-- `init { worktreeId, theme, layout, visible }`, sent once. The page answers `{ type: "ready" }`.
+- `init { worktreeId, theme, layout, visible }`, sent once. `theme` is `{ mode, tokens }`, the same shape editors get. The page answers `{ type: "ready" }`.
+- `theme { mode, tokens }` whenever Band's theme changes (light or dark, Settings > Appearance edits), the same message editors get.
 - `stream.opened { id }`, `stream.frame { id, data }` (an `ArrayBuffer`), `stream.message { id, text }` and `stream.closed { id, code, reason }`.
 - `call.result { id, result }` and `call.error { id, message }`.
 - `control { enabled }`, `visible { visible }` and `layout { layout }`.

@@ -51,6 +51,19 @@ export class ExtensionPanelPage {
     return this.frame.locator("#echoes li");
   }
 
+  get themeMode(): Locator {
+    return this.frame.locator("#theme-mode");
+  }
+
+  get themeBackground(): Locator {
+    return this.frame.locator("#theme-bg");
+  }
+
+  /** The panel body's computed background, after the page applied the theme it was sent. */
+  async bodyBackground(): Promise<string> {
+    return await this.frame.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor);
+  }
+
   get sendButton(): Locator {
     return this.frame.getByRole("button", { name: "Send input" });
   }

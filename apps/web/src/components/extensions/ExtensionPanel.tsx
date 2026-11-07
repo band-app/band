@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { directPluginStreamTarget, directSocketClosed } from "../../lib/direct-worker";
 import { HubWebSocket, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
-import { readTheme } from "./ExtensionEditor";
+import { readTheme, useThemeUpdates } from "./ExtensionEditor";
 
 interface Props {
   worktreeId: string;
@@ -212,6 +212,8 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
       visible: visibleRef.current,
     });
   }, [closeStreams, onMessage, worktreeId]);
+
+  useThemeUpdates(post, ready);
 
   useEffect(() => {
     post({ type: "visible", visible });
