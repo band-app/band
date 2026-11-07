@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { agentDaemonPaths, agentRunDir } from "@band-app/host-local/agents/daemon/protocol";
 import type { Channel, ServerSession } from "@band-app/link";
 import { stopAgentDaemons } from "../src/agents.ts";
@@ -158,6 +159,67 @@ describe("chat agents survive a worker restart", () => {
     third.stdout.reset();
     await call(session, "acp.kill", { agentId: spawned.agentId });
     await waitFor(() => !isAlive(spawned.pid as number), 8000, "the agent to stop on kill");
+  });
+
+  it("reattaches across a change of the worker's build", async () => {
+    const spawned = await spawnAgent("cat", []);
+    const first = attachTo(spawned);
+    await first.stdout.send(Buffer.from("one\n"));
+    await waitFor(() => first.out.text() === "one\n", 8000, "the first echo");
+    await killWorker();
+
+    // An update changes the daemon entry's size or mtime, which is the build id.
+    const entry = fileURLToPath(new URL("../src/agent-daemon.ts", import.meta.url));
+    const before = statSync(entry);
+    utimesSync(entry, before.atime, new Date(before.mtimeMs + 5000));
+    try {
+      await startWorker({ BAND_AGENT_BUFFER_BYTES: "100000" });
+      const again = await session.request<Reattached>("acp.reattach", {
+        agentId: spawned.agentId,
+        stdout: 4,
+        stderr: 0,
+      });
+      assert.equal(again.pid, spawned.pid, "the same process");
+      const second = attachTo(again);
+      await second.stdout.send(Buffer.from("two\n"));
+      await waitFor(() => second.out.text() === "two\n", 8000, "an echo after the update");
+      await call(session, "acp.kill", { agentId: spawned.agentId });
+    } finally {
+      utimesSync(entry, before.atime, before.mtime);
+    }
+  });
+
+  it("reattaches to a superseded daemon of the old build after a second restart", async () => {
+    const old = await spawnAgent("cat", []);
+    const first = attachTo(old);
+    await first.stdout.send(Buffer.from("one\n"));
+    await waitFor(() => first.out.text() === "one\n", 8000, "the first echo");
+    await killWorker();
+
+    const entry = fileURLToPath(new URL("../src/agent-daemon.ts", import.meta.url));
+    const before = statSync(entry);
+    utimesSync(entry, before.atime, new Date(before.mtimeMs + 9000));
+    try {
+      await startWorker({ BAND_AGENT_BUFFER_BYTES: "100000" });
+      // The first spawn of the new build launches its daemon, which supersedes the old one.
+      const fresh = await spawnAgent("cat", []);
+      assert.notEqual(fresh.pid, old.pid);
+      await killWorker();
+      await startWorker({ BAND_AGENT_BUFFER_BYTES: "100000" });
+      const again = await session.request<Reattached>("acp.reattach", {
+        agentId: old.agentId,
+        stdout: 4,
+        stderr: 0,
+      });
+      assert.equal(again.pid, old.pid, "the agent of the retired daemon");
+      const second = attachTo(again);
+      await second.stdout.send(Buffer.from("two\n"));
+      await waitFor(() => second.out.text() === "two\n", 8000, "an echo from the retired daemon");
+      await call(session, "acp.kill", { agentId: old.agentId });
+      await call(session, "acp.kill", { agentId: fresh.agentId });
+    } finally {
+      utimesSync(entry, before.atime, before.mtime);
+    }
   });
 
   it("holds output above the cap and loses none of it", async () => {

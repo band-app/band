@@ -269,7 +269,7 @@ export function installService(opts: ServiceOptions, env: ServiceEnv): void {
   ensureDir(paths.serviceDir, 0o700);
 
   if (env.platform === "linux") {
-    writePrivate(paths.envFile, renderEnvFile(vars));
+    writePrivate(paths.envFile, renderEnvFile({ ...vars, BAND_LOG_FILE: paths.logFile }));
     mkdirSync(join(paths.unitFile, ".."), { recursive: true });
     writeFileSync(
       paths.unitFile,

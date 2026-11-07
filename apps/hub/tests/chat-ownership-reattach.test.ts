@@ -14,7 +14,14 @@
 // the way a kill between the write to the daemon and the daemon's read would have left it (the
 // prompt's end lies beyond the bytes the daemon wrote).
 
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
@@ -501,5 +508,48 @@ describe("a prompt the daemon never received (S6)", () => {
     // The rebuilt client talks to the agent on ids above every earlier one, whole lines only.
     const prompt = wireState(worker, chatId);
     expect(prompt?.promptRequestId).toBeNull();
+  }, 180_000);
+});
+
+describe("a turn that runs while the worker updates to another build (S1, S2)", () => {
+  /** An update changes the size or mtime of the daemon entry, which is the build id. */
+  function changeBuild(): () => void {
+    const dir = join(import.meta.dirname, "../../worker");
+    const entries = ["src/agent-daemon.ts", "dist/agent-daemon.mjs"]
+      .map((f) => join(dir, f))
+      .filter((f) => existsSync(f));
+    const saved = entries.map((f) => {
+      const st = statSync(f);
+      return { f, atime: st.atime, mtime: st.mtime, mtimeMs: st.mtimeMs };
+    });
+    for (const s of saved) utimesSync(s.f, s.atime, new Date(s.mtimeMs + 7000));
+    return () => {
+      for (const s of saved) utimesSync(s.f, s.atime, s.mtime);
+    };
+  }
+  it("reattaches the agent of the old build", async () => {
+    let worker = await startOwner("xb");
+    const chatId = "xb-chat";
+    await send(chatId, "stream through the restart");
+    await waitFor(() => (chunkTexts(workerRows(worker, chatId)).length >= 15 ? true : undefined), {
+      label: "part of the reply to be logged",
+      timeoutMs: 60_000,
+    });
+    const pidBefore = w.stubRequests(worker, "session/prompt")[0] as { pid?: number } | undefined;
+    await w.killWorker(worker, "SIGTERM", { waitForLease: false });
+    const restore = changeBuild();
+    try {
+      worker = await w.restartWorker(worker);
+      await streamTurns(worker, chatId);
+    } finally {
+      restore();
+    }
+    const ends = await loggedTurnEnds(worker, chatId, 1);
+    expectWholeStream(chunkTexts(workerRows(worker, chatId)));
+    expect(ends).toHaveLength(1);
+    expect(ends[0]?.error, "the turn was not closed as interrupted").toBeUndefined();
+    const prompts = w.stubRequests(worker, "session/prompt") as Array<{ pid?: number }>;
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]?.pid).toBe(pidBefore?.pid);
   }, 180_000);
 });
