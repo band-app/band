@@ -6,7 +6,7 @@ import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { encodeStreamFrame, StreamFrameReader } from "@band-app/extension-worker-sdk/protocol";
-import type { LanguageServerSpec } from "@band-app/host-local/lsp/lsp-manager";
+import { type LanguageServerSpec, stopStaleServers } from "@band-app/host-local/lsp/lsp-manager";
 import {
   type ExtensionServiceState,
   type ExtensionsFetchParams,
@@ -501,7 +501,12 @@ export class ExtensionHost {
         const manifest = await readManifest(dir, item.id);
         for (const def of manifest.contributes.languageServers) {
           const key = `${item.id}/${def.id}`;
-          const why = checkRequires(def.requires, process.env.PATH);
+          // Under Electron the worker runs a .mjs server with its own executable, so no node is needed.
+          const needed =
+            process.versions.electron !== undefined
+              ? def.requires.filter((r) => r !== "node")
+              : def.requires;
+          const why = checkRequires(needed, process.env.PATH);
           const unavailable = why?.replace(/^(.+) is not on the PATH$/, "needs $1") ?? undefined;
           next.set(key, {
             spec: {
@@ -530,6 +535,7 @@ export class ExtensionHost {
       }
     }
     this.lsServers = next;
+    stopStaleServers(this.languageServers());
   }
 
   private ineligible(def: WorkerServiceManifest): string | null {

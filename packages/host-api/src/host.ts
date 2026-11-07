@@ -946,7 +946,7 @@ export interface HostExtensionItem {
   sha256: string;
 }
 
-/** One worker service of an extension and where it stands on a worker. */
+/** One language server of an extension and where it stands on a worker. */
 export interface HostLanguageServerState {
   extensionId: string;
   serverId: string;
@@ -958,6 +958,7 @@ export interface HostLanguageServerState {
   reason?: string;
 }
 
+/** One worker service of an extension and where it stands on a worker. */
 export interface HostExtensionServiceState {
   extensionId: string;
   serviceId: string;

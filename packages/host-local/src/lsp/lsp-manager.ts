@@ -29,6 +29,35 @@ export interface LanguageServerSpec {
 /** Where the manager looks a server up. */
 export type LanguageServerLookup = () => readonly LanguageServerSpec[];
 
+/**
+ * Variables a language server inherits. Nothing else, so an extension's server never sees
+ * `BAND_*`, `GIT_CONFIG_*` or a forge token from the worker's environment.
+ */
+const INHERITED_ENV = [
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TMPDIR",
+  "TZ",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+] as const;
+
+function sameSpec(a: LanguageServerSpec, b: LanguageServerSpec): boolean {
+  return (
+    a.dir === b.dir &&
+    a.command === b.command &&
+    JSON.stringify(a.args) === JSON.stringify(b.args)
+  );
+}
+
 /** The command and arguments that start a server: its script under the worker's node, or a binary on the PATH. */
 export function launchCommand(spec: LanguageServerSpec): {
   command: string;
@@ -51,6 +80,8 @@ export function launchCommand(spec: LanguageServerSpec): {
 // ---------------------------------------------------------------------------
 interface LspServerSession {
   process: ChildProcess;
+  /** The registry entry the process was started from. */
+  spec: LanguageServerSpec;
   /** Output queues of the open connections. Each receives every stdout chunk. */
   subscribers: Set<OutputQueue>;
 }
@@ -121,10 +152,14 @@ async function getOrSpawnServer(
 ): Promise<LspServerSession> {
   const serverId = toServerId(worktreeId, lang);
 
-  const existing = servers.get(serverId);
-  if (existing) return existing;
-
   const spec = lookup().find((candidate) => candidate.key === lang);
+  const existing = servers.get(serverId);
+  if (existing) {
+    // A removed, updated or now restricted extension must not keep serving from its old process.
+    if (spec && !spec.unavailable && sameSpec(existing.spec, spec)) return existing;
+    killServer(serverId, existing);
+  }
+
   if (!spec) {
     throw new Error(`No language server configured for: ${lang}`);
   }
@@ -150,13 +185,18 @@ async function getOrSpawnServer(
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: {
-      ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v != null)),
+      ...Object.fromEntries(
+        INHERITED_ENV.flatMap((name) => {
+          const value = process.env[name];
+          return value === undefined ? [] : [[name, value]];
+        }),
+      ),
       PATH: combinedPath,
       ...(launch.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     } as unknown as NodeJS.ProcessEnv,
   });
 
-  const session: LspServerSession = { process: child, subscribers: new Set() };
+  const session: LspServerSession = { process: child, spec, subscribers: new Set() };
 
   function removeSession(): void {
     // A replacement may already hold the id after a kill and respawn.
@@ -263,6 +303,24 @@ export async function connectLspServer(
 // ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
+
+function killServer(serverId: string, session: LspServerSession): void {
+  session.process.kill();
+  servers.delete(serverId);
+  for (const subscriber of session.subscribers) subscriber.end();
+  session.subscribers.clear();
+  for (const [worktreeId, ids] of worktreeServers) {
+    if (ids.delete(serverId) && ids.size === 0) worktreeServers.delete(worktreeId);
+  }
+}
+
+/** Kills running servers whose registry entry was removed, changed or became unavailable. */
+export function stopStaleServers(current: readonly LanguageServerSpec[]): void {
+  for (const [serverId, session] of [...servers]) {
+    const spec = current.find((candidate) => candidate.key === session.spec.key);
+    if (!spec || spec.unavailable || !sameSpec(session.spec, spec)) killServer(serverId, session);
+  }
+}
 
 /**
  * Kill all language servers for a worktree.

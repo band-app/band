@@ -139,7 +139,15 @@ describe("language servers from extensions", () => {
           : undefined,
       { label: "no language servers on a restricted worker", timeoutMs: 20_000, intervalMs: 200 },
     );
-    const closed = await closeOf(WORKTREE, TS_LSP_KEY);
+    // The worker may still be applying the trust drop. A server it already ran is killed then,
+    // so the socket is refused once the drop has landed.
+    const closed = await waitFor(
+      async () => {
+        const result = await closeOf(WORKTREE, TS_LSP_KEY);
+        return result.code === 4001 ? result : undefined;
+      },
+      { label: "a restricted worker refusing the language server", timeoutMs: 40_000, intervalMs: 500 },
+    );
     expect(closed.code).toBe(4001);
   }, 60_000);
 });
