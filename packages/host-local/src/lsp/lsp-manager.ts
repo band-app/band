@@ -52,9 +52,7 @@ const INHERITED_ENV = [
 
 function sameSpec(a: LanguageServerSpec, b: LanguageServerSpec): boolean {
   return (
-    a.dir === b.dir &&
-    a.command === b.command &&
-    JSON.stringify(a.args) === JSON.stringify(b.args)
+    a.dir === b.dir && a.command === b.command && JSON.stringify(a.args) === JSON.stringify(b.args)
   );
 }
 

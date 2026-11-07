@@ -146,7 +146,11 @@ describe("language servers from extensions", () => {
         const result = await closeOf(WORKTREE, TS_LSP_KEY);
         return result.code === 4001 ? result : undefined;
       },
-      { label: "a restricted worker refusing the language server", timeoutMs: 40_000, intervalMs: 500 },
+      {
+        label: "a restricted worker refusing the language server",
+        timeoutMs: 40_000,
+        intervalMs: 500,
+      },
     );
     expect(closed.code).toBe(4001);
   }, 60_000);
