@@ -762,12 +762,30 @@ export class ChatRuntime {
       return { kind: "none" };
     };
     const acpHost = this.env.host.acp;
-    if (!state.agentId || !state.sessionId || !state.init || !acpHost.reattach) return none();
+    if (!state.agentId || !state.sessionId || !state.init || !acpHost.reattach) {
+      this.env.log.warn(
+        {
+          chatId: this.chatId,
+          agentId: state.agentId ?? null,
+          hasSession: Boolean(state.sessionId),
+          hasInit: Boolean(state.init),
+          canReattach: Boolean(acpHost.reattach),
+        },
+        "the stored client state cannot be rebuilt; the chat's agent is not reattached",
+      );
+      return none();
+    }
     const child = await acpHost.reattach(state.agentId, {
       stdout: state.stdoutOffset,
       stderr: state.stderrOffset,
     });
-    if (!child) return none();
+    if (!child) {
+      this.env.log.warn(
+        { chatId: this.chatId, agentId: state.agentId },
+        "the agent could not be reattached; the chat starts a new one",
+      );
+      return none();
+    }
 
     const info = this.info;
     const promptRequest = state.openClientRequests.find((r) => r.method === "session/prompt");

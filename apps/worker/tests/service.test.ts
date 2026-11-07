@@ -122,6 +122,26 @@ describe("install-service", () => {
     );
   });
 
+  it("points the worker's log at worker.log on both platforms", { skip: !supported }, () => {
+    const home = tmpDir("band-service-log-");
+    dirs.push(home);
+    const { bin } = stubBin(home);
+    const install = run(home, bin, [
+      "install-service",
+      "--hub",
+      "https://hub.example.com",
+      "--token",
+      TOKEN,
+    ]);
+    assert.equal(install.status, 0, install.stderr);
+    const file =
+      platform() === "linux"
+        ? join(home, ".band", "worker-service", "worker.env")
+        : join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+    const logPath = join(home, ".band", "worker-service", "worker.log");
+    assert.ok(readFileSync(file, "utf8").includes(logPath));
+  });
+
   it("installs, reports status and uninstalls", { skip: !supported }, () => {
     const home = tmpDir("band-service-");
     dirs.push(home);
