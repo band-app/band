@@ -115,6 +115,8 @@ export interface WireState {
   stdoutOffset: number;
   /** Bytes of stderr read. Diagnostics only: no event comes from stderr. */
   stderrOffset: number;
+  /** Bytes written to the agent's stdin, counting the request being written when this was saved. */
+  stdinOffset?: number;
   /** The JSON-RPC id the client's next request takes. */
   nextRequestId: number;
   /** The id of the open `session/prompt`, when a turn waits on the agent. */
@@ -122,9 +124,14 @@ export interface WireState {
   /** Client requests the agent has not answered, `session/prompt` included. */
   openClientRequests: OpenRequest[];
   /** Agent requests (permission, form) the client has not answered, with the agent's ids. */
-  openAgentRequests: Array<OpenRequest & { requestId?: string }>;
-  /** The turn in progress. The messages behind it are in `queued_messages`. */
-  turn: { seq: number; taskId: string; startedAt: number } | null;
+  openAgentRequests: Array<OpenRequest & { requestId?: string; optionIds?: string[] }>;
+  /**
+   * The turn in progress, with the message it runs, so a prompt that never reached the agent can go
+   * back in the queue. The messages behind it are in `queued_messages`.
+   */
+  turn: { seq: number; taskId: string; startedAt: number; message?: StoredQueuedMessage } | null;
+  /** The agent's `initialize` answer, which a rebuilt client needs for its capabilities. */
+  init?: unknown;
   /** The session's log revision the client writes. */
   revision: number;
   /** Background-work holds of the agent process. */
@@ -158,9 +165,11 @@ export class ChatStore {
       if (existsSync(path)) chmodSync(path, 0o600);
     }
     const db = new DatabaseSync(file);
+    // First, so the pragmas below wait for another connection instead of failing: the worker
+    // that is being replaced may still hold the file, or a reader may be recovering its WAL.
+    db.exec("PRAGMA busy_timeout = 10000");
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA synchronous = NORMAL");
-    db.exec("PRAGMA busy_timeout = 5000");
     db.exec(SCHEMA);
     const store = new ChatStore(db);
     const orm = drizzle({ client: db }) as unknown as ChatLogDb;
@@ -432,6 +441,18 @@ export class ChatStore {
       .prepare("SELECT payload FROM queued_messages WHERE chat_id = ? ORDER BY seq")
       .all(chatId) as { payload: string }[];
     return rows.map((r) => JSON.parse(r.payload) as StoredQueuedMessage);
+  }
+
+  /** Puts a message back at the head of the queue: a turn that never started on the agent. */
+  unshiftQueued(chatId: string, message: StoredQueuedMessage): void {
+    const row = this.db
+      .prepare("SELECT coalesce(min(seq), 1) AS seq FROM queued_messages WHERE chat_id = ?")
+      .get(chatId) as { seq: number };
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO queued_messages (id, chat_id, seq, payload) VALUES (?, ?, ?, ?)",
+      )
+      .run(message.id, chatId, row.seq - 1, JSON.stringify(message));
   }
 
   pushQueued(chatId: string, message: StoredQueuedMessage): void {

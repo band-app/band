@@ -4,7 +4,7 @@ import type { ChatEventFile } from "@band-app/shared/chat-events";
 import { insertAtSelection } from "@band-app/shared/dictation-text";
 import PasteInput, { type PastedFile } from "@mattermost/react-native-paste-input";
 import { ArrowUp, X } from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -21,7 +21,7 @@ import { useConfigChoice } from "../../lib/composer/use-config-choice";
 import { useDictation } from "../../lib/composer/use-dictation";
 import { useDraft } from "../../lib/composer/use-draft";
 import { chipLabel, withSelection } from "../../lib/extensions/selection";
-import { useEditorSelection } from "../../lib/extensions/use-editors";
+import { useUnconsumedEditorSelection } from "../../lib/extensions/use-consumed-selection";
 import { colors, useScheme } from "../../theme";
 import { Glass, MicGlyph, PlusGlyph } from "../glass";
 import { Icon } from "../icon";
@@ -94,15 +94,9 @@ export function Composer({
   const dictating = dictation.state.phase === "recording";
   const transcribing = dictation.state.phase === "transcribing";
 
-  // The editor selection of this worktree rides along as a chip; removing it drops it for one message.
-  const editorSelection = useEditorSelection(worktreeId);
-  const [chipDropped, setChipDropped] = useState(false);
-  const selectionStamp = editorSelection
-    ? `${editorSelection.updatedAt ?? ""}|${editorSelection.selection.address}`
-    : "";
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new selection brings the chip back
-  useEffect(() => setChipDropped(false), [selectionStamp]);
-  const chip = editorSelection && !chipDropped ? editorSelection : null;
+  // The editor selection of this worktree rides along as a chip, once: sending it or tapping x
+  // uses it up until the editor reports a new one.
+  const { selection: chip, consume: consumeSelection } = useUnconsumedEditorSelection(worktreeId);
 
   const canSend = text.trim().length > 0 || attachments.length > 0;
   const expanded = focused || sheetOpen || drawerOpen || attachments.length > 0 || chip !== null;
@@ -111,19 +105,20 @@ export function Composer({
     if (!canSend) return;
     const sent = { text, attachments };
     const wire = withSelection(text, chip);
-    setChipDropped(false);
     setText("");
     setAttachments([]);
     setHint(null);
     try {
       await onSend(wire, toWireFiles(sent.attachments));
+      // The selection rode along once; a failed send keeps it for the retry.
+      if (chip) consumeSelection(chip);
     } catch (err) {
       // Put the message back so nothing typed is lost.
       setText(textRef.current ? `${sent.text}\n${textRef.current}` : sent.text);
       setAttachments((current) => [...sent.attachments, ...current]);
       Alert.alert("Couldn't send", err instanceof Error ? err.message : "Try again.");
     }
-  }, [canSend, text, attachments, chip, onSend, setText]);
+  }, [canSend, text, attachments, chip, consumeSelection, onSend, setText]);
 
   const addFrom = useCallback(async (pick: () => Promise<Attachment[]>) => {
     try {
@@ -264,7 +259,7 @@ export function Composer({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Remove selection"
-                  onPress={() => setChipDropped(true)}
+                  onPress={() => consumeSelection(chip)}
                   hitSlop={8}
                   testID="composer__selection-remove"
                 >

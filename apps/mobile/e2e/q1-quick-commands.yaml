@@ -1,0 +1,64 @@
+# Q1: the worktree's more sheet lists the repo's quick commands and the global ones; tapping a Terminal
+# command opens a terminal tab running it; a command is added, edited and deleted from the app.
+appId: app.getband.mobile
+name: Q1 quick commands
+---
+- runFlow: subflows/pair-link.yaml
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: quick-command-seed?label=Seeded%20gamma&repo=gamma&command=echo%20QC_PHONE_%24((40%2B2))
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: quick-command-seed?label=Seeded%20other&repo=alpha&command=true
+- runFlow:
+    file: subflows/open-gamma.yaml
+    env:
+      WT: gamma-compose
+- tapOn:
+    id: worktree__more
+- tapOn:
+    id: views__quick-commands
+- extendedWaitUntil:
+    visible:
+      id: quick-commands__sheet
+    timeout: 10000
+- assertVisible: Seeded gamma
+- assertNotVisible: Seeded other
+- takeScreenshot: q1-list
+# Add one from the app.
+- tapOn:
+    id: quick-commands__add
+- tapOn:
+    id: quick-command-form__label
+- inputText: Phone made
+- tapOn:
+    id: quick-command-form__body
+- inputText: ls
+- takeScreenshot: q1-form
+- tapOn:
+    id: quick-command-form__save
+- extendedWaitUntil:
+    visible: Phone made
+    timeout: 10000
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: quick-command-expect?label=Phone%20made&n=1
+# Delete it again.
+- tapOn:
+    text: Delete Phone made
+- tapOn:
+    text: Delete
+- runScript:
+    file: scripts/hub-control.js
+    env:
+      ACTION: quick-command-expect?label=Phone%20made&n=0
+# Run the seeded one: a terminal tab opens.
+- tapOn: Run Seeded gamma
+- extendedWaitUntil:
+    visible:
+      id: terminal__keybar
+    timeout: 20000
+- takeScreenshot: q1-ran

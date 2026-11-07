@@ -109,9 +109,9 @@ class FakeWindow {
     return mutate("editors.register", this.tab(worktreeId, file));
   }
 
-  close(worktreeId: string, file: string): Promise<unknown> {
+  close(worktreeId: string, file: string, reason?: "closed"): Promise<unknown> {
     this.docs.delete(`${worktreeId}|${file}`);
-    return mutate("editors.unregister", this.tab(worktreeId, file));
+    return mutate("editors.unregister", { ...this.tab(worktreeId, file), reason });
   }
 
   select(worktreeId: string, file: string, selection: object | null): Promise<unknown> {
@@ -414,6 +414,25 @@ describe("agent access to editor tabs", () => {
     expect((await query())?.selection.address).toBe("b");
     // The test hub sets BAND_EDITOR_SELECTION_TTL_MS to SELECTION_TTL_MS.
     await expect.poll(query, { timeout: SELECTION_TTL_MS * 3, interval: 500 }).toBeNull();
+  }, 60_000);
+
+  it("drops the selection when the tab is closed on purpose, from another window's view too", async () => {
+    const query = async () =>
+      trpcData<{ selection: { address: string } } | null>(
+        await trpcQuery(server.url, "editors.selection", { worktreeId: WORKTREE_ID }, TEST_TOKEN),
+      );
+    await win.open(WORKTREE_ID, FILE, "text\n");
+    await win.select(WORKTREE_ID, FILE, { address: "c", kind: "text", label: "c", text: "c" });
+    // A close of another file leaves it.
+    await win.close(WORKTREE_ID, OTHER, "closed");
+    expect((await query())?.selection.address).toBe("c");
+    const before = win.events.filter((e) => e.kind === "editor-selection-changed").length;
+    await win.close(WORKTREE_ID, FILE, "closed");
+    expect(await query()).toBeNull();
+    await waitFor(
+      async () => win.events.filter((e) => e.kind === "editor-selection-changed").length > before,
+      { label: "selection cleared event" },
+    );
   }, 60_000);
 
   it("S5: an agent cannot call editors.* through the MCP endpoint", async () => {

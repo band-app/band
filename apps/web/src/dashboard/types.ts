@@ -492,3 +492,24 @@ export interface BrowserProfileInfo {
   source: string | null;
   createdAt: number;
 }
+
+/** A saved quick command (`quickCommands.list`). `repo` is null for a global command. */
+export type QuickCommand = {
+  id: string;
+  label: string;
+  repo: string | null;
+  lastRunAt: number | null;
+} & (
+  | { action: "terminal"; command: string; appendEnter: boolean }
+  | { action: "agent"; agentId: string; prompt: string }
+);
+
+export type QuickCommandInput =
+  | {
+      label: string;
+      repo: string | null;
+      action: "terminal";
+      command: string;
+      appendEnter: boolean;
+    }
+  | { label: string; repo: string | null; action: "agent"; agentId: string; prompt: string };

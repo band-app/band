@@ -301,6 +301,15 @@ export class ChatPanePage {
     return this.page.getByTestId(`center-chat-tab--${chatId}`).filter({ visible: true });
   }
 
+  /**
+   * Selects one chat's center tab with the press that selects it. A real click is blocked on a
+   * narrow window, where the title bar's back and forward buttons and the header's actions sit
+   * over the end of the tab strip, so the pointer-down goes straight to the tab.
+   */
+  async selectChatTab(chatId: string): Promise<void> {
+    await this.chatTab(chatId).dispatchEvent("pointerdown", { button: 0, isPrimary: true });
+  }
+
   /** Navigate to the worktree's chat view. The only place URLs are
    *  constructed in this page object. */
   async goto(worktreeId: string): Promise<void> {
@@ -661,6 +670,16 @@ export class ChatPanePage {
   /** The chip for what the person selected in an editor tab. */
   get selectionChip(): Locator {
     return this.page.getByTestId("chat__selection-chip").filter({ visible: true });
+  }
+
+  /** The read-only chip inside a sent user message whose text contains `text`. */
+  sentSelectionChip(text: string): Locator {
+    return this.userMessage(text).getByTestId("chat__sent-selection-chip");
+  }
+
+  /** The selected text popover of a sent message's chip. */
+  get sentSelectionText(): Locator {
+    return this.page.getByTestId("chat__sent-selection-text");
   }
 
   async removeSelectionChip(): Promise<void> {

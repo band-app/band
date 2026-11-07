@@ -343,7 +343,7 @@ describe("extension panels and tools", () => {
     expect(echo?.content?.[0]?.text).toContain(b.hostId);
   }, 90_000);
 
-  it("S2: the panel stream sends frames, drops input until control, then delivers it", async () => {
+  it("S2: the panel stream sends frames and delivers input without any control message", async () => {
     const params = encodeURIComponent(JSON.stringify({ frames: 3 }));
     const url = `${server.url.replace("http", "ws")}/api/extensions/echo-service/worktrees/${encodeURIComponent(
       a.worktreeId,
@@ -363,16 +363,16 @@ describe("extension panels and tools", () => {
     });
     expect(received.slice(0, 3)).toEqual(["frame-0", "bytes:1", "frame-2"]);
 
-    // View-only: the input is dropped.
-    ws.send("before");
-
+    // No control message was sent: the input reaches the service. A legacy control frame is ignored.
+    ws.send("first");
     ws.send(JSON.stringify({ type: "control", enabled: true }));
-    ws.send("after");
-    await waitFor(() => (received.includes("echo:after") ? true : undefined), {
-      label: "the service received the input after control",
-      timeoutMs: 20_000,
-    });
-    expect(received).not.toContain("echo:before");
+    ws.send("second");
+    await waitFor(
+      () =>
+        received.includes("echo:first") && received.includes("echo:second") ? true : undefined,
+      { label: "the service received the input", timeoutMs: 20_000 },
+    );
+    expect(received.some((m) => m.includes('"type":"control"'))).toBe(false);
     ws.close();
   }, 60_000);
 
@@ -427,16 +427,15 @@ describe("extension panels and tools", () => {
     );
     expect(frames[0]).toBe("profile:direct");
 
-    // View-only until control; binary input is dropped even with control.
+    // Text input goes through from the start; binary input is dropped.
     direct.send("before");
     direct.send(JSON.stringify({ type: "control", enabled: true }));
     direct.send(Buffer.from([7]));
     direct.send("after");
-    await waitFor(() => (frames.includes("echo:after") ? true : undefined), {
-      label: "input after control",
-      timeoutMs: 20_000,
-    });
-    expect(frames).not.toContain("echo:before");
+    await waitFor(
+      () => (frames.includes("echo:before") && frames.includes("echo:after") ? true : undefined),
+      { label: "input", timeoutMs: 20_000 },
+    );
     expect(frames).not.toContain("echo:07");
     direct.close();
 

@@ -44,10 +44,13 @@ export const editorsRouter = t.router({
       editorRegistryService.register({ ...input, dirty: input.dirty === true });
       return { ok: true as const };
     }),
-  unregister: publicProcedure.input(tabInput.omit({ editorId: true })).mutation(({ input }) => {
-    editorRegistryService.unregister(input);
-    return { ok: true as const };
-  }),
+  unregister: publicProcedure
+    .input(tabInput.omit({ editorId: true }).extend({ reason: z.literal("closed").optional() }))
+    .mutation(({ input }) => {
+      const { reason, ...tab } = input;
+      editorRegistryService.unregister(tab, reason);
+      return { ok: true as const };
+    }),
   result: publicProcedure
     .input(
       z.object({

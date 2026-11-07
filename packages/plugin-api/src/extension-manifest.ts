@@ -69,8 +69,8 @@ export const panelSchema = z
     /** The `capability` of one of this extension's worker services. */
     capability: idSchema,
     /**
-     * Band takes control for the person as soon as a stream connects (and after each reconnect), so
-     * input reaches the service without pressing Take control. Release still works.
+     * Accepted so existing manifests keep loading. It has no effect: panel streams always accept
+     * input.
      */
     defaultControl: z.boolean().default(false),
   })

@@ -312,46 +312,7 @@ export class AcpAgentProcess {
       }
     })();
 
-    const out = new WritableStream<Uint8Array>({
-      write: (chunk) => child.stdin.write(chunk),
-      close: () => child.stdin.end(),
-    });
-    // With a tap the agent's stdout is read line by line there, so each line has its byte offset.
-    const wire = tap
-      ? acp.ndJsonStream(out, new ReadableStream<Uint8Array>({ start: (c) => c.close() }))
-      : acp.ndJsonStream(out, iterableToReadable(child.stdout));
-    const innerWriter = tap ? wire.writable.getWriter() : null;
-    const wireWritable =
-      tap && innerWriter
-        ? new WritableStream<acp.AnyMessage>({
-            write: (message) => innerWriter.write(tap.outbound(message)),
-            close: () => innerWriter.close(),
-            abort: (reason) => innerWriter.abort(reason),
-          })
-        : wire.writable;
-    const wireReadable = tap
-      ? tap.inbound({
-          stdout: child.stdout,
-          ack: child.ack?.bind(child),
-          stderrOffset: child.stderrOffset?.bind(child),
-        })
-      : wire.readable;
-    const stream = {
-      writable: wireWritable,
-      readable: splitAsyncTasks(wireReadable, (n) => handlers.onAsyncTask?.(n)),
-    };
-    const connection = acp
-      .client({ name: "band" })
-      .onNotification(acp.methods.client.session.update, (ctx) => {
-        handlers.onUpdate(ctx.params);
-      })
-      .onRequest(acp.methods.client.session.requestPermission, async (ctx) => ({
-        outcome: await handlers.onPermission(ctx.params, ctx.signal),
-      }))
-      .onRequest(acp.methods.client.elicitation.create, (ctx) =>
-        handlers.onElicitation(ctx.params, ctx.signal),
-      )
-      .connect(stream);
+    const connection = AcpAgentProcess.connect(child, handlers, tap);
 
     void child.exit.then(({ code, signal }) => {
       // Before the handler, so a caller it wakes already sees `alive` false.
@@ -379,6 +340,93 @@ export class AcpAgentProcess {
       child.kill("SIGTERM");
       throw withStderr(label, err, stderr.text(), lifecycle.exit, scrub);
     }
+  }
+
+  /** Wires the SDK's client to the agent's stdio, through the tap when there is one. */
+  private static connect(
+    child: AgentStdio,
+    handlers: AcpAgentHandlers,
+    tap?: WireTap,
+  ): acp.ClientConnection {
+    const out = new WritableStream<Uint8Array>({
+      write: (chunk) => child.stdin.write(chunk),
+      close: () => child.stdin.end(),
+    });
+    // With a tap the agent's stdout is read line by line there, so each line has its byte offset.
+    const wire = tap
+      ? acp.ndJsonStream(out, new ReadableStream<Uint8Array>({ start: (c) => c.close() }))
+      : acp.ndJsonStream(out, iterableToReadable(child.stdout));
+    const innerWriter = tap ? wire.writable.getWriter() : null;
+    if (tap && innerWriter) tap.setSender((message) => innerWriter.write(message));
+    const wireWritable =
+      tap && innerWriter
+        ? new WritableStream<acp.AnyMessage>({
+            write: (message) => {
+              const sent = tap.outbound(message);
+              return sent ? innerWriter.write(sent) : Promise.resolve();
+            },
+            close: () => innerWriter.close(),
+            abort: (reason) => innerWriter.abort(reason),
+          })
+        : wire.writable;
+    const wireReadable = tap
+      ? tap.inbound({
+          stdout: child.stdout,
+          ack: child.ack?.bind(child),
+          stderrOffset: child.stderrOffset?.bind(child),
+        })
+      : wire.readable;
+    const stream = {
+      writable: wireWritable,
+      readable: splitAsyncTasks(wireReadable, (n) => handlers.onAsyncTask?.(n)),
+    };
+    const connection = acp
+      .client({ name: "band" })
+      .onNotification(acp.methods.client.session.update, (ctx) => {
+        handlers.onUpdate(ctx.params);
+      })
+      .onRequest(acp.methods.client.session.requestPermission, async (ctx) => ({
+        outcome: await handlers.onPermission(ctx.params, ctx.signal),
+      }))
+      .onRequest(acp.methods.client.elicitation.create, (ctx) =>
+        handlers.onElicitation(ctx.params, ctx.signal),
+      )
+      .connect(stream);
+    return connection;
+  }
+
+  /**
+   * Takes over an agent a former client of this chat left running: it is initialized already, so
+   * only the connection is made, with the `initialize` answer the former client stored. The tap
+   * decides what the new connection may send and what it sees (see `WireRestore`).
+   */
+  static reattach(
+    child: AgentStdio,
+    init: acp.InitializeResponse,
+    label: string,
+    handlers: AcpAgentHandlers,
+    tap: WireTap,
+  ): AcpAgentProcess {
+    const scrub = (text: string) => text;
+    const stderr = stderrTail(scrub);
+    // An agent that exited while the worker was down is dead from the start: its exit event is
+    // still on its way, and a prompt sent meanwhile would fail instead of starting a new agent.
+    const lifecycle: Lifecycle = { exited: child.held?.exited === true, exit: null };
+    void (async () => {
+      try {
+        for await (const chunk of child.stderr) stderr.push(chunk);
+      } catch {
+        // The stream ends with the process.
+      }
+    })();
+    const connection = AcpAgentProcess.connect(child, handlers, tap);
+    void child.exit.then(({ code, signal }) => {
+      lifecycle.exited = true;
+      lifecycle.exit = { code, signal: signal ?? null };
+      connection.close();
+      handlers.onExit(code, stderr.text());
+    });
+    return new AcpAgentProcess(lifecycle, child, connection, label, init, stderr, scrub);
   }
 
   /** The agent lives in the worker's agent daemon, so it survives the link and the worker restarting. */

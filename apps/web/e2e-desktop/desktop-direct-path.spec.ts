@@ -359,7 +359,7 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
     const chat = new ChatPanePage(desktop.window, "app://placeholder", "");
     await expect(async () => {
       await worktreePage.activateTabInNarrowWindow("chat");
-      await chat.chatTab(chatId).click();
+      await chat.selectChatTab(chatId);
       await expect(chat.promptInput).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
     await chat.typeMessage("hello on this Mac");

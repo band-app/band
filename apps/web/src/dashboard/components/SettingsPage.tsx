@@ -48,6 +48,7 @@ import { GroupsSettings } from "./settings/GroupsSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
 import { McpSettings } from "./settings/McpSettings";
+import { QuickCommandsSettings } from "./settings/QuickCommandsSettings";
 import { RepoSettingsPage } from "./settings/RepoSettingsPage";
 import { ReposOverview } from "./settings/ReposOverview";
 import { RunnersSettings } from "./settings/RunnersSettings";
@@ -79,7 +80,7 @@ const MODEL_DEFAULT_SENTINEL = "__band_default__";
 // invisible character in editors and diffs.
 const ID_DELIMITER = "\u001f";
 
-type SettingsSectionId =
+export type SettingsSectionId =
   | "appearance"
   | "general"
   | "hub"
@@ -95,6 +96,7 @@ type SettingsSectionId =
   | "agent-hooks"
   | "runners"
   | "groups"
+  | "quick-commands"
   | "agents"
   | "usage"
   | "notifications"
@@ -224,6 +226,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     id: "groups",
     title: "Groups",
     subtitle: "Sort worktrees into groups in the sidebar.",
+    group: "Worktree",
+  },
+  {
+    id: "quick-commands",
+    title: "Quick commands",
+    subtitle: "Saved terminal commands and agent prompts you run with one tap.",
     group: "Worktree",
   },
   {
@@ -962,6 +970,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
 
                   {/* ── Groups ─────────────────────────────────────── */}
                   {active === "groups" ? <GroupsSettings /> : null}
+                  {active === "quick-commands" ? <QuickCommandsSettings /> : null}
 
                   {/* ── Coding Agents ──────────────────────────────── */}
                   {active === "agents" ? (
