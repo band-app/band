@@ -116,6 +116,20 @@ export function readTheme(): { mode: "dark" | "light"; tokens: Record<string, st
   return { mode: root.classList.contains("dark") ? "dark" : "light", tokens };
 }
 
+/** Posts `{ type: "theme", mode, tokens }` to the page whenever Band's theme changes. Shared by editors and panels. */
+export function useThemeUpdates(post: (message: unknown) => void, enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled) return;
+    const send = () => post({ type: "theme", ...readTheme() });
+    const observer = new MutationObserver(send);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+    return () => observer.disconnect();
+  }, [enabled, post]);
+}
+
 const MIME_BY_EXT: Record<string, string> = {
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".csv": "text/csv",
@@ -476,17 +490,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
     if (visible && ready) void checkDisk();
   }, [visible, ready, checkDisk]);
 
-  // Follow Band's theme.
-  useEffect(() => {
-    if (!ready) return;
-    const send = () => post({ type: "theme", ...readTheme() });
-    const observer = new MutationObserver(send);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style", "data-theme"],
-    });
-    return () => observer.disconnect();
-  }, [ready, post]);
+  useThemeUpdates(post, ready);
 
   // "Close Without Saving" drops the edits.
   useEffect(() => {
