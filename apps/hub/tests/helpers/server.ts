@@ -162,7 +162,9 @@ export interface StartServerOptions {
   /**
    * With `BAND_TEST_HOST=remote-loopback`, a real `band-worker` joins the server
    * and the seeded worktrees move onto it (see `test-host.ts`). Pass `false` for
-   * a test that is about the hub's own machine. No effect in `local` mode.
+   * a test that is about the hub's own machine. `true` starts the worker in `local`
+   * mode too, for a test that needs a worker whatever the mode (language servers run
+   * only on workers).
    */
   remoteHost?: boolean;
 }
@@ -220,7 +222,8 @@ export const LISTENING_BANNER = /Web server listening on http:\/\/[^\s:]+:(\d+)/
  * process-group teardown already used by `apps/web/e2e/helpers/server.ts`.
  */
 export async function startServer(opts: StartServerOptions): Promise<ServerHandle> {
-  if (!isRemoteLoopback || opts.remoteHost === false) return startHubServer(opts);
+  const withWorker = opts.remoteHost === true || (isRemoteLoopback && opts.remoteHost !== false);
+  if (!withWorker) return startHubServer(opts);
 
   const handle = await startHubServer({
     ...opts,

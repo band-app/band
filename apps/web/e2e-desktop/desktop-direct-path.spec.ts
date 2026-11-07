@@ -18,6 +18,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { expect, test } from "@playwright/test";
+import { installTsLsp, waitForLanguageServer } from "../../hub/tests/helpers/lsp-extension";
 import { ACP_STUB_AGENT_PATH } from "../e2e/helpers/acp-stub";
 import {
   cleanupTmpHome,
@@ -190,6 +191,10 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   await thisComputer.add.click();
   await expect(thisComputer.state).toHaveAttribute("data-status", "online", { timeout: 90_000 });
   const hostId = workerId();
+  // The editor asks for a language server only when the worker reports one, and an extension
+  // brings it. The stand-in runs the typescript-language-server this repo installs.
+  await installTsLsp(remote.url, REMOTE_TOKEN);
+  await waitForLanguageServer(remote.url, REMOTE_TOKEN, hostId);
   await hubCall("repos.addByUrl", {
     remoteUrl: seedRemoteRepo(join(home, "remotes")),
     name: "proj",
@@ -267,7 +272,6 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   expect(socketsAt("/watch").length).toBeGreaterThan(0);
   expect(socketsAt("/watch").every((u) => /^ws:\/\/127\.0\.0\.1:\d+\//.test(u))).toBe(true);
   // A TypeScript file asks for a language server, and the socket goes to the worker too. The
-  // bundled worker ships no language server, so this checks where the editor connects, and the
   // answers of a real one are in apps/hub/tests/direct-path.test.ts.
   await files.expandFileTreeFolder("src", "src/app.ts");
   await files.openFile("src/app.ts");

@@ -22,6 +22,7 @@ format-trpc.test.ts
 hook-host-routing.test.ts
 hub-update-builtin.test.ts
 hub-update.test.ts
+lsp-extension.test.ts
 lsp-reconnect.test.ts
 needs-attention.test.ts
 plain-repos.test.ts

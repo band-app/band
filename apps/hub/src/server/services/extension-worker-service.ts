@@ -39,6 +39,7 @@ export interface ExtensionServiceView {
 
 interface Cached {
   services: HostExtensionServiceState[];
+  languageServers?: LanguageServerView[];
   problems: Array<{ extensionId: string; reason: string }>;
 }
 
@@ -89,7 +90,12 @@ export class ExtensionWorkerService {
     if (hostTrustService.trustOf(hostId) === "restricted") return [];
     const items: HostExtensionItem[] = [];
     for (const manifest of (await extensionService.list()).extensions) {
-      if (manifest.contributes.workerServices.length === 0) continue;
+      if (
+        manifest.contributes.workerServices.length === 0 &&
+        manifest.contributes.languageServers.length === 0
+      ) {
+        continue;
+      }
       const archive = await extensionService.archiveOf(manifest.id);
       if (!archive || archive.version !== manifest.version) continue;
       items.push({ id: manifest.id, version: archive.version, sha256: archive.sha256 });
@@ -180,6 +186,17 @@ export class ExtensionWorkerService {
   }
 
   /**
+   * The language servers a worker can run, as it last reported them. A restricted worker, the
+   * hub's own machine and an offline worker have none.
+   */
+  languageServersFor(hostId: string, online: boolean): LanguageServerView[] {
+    if (hostId === "local" || !online || hostTrustService.trustOf(hostId) === "restricted") {
+      return [];
+    }
+    return [...(this.states.get(hostId)?.languageServers ?? [])];
+  }
+
+  /**
    * What `workers.list` shows for a worker. A restricted worker lists each worker-service
    * extension as not eligible. For others it is what the worker last reported.
    */
@@ -224,6 +241,17 @@ export class ExtensionWorkerService {
     }
     return out;
   }
+}
+
+/** A language server as `workers.list` shows it. */
+export interface LanguageServerView {
+  extensionId: string;
+  serverId: string;
+  key: string;
+  languages: string[];
+  files: string[];
+  state: "ready" | "unavailable";
+  reason?: string;
 }
 
 function signatureOf(items: HostExtensionItem[]): string {

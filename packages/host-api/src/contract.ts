@@ -24,6 +24,11 @@ export interface HostFixture {
   host: Host;
   /** An empty directory on the host the suite may fill. */
   workDir: string;
+  /**
+   * The `lang` of a working language server on this host. Hosts that can't be given one leave
+   * it out, and the suite then checks only that an unknown language is refused.
+   */
+  languageServer?: string;
   /** Called once after the suite. Removes `workDir` and stops anything started. */
   dispose(): Promise<void>;
 }
@@ -401,9 +406,16 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       }
     });
 
+    it("refuses a language no server is configured for", async () => {
+      await assert.rejects(
+        host.lsp.connect({ worktreeId: "contract-lsp", lang: "no-such-language", root: repo }),
+      );
+    });
+
     it("connects to a language server and stops it with the worktree", async () => {
-      const spec = { worktreeId: "contract-lsp", lang: "typescript", root: repo };
-      await assert.rejects(host.lsp.connect({ ...spec, lang: "no-such-language" }));
+      // A host with no language server to connect to has nothing more to check here.
+      if (!fixture.languageServer) return;
+      const spec = { worktreeId: "contract-lsp", lang: fixture.languageServer, root: repo };
 
       const first = await host.lsp.connect(spec);
       const second = await host.lsp.connect(spec);

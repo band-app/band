@@ -954,6 +954,18 @@ export interface HostExtensionItem {
   sha256: string;
 }
 
+/** One language server of an extension and where it stands on a worker. */
+export interface HostLanguageServerState {
+  extensionId: string;
+  serverId: string;
+  /** `<extension id>/<server id>`, the `lang` of an `/lsp` connection. */
+  key: string;
+  languages: string[];
+  files: string[];
+  state: "ready" | "unavailable";
+  reason?: string;
+}
+
 /** One worker service of an extension and where it stands on a worker. */
 export interface HostExtensionServiceState {
   extensionId: string;
@@ -966,6 +978,8 @@ export interface HostExtensionServiceState {
 
 export interface HostExtensionStates {
   services: HostExtensionServiceState[];
+  /** The language servers the extensions contribute, as this worker can run them. */
+  languageServers?: HostLanguageServerState[];
   /** Extensions the worker could not set up at all, with the reason. */
   problems: Array<{ extensionId: string; reason: string }>;
 }

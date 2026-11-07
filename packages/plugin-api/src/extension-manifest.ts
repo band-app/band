@@ -77,6 +77,37 @@ export const panelSchema = z
   .strict();
 
 /**
+ * A language server the worker runs for the editor. The code viewer opens a file whose name
+ * matches `files` (or whose language is in `languages`) against this server. The worker starts one
+ * process per worktree on the first connection and shares it between editors.
+ */
+export const languageServerSchema = z
+  .object({
+    id: idSchema,
+    /** LSP languageIds the server handles, such as `typescript` and `typescriptreact`. */
+    languages: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,40}$/)).min(1),
+    /** File name globs, matched like a file editor's `selector`. */
+    files: z.array(selectorSchema).min(1),
+    /**
+     * A file in the extension folder that ends in `.js`, `.mjs` or `.cjs` (run with the worker's
+     * node), or the name of a binary on the worker's PATH.
+     */
+    command: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine(
+        (p) => !p.startsWith("/") && !p.split("/").includes(".."),
+        "Must stay inside the folder",
+      ),
+    args: z.array(z.string().max(500)).default([]),
+    /** Files at the worktree root that mark a project. With none present the server is not offered. Empty means always. */
+    rootMarkers: z.array(z.string().min(1).max(100)).default([]),
+    requires: z.array(requirementSchema).default([]),
+  })
+  .strict();
+
+/**
  * An agent tool of the built-in `band` MCP server, named `<extension id>_<name>`. A worker service
  * answers it: Band calls `method` on the service `service` of the worktree's worker.
  */
@@ -111,6 +142,7 @@ export const extensionManifestSchema = z
         workerServices: z.array(workerServiceSchema).default([]),
         panels: z.array(panelSchema).default([]),
         tools: z.array(toolSchema).default([]),
+        languageServers: z.array(languageServerSchema).default([]),
       })
       .strict()
       .default({}),
@@ -147,6 +179,7 @@ export const extensionManifestSchema = z
 
 export type FileEditorManifest = z.infer<typeof fileEditorSchema>;
 export type PanelManifest = z.infer<typeof panelSchema>;
+export type LanguageServerManifest = z.infer<typeof languageServerSchema>;
 export type ToolManifest = z.infer<typeof toolSchema>;
 export type WorkerServiceManifest = z.infer<typeof workerServiceSchema>;
 export type ExtensionManifest = z.infer<typeof extensionManifestSchema>;

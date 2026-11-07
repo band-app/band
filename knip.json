@@ -58,7 +58,6 @@
     "packages/host-local": {
       "project": ["src/**/*.ts", "tests/**/*.ts"],
       "ignoreDependencies": [
-        "typescript-language-server",
         "@agentclientprotocol/claude-agent-acp",
         "@agentclientprotocol/codex-acp"
       ]
@@ -84,7 +83,6 @@
         "fzf",
         "node-pty",
         "pino",
-        "typescript-language-server",
         "zod"
       ]
     },
