@@ -3146,10 +3146,11 @@ const RightHeaderActions = memo(function RightHeaderActions(props: LayoutHeaderA
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="worktree-center__toolbar">
       {renderLeafActions?.()}
       {activeWorktreeId && <DesktopHeaderButton worktreeId={activeWorktreeId} />}
+      {/* Last action button; the collapsed sidepanel's expand toggle keeps the window's corner. */}
+      <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
       {edges.top && edges.right && chrome?.onToggleRightPanel && !chrome.rightPanelVisible && (
         <RightPanelToggle onToggle={chrome.onToggleRightPanel} visible={false} />
       )}
-      <QuickCommandsTabButton apiId={props.containerApi.id} groupId={props.group.id} />
     </div>
   );
 });
