@@ -132,7 +132,7 @@ export async function launchDesktop(opts: {
   // Never inherit a dev-server URL: the app would load that instead of `app://`.
   // The app's workers and extension services name simulator devices with this prefix. The config
   // sets it for the run; a launch from elsewhere gets one too, never the real "Band".
-  env.BAND_SIMULATOR_NAME_PREFIX ||= ensureSimulatorTestPrefix({});
+  env.BAND_SIMULATOR_NAME_PREFIX ||= ensureSimulatorTestPrefix(process.env);
   delete env.BAND_DEV_WEB_URL;
   delete env.BAND_CDP_PORT;
   if (opts.answeredWorkerPrompt?.length) {

@@ -31,7 +31,6 @@ import { spawnSync } from "node:child_process";
 // The time is in the name so a later run can tell a crashed run's leftovers from a live run's.
 const PREFIX_VAR = "BAND_SIMULATOR_NAME_PREFIX";
 const TEST_PREFIX = /^band-test-([0-9a-z]+)-\d+$/;
-const EN_DASH = "\u2013";
 
 /** Sets the simulator name prefix of this run unless the caller already chose one. */
 export function ensureSimulatorTestPrefix(env = process.env, now = Date.now()) {
@@ -103,8 +102,6 @@ export function sweepSimulatorTestDevices({ prefix, olderThanMs = 3 * 3600_000 }
   }
   return deleted;
 }
-
-export const SIMULATOR_EN_DASH = EN_DASH;
 
 export function scrubWorkerEnv(env = process.env) {
   ensureSimulatorTestPrefix(env);
