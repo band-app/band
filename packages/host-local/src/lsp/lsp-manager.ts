@@ -1,26 +1,50 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Duplex } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { shellPath } from "../process/path";
 
-/** Directory of this module — used to locate local node_modules/.bin */
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 const log = createLogger("lsp");
 
 // ---------------------------------------------------------------------------
-// Language server configuration — add new languages here
+// Language server registry. Servers come from installed extensions: the worker
+// builds the list from their manifests (`contributes.languageServers`) and the
+// host reads it on every connection.
 // ---------------------------------------------------------------------------
-interface LangServerConfig {
+
+/** One language server an extension contributes, resolved against its unpacked folder. */
+export interface LanguageServerSpec {
+  /** `<extension id>/<server id>`. The `lang` of a connection. */
+  key: string;
+  /** The extension's unpacked folder. */
+  dir: string;
   command: string;
   args: string[];
+  rootMarkers: string[];
+  /** Why the server cannot run on this worker, such as `needs node`. Absent when it can. */
+  unavailable?: string;
 }
 
-const LANG_SERVER_CONFIG: Record<string, LangServerConfig> = {
-  typescript: { command: "typescript-language-server", args: ["--stdio"] },
-};
+/** Where the manager looks a server up. */
+export type LanguageServerLookup = () => readonly LanguageServerSpec[];
+
+/** The command and arguments that start a server: its script under the worker's node, or a binary on the PATH. */
+export function launchCommand(spec: LanguageServerSpec): {
+  command: string;
+  args: string[];
+  electron: boolean;
+} {
+  if (/\.(?:m?js|cjs)$/.test(spec.command)) {
+    return {
+      command: process.execPath,
+      args: [join(spec.dir, spec.command), ...spec.args],
+      // Band itself runs as plain Node only with this variable.
+      electron: process.versions.electron !== undefined,
+    };
+  }
+  return { command: spec.command, args: spec.args, electron: false };
+}
 
 // ---------------------------------------------------------------------------
 // Session tracking (mirrors terminal-manager.ts dual-map pattern)
@@ -90,6 +114,7 @@ function toServerId(worktreeId: string, lang: string): string {
  * initialize handshake is left to the client library (@codemirror/lsp-client).
  */
 async function getOrSpawnServer(
+  lookup: LanguageServerLookup,
   worktreeId: string,
   lang: string,
   root: string,
@@ -99,43 +124,35 @@ async function getOrSpawnServer(
   const existing = servers.get(serverId);
   if (existing) return existing;
 
-  const config = Object.hasOwn(LANG_SERVER_CONFIG, lang) ? LANG_SERVER_CONFIG[lang] : undefined;
-  if (!config) {
+  const spec = lookup().find((candidate) => candidate.key === lang);
+  if (!spec) {
     throw new Error(`No language server configured for: ${lang}`);
+  }
+  if (spec.unavailable) {
+    throw new Error(`The ${lang} language server is not available here: ${spec.unavailable}`);
+  }
+  if (spec.rootMarkers.length > 0 && !spec.rootMarkers.some((m) => existsSync(join(root, m)))) {
+    throw new Error(
+      `No project for ${lang}: the worktree has none of ${spec.rootMarkers.join(", ")}`,
+    );
   }
 
   const resolvedPath = await shellPath();
   const cwd = root;
-
-  // Build PATH: app node_modules/.bin (where typescript-language-server
-  // lives), worktree node_modules/.bin (where tsserver lives), then
-  // the user's shell PATH for anything else (node, etc.).
-  //
-  // In development, __dirname is packages/host-local/src/lsp/ so we walk up
-  // two levels to reach packages/host-local/, then into node_modules/.bin
-  // (the package depends on typescript-language-server). In the bundled DMG,
-  // __dirname is dist/ so we need ./node_modules/.bin instead. Use both so
-  // it works in either environment, and in the worker package.
-  const appBin = resolve(__dirname, "../../node_modules/.bin");
-  const bundledBin = resolve(__dirname, "node_modules/.bin");
-  // The worker bundle is `<package>/dist/band-worker.mjs`. Its dependencies
-  // install in `<package>/node_modules`, or beside the package when hoisted.
-  const workerBin = resolve(__dirname, "../node_modules/.bin");
-  const hoistedBin = resolve(__dirname, "../../../.bin");
-  const worktreeBin = join(cwd, "node_modules/.bin");
+  // The worktree's own node_modules/.bin first (a project's tools), then the shell PATH.
   const pathSep = process.platform === "win32" ? ";" : ":";
-  const combinedPath = [bundledBin, appBin, workerBin, hoistedBin, worktreeBin, resolvedPath].join(
-    pathSep,
-  );
+  const combinedPath = [join(cwd, "node_modules/.bin"), resolvedPath].join(pathSep);
+  const launch = launchCommand(spec);
 
   log.debug("Spawning %s language server in %s for worktree %s", lang, cwd, worktreeId);
 
-  const child = spawn(config.command, config.args, {
+  const child = spawn(launch.command, launch.args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v != null)),
       PATH: combinedPath,
+      ...(launch.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     } as unknown as NodeJS.ProcessEnv,
   });
 
@@ -210,12 +227,15 @@ async function getOrSpawnServer(
  * Opens a connection to the worktree's language server for `lang`, starting
  * the server first if it isn't running.
  */
-export async function connectLspServer(spec: {
-  worktreeId: string;
-  lang: string;
-  root: string;
-}): Promise<Duplex> {
-  const session = await getOrSpawnServer(spec.worktreeId, spec.lang, spec.root);
+export async function connectLspServer(
+  lookup: LanguageServerLookup,
+  spec: {
+    worktreeId: string;
+    lang: string;
+    root: string;
+  },
+): Promise<Duplex> {
+  const session = await getOrSpawnServer(lookup, spec.worktreeId, spec.lang, spec.root);
   const { process: child, subscribers } = session;
   if (!child.stdin || !child.stdout) {
     throw new Error("Language server stdio not available");

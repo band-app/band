@@ -76,7 +76,12 @@ import { installSkills } from "./agents/skills-install";
 import { ChromiumManager } from "./browser/chromium";
 import { desktopUnavailableReason, openDesktop } from "./desktop/desktop";
 import { execGh, execGit, listWorktrees } from "./git/git-client";
-import { connectLspServer, killAllServers, killWorktreeServers } from "./lsp/lsp-manager";
+import {
+  connectLspServer,
+  killAllServers,
+  killWorktreeServers,
+  type LanguageServerSpec,
+} from "./lsp/lsp-manager";
 import { probeCapabilities } from "./process/capabilities";
 import { duBytes } from "./process/du";
 import { prependBinDirs } from "./process/path";
@@ -103,6 +108,11 @@ const EXEC_MAX_BUFFER = 50 * 1024 * 1024;
 export const LOCAL_HOST_ID = "local";
 
 export interface LocalHostOptions {
+  /**
+   * The language servers installed extensions contribute. Read on every connection. A host
+   * without them (the hub's own machine) has no language servers.
+   */
+  languageServers?: () => readonly LanguageServerSpec[];
   /**
    * The terminal backend `host.pty` returns. A function, because the hub picks
    * its backend at boot (and can replace it), after the host exists.
@@ -157,7 +167,7 @@ export class LocalHost implements Host {
     listFiles: (root) => listFiles(root),
   };
   readonly lsp: HostLsp = {
-    connect: (spec) => connectLspServer(spec),
+    connect: (spec) => connectLspServer(() => this.options.languageServers?.() ?? [], spec),
     killWorktree: async (worktreeId) => killWorktreeServers(worktreeId),
     killAll: async () => killAllServers(),
   };

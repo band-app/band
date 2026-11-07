@@ -102,13 +102,10 @@ export {
   buildLspWsUrl,
   createDiffLspNavigation,
   createLspExtension,
-  getLspLanguageId,
   hasPendingNavigation,
-  LSP_SUPPORTED_LANGUAGES,
   releaseLspClient,
   resolveNavigation,
   toFileUri,
-  toLspServerLang,
 } from "./lib/codemirror-lsp";
 export {
   clearSearch,

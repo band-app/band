@@ -21,9 +21,22 @@ runHostContract("LocalHost", {
     // realpath: macOS's tmpdir is a symlink, and git reports resolved paths.
     const workDir = await realpath(await mkdtemp(join(tmpdir(), "band-host-contract-")));
     const pty = new InProcessTerminalBackend();
-    const host = new LocalHost({ terminalBackend: () => pty });
+    const host = new LocalHost({
+      terminalBackend: () => pty,
+      // What an installed extension contributes, with a server that only answers `initialize`.
+      languageServers: () => [
+        {
+          key: "stub/lsp",
+          dir: fileURLToPath(new URL("./fixtures", import.meta.url)),
+          command: "stub-lsp.mjs",
+          args: [],
+          rootMarkers: [],
+        },
+      ],
+    });
     return {
       host,
+      languageServer: "stub/lsp",
       workDir,
       async dispose() {
         await pty.close();
