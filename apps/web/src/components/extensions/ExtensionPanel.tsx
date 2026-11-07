@@ -1,7 +1,12 @@
 import type { PanelManifest } from "@band-app/plugin-api";
-import { CircleAlert, Loader2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
+import { CircleAlert, Loader2, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { directPluginStreamTarget, directSocketClosed } from "../../lib/direct-worker";
+import {
+  directPluginStreamTarget,
+  directSocketClosed,
+  directUnavailableReason,
+} from "../../lib/direct-worker";
 import { HubWebSocket, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
 import { readTheme, useThemeUpdates } from "./ExtensionEditor";
@@ -18,6 +23,9 @@ type PanelLayout = "compact" | "regular";
 
 /** Most streams one panel may hold open at once. */
 const MAX_STREAMS = 4;
+
+/** How often a stream that runs through the hub asks whether the direct path works again. */
+const DIRECT_RETRY_MS = 15_000;
 
 function currentLayout(): PanelLayout {
   return window.matchMedia("(min-width: 1024px)").matches ? "regular" : "compact";
@@ -44,10 +52,21 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
   visibleRef.current = visible;
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Why each open stream goes through the hub. Empty when every stream is direct. */
+  const hubReasonsRef = useRef(new Map<string, string>());
+  const [hubReason, setHubReason] = useState<string | null>(null);
+
+  const setVia = useCallback((id: string, reason: string | null) => {
+    if (reason === null) hubReasonsRef.current.delete(id);
+    else hubReasonsRef.current.set(id, reason);
+    setHubReason([...hubReasonsRef.current.values()][0] ?? null);
+  }, []);
 
   const closeStreams = useCallback(() => {
     for (const ws of streamsRef.current.values()) ws.close(1000, "closed");
     streamsRef.current.clear();
+    hubReasonsRef.current.clear();
+    setHubReason(null);
   }, []);
 
   const post = useCallback((message: unknown, transfer: Transferable[] = []) => {
@@ -75,18 +94,21 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
       };
       streamsRef.current.set(id, placeholder as unknown as WebSocket);
 
-      const attach = (ws: WebSocket, direct: boolean) => {
+      const wire = (ws: WebSocket, direct: boolean, reason: string | null, announce: boolean) => {
         ws.binaryType = "arraybuffer";
         streamsRef.current.set(id, ws);
-        let opened = false;
-        ws.addEventListener("open", () => {
+        setVia(id, reason);
+        let opened = !announce;
+        const onOpen = () => {
           opened = true;
+          if (!announce) return;
           if (!controlSentRef.current) {
             controlSentRef.current = true;
             post({ type: "control", enabled: true });
           }
           post({ type: "stream.opened", id });
-        });
+        };
+        ws.addEventListener("open", onOpen);
         ws.addEventListener("message", (event) => {
           if (typeof event.data === "string")
             post({ type: "stream.message", id, text: event.data });
@@ -95,28 +117,64 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
         ws.addEventListener("close", (event) => {
           if (streamsRef.current.get(id) !== ws) return;
           streamsRef.current.delete(id);
+          setVia(id, null);
           // The worker refused, is not there or cannot open the stream: the hub carries it.
           if (direct && directSocketClosed(worktreeId, event, opened) === "fallback") {
-            openHub();
+            openHub("The worker's direct stream failed. Direct is tried again shortly.");
             return;
           }
           post({ type: "stream.closed", id, code: event.code, reason: event.reason });
         });
       };
 
-      const openHub = () => {
+      // A stream on the hub looks for the direct path again, so one failure at open never keeps it
+      // there for good. A working direct socket replaces the hub one without telling the page.
+      const retryDirect = (hubWs: WebSocket) => {
+        const timer = setInterval(() => {
+          if (streamsRef.current.get(id) !== hubWs) {
+            clearInterval(timer);
+            return;
+          }
+          void directPluginStreamTarget(panel.capability, worktreeId, {
+            name,
+            params,
+            binaryInput: panel.binaryInput,
+          }).then(
+            (target) => {
+              if (!target || streamsRef.current.get(id) !== hubWs) return;
+              clearInterval(timer);
+              const candidate = new WebSocket(target.url, target.protocols);
+              candidate.binaryType = "arraybuffer";
+              candidate.addEventListener("open", () => {
+                if (streamsRef.current.get(id) !== hubWs) {
+                  candidate.close(1000, "closed");
+                  return;
+                }
+                hubWs.close(1000, "moved");
+                wire(candidate, true, null, false);
+              });
+              candidate.addEventListener("close", () => {
+                // It never opened: stay on the hub and look again.
+                if (streamsRef.current.get(id) === hubWs) retryDirect(hubWs);
+              });
+            },
+            () => undefined,
+          );
+        }, DIRECT_RETRY_MS);
+      };
+
+      const openHub = (reason: string) => {
         const query = new URLSearchParams({ panel: panel.id, name });
         if (params !== undefined) query.set("params", JSON.stringify(params));
-        attach(
-          new HubWebSocket(
-            hubWsUrl(
-              `/api/extensions/${encodeURIComponent(extensionId)}/worktrees/${encodeURIComponent(
-                worktreeId,
-              )}/stream?${query}`,
-            ),
+        const hubWs = new HubWebSocket(
+          hubWsUrl(
+            `/api/extensions/${encodeURIComponent(extensionId)}/worktrees/${encodeURIComponent(
+              worktreeId,
+            )}/stream?${query}`,
           ),
-          false,
         );
+        wire(hubWs, false, reason, true);
+        retryDirect(hubWs);
       };
 
       // In the desktop app, for a worktree on this Mac's worker, the stream goes to the worker's
@@ -128,15 +186,20 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
       }).then(
         (target) => {
           if (cancelled) return;
-          if (!target) return openHub();
-          attach(new WebSocket(target.url, target.protocols), true);
+          if (!target) {
+            void directUnavailableReason(worktreeId).then((reason) => {
+              if (!cancelled) openHub(reason);
+            });
+            return;
+          }
+          wire(new WebSocket(target.url, target.protocols), true, null, true);
         },
         () => {
-          if (!cancelled) openHub();
+          if (!cancelled) openHub("Asking the worker for direct access failed.");
         },
       );
     },
-    [extensionId, panel.binaryInput, panel.capability, panel.id, post, worktreeId],
+    [extensionId, panel.binaryInput, panel.capability, panel.id, post, setVia, worktreeId],
   );
 
   const onMessage = useCallback(
@@ -168,6 +231,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           const ws = streamsRef.current.get(id);
           // Forget the id first, so the close event cannot start a hub fallback for a closed stream.
           streamsRef.current.delete(id);
+          setVia(id, null);
           if (ws) {
             ws.close(1000, "closed");
             post({ type: "stream.closed", id, code: 1000, reason: "closed" });
@@ -199,7 +263,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           break;
       }
     },
-    [extensionId, openStream, panel.binaryInput, panel.id, post, worktreeId],
+    [extensionId, openStream, panel.binaryInput, panel.id, post, setVia, worktreeId],
   );
 
   const handshake = useCallback(() => {
@@ -273,6 +337,27 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           <div className="pointer-events-none absolute right-2 top-2 text-muted-foreground">
             <Loader2 className="size-4 animate-spin" aria-label="Loading panel" />
           </div>
+        )}
+        {hubReason && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label="Streaming via hub"
+                data-testid="extension-panel__via-hub"
+                className="absolute bottom-2 right-2 flex items-center gap-1 rounded bg-warning-bg px-1.5 py-0.5 text-xs text-warning"
+              >
+                <Waypoints className="size-3.5" aria-hidden="true" />
+                via hub
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-64 text-xs text-warning"
+              data-testid="extension-panel__via-hub-reason"
+            >
+              {hubReason}
+            </PopoverContent>
+          </Popover>
         )}
         {error && (
           <div className="absolute right-2 top-2 text-destructive">

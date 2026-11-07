@@ -15,6 +15,8 @@ export class ExtensionPanelPage {
   readonly tab: Locator;
   readonly panel: Locator;
   readonly controlButton: Locator;
+  readonly viaHubMarker: Locator;
+  readonly viaHubReason: Locator;
 
   constructor(
     private readonly page: Page,
@@ -29,6 +31,8 @@ export class ExtensionPanelPage {
     this.tab = page.getByTestId(`center-plugin-tab--ext:${extensionId}-${panelId}`);
     this.panel = page.getByTestId("extension-panel");
     this.controlButton = page.getByTestId("extension-panel__control");
+    this.viaHubMarker = page.getByTestId("extension-panel__via-hub");
+    this.viaHubReason = page.getByTestId("extension-panel__via-hub-reason");
   }
 
   private get frame(): FrameLocator {
