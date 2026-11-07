@@ -53,6 +53,14 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
                 capability: options.capability ?? "echo",
                 defaultControl: true,
               },
+              {
+                id: "bin",
+                label: "Echo binary",
+                icon: "monitor",
+                entry: "panel.html",
+                capability: options.capability ?? "echo",
+                binaryInput: true,
+              },
             ],
             tools: [
               {
@@ -89,6 +97,8 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
           entry: "service.mjs",
           requires: options.requires ?? [],
           capability: options.capability ?? "echo",
+          // Only ECHO_DISPLAY is allowed; the fixture also offers names the worker must ignore.
+          worktreeEnv: ["ECHO_DISPLAY", "ECHO_UNSET"],
         },
       ],
     },

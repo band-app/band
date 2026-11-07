@@ -134,7 +134,11 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
 
       // In the desktop app, for a worktree on this Mac's worker, the stream goes to the worker's
       // loopback listener. The service sees the `direct` profile there and `hub` here.
-      directPluginStreamTarget(panel.capability, worktreeId, { name, params }).then(
+      directPluginStreamTarget(panel.capability, worktreeId, {
+        name,
+        params,
+        binaryInput: panel.binaryInput,
+      }).then(
         (target) => {
           if (cancelled) return;
           if (!target) return openHub();
@@ -145,7 +149,15 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
         },
       );
     },
-    [extensionId, panel.capability, panel.defaultControl, panel.id, post, worktreeId],
+    [
+      extensionId,
+      panel.binaryInput,
+      panel.capability,
+      panel.defaultControl,
+      panel.id,
+      post,
+      worktreeId,
+    ],
   );
 
   const onMessage = useCallback(
@@ -164,8 +176,13 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
         case "stream.send": {
           const ws = streamsRef.current.get(id);
           // The hub drops input until the person takes control; the check here only saves traffic.
-          if (ws?.readyState === WebSocket.OPEN && typeof msg.message === "string") {
-            ws.send(msg.message);
+          if (ws?.readyState === WebSocket.OPEN) {
+            if (typeof msg.message === "string") ws.send(msg.message);
+            else if (panel.binaryInput && msg.message instanceof ArrayBuffer) ws.send(msg.message);
+            else if (panel.binaryInput && ArrayBuffer.isView(msg.message)) {
+              const view = msg.message as ArrayBufferView;
+              ws.send(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+            }
           }
           break;
         }
@@ -204,7 +221,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           break;
       }
     },
-    [extensionId, openStream, panel.id, post, worktreeId],
+    [extensionId, openStream, panel.binaryInput, panel.id, post, worktreeId],
   );
 
   const handshake = useCallback(() => {

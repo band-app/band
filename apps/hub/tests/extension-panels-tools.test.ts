@@ -376,6 +376,110 @@ describe("extension panels and tools", () => {
     ws.close();
   }, 60_000);
 
+  async function openPanelStream(panel: string, worktreeId: string) {
+    const params = encodeURIComponent(JSON.stringify({ frames: 1 }));
+    const url = `${server.url.replace("http", "ws")}/api/extensions/echo-service/worktrees/${encodeURIComponent(
+      worktreeId,
+    )}/stream?panel=${panel}&name=screen&params=${params}`;
+    const ws = new WebSocket(url, { headers: { Cookie: `band_token=${TEST_TOKEN}` } });
+    const received: string[] = [];
+    ws.on("message", (data, isBinary) => {
+      received.push(isBinary ? `bytes:${[...(data as Buffer)].join(",")}` : data.toString());
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    // The stream is open once the service's first frame arrives; input before that is dropped.
+    await waitFor(() => (received.includes("frame-0") ? true : undefined), {
+      label: "the first frame",
+      timeoutMs: 20_000,
+    });
+    return { ws, received };
+  }
+
+  it("binary input reaches a binaryInput panel's service only while in control", async () => {
+    const { ws, received } = await openPanelStream("bin", a.worktreeId);
+    ws.send(Buffer.from([1, 2, 3]));
+    ws.send(JSON.stringify({ type: "control", enabled: true }));
+    ws.send(Buffer.from([9, 8]));
+    await waitFor(() => (received.includes("echo:0908") ? true : undefined), {
+      label: "binary input in control mode",
+      timeoutMs: 20_000,
+    });
+    // The frame sent view-only was dropped.
+    expect(received).not.toContain("echo:010203");
+    ws.send(JSON.stringify({ type: "control", enabled: false }));
+    ws.send(Buffer.from([7]));
+    ws.send(JSON.stringify({ type: "control", enabled: true }));
+    ws.send("marker");
+    await waitFor(() => (received.includes("echo:marker") ? true : undefined), {
+      label: "a marker after release",
+      timeoutMs: 20_000,
+    });
+    expect(received).not.toContain("echo:07");
+    ws.close();
+  }, 60_000);
+
+  it("binary input is dropped for a panel without binaryInput, even in control", async () => {
+    const { ws, received } = await openPanelStream("screen", a.worktreeId);
+    ws.send(JSON.stringify({ type: "control", enabled: true }));
+    ws.send(Buffer.from([5, 5]));
+    ws.send("marker");
+    await waitFor(() => (received.includes("echo:marker") ? true : undefined), {
+      label: "a text marker",
+      timeoutMs: 20_000,
+    });
+    expect(received).not.toContain("echo:0505");
+    ws.close();
+  }, 60_000);
+
+  it("two viewers of one panel both see the service and both can send input", async () => {
+    const one = await openPanelStream("bin", a.worktreeId);
+    const two = await openPanelStream("bin", a.worktreeId);
+    for (const v of [one, two]) v.ws.send(JSON.stringify({ type: "control", enabled: true }));
+    one.ws.send("from-one");
+    two.ws.send("from-two");
+    await waitFor(() => (one.received.includes("echo:from-one") ? true : undefined), {
+      label: "viewer one answered",
+      timeoutMs: 20_000,
+    });
+    await waitFor(() => (two.received.includes("echo:from-two") ? true : undefined), {
+      label: "viewer two answered",
+      timeoutMs: 20_000,
+    });
+    // Each viewer has its own stream: viewer two never sees viewer one's echo.
+    expect(two.received).not.toContain("echo:from-one");
+    one.ws.close();
+    two.ws.close();
+  }, 60_000);
+
+  it("a terminal in a worktree gets the allowlisted variables of the service, nothing else", async () => {
+    const terminalId = "5d1f2a3b-6c7d-4e8f-9a0b-1c2d3e4f5a6b";
+    await m("terminal.create", {
+      worktreeId: a.worktreeId,
+      id: terminalId,
+      command:
+        `printf 'ENV:%s|%s|%s|\\n' "$ECHO_DISPLAY" "$ECHO_UNSET" "$ECHO_NOT_LISTED"; ` +
+        `[ "$BAND_TOKEN" = evil ] && echo EVIL_TOKEN; [ "$PATH" = /evil ] && echo EVIL_PATH; echo DONE`,
+    });
+    const output = await waitFor(
+      async () => {
+        const data = await q<{ output: string }>("terminal.output", { terminalId }).catch(
+          () => undefined,
+        );
+        return data?.output.includes("DONE") ? data.output : undefined;
+      },
+      { label: "the terminal printed its variables", timeoutMs: 30_000 },
+    );
+    // ECHO_DISPLAY comes from the service; ECHO_UNSET (a number), ECHO_NOT_LISTED (not in the
+    // manifest), BAND_TOKEN and PATH (never allowed) do not.
+    expect(output).toContain(`ENV::${a.worktreeId.length}|||`);
+    expect(output).not.toContain("EVIL_TOKEN");
+    expect(output).not.toContain("EVIL_PATH");
+    await m("terminal.kill", { terminalId });
+  }, 60_000);
+
   it("S2: the service sees profile hub through the hub and direct on the worker's loopback listener", async () => {
     // Through the hub: the page's own params cannot choose the profile.
     const params = encodeURIComponent(JSON.stringify({ profile: "direct" }));

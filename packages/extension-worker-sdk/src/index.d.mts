@@ -69,6 +69,12 @@ export interface WorkerServiceDefinition {
       | { onMessage?(message: StreamMessage): void; onClose?(): void }
       | Promise<void | { onMessage?(message: StreamMessage): void; onClose?(): void }>
   >;
+  /**
+   * The worker asks before it starts an agent or a terminal in a worktree. Return variables to add
+   * to its environment. Only names the manifest lists in the service's `worktreeEnv` are used, and
+   * a call that fails or takes longer than 10 seconds adds nothing.
+   */
+  worktreeEnv?(scope: ServiceScope): Record<string, string> | Promise<Record<string, string>>;
   /** A worktree was removed (state to delete) or the service lets it go (state to keep). */
   onRelease?(worktreeKey: string, reason: "removed" | "fenced" | "shutdown"): void | Promise<void>;
   /** The worker asks the service to stop. It exits after this returns. */

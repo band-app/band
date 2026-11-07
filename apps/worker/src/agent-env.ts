@@ -10,10 +10,16 @@ import { ghTokenEnv } from "./gh-token.ts";
 export async function agentSpawnEnv(
   ctx: WorkerContext,
   env: Record<string, string>,
+  cwd?: string,
 ): Promise<Record<string, string>> {
   const out = { ...env };
   const cliDir = await ctx.cli?.dir();
   if (cliDir) out.PATH = [cliDir, out.PATH ?? process.env.PATH].filter(Boolean).join(delimiter);
   Object.assign(out, await ghTokenEnv(ctx));
+  // Variables an extension service gives this worktree's agents (the DISPLAY of its desktop).
+  const worktreeId = env.BAND_WORKTREE_ID;
+  if (worktreeId && ctx.extensions) {
+    Object.assign(out, await ctx.extensions.worktreeEnv(worktreeId, cwd ?? ""));
+  }
   return out;
 }

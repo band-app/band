@@ -3,7 +3,7 @@
  * branch, so `feat/same` on worker A and on worker B are two worktrees with the ids
  * `proj-feat-same@<hostA>` and `proj-feat-same@<hostB>`. Everything the UI keys on that id has to
  * keep them apart: sidebar selection in the three groupings, the URL, chats, terminals, files,
- * Changes, Checks, the desktop viewer, removal and origin links.
+ * Changes, Checks, removal and origin links.
  *
  * Real production hub with BAND_LOCAL_HOST=off, two real `band-worker` processes with their own
  * temp HOME, root and state dir, a real browser. The only fakes are the ones on the workers' own
@@ -12,16 +12,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { type GhStub, ghStub } from "../../hub/tests/fixtures/gh-stub";
 import {
@@ -29,7 +22,6 @@ import {
   pullRequestNode,
   reviewQueryData,
 } from "../../hub/tests/fixtures/github-review-data";
-import { type RfbStub, startRfbStub } from "./fixtures/rfb-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -66,7 +58,6 @@ interface Host {
   root: string;
   worker: WorkerHandle;
   gh: GhStub;
-  rfb: RfbStub;
   /** Worktree id of `feat/same` on this host. */
   same: string;
   /** Where `feat/same` is checked out on this host. */
@@ -103,7 +94,7 @@ function makeRepo(dir: string): void {
   git(dir, "commit", "-q", "-m", "init");
 }
 
-async function startHost(name: string, vncSize: [number, number]): Promise<Host> {
+async function startHost(name: string): Promise<Host> {
   const issued = await trpcMutateData<{ token: string; hostId: string }>(
     server.url,
     TOKEN,
@@ -112,21 +103,12 @@ async function startHost(name: string, vncSize: [number, number]): Promise<Host>
   );
   const root = tmpDir(`band-e2e-two-${name}-root-`);
   makeRepo(join(root, REPO));
-  const rfb = await startRfbStub();
-  rfb.setSize(...vncSize);
   const gh = await ghStub.start();
-  // A fake x11vnc on PATH and a DISPLAY make the worker report the `desktop` capability.
-  const bin = tmpDir(`band-e2e-two-${name}-bin-`);
-  writeFileSync(join(bin, "x11vnc"), "#!/bin/sh\nexit 0\n");
-  chmodSync(join(bin, "x11vnc"), 0o755);
   const worker = startWorker({
     env: {
       BAND_HUB_URL: server.url,
       BAND_BOOTSTRAP_TOKEN: issued.token,
       BAND_WORKER_ID: issued.hostId,
-      DISPLAY: ":99",
-      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
-      BAND_DESKTOP_VNC_PORT: String(rfb.port),
       ...gh.env,
     },
     root,
@@ -139,7 +121,6 @@ async function startHost(name: string, vncSize: [number, number]): Promise<Host>
     root,
     worker,
     gh,
-    rfb,
     same: `${REPO}-${SAME}@${issued.hostId}`,
     checkout: join(root, ".band-worktrees", REPO, BRANCH),
   };
@@ -153,7 +134,7 @@ async function waitOnline(host: Host): Promise<void> {
           hosts: Array<{ id: string; status: string; capabilities: string[] }>;
         }>(server.url, TOKEN, "hosts.list");
         const row = hosts.find((h) => h.id === host.id);
-        return row?.status === "online" && row.capabilities.includes("desktop");
+        return row?.status === "online";
       },
       { timeout: 30_000 },
     )
@@ -205,8 +186,8 @@ test.beforeAll(async () => {
   });
   server = await startServer({ tmpHome, env: { BAND_LOCAL_HOST: "off" } });
 
-  a = await startHost("box-a", [64, 48]);
-  b = await startHost("box-b", [80, 60]);
+  a = await startHost("box-a");
+  b = await startHost("box-b");
   await waitOnline(a);
   await waitOnline(b);
 
@@ -270,7 +251,6 @@ test.afterAll(async () => {
   for (const host of [a, b]) {
     await host?.worker.kill();
     await host?.gh.stop();
-    await host?.rfb.close();
   }
   await server?.close();
   cleanupTmpHome(tmpHome);
@@ -381,25 +361,6 @@ test("a file, the Changes panel and the Checks tab show the selected host's data
   expect(b.gh.requests.some((r) => r.cwd === b.checkout)).toBe(true);
   expect(a.gh.requests.some((r) => r.cwd === b.checkout)).toBe(false);
   expect(b.gh.requests.some((r) => r.cwd === a.checkout)).toBe(false);
-});
-
-test("the desktop viewer opens the selected host's desktop (item 5)", async ({ page }) => {
-  const app = new TwoHostsPage(page, server.url, TOKEN);
-
-  await app.open(a.same);
-  await app.desktop.headerButton.click();
-  await expect(app.desktop.dialog).toBeVisible();
-  await app.desktop.expectFramebuffer();
-  await expect(app.desktop.hostName).toHaveText("box-a");
-  await expect(app.desktop.resolution).toHaveText("64x48");
-  await app.desktop.close();
-
-  await app.open(b.same);
-  await app.desktop.headerButton.click();
-  await expect(app.desktop.dialog).toBeVisible();
-  await app.desktop.expectFramebuffer();
-  await expect(app.desktop.hostName).toHaveText("box-b");
-  await expect(app.desktop.resolution).toHaveText("80x60");
 });
 
 test("an origin link from a child started on B nests under B (item 7)", async ({ page }) => {

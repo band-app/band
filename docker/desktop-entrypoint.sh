@@ -1,5 +1,6 @@
 #!/bin/sh
-# Starts a virtual desktop, then the band-worker (plan step 7.1). Run by the band-worker-desktop image and
+# Starts a virtual desktop, then the band-worker (plan step 7.1). Band bundles no viewer: the official
+# `desktop` extension runs its own Xvfb and x11vnc per worktree on this image and sets each agent's DISPLAY. Run by the band-worker-desktop image and
 # by the docker runner hook with `desktop: true`.
 #
 #   Xvfb :99             the display, at BAND_DESKTOP_RESOLUTION (default 1280x800x24)
@@ -7,7 +8,7 @@
 #   x11vnc               the VNC server, bound to 127.0.0.1 only, with no password
 #
 # x11vnc has no password and no other listener on purpose: the only way to it is the worker's link
-# (`desktop.open`), and the hub authenticates the viewer. Never remove -localhost.
+# (the extension's panel stream), and the hub authenticates the viewer. Never remove -localhost.
 #
 # DISPLAY is exported before the worker starts, so every agent, terminal and Playwright headed run the
 # worker launches draws on this display.
@@ -42,8 +43,8 @@ x11vnc -display "$display" -localhost -rfbport "$port" -nopw -forever -shared -n
   >/tmp/x11vnc.log 2>&1 &
 
 # Wait for x11vnc to listen (the worker reports the desktop as soon as it starts, and a viewer may
-# be waiting), up to 10 seconds. A failure is logged and the worker starts anyway: `desktop.open`
-# then fails with the connect error.
+# be waiting), up to 10 seconds. A failure is logged and the worker starts anyway: the
+# extension then reports the connect error.
 n=0
 until node -e 'require("net").connect({host:"127.0.0.1",port:Number(process.argv[1])}).on("connect",function(){this.destroy()}).on("error",()=>process.exit(1))' "$port" 2>/dev/null; do
   n=$((n + 1))

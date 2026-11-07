@@ -78,5 +78,6 @@ export async function handleExtensionStream(
         profile: "hub",
       }),
     fail,
+    { binaryInput: panel.binaryInput },
   );
 }

@@ -91,7 +91,7 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
   );
 
   r.raw("acp.spawn", async (a) => {
-    const env = await agentSpawnEnv(ctx, strRecord(a, "env"));
+    const env = await agentSpawnEnv(ctx, strRecord(a, "env"), optStr(a, "cwd"));
     const launch = {
       command: str(a, "command"),
       args: strArray(a, "args"),

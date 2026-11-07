@@ -75,11 +75,6 @@ import {
   startUsageEventPruneScheduler,
   stopUsageEventPruneScheduler,
 } from "./src/server/infra/db/queries/usage-events.ts";
-import {
-  desktopHostId,
-  handleDesktopConnection,
-  selectDesktopProtocol,
-} from "./src/server/infra/host/desktop-proxy.ts";
 import { hostRegistry } from "./src/server/infra/host/registry.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
 import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
@@ -1575,16 +1570,6 @@ async function main() {
   const cdpWss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
 
   // ---------------------------------------------------------------------------
-  // WebSocket server for host desktops (RFB over the worker link)
-  // ---------------------------------------------------------------------------
-  const desktopWss = new WebSocketServer({
-    noServer: true,
-    handleProtocols: selectDesktopProtocol,
-    // RFB client messages are small. The default 100 MiB frame limit lets a viewer queue far more.
-    maxPayload: 1024 * 1024,
-  });
-
-  // ---------------------------------------------------------------------------
   // WebSocket server for plugin live streams (an extension panel's screen)
   // ---------------------------------------------------------------------------
   const pluginStreamWss = new WebSocketServer({
@@ -1652,14 +1637,6 @@ async function main() {
     }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
-
-    const desktopHost = desktopHostId(url.pathname);
-    if (desktopHost !== null) {
-      desktopWss.handleUpgrade(req, socket, head, (ws) => {
-        void handleDesktopConnection(ws, req, desktopHost);
-      });
-      return;
-    }
 
     const extensionStream = extensionStreamTarget(url.pathname);
     if (extensionStream !== null) {
@@ -1992,7 +1969,6 @@ async function main() {
     wssHandler.broadcastReconnectNotification();
     wss.close();
     terminalWss.close();
-    desktopWss.close();
     pluginStreamWss.close();
     lspWss.close();
     cdpWss.close();

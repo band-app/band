@@ -191,7 +191,7 @@ export async function directTerminalTarget(
 export async function directPluginStreamTarget(
   pluginId: string,
   worktreeId: string,
-  stream?: { name: string; params?: unknown },
+  stream?: { name: string; params?: unknown; binaryInput?: boolean },
 ): Promise<DirectSocketTarget | null> {
   const access = await directAccessFor(worktreeId);
   if (!access) return null;
@@ -199,6 +199,7 @@ export async function directPluginStreamTarget(
   if (stream) {
     query.set("name", stream.name);
     if (stream.params !== undefined) query.set("params", JSON.stringify(stream.params));
+    if (stream.binaryInput) query.set("binaryInput", "1");
   }
   return {
     url: `ws://127.0.0.1:${access.port}${directPluginStreamPath(pluginId)}?${query}`,

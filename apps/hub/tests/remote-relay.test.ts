@@ -452,10 +452,6 @@ beforeAll(async () => {
           // A file outside the worktree, and a folder grant for its HTML, are for a person's token.
           probe("external-file", `/api/external-file/${WT_A}?path=/etc/hosts`),
           probe("external-preview", `/api/external-preview/${WT_A}/1.x.y/etc/hosts`),
-          // The desktop route (plan step 7.1) is for a person's device token. The relay lists no
-          // route for it, so no host id gets an agent through, including the hub's own.
-          probe("desktop-local", "/api/hosts/local/desktop"),
-          probe("desktop-worker", "/api/hosts/h-0123456789ab/desktop"),
           // A worker service's live stream is for a person's device token too.
           probe("plugin-stream", `/api/plugins/echo/worktrees/${WT_A}/stream`),
           // An extension panel's stream and its service calls are for a person's device token as
@@ -703,8 +699,6 @@ describe("the worker relay (S2)", () => {
     expect(by("other-route")?.status).toBe(403);
     expect(by("file-download")?.status).toBe(403);
     expect(by("file-range")?.status).toBe(403);
-    expect(by("desktop-local")?.status).toBe(403);
-    expect(by("desktop-worker")?.status).toBe(403);
     expect(by("plugin-stream")?.status).toBe(403);
     expect(by("extension-panel-stream")?.status).toBe(403);
     expect(by("extension-panel-call")?.status).toBe(403);
