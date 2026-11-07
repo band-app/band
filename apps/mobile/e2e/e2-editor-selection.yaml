@@ -53,13 +53,9 @@ name: E2 editor selection reaches the agent
     env:
       ACTION: expect-prompt
       VALUE: "Selected in notes.band-test (text-editor/text): chars 0-5"
-# Remove the chip: the next message carries no block.
+# The selection was used by the first message: the chip is gone and the next message carries no block.
 - tapOn:
     id: composer__input
-- assertVisible:
-    id: composer__selection
-- tapOn:
-    id: composer__selection-remove
 - assertNotVisible:
     id: composer__selection
 - inputText: "plain follow up"

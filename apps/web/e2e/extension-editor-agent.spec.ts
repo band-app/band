@@ -156,14 +156,40 @@ test("S1: the selection shows as a chip and goes with the message unless it is r
   await expect.poll(() => promptTexts().some((t) => t.includes("plain question"))).toBe(true);
   expect(promptTexts().find((t) => t.includes("plain question"))).not.toContain("Selected in");
 
-  // A removed chip applies to one message: the selection comes back for the next one.
+  // A dismissed selection stays gone for later messages and after a reload.
+  await expect(chat.selectionChip).toHaveCount(0);
+  await chat.typeMessage("still no selection");
+  await chat.submit();
+  await expect.poll(() => promptTexts().some((t) => t.includes("still no selection"))).toBe(true);
+  expect(promptTexts().find((t) => t.includes("still no selection"))).not.toContain("Selected in");
+  await chat.reload();
+  await chat.showChat();
+  await expect(chat.selectionChip).toHaveCount(0);
+
+  // A new selection brings the chip back, and it goes with one message only.
+  await editor.showTab(NOTE);
+  await editor.selectText(NOTE, 0, 4);
+  await chat.showChat();
   await expect(chat.selectionChip).toBeVisible();
   await chat.typeMessage("what is this word");
   await chat.submit();
   await expect.poll(() => promptTexts().some((t) => t.includes("what is this word"))).toBe(true);
   expect(promptTexts().find((t) => t.includes("what is this word"))).toContain(
-    `Selected in ${NOTE} (text-editor/text): chars 0-5\nAddress: chars:0-5\nhello`,
+    `Selected in ${NOTE} (text-editor/text): chars 0-4\nAddress: chars:0-4\nhell`,
   );
+  await expect(chat.selectionChip).toHaveCount(0);
+  await chat.typeMessage("and the next one");
+  await chat.submit();
+  await expect.poll(() => promptTexts().some((t) => t.includes("and the next one"))).toBe(true);
+  expect(promptTexts().find((t) => t.includes("and the next one"))).not.toContain("Selected in");
+  await chat.reload();
+  await chat.showChat();
+  await expect(chat.selectionChip).toHaveCount(0);
+
+  await editor.showTab(NOTE);
+  await editor.selectText(NOTE, 0, 5);
+  await chat.showChat();
+  await expect(chat.selectionChip).toBeVisible();
 
   // A collapsed selection clears the chip.
   await editor.showTab(NOTE);
