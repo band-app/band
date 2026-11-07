@@ -10,13 +10,13 @@ import { randomUUID } from "node:crypto";
 import { type FileEditorManifest, matchesSelector } from "@band-app/plugin-api";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { chatService } from "../../services/chat-service";
 import {
   EditorCallError,
   type EditorTab,
   editorRegistryService,
 } from "../../services/editor-registry-service";
 import { type EditorToolDef, extensionService } from "../../services/extension-service";
+import type { ToolScope } from "./tool-scope";
 
 function jsonText(value: unknown, isError = false) {
   return {
@@ -83,8 +83,8 @@ function describeTab(tab: EditorTab) {
   };
 }
 
-export async function registerEditorTools(server: McpServer, chatId: string): Promise<void> {
-  const worktreeOf = (): string | null => chatService.get(chatId)?.worktreeId ?? null;
+export async function registerEditorTools(server: McpServer, scope: ToolScope): Promise<void> {
+  const worktreeOf = (): string | null => scope.worktreeId();
   const noWorktree = () => jsonText({ error: "This chat has no worktree" }, true);
 
   server.registerTool(

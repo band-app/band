@@ -809,6 +809,57 @@
       ]
     },
     {
+      "description": "List the tools of the built-in band MCP server for a chat or worktree",
+      "name": "tools list",
+      "notes": "Text output: `NAME  DESCRIPTION` (space-padded table).\nJSON output: `{\"tools\": [{\"name\": \"...\", \"description\": \"...\", \"inputSchema\": {...}}]}`.",
+      "parameters": [
+        {
+          "description": "Chat ID (defaults to $BAND_CHAT_ID)",
+          "name": "--chat",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Worktree ID, for a terminal with no chat (defaults to $BAND_WORKTREE_ID)",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Call one tool of the built-in band MCP server and print its result",
+      "name": "tools call",
+      "notes": "Text output: the tool's text, and for an image the path of a file written under the system temp dir. A failed call or an isError result exits 1 with the message on stderr. Tools that need a chat refuse a worktree-only call.\nJSON output: the raw MCP content array.",
+      "parameters": [
+        {
+          "description": "Tool name, from `band tools list`",
+          "name": "name",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Tool arguments as a JSON object (default {})",
+          "name": "--json",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Chat ID (defaults to $BAND_CHAT_ID)",
+          "name": "--chat",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Worktree ID, for a terminal with no chat (defaults to $BAND_WORKTREE_ID)",
+          "name": "--worktree",
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
       "description": "Remove a subscription",
       "name": "subscriptions remove",
       "parameters": [

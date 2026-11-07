@@ -85,6 +85,7 @@ import { systemRouter } from "./system/router";
 import { tasksRouter } from "./tasks/router";
 import { terminalsRouters } from "./terminals/router";
 import { tokensRouter } from "./tokens/router";
+import { toolsRouter } from "./tools/router";
 import { t } from "./trpc";
 import { tunnelRouter } from "./tunnel/router";
 import { vaultRouter } from "./vault/router";
@@ -99,6 +100,7 @@ export const appRouter = t.router({
   worktree: worktreeRouter,
   cronjobs: cronjobsRouter,
   subscriptions: subscriptionsRouter,
+  tools: toolsRouter,
   chats: chatsRouter,
   agentSessions: agentSessionsRouter,
   chat: chatRouter,

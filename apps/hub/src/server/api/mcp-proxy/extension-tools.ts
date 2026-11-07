@@ -7,11 +7,11 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { chatService } from "../../services/chat-service";
 import { extensionService } from "../../services/extension-service";
 import { pluginHost } from "../../services/plugin-host-service";
 import { worktreeService } from "../../services/worktree-service";
 import { advertiseToolSchemas } from "./editor-tools";
+import type { ToolScope } from "./tool-scope";
 
 function jsonText(value: unknown, isError = false) {
   return {
@@ -106,7 +106,7 @@ function toolResultFor(result: unknown) {
   return jsonText(result ?? null);
 }
 
-export async function registerExtensionTools(server: McpServer, chatId: string): Promise<void> {
+export async function registerExtensionTools(server: McpServer, scope: ToolScope): Promise<void> {
   const schemas = new Map<string, Record<string, unknown>>();
   const { extensions } = await extensionService.list();
   for (const extension of extensions) {
@@ -128,15 +128,16 @@ export async function registerExtensionTools(server: McpServer, chatId: string):
           // biome-ignore lint/suspicious/noExplicitAny: arguments are checked by the service
           async (args: any) => {
             try {
-              const chat = chatService.get(chatId);
-              const resolved = chat?.worktreeId ? worktreeService.resolve(chat.worktreeId) : null;
-              if (!chat || !resolved) return jsonText({ error: "This chat has no worktree" }, true);
+              const worktreeId = scope.worktreeId();
+              const resolved = worktreeId ? worktreeService.resolve(worktreeId) : null;
+              if (!worktreeId || !resolved)
+                return jsonText({ error: "This chat has no worktree" }, true);
               const result = await pluginHost.callWorker(
                 service.capability,
                 resolved.host.id,
                 tool.method,
                 args ?? {},
-                { worktreeKey: chat.worktreeId, worktreePath: resolved.worktree.path },
+                { worktreeKey: worktreeId, worktreePath: resolved.worktree.path },
               );
               return toolResultFor(result);
             } catch (err) {
