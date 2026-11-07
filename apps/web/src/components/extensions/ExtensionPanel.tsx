@@ -1,11 +1,10 @@
 import type { PanelManifest } from "@band-app/plugin-api";
-import { Button } from "@band-app/ui";
 import { CircleAlert, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { directPluginStreamTarget, directSocketClosed } from "../../lib/direct-worker";
 import { HubWebSocket, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import { trpc } from "../../lib/trpc-client";
-import { readTheme } from "./ExtensionEditor";
+import { readTheme, useThemeUpdates } from "./ExtensionEditor";
 
 interface Props {
   worktreeId: string;
@@ -32,20 +31,18 @@ function currentLayout(): PanelLayout {
  * `stream.close { id }` and `call { id, method, params }`. Messages to the page: `init`,
  * `stream.opened`, `stream.frame { id, data }` (binary), `stream.message { id, text }`,
  * `stream.closed { id, code, reason }`, `call.result { id, result }`, `call.error { id, message }`,
- * `control { enabled }`, `visible { visible }` and `layout`. A stream starts view-only. Only the
- * Take control button in Band's own toolbar enables input, which the page cannot press.
+ * `control { enabled }`, `visible { visible }` and `layout`. Input is always on: the page gets
+ * `control { enabled: true }` once its first stream opens, for pages written against the older
+ * view-only protocol.
  */
 export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Props) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
   const streamsRef = useRef(new Map<string, WebSocket>());
-  const controllingRef = useRef(false);
-  // The person pressed Release on a `defaultControl` panel: stay released until the next reconnect.
-  const releasedRef = useRef(false);
+  const controlSentRef = useRef(false);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const [ready, setReady] = useState(false);
-  const [controlling, setControlling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const closeStreams = useCallback(() => {
@@ -84,18 +81,9 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
         let opened = false;
         ws.addEventListener("open", () => {
           opened = true;
-          const text = JSON.stringify({ type: "control", enabled: true });
-          if (panel.defaultControl && !releasedRef.current && !controllingRef.current) {
-            // The manifest asks for control from the start: take it, for every open stream.
-            controllingRef.current = true;
-            setControlling(true);
-            for (const other of streamsRef.current.values()) {
-              if (other.readyState === WebSocket.OPEN) other.send(text);
-            }
+          if (!controlSentRef.current) {
+            controlSentRef.current = true;
             post({ type: "control", enabled: true });
-          } else if (controllingRef.current) {
-            // A stream opened while the person is controlling joins in control mode.
-            ws.send(text);
           }
           post({ type: "stream.opened", id });
         });
@@ -107,8 +95,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
         ws.addEventListener("close", (event) => {
           if (streamsRef.current.get(id) !== ws) return;
           streamsRef.current.delete(id);
-          // The worker refused, is not there or cannot open the stream: the hub carries it. The
-          // hub's socket starts view-only, so a control taken on the worker is re-sent on open.
+          // The worker refused, is not there or cannot open the stream: the hub carries it.
           if (direct && directSocketClosed(worktreeId, event, opened) === "fallback") {
             openHub();
             return;
@@ -149,15 +136,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
         },
       );
     },
-    [
-      extensionId,
-      panel.binaryInput,
-      panel.capability,
-      panel.defaultControl,
-      panel.id,
-      post,
-      worktreeId,
-    ],
+    [extensionId, panel.binaryInput, panel.capability, panel.id, post, worktreeId],
   );
 
   const onMessage = useCallback(
@@ -175,7 +154,6 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           break;
         case "stream.send": {
           const ws = streamsRef.current.get(id);
-          // The hub drops input until the person takes control; the check here only saves traffic.
           if (ws?.readyState === WebSocket.OPEN) {
             if (typeof msg.message === "string") ws.send(msg.message);
             else if (panel.binaryInput && msg.message instanceof ArrayBuffer) ws.send(msg.message);
@@ -229,9 +207,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
     if (!frame?.contentWindow) return;
     portRef.current?.close();
     closeStreams();
-    controllingRef.current = false;
-    releasedRef.current = false;
-    setControlling(false);
+    controlSentRef.current = false;
     setReady(false);
     const channel = new MessageChannel();
     channel.port1.onmessage = onMessage;
@@ -245,6 +221,8 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
       visible: visibleRef.current,
     });
   }, [closeStreams, onMessage, worktreeId]);
+
+  useThemeUpdates(post, ready);
 
   useEffect(() => {
     post({ type: "visible", visible });
@@ -265,17 +243,6 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
     [closeStreams],
   );
 
-  const setControl = (enabled: boolean) => {
-    controllingRef.current = enabled;
-    releasedRef.current = !enabled;
-    setControlling(enabled);
-    const text = JSON.stringify({ type: "control", enabled });
-    for (const ws of streamsRef.current.values()) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(text);
-    }
-    post({ type: "control", enabled });
-  };
-
   const src = hubUrl(`/ext/${encodeURIComponent(extensionId)}/${panel.entry}`);
 
   return (
@@ -286,23 +253,8 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
       data-extension-id={extensionId}
       data-panel-id={panel.id}
       data-ready={ready ? "true" : "false"}
-      data-control={controlling ? "true" : "false"}
       className="relative flex h-full w-full flex-col overflow-hidden outline-none"
     >
-      <div className="flex shrink-0 items-center justify-end gap-2 border-b border-border bg-background px-2 py-1">
-        <span className="text-xs text-muted-foreground" data-testid="extension-panel__mode">
-          {controlling ? "Controlling" : "View only"}
-        </span>
-        <Button
-          size="sm"
-          variant={controlling ? "default" : "outline"}
-          disabled={!ready}
-          data-testid="extension-panel__control"
-          onClick={() => setControl(!controlling)}
-        >
-          {controlling ? "Release" : "Take control"}
-        </Button>
-      </div>
       <div className="relative min-h-0 flex-1">
         <iframe
           ref={frameRef}

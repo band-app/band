@@ -24,7 +24,7 @@ import {
 import { findOption, selectValues } from "@band-app/chat-runtime/config-options";
 import { PendingWork } from "@band-app/chat-runtime/pending-work";
 import { loggedSessionCost, sessionStateFromLog } from "@band-app/chat-runtime/session-state";
-import { WireTap } from "@band-app/chat-runtime/wire-tap";
+import { type WireRestore, WireTap } from "@band-app/chat-runtime/wire-tap";
 import type { Host } from "@band-app/host-api";
 import type { ChatLaunchReply, OwnedChatInfo } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
@@ -35,7 +35,7 @@ import type {
   LoggedChatEvent,
   SessionState,
 } from "@band-app/shared/chat-events";
-import type { ChatStore, WireState } from "./store.ts";
+import type { ChatStore, StoredQueuedMessage, WireState } from "./store.ts";
 
 /** After `session/cancel`, how long a turn gets to stop before its agent process is killed. */
 const CANCEL_GRACE_MS = 15_000;
@@ -70,8 +70,11 @@ export interface RuntimeEnv {
   host: Host;
   store: ChatStore;
   log: Logger;
-  /** The launch for the chat's agent (or `agentId`'s): from the hub, or the last one it gave. */
-  launch(chatId: string, agentId?: string): Promise<ChatLaunchReply>;
+  /**
+   * The launch for the chat's agent (or `agentId`'s): from the hub, or the last one it gave. With
+   * `fresh` only the hub's answer counts, and it rejects when the hub is not reachable.
+   */
+  launch(chatId: string, agentId?: string, options?: { fresh?: boolean }): Promise<ChatLaunchReply>;
   /**
    * Throws when no process may start in `cwd`: the worker lost the hub's lease, or the folder was
    * continued on another host. The same check the hub's `acp.spawn` gets.
@@ -88,6 +91,24 @@ export interface RuntimeEnv {
   /** The agent acted outside a turn the worker started. */
   activity(chatId: string, kind: "update" | "work"): void;
 }
+
+/** How a rebuilt chat stands (see {@link ChatRuntime.rebuild}). */
+export type Rebuilt =
+  /** No agent was held for the chat, or it could not be taken over. */
+  | { kind: "none" }
+  /** The agent is taken over and no turn was running. */
+  | { kind: "idle" }
+  /** A turn was running and carries on: `done` settles when the agent answers the prompt. */
+  | {
+      kind: "turn";
+      turn: { taskId: string; startedAt: number; prompt: string };
+      done: Promise<acp.PromptResponse>;
+    }
+  /** The prompt of the running turn never reached the agent. */
+  | { kind: "undelivered"; taskId: string; startedAt: number; message: StoredQueuedMessage | null };
+
+/** How long a rebuilt client waits for its connection to re-issue the open prompt. */
+const ADOPT_TIMEOUT_MS = 10_000;
 
 let transientId = -1;
 
@@ -115,9 +136,16 @@ export class ChatRuntime {
   /** The hash of the launch the current process started with. */
   private specHash: string | null = null;
   /** The turn the agent is working on, for the stored client state. */
-  private turn: { seq: number; taskId: string; startedAt: number } | null = null;
+  private turn: WireState["turn"] = null;
   private heldAgentId: string | null = null;
   private persistScheduled = false;
+  /** The agent's `initialize` answer, stored so a rebuilt client knows its capabilities. */
+  private initResponse: acp.InitializeResponse | null = null;
+  /** A rebuilt client has not yet compared a fresh launch from the hub with the running agent's. */
+  private launchCheckPending = false;
+  private checkingLaunch = false;
+  /** A fresh launch differs from the running agent's: restart it at the next clean point. */
+  private restartPending = false;
 
   constructor(
     readonly chatId: string,
@@ -229,8 +257,8 @@ export class ChatRuntime {
     signal: AbortSignal,
     make: (done: (answer: string) => void) => Omit<PendingRequest, "cancel">,
     onCancel: () => void,
+    requestId: string = randomUUID(),
   ): string {
-    const requestId = randomUUID();
     let settled = false;
     const done = (answer: string) => {
       if (settled) return;
@@ -329,7 +357,9 @@ export class ChatRuntime {
    * The tap whose batches commit in one transaction with the events parsed from them. After the
    * commit the daemon may drop those bytes.
    */
-  private newTap(): WireTap {
+  private newTap(
+    base: { stdoutBase?: number; nextRequestId?: number; restore?: WireRestore } = {},
+  ): WireTap {
     const store = this.env.store;
     const tap: WireTap = new WireTap(
       {
@@ -353,11 +383,20 @@ export class ChatRuntime {
           }
           if (saved && this.tap === tap) tap.acknowledge();
         },
-        changed: () => this.persistSoon(),
+        // Before the message reaches the agent, so a restart finds a request it was written for.
+        changed: () => {
+          if (this.tap !== tap) return;
+          try {
+            this.saveWire(tap);
+          } catch (err) {
+            this.env.log.warn({ chatId: this.chatId, err }, "could not store the client state");
+          }
+        },
       },
-      0,
-      1,
+      base.stdoutBase ?? 0,
+      base.nextRequestId ?? 1,
       (line, err) => this.env.log.warn({ chatId: this.chatId, line, err }, "bad line from agent"),
+      base.restore,
     );
     return tap;
   }
@@ -370,10 +409,15 @@ export class ChatRuntime {
       specHash: this.specHash,
       stdoutOffset: snapshot.stdoutOffset,
       stderrOffset: tap.stderrOffset(),
+      stdinOffset: snapshot.stdinOffset,
       nextRequestId: snapshot.nextRequestId,
       promptRequestId: prompt?.id ?? null,
       openClientRequests: snapshot.openClientRequests,
-      openAgentRequests: snapshot.openAgentRequests,
+      openAgentRequests: snapshot.openAgentRequests.map((r) => {
+        const optionIds = r.requestId ? this.pending.get(r.requestId)?.optionIds : undefined;
+        return optionIds ? { ...r, optionIds } : r;
+      }),
+      init: this.initResponse ?? undefined,
       turn: this.inTurn && this.turn ? this.turn : null,
       revision: this.revision,
       work: this.work.snapshot(),
@@ -426,7 +470,14 @@ export class ChatRuntime {
       const baseEnv = { ...resolved.env, ...launch.env, ...launch.loginEnv };
       // What a rebuilt client compares a fresh launch with. Taken before the worker adds its own
       // variables (its CLI path, a GitHub token), and stored as a hash only.
-      const specHash = launchSpecHash({ ...resolved, env: baseEnv, unsetEnv: launch.unsetEnv });
+      // Like the hub's own hash: the chat's variables (relay grant, chat ids) differ per launch by design.
+      const specHash = launchSpecHash({
+        ...resolved,
+        env: { ...resolved.env, ...launch.loginEnv },
+        unsetEnv: launch.unsetEnv,
+      });
+      this.launchCheckPending = false;
+      this.restartPending = false;
       const env = await this.env.spawnEnv(baseEnv);
       // Held by the agent daemon when the worker has one, so the agent outlives a worker restart.
       // `owned` tells the daemon the chat works without the hub.
@@ -466,6 +517,7 @@ export class ChatRuntime {
       }
       this.launch = launch;
       this.agentId = agentId;
+      this.initResponse = proc.init;
       return proc;
     })();
     this.starting = starting;
@@ -473,6 +525,7 @@ export class ChatRuntime {
       const proc = await starting;
       this.process = proc;
       this.sessionId = null;
+      this.persistSoon();
       return proc;
     } finally {
       if (this.starting === starting) this.starting = null;
@@ -498,6 +551,7 @@ export class ChatRuntime {
     how: "new" | "load" | "resume",
     attached: AttachedSession,
   ): void {
+    this.persistSoon();
     this.record({
       type: "session-attached",
       sessionId: attached.sessionId,
@@ -684,6 +738,7 @@ export class ChatRuntime {
     options: { strictSession?: boolean } = {},
   ): Promise<string | null> {
     while (this.attaching) await this.attaching.catch(() => undefined);
+    if (purpose === "prompt") this.restartIfClean();
     this.attaching = this.attach(purpose, options.strictSession);
     try {
       await this.attaching;
@@ -691,6 +746,254 @@ export class ChatRuntime {
       this.attaching = null;
     }
     return this.sessionId;
+  }
+
+  // ---- rebuilding after a worker restart -----------------------------------
+
+  /**
+   * Takes over the agent this chat's former client (the worker before it restarted) left running in
+   * the agent daemon. The stored state says where the former client stood in the agent's output,
+   * which requests were open in each direction and which turn ran. The daemon replays what the
+   * agent said since the last committed line, so the events of those lines are logged once.
+   */
+  async rebuild(state: WireState): Promise<Rebuilt> {
+    const none = (): Rebuilt => {
+      this.env.store.clearWireState(this.chatId);
+      return { kind: "none" };
+    };
+    const acpHost = this.env.host.acp;
+    if (!state.agentId || !state.sessionId || !state.init || !acpHost.reattach) {
+      this.env.log.warn(
+        {
+          chatId: this.chatId,
+          agentId: state.agentId ?? null,
+          hasSession: Boolean(state.sessionId),
+          hasInit: Boolean(state.init),
+          canReattach: Boolean(acpHost.reattach),
+        },
+        "the stored client state cannot be rebuilt; the chat's agent is not reattached",
+      );
+      return none();
+    }
+    const child = await acpHost.reattach(state.agentId, {
+      stdout: state.stdoutOffset,
+      stderr: state.stderrOffset,
+    });
+    if (!child) {
+      this.env.log.warn(
+        { chatId: this.chatId, agentId: state.agentId },
+        "the agent could not be reattached; the chat starts a new one",
+      );
+      return none();
+    }
+
+    const info = this.info;
+    const promptRequest = state.openClientRequests.find((r) => r.method === "session/prompt");
+    const written = child.held?.stdinWritten;
+    // The daemon counts the bytes it wrote to the agent. A prompt that ends past that count never arrived.
+    const undelivered =
+      state.turn !== null &&
+      promptRequest !== undefined &&
+      promptRequest.stdinEnd !== undefined &&
+      written !== undefined &&
+      written < promptRequest.stdinEnd;
+    const adoptPromptId = promptRequest && !undelivered ? promptRequest.id : undefined;
+
+    const generation = ++this.generation;
+    const tap = this.newTap({
+      stdoutBase: state.stdoutOffset,
+      nextRequestId: state.nextRequestId,
+      restore: {
+        openClientRequests: state.openClientRequests,
+        openAgentRequests: state.openAgentRequests,
+        stdinBase: written ?? state.stdinOffset ?? 0,
+        adoptPromptId,
+      },
+    });
+    this.tap = tap;
+    this.launch = this.env.store.ownedChat(this.chatId)?.launch ?? null;
+    this.specHash = state.specHash;
+    this.heldAgentId = state.agentId;
+    this.agentId = info.agentId;
+    this.initResponse = state.init as acp.InitializeResponse;
+    this.sessionId = state.sessionId;
+    this.revision = state.revision;
+    this.routing = "log";
+    this.lastUpdateKind = null;
+    if (state.live) this.live = { ...emptyLive(), ...(state.live as Partial<LiveState>) };
+    this.work.restore(state.work);
+    const proc = AcpAgentProcess.reattach(
+      child,
+      this.initResponse,
+      this.launch?.agent.label ?? info.agentId,
+      this.handlers(generation),
+      tap,
+    );
+    this.process = proc;
+    this.launchCheckPending = true;
+    this.restoreRequests(tap, state.openAgentRequests);
+
+    let done: Promise<acp.PromptResponse> | null = null;
+    if (state.turn && !undelivered) {
+      this.inTurn = true;
+      this.turnSeq++;
+      this.turn = { ...state.turn, seq: this.turnSeq };
+      if (adoptPromptId !== undefined) {
+        // The connection re-issues the prompt; the tap keeps that request back and hands the
+        // agent's reply to the old id to it.
+        const request = proc.prompt(state.sessionId, []);
+        request.catch(() => undefined);
+        const adopted = await Promise.race([
+          tap.adopted.then(() => true),
+          // The request failed before it left (the agent's exit closed the connection): that is
+          // the turn's outcome, with no reason to wait.
+          request.then(
+            () => true,
+            () => true,
+          ),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), ADOPT_TIMEOUT_MS).unref?.(),
+          ),
+        ]);
+        if (!adopted) {
+          // The agent's reply to the old id would be dropped, so the turn would never end.
+          this.env.log.warn({ chatId: this.chatId }, "could not re-issue the prompt");
+          done = Promise.reject(new Error("The worker could not take over the running turn"));
+        } else {
+          done = request;
+        }
+      } else {
+        // The agent answered before the restart and the answer was committed: only the end of the
+        // turn was never logged.
+        done = Promise.resolve({ stopReason: "end_turn" } as acp.PromptResponse);
+      }
+      done = done.finally(() => {
+        this.inTurn = false;
+        this.turn = null;
+        this.persistSoon();
+      });
+    }
+    tap.release();
+    this.persistSoon();
+    this.env.stateChanged(this.chatId);
+    this.env.log.info(
+      { chatId: this.chatId, agentId: state.agentId, turn: state.turn?.taskId, undelivered },
+      "rebuilt the chat's client",
+    );
+    // The link may be up already (the hub's connect came while this ran): check now, else on connect.
+    void this.checkLaunch();
+    if (state.turn && undelivered) {
+      this.turn = null;
+      return {
+        kind: "undelivered",
+        taskId: state.turn.taskId,
+        startedAt: state.turn.startedAt,
+        message: state.turn.message ?? null,
+      };
+    }
+    if (state.turn && done) {
+      return {
+        kind: "turn",
+        turn: {
+          taskId: state.turn.taskId,
+          startedAt: state.turn.startedAt,
+          prompt: state.turn.message?.text ?? "",
+        },
+        done,
+      };
+    }
+    return { kind: "idle" };
+  }
+
+  /** Reopens the permission and form requests the former client left waiting, under their ids. */
+  private restoreRequests(tap: WireTap, open: WireState["openAgentRequests"]): void {
+    const never = new AbortController().signal;
+    for (const r of open) {
+      const permission = r.method === "session/request_permission";
+      const cancelled = permission ? { outcome: { outcome: "cancelled" } } : { action: "cancel" };
+      const send = (result: unknown) => void tap.respond(r.id, result).catch(() => undefined);
+      if (!r.requestId) {
+        // The request reached the client but was never logged: nobody can answer it.
+        send(cancelled);
+        continue;
+      }
+      this.openRequest(
+        never,
+        (done) =>
+          permission
+            ? {
+                optionIds: r.optionIds,
+                permission: (optionId) => {
+                  done(optionId ?? "cancelled");
+                  send({
+                    outcome: optionId
+                      ? { outcome: "selected", optionId }
+                      : { outcome: "cancelled" },
+                  });
+                },
+              }
+            : {
+                elicitation: (response) => {
+                  done(response.action);
+                  send(response);
+                },
+              },
+        () => send(cancelled),
+        r.requestId,
+      );
+    }
+  }
+
+  /**
+   * Compares a fresh launch from the hub with the one the running agent started with. A different
+   * one is applied at the next clean point. Waits for the hub: with the link down it does nothing
+   * and the caller tries again when the link is up.
+   */
+  async checkLaunch(): Promise<void> {
+    if (!this.launchCheckPending || this.checkingLaunch || !this.process?.alive) return;
+    const agentId = this.agentId;
+    if (!agentId) return;
+    this.checkingLaunch = true;
+    try {
+      const launch = await this.env.launch(this.chatId, agentId, { fresh: true });
+      const resolved = await this.env.host.acp.resolveLaunch({
+        type: launch.agent.type,
+        label: launch.agent.label,
+        command: launch.agent.command,
+      });
+      if (typeof resolved === "string") return;
+      const hash = launchSpecHash({
+        ...resolved,
+        env: { ...resolved.env, ...launch.loginEnv },
+        unsetEnv: launch.unsetEnv,
+      });
+      this.launchCheckPending = false;
+      if (hash !== this.specHash) {
+        this.env.log.info(
+          { chatId: this.chatId },
+          "the agent's launch changed since it started; restarting it at the next clean point",
+        );
+        this.restartPending = true;
+        this.restartIfClean();
+      }
+    } catch (err) {
+      this.env.log.debug({ chatId: this.chatId, err }, "launch check waits for the hub");
+    } finally {
+      this.checkingLaunch = false;
+    }
+  }
+
+  /** Stops the agent when a newer launch is waiting and nothing runs on it: no turn, request or background work. */
+  restartIfClean(): void {
+    if (!this.restartPending) return;
+    if (this.inTurn || this.attaching || this.pending.size > 0) return;
+    if (this.work.outstanding().length > 0) return;
+    this.restartPending = false;
+    if (!this.process?.alive) return;
+    this.env.log.info({ chatId: this.chatId }, "restarting the agent with its new launch");
+    this.generation++;
+    this.starting = null;
+    this.stopProcess();
   }
 
   // ---- turn ----------------------------------------------------------------
@@ -719,7 +1022,7 @@ export class ChatRuntime {
 
   async prompt(
     blocks: acp.ContentBlock[],
-    turn?: { taskId: string; startedAt: number },
+    turn?: { taskId: string; startedAt: number; message?: StoredQueuedMessage },
   ): Promise<acp.PromptResponse> {
     const proc = this.process;
     if (!proc?.alive || !this.sessionId) {
@@ -728,7 +1031,6 @@ export class ChatRuntime {
     this.inTurn = true;
     this.turnSeq++;
     this.turn = turn ? { seq: this.turnSeq, ...turn } : null;
-    this.persistSoon();
     try {
       try {
         return await proc.prompt(this.sessionId, blocks);

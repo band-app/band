@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { browserProfileService } from "../../services/browser-profile-service";
 import { cronjobService } from "../../services/cronjob-service";
+import { quickCommandService } from "../../services/quick-command-service";
 import { repoService } from "../../services/repo-service";
 import { adminProcedure, publicProcedure, t } from "../trpc";
 import { repoErrorToTrpc } from "./errors";
@@ -134,6 +135,7 @@ export const reposRouter = t.router({
     // teardown is composed at the API layer rather than buried inside
     // `RepoService.remove`.
     cronjobService.removeForRepo(input.name);
+    quickCommandService.removeForRepo(input.name);
     repoService.remove(input.name);
     // Same for the repo's default browser profile mapping.
     browserProfileService.forgetRepo(input.name);

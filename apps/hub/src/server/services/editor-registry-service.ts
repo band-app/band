@@ -107,9 +107,24 @@ export class EditorRegistryService {
     }
   }
 
-  unregister(tab: Pick<EditorTab, "clientId" | "worktreeId" | "file" | "extensionId">): void {
+  /**
+   * Forgets a tab. With `reason: "closed"` (the person closed the tab) the worktree's selection
+   * goes too when it came from that file and extension. Without a reason the selection stays,
+   * because an unmount also happens on a worktree switch, a reload or the phone leaving its
+   * editor screen.
+   */
+  unregister(
+    tab: Pick<EditorTab, "clientId" | "worktreeId" | "file" | "extensionId">,
+    reason?: "closed",
+  ): void {
     const existing = this.tabs.get(tabKey(tab));
     if (existing) this.drop(existing);
+    if (reason !== "closed") return;
+    const stored = this.selections.get(tab.worktreeId);
+    if (stored && stored.file === tab.file && stored.extensionId === tab.extensionId) {
+      this.selections.delete(tab.worktreeId);
+      emit({ kind: "editor-selection-changed", worktreeId: tab.worktreeId });
+    }
   }
 
   private drop(tab: EditorTab): void {

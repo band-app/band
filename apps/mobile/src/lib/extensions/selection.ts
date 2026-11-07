@@ -1,5 +1,7 @@
 /** The editor selection the hub keeps per worktree (`editors.selection`) and how a message carries it. */
 
+import { selectionBlockText, selectionLabel } from "@band-app/shared/editor-selection-block";
+
 export interface EditorSelectionInfo {
   file: string;
   extensionId: string;
@@ -15,15 +17,12 @@ export function fileBaseName(path: string): string {
 
 /** The chip text: `<label> · <file name>`. */
 export function chipLabel(info: EditorSelectionInfo): string {
-  return `${info.selection.label} · ${fileBaseName(info.file)}`;
+  return selectionLabel(info.file, info.selection.label);
 }
 
 /** The block added after the user's text. */
 export function selectionBlock(info: EditorSelectionInfo): string {
-  const head =
-    `Selected in ${info.file} (${info.extensionId}/${info.editorId}): ${info.selection.label}\n` +
-    `Address: ${info.selection.address}`;
-  return info.selection.text ? `${head}\n${info.selection.text}` : head;
+  return selectionBlockText(info);
 }
 
 /** The message to send: the user's text, then the selection block when the chip is kept. */

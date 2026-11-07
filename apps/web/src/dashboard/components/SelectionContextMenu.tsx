@@ -4,6 +4,9 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@band-app/ui";
 import { EditorView } from "@codemirror/view";
@@ -16,10 +19,16 @@ import {
   Scissors,
   SquareTerminal,
   TextSelect,
+  Zap,
 } from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
 import { readClipboardText, writeClipboardText } from "../../lib/clipboard";
+import {
+  useQuickCommandMutations,
+  useQuickCommandsFor,
+  useRepoNameOfWorktree,
+} from "../hooks/use-quick-commands";
 import { formatShortcut, isMacPlatform } from "../lib/command-registry";
 import {
   addSelectionToChat,
@@ -266,16 +275,68 @@ export function CodeSelectionContextMenu({ children }: { children: React.ReactEl
 }
 
 /**
+ * "Quick Commands" submenu of a terminal's right-click menu. Picking one types its text into this
+ * terminal, and presses Enter when the command has Append Enter on. Agent commands start a new
+ * agent, so they are not offered here.
+ */
+function TerminalQuickCommandsSubmenu({
+  worktreeId,
+  sendInput,
+  onPicked,
+}: {
+  worktreeId: string;
+  sendInput: (data: string) => void;
+  onPicked: () => void;
+}) {
+  const commands = useQuickCommandsFor(useRepoNameOfWorktree(worktreeId));
+  const { markRun } = useQuickCommandMutations();
+  const terminalCommands = commands.flatMap((c) => (c.action === "terminal" ? [c] : []));
+  if (terminalCommands.length === 0) return null;
+  return (
+    <>
+      <ContextMenuSeparator />
+      <ContextMenuSub>
+        <ContextMenuSubTrigger data-testid="selection-menu__quick-commands">
+          <Zap className="size-4" />
+          Quick Commands
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent data-testid="selection-menu__quick-commands-list">
+          {terminalCommands.map((c) => (
+            <ContextMenuItem
+              key={c.id}
+              data-testid="selection-menu__quick-command"
+              onSelect={() => {
+                markRun.mutate({ id: c.id });
+                // A carriage return is what the Enter key sends.
+                sendInput(c.appendEnter ? `${c.command}\r` : c.command);
+                onPicked();
+              }}
+            >
+              <span className="truncate">{c.label}</span>
+            </ContextMenuItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    </>
+  );
+}
+
+/**
  * Right-click menu for a terminal. A terminal selection has no file behind it,
  * so "Add to Chat" sends the selected text itself, and there is no reference to
  * copy or type into a terminal.
  */
 export function TerminalSelectionContextMenu({
   getTerminal,
+  worktreeId,
+  sendInput,
   disabled = false,
   children,
 }: {
   getTerminal: () => Terminal | null;
+  /** With `sendInput`, adds the Quick Commands submenu for this worktree's repo. */
+  worktreeId?: string;
+  sendInput?: (data: string) => void;
   /** Off on touch screens, where a long-press starts the terminal's own
    *  selection mode and its keyboard toolbar has Copy and Paste. */
   disabled?: boolean;
@@ -348,6 +409,16 @@ export function TerminalSelectionContextMenu({
             focusAfterClose.queue(term);
           })}
         />
+        {worktreeId && sendInput && (
+          <TerminalQuickCommandsSubmenu
+            worktreeId={worktreeId}
+            sendInput={sendInput}
+            onPicked={() => {
+              const term = getTerminal();
+              if (term) focusAfterClose.queue(term);
+            }}
+          />
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );

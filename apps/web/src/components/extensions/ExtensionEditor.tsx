@@ -10,6 +10,23 @@ import { hubFetch, hubUrl } from "../../lib/hub-config";
 import { isDesktop } from "../../lib/is-desktop";
 import { trpc } from "../../lib/trpc-client";
 
+/** The extension of each editor tab this window has registered, by worktree and file. */
+const registeredEditors = new Map<string, string>();
+const registeredKey = (worktreeId: string, file: string) => `${worktreeId}\u0000${file}`;
+
+/**
+ * Tells the hub the person closed the editor tab for `file`, so it drops that tab's selection.
+ * An unmount alone does not (a worktree switch or reload keeps the chip). A file with no
+ * registered editor tab does nothing.
+ */
+export function reportEditorTabClosed(worktreeId: string, file: string): void {
+  const extensionId = registeredEditors.get(registeredKey(worktreeId, file));
+  if (!extensionId) return;
+  void trpc.editors.unregister
+    .mutate({ clientId: getClientId(), worktreeId, file, extensionId, reason: "closed" })
+    .catch(() => {});
+}
+
 /** What a caller (the agent tools, later) can do with an open editor tab. */
 export interface ExtensionEditorHandle {
   /** Sends one MCP JSON-RPC request to the editor and resolves with its answer (matched by `id`). */
@@ -97,6 +114,20 @@ export function readTheme(): { mode: "dark" | "light"; tokens: Record<string, st
     if (value) tokens[name] = value;
   }
   return { mode: root.classList.contains("dark") ? "dark" : "light", tokens };
+}
+
+/** Posts `{ type: "theme", mode, tokens }` to the page whenever Band's theme changes. Shared by editors and panels. */
+export function useThemeUpdates(post: (message: unknown) => void, enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled) return;
+    const send = () => post({ type: "theme", ...readTheme() });
+    const observer = new MutationObserver(send);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+    return () => observer.disconnect();
+  }, [enabled, post]);
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -376,6 +407,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
   useEffect(() => {
     if (!ready) return;
     const identity = tabIdentity();
+    registeredEditors.set(registeredKey(identity.worktreeId, identity.file), identity.extensionId);
     const register = () =>
       void trpc.editors.register.mutate({ ...identity, dirty: dirtyRef.current }).catch(() => {});
     register();
@@ -458,17 +490,7 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
     if (visible && ready) void checkDisk();
   }, [visible, ready, checkDisk]);
 
-  // Follow Band's theme.
-  useEffect(() => {
-    if (!ready) return;
-    const send = () => post({ type: "theme", ...readTheme() });
-    const observer = new MutationObserver(send);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style", "data-theme"],
-    });
-    return () => observer.disconnect();
-  }, [ready, post]);
+  useThemeUpdates(post, ready);
 
   // "Close Without Saving" drops the edits.
   useEffect(() => {

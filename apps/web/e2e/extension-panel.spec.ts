@@ -23,6 +23,7 @@ import {
 } from "./helpers/server";
 import { trpcMutate, trpcMutateData, trpcQuery } from "./helpers/trpc";
 import { startWorker, type WorkerHandle } from "./helpers/worker";
+import { AppearancePage } from "./pages/AppearancePage";
 import { ExtensionPanelPage } from "./pages/ExtensionPanelPage";
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -177,7 +178,7 @@ test("S1: the + menu offers the panel on the worker that runs the service, not o
   await expect(panel.menuItem).toHaveCount(0);
 });
 
-test("S2: frames arrive in the panel, input waits for Take control, and a call returns", async ({
+test("S2: frames arrive in the panel, there is no Take control, input and a call work at once", async ({
   page,
 }) => {
   const panel = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "screen");
@@ -185,34 +186,44 @@ test("S2: frames arrive in the panel, input waits for Take control, and a call r
   await panel.openFromMenu();
   await expect(panel.frames).toHaveText("3");
   await expect(panel.callResult).toHaveText('{"hello":"panel"}');
-  await expect(panel.mode).toHaveText("View only");
-
-  // Input before control is dropped by the hub: nothing comes back.
-  await panel.sendButton.click();
-  await expect(panel.echoes).toHaveCount(0);
-
-  await panel.takeControl();
-  await expect(panel.mode).toHaveText("Controlling");
+  await expect(panel.controlButton).toHaveCount(0);
   await expect(panel.pageMode).toHaveText("control");
+
   await panel.sendButton.click();
   await expect(panel.echoes).toHaveCount(1);
   await expect(panel.echoes.first()).toHaveText("echo:tap");
 });
 
-test("S8: a panel with defaultControl starts in control and Release stops input; one without starts view-only", async ({
+test("S8: a panel with defaultControl behaves the same: no button, input works", async ({
   page,
 }) => {
   const auto = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "auto");
   await auto.open(worktreeA);
   await auto.openFromMenu();
   await expect(auto.frames).toHaveText("3");
-  await expect(auto.mode).toHaveText("Controlling");
+  await expect(auto.controlButton).toHaveCount(0);
   await expect(auto.pageMode).toHaveText("control");
   await auto.sendButton.click();
   await expect(auto.echoes).toHaveCount(1);
+});
 
-  await auto.controlButton.click();
-  await expect(auto.mode).toHaveText("View only");
-  await auto.sendButton.click();
-  await expect(auto.echoes).toHaveCount(1);
+test("S9: a panel gets the theme in init and a theme message on each change", async ({ page }) => {
+  const panel = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "screen");
+  await panel.open(worktreeA);
+  await panel.openFromMenu();
+  await expect(panel.themeMode).not.toHaveText("none");
+
+  const appearance = new AppearancePage(page, server.url, TOKEN);
+  await appearance.openInPlace();
+  await appearance.chooseMode("light");
+  await expect(panel.themeMode).toHaveText("light");
+  const lightBackground = await panel.bodyBackground();
+
+  await appearance.chooseMode("dark");
+  await expect(panel.themeMode).toHaveText("dark");
+  await expect.poll(() => panel.bodyBackground()).not.toBe(lightBackground);
+
+  await appearance.setColor("background", "#123456");
+  await expect(panel.themeBackground).toContainText("#123456");
+  await expect.poll(() => panel.bodyBackground()).toBe("rgb(18, 52, 86)");
 });

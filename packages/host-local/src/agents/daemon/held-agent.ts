@@ -101,7 +101,12 @@ export class HeldAgentProcess implements AgentStdio {
   }
 
   get held(): NonNullable<AgentStdio["held"]> {
-    return { agentId: this.record.agentId, specHash: this.record.specHash };
+    return {
+      agentId: this.record.agentId,
+      specHash: this.record.specHash,
+      stdinWritten: this.record.stdinWritten,
+      exited: this.record.exit !== null,
+    };
   }
 
   get ghToken(): boolean {

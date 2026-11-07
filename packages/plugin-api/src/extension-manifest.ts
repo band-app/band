@@ -95,13 +95,13 @@ export const panelSchema = z
     /** The `capability` of one of this extension's worker services. */
     capability: idSchema,
     /**
-     * Band takes control for the person as soon as a stream connects (and after each reconnect), so
-     * input reaches the service without pressing Take control. Release still works.
+     * Accepted so existing manifests keep loading. It has no effect: panel streams always accept
+     * input.
      */
     defaultControl: z.boolean().default(false),
     /**
-     * Binary frames from the page reach the service while the person is in control and are dropped
-     * otherwise. Without it every binary frame from the page is dropped. Text frames are unchanged.
+     * Binary frames from the page (1 MiB at most each) reach the service, as text frames do.
+     * Without it every binary frame from the page is dropped.
      */
     binaryInput: z.boolean().default(false),
   })

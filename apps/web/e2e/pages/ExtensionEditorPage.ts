@@ -85,6 +85,11 @@ export class ExtensionEditorPage {
     });
   }
 
+  /** Closes the file's tab with its × button. */
+  async closeTab(path: string): Promise<void> {
+    await this.worktree.closeFileTab(path);
+  }
+
   async replaceText(path: string, text: string): Promise<void> {
     await test.step(`Type into ${path}`, async () => {
       await this.textarea(path).fill(text);

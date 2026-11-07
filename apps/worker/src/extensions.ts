@@ -52,7 +52,11 @@ const RESERVED_CAPABILITIES = new Set([
 ]);
 const CRASH_WINDOW_MS = 5 * 60_000;
 
-/** Variables a service inherits. Nothing else, so no `BAND_*` or `GIT_CONFIG_*` reaches it. */
+/**
+ * Variables a service inherits. Nothing else, so no `BAND_*` or `GIT_CONFIG_*` reaches it, except
+ * `BAND_SIMULATOR_NAME_PREFIX`: test runs set it so the simulator service names its devices with
+ * a prefix that is never a person's.
+ */
 const INHERITED_ENV = [
   "PATH",
   "HOME",
@@ -65,6 +69,7 @@ const INHERITED_ENV = [
   "TZ",
   "DISPLAY",
   "XDG_RUNTIME_DIR",
+  "BAND_SIMULATOR_NAME_PREFIX",
 ] as const;
 
 export interface SpawnSpec {
@@ -766,14 +771,34 @@ export class ExtensionHost {
     return out;
   }
 
-  /** The worktree at `path` was removed: every service deletes its state for it. */
+  /**
+   * The worktree at `path` was removed: every running service deletes its state for it. A service
+   * that served the worktree in this run gets its key. Any other (it served the worktree before a
+   * restart, or never) gets `worktreeKey: ""` with the path, and maps the path to its own state.
+   */
   async releasePath(path: string): Promise<void> {
     for (const s of this.services.values()) {
+      if (!s.proc) continue;
+      let known = false;
       for (const [key, at] of [...s.scopes]) {
         if (at !== path) continue;
+        known = true;
         s.scopes.delete(key);
         await s.proc
-          ?.request("worktree.release", { worktreeKey: key, reason: "removed" }, 5000)
+          .request(
+            "worktree.release",
+            { worktreeKey: key, worktreePath: path, reason: "removed" },
+            5000,
+          )
+          .catch(() => undefined);
+      }
+      if (!known) {
+        await s.proc
+          .request(
+            "worktree.release",
+            { worktreeKey: "", worktreePath: path, reason: "removed" },
+            5000,
+          )
           .catch(() => undefined);
       }
     }

@@ -10,6 +10,7 @@ import {
 import { groupEntries } from "@band-app/client/tool-summary";
 import type { ChatMessage, Entry } from "@band-app/client/transcript";
 import type { SessionState } from "@band-app/shared/chat-events";
+import { parseSelectionBlock } from "@band-app/shared/editor-selection-block";
 import {
   cn,
   DropdownMenu,
@@ -36,7 +37,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, SearchBar } from "@/dashboard";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { useEditorSelection, withSelectionBlock } from "../lib/editor-selection";
+import {
+  markSelectionConsumed,
+  useUnconsumedEditorSelection,
+  withSelectionBlock,
+} from "../lib/editor-selection";
 import { groupModelsByProvider, modelNameWithoutProvider } from "../lib/model-providers";
 import { useToastObstruction } from "../lib/toast-obstructions";
 import { trpc } from "../lib/trpc-client";
@@ -67,7 +72,7 @@ import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { AgentFailureCard } from "./chat/AgentFailureCard";
 import { ChatLoginMenu } from "./chat/ChatLoginMenu";
-import { EditorSelectionChip } from "./chat/EditorSelectionChip";
+import { EditorSelectionChip, SentSelectionChip } from "./chat/EditorSelectionChip";
 import { HeldEventsNotice } from "./chat/HeldEventsNotice";
 import { ListeningPill } from "./chat/ListeningPill";
 import { MessageActions } from "./chat/MessageActions";
@@ -386,12 +391,9 @@ export function ChatView({
     return () => window.removeEventListener("band:new-chat-session", onNewChat);
   }, [visible, wsActive, handleNewSession]);
 
-  // The person's selection in an open editor tab rides along as a chip. Removing it drops it for
-  // one message; a new selection brings it back.
-  const editorSelection = useEditorSelection(worktreeId);
-  const [selectionDismissed, setSelectionDismissed] = useState<number | null>(null);
-  const shownSelection =
-    editorSelection && editorSelection.updatedAt !== selectionDismissed ? editorSelection : null;
+  // The person's selection in an open editor tab rides along as a chip. A selection is attached to one
+  // message at most, and removing the chip drops it until a new selection arrives.
+  const shownSelection = useUnconsumedEditorSelection(worktreeId);
   const shownSelectionRef = useRef(shownSelection);
   shownSelectionRef.current = shownSelection;
 
@@ -402,13 +404,13 @@ export function ChatView({
       // The server queues the message when a turn is already running.
       try {
         await send(withSelectionBlock(message.text, carried), message.files);
-        // A removed chip applies to one message; the next one carries the selection again.
-        setSelectionDismissed(null);
+        // The selection rode along once; it is not offered again until the editor reports a new one.
+        if (carried) markSelectionConsumed(worktreeId, carried);
       } catch (err) {
         console.error("[ChatView] send failed:", err);
       }
     },
-    [send],
+    [send, worktreeId],
   );
 
   const handleCancelQueued = useCallback(
@@ -609,11 +611,20 @@ export function ChatView({
               {message.files?.map((file) => (
                 <MessageFilePart key={file.url} part={{ type: "file", ...file }} />
               ))}
-              {message.text.trim() && (
-                <div data-chat-find-text="">
-                  <MessageResponse>{message.text}</MessageResponse>
-                </div>
-              )}
+              {(() => {
+                const parsed = parseSelectionBlock(message.text);
+                const body = parsed ? parsed.body : message.text;
+                return (
+                  <>
+                    {body.trim() && (
+                      <div data-chat-find-text="">
+                        <MessageResponse>{body}</MessageResponse>
+                      </div>
+                    )}
+                    {parsed && <SentSelectionChip label={parsed.chipLabel} text={parsed.text} />}
+                  </>
+                );
+              })()}
             </MessageContent>
             {!message.pending && (
               <MessageActions
@@ -790,7 +801,7 @@ export function ChatView({
             {shownSelection && (
               <EditorSelectionChip
                 state={shownSelection}
-                onRemove={() => setSelectionDismissed(shownSelection.updatedAt)}
+                onRemove={() => markSelectionConsumed(worktreeId, shownSelection)}
               />
             )}
             <PromptInputBody>

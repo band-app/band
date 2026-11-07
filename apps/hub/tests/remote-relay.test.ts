@@ -330,6 +330,15 @@ beforeAll(async () => {
           probe("tokens", "/trpc/tokens.list"),
           probe("settings", "/trpc/settings.get"),
           probe("vault-list", "/trpc/vault.list"),
+          // A saved quick command is text a person later runs in a shell.
+          probe("quick-commands-list", "/trpc/quickCommands.list"),
+          post("quick-commands-create", "/trpc/quickCommands.create", {
+            label: "x",
+            repo: null,
+            action: "terminal",
+            command: "ls",
+            appendEnter: true,
+          }),
           post("extensions-install-official", "/trpc/extensions.installOfficial", { id: "demo" }),
           // The machine's process table and disk use are a person's page.
           probe("resources-snapshot", "/trpc/resources.snapshot"),
@@ -666,6 +675,8 @@ describe("the worker relay (S2)", () => {
     expect(by("settings")?.status).toBe(403);
     // The vault, and the OAuth flows it starts, are out of agent reach.
     expect(by("vault-list")?.status).toBe(403);
+    expect(by("quick-commands-list")?.status).toBe(403);
+    expect(by("quick-commands-create")?.status).toBe(403);
     expect(by("extensions-install-official")?.status).toBe(403);
     expect(by("resources-snapshot")?.status).toBe(403);
     for (const name of ["editors-selection", "editors-register", "editors-result"]) {

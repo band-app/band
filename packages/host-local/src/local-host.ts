@@ -58,6 +58,7 @@ import type {
   WorktreeInfo,
   WorktreeSpec,
 } from "@band-app/host-api";
+import { createLogger } from "@band-app/logger";
 import { resolveAcpLaunch } from "./agents/acp-launch";
 import { adapterVersionOf } from "./agents/adapter-version";
 import { spawnAgentProcess } from "./agents/agent-spawn";
@@ -89,6 +90,8 @@ import { copyWorktreeFiles } from "./setup/worktree-files";
 import { transcribeLocally } from "./speech/transcribe";
 import { findLatestClaudeSessionId } from "./terminals/claude-resume";
 import { readAccountUsage } from "./usage/account-usage";
+
+const log = createLogger("local-host");
 
 /** How long `info()` keeps the tool versions it probed. */
 const TOOLS_TTL_MS = 60_000;
@@ -168,6 +171,19 @@ export class LocalHost implements Host {
     },
     spawn: (launch, cwd, options) =>
       this.spawnAgent(launch, cwd, options?.held === true, options?.owned === true),
+    reattach: async (agentId, offsets) => {
+      const holder = this.options.agentHolder;
+      if (!holder) return null;
+      try {
+        const held = await HeldAgentProcess.attach(holder, agentId, offsets);
+        if (!held)
+          log.warn({ agentId }, "no agent daemon holds the agent; it cannot be reattached");
+        return held;
+      } catch (err) {
+        log.warn({ agentId, err }, "could not reattach the agent");
+        return null;
+      }
+    },
   };
   readonly mcp: HostMcp = {
     openStdio: (spec) => openMcpStdio(spec),

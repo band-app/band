@@ -60,7 +60,7 @@ import type {
 import { agentSpawnEnv } from "../agent-env.ts";
 import type { Registrar, WorkerContext } from "../context.ts";
 import { ChatRuntime } from "./runtime.ts";
-import type { ChatStore } from "./store.ts";
+import type { ChatStore, WireState } from "./store.ts";
 import { Turns } from "./turns.ts";
 
 /** Rows per `chat.history` page and per `chat.replicate` batch. */
@@ -86,6 +86,8 @@ export class ChatOwner {
   private readonly runtimes = new Map<string, ChatRuntime>();
   private readonly listeners = new Map<string, Set<ChatListener>>();
   private readonly seeding = new Map<string, Promise<void>>();
+  /** Chats whose client is being rebuilt after a restart. Nothing new runs on them yet. */
+  private readonly rebuilding = new Map<string, Promise<void>>();
   /** Chats the hub took back that are still replicating their last rows: nothing new runs. */
   private readonly releasing = new Set<string>();
   /** The hub's answer to `chat.sessionState`, per chat with no session yet. */
@@ -110,6 +112,7 @@ export class ChatOwner {
         return `/api/shared/${encodeURIComponent(worktreeId)}/${encodeURIComponent(chatId)}/${encodeURIComponent(filename)}`;
       },
       changed: (chatId) => this.publishLive(chatId),
+      blocked: (chatId) => this.rebuilding.has(chatId),
     });
   }
 
@@ -165,13 +168,53 @@ export class ChatOwner {
     await this.flushReplication();
   }
 
-  /** Runs what was queued before the worker last stopped, for chats whose log is copied in. */
+  /**
+   * Picks the chats up where the worker left them: a chat whose agent the agent daemon still holds
+   * gets a rebuilt client and its turn carries on; for the others, what was queued before the
+   * worker last stopped runs. Only chats whose log is copied in: one still copying may hold a hub
+   * turn whose end is on a page not copied yet.
+   */
   start(): void {
     for (const record of this.store.ownedChats()) {
-      // A chat still copying in may hold a hub turn whose end is on a page not copied yet.
       if (!record.seeded) continue;
-      this.closeInterruptedTurn(record.info.chatId);
-      this.turns.drain(record.info.chatId);
+      const chatId = record.info.chatId;
+      const state = this.store.wireState(chatId);
+      if (!state?.agentId) {
+        this.closeInterruptedTurn(chatId);
+        this.turns.drain(chatId);
+        continue;
+      }
+      const work = this.rebuild(chatId, state)
+        .catch((err) => {
+          this.warn(`could not rebuild the client of chat ${chatId}`, err);
+          this.store.clearWireState(chatId);
+          this.closeInterruptedTurn(chatId);
+          return true;
+        })
+        .then((drain) => {
+          this.rebuilding.delete(chatId);
+          if (drain) this.turns.drain(chatId);
+          this.publishLive(chatId);
+        });
+      this.rebuilding.set(chatId, work);
+    }
+  }
+
+  /** Rebuilds one chat. Resolves with whether the queue may start draining. */
+  private async rebuild(chatId: string, state: WireState): Promise<boolean> {
+    const rebuilt = await this.runtime(chatId).rebuild(state);
+    switch (rebuilt.kind) {
+      case "none":
+      case "idle":
+        this.closeInterruptedTurn(chatId);
+        return true;
+      case "turn":
+        this.turns.adopt(chatId, rebuilt.turn, rebuilt.done);
+        return true;
+      case "undelivered":
+        // The queue stays paused, as after any failed turn: the next message starts it.
+        this.turns.abandon(chatId, rebuilt);
+        return false;
     }
   }
 
@@ -212,6 +255,8 @@ export class ChatOwner {
     for (const record of this.store.ownedChats()) {
       if (!record.seeded) void this.seed(record.info.chatId);
       this.publishLive(record.info.chatId);
+      // A rebuilt chat compares a fresh launch with its running agent's once the hub can answer.
+      void this.runtimes.get(record.info.chatId)?.checkLaunch();
     }
     this.kickReplication();
   }
@@ -450,7 +495,7 @@ export class ChatOwner {
         host: this.ctx.host,
         store: this.store,
         log: this.ctx.log,
-        launch: (id, agentId) => this.launch(id, agentId),
+        launch: (id, agentId, options) => this.launch(id, agentId, options),
         assertMayRun: (cwd) => this.ctx.lease.assertMayRun(cwd),
         spawnEnv: (env) => agentSpawnEnv(this.ctx, env),
         emit: (id, event) => this.emit(id, event),
@@ -468,8 +513,13 @@ export class ChatOwner {
   }
 
   /** The launch for the chat's agent: a fresh one from the hub, else the last one it gave. */
-  private async launch(chatId: string, agentId?: string): Promise<ChatLaunchReply> {
-    const cached = this.store.ownedChat(chatId)?.launch ?? null;
+  private async launch(
+    chatId: string,
+    agentId?: string,
+    options: { fresh?: boolean } = {},
+  ): Promise<ChatLaunchReply> {
+    if (options.fresh && !this.ctx.session.attached) throw new Error("The hub is not reachable");
+    const cached = options.fresh ? null : (this.store.ownedChat(chatId)?.launch ?? null);
     if (this.ctx.session.attached) {
       try {
         const params: ChatLaunchParams = { chatId, ...(agentId ? { agentId } : {}) };

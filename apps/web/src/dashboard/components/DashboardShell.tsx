@@ -50,9 +50,10 @@ import { collapsibleKeys, ORIGIN_COLLAPSE_KEY } from "../lib/sidebar-grouping";
 import { useDashboardStore } from "../stores/index";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { GroupNameDialog } from "./GroupDialogs";
+import { OPEN_SETTINGS_SECTION_EVENT } from "./QuickCommandsMenu";
 import { RepoList } from "./RepoList";
 import { ReposPanel } from "./ReposPanel";
-import { SettingsPage } from "./SettingsPage";
+import { SettingsPage, type SettingsSectionId } from "./SettingsPage";
 import { UpdateAvailableBadge } from "./UpdateAvailableBadge";
 
 interface DashboardShellProps {
@@ -104,6 +105,7 @@ export function DashboardShell({
   const { groups, loaded: groupsLoaded } = useGroupsQuery();
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [settingsHosts, setSettingsHosts] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId | undefined>();
   const [addingRepo, setAddingRepo] = useState(false);
   // Adding a repo needs an admin token.
   const admin = useQuery({
@@ -141,7 +143,19 @@ export function DashboardShell({
   useSetupStatusWatcher();
   useOriginChangeWatcher();
 
+  // Menus elsewhere (the quick commands menu) open Settings on a section.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      setSettingsHosts(false);
+      setSettingsSection((e as CustomEvent<SettingsSectionId>).detail);
+      setShowSettingsDialog(true);
+    };
+    window.addEventListener(OPEN_SETTINGS_SECTION_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, onOpen);
+  }, []);
+
   const handleSettingsClick = useCallback(() => {
+    setSettingsSection(undefined);
     setSettingsHosts(false);
     setShowSettingsDialog(true);
   }, []);
@@ -667,7 +681,7 @@ export function DashboardShell({
       <SettingsPage
         open={showSettingsDialog}
         onOpenChange={setShowSettingsDialog}
-        initialSection={settingsHosts ? "hosts" : undefined}
+        initialSection={settingsHosts ? "hosts" : settingsSection}
       />
     </div>
   );

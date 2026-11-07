@@ -538,7 +538,7 @@ export interface AgentStdio {
    * Set when a process outside the caller's reach holds the agent (the worker's agent daemon), so it
    * survives the link and the worker restarting. The same `agentId` reattaches it.
    */
-  held?: { agentId: string; specHash: string | null };
+  held?: { agentId: string; specHash: string | null; stdinWritten?: number; exited?: boolean };
   /**
    * Stops using the process and leaves it running. Set for a held agent, which the worker's agent
    * daemon keeps. Without it the only way to let go of the agent is `kill`.
@@ -571,6 +571,14 @@ export interface HostAcp {
     cwd: string,
     options?: { held?: boolean; owned?: boolean },
   ): Promise<AgentStdio>;
+  /**
+   * Takes over an agent the worker's agent daemon still holds, replaying its output from these byte
+   * offsets. Null when no daemon holds it. Absent on a host with no agent daemon.
+   */
+  reattach?(
+    agentId: string,
+    offsets: { stdout: number; stderr: number },
+  ): Promise<AgentStdio | null>;
 }
 
 /** What it takes to start a stdio MCP server (plan step 4.4). */

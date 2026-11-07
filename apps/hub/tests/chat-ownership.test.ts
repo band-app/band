@@ -463,11 +463,19 @@ describe("hub state follows the owner's events (S5)", () => {
       label: "status working",
       timeoutMs: 20_000,
     });
+    // The agent dies while the worker is down (this hub's lease is 1.5 s, and the agent daemon
+    // stops held agents when it runs out; killing the process makes that certain and does not
+    // depend on the daemon's watchdog). The restarted worker then finds no agent to take over.
+    // With an agent that survives, the turn carries on: chat-ownership-reattach.test.ts.
+    const agentPid = (w.stubRequests(owner, "session/prompt").at(-1) as { pid?: number }).pid;
     await w.killWorker(owner, "SIGKILL", { waitForLease: false });
+    if (agentPid) process.kill(agentPid, "SIGKILL");
     owner = await w.restartWorker(owner);
     await waitFor(async () => ((await worktreeStatus(wt)) === "failed" ? true : undefined), {
       label: "status failed after the restart",
       timeoutMs: 30_000,
+    }).catch((err: Error) => {
+      throw new Error(`${err.message}\n${owner.output()}`);
     });
     await waitQuiet(wt, chatId);
     const tasks = await w.q<{ tasks: Array<{ prompt: string; status: string }> }>("tasks.list", {

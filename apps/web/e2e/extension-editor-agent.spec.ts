@@ -156,14 +156,40 @@ test("S1: the selection shows as a chip and goes with the message unless it is r
   await expect.poll(() => promptTexts().some((t) => t.includes("plain question"))).toBe(true);
   expect(promptTexts().find((t) => t.includes("plain question"))).not.toContain("Selected in");
 
-  // A removed chip applies to one message: the selection comes back for the next one.
+  // A dismissed selection stays gone for later messages and after a reload.
+  await expect(chat.selectionChip).toHaveCount(0);
+  await chat.typeMessage("still no selection");
+  await chat.submit();
+  await expect.poll(() => promptTexts().some((t) => t.includes("still no selection"))).toBe(true);
+  expect(promptTexts().find((t) => t.includes("still no selection"))).not.toContain("Selected in");
+  await chat.reload();
+  await chat.showChat();
+  await expect(chat.selectionChip).toHaveCount(0);
+
+  // A new selection brings the chip back, and it goes with one message only.
+  await editor.showTab(NOTE);
+  await editor.selectText(NOTE, 0, 4);
+  await chat.showChat();
   await expect(chat.selectionChip).toBeVisible();
   await chat.typeMessage("what is this word");
   await chat.submit();
   await expect.poll(() => promptTexts().some((t) => t.includes("what is this word"))).toBe(true);
   expect(promptTexts().find((t) => t.includes("what is this word"))).toContain(
-    `Selected in ${NOTE} (text-editor/text): chars 0-5\nAddress: chars:0-5\nhello`,
+    `Selected in ${NOTE} (text-editor/text): chars 0-4\nAddress: chars:0-4\nhell`,
   );
+  await expect(chat.selectionChip).toHaveCount(0);
+  await chat.typeMessage("and the next one");
+  await chat.submit();
+  await expect.poll(() => promptTexts().some((t) => t.includes("and the next one"))).toBe(true);
+  expect(promptTexts().find((t) => t.includes("and the next one"))).not.toContain("Selected in");
+  await chat.reload();
+  await chat.showChat();
+  await expect(chat.selectionChip).toHaveCount(0);
+
+  await editor.showTab(NOTE);
+  await editor.selectText(NOTE, 0, 5);
+  await chat.showChat();
+  await expect(chat.selectionChip).toBeVisible();
 
   // A collapsed selection clears the chip.
   await editor.showTab(NOTE);
@@ -171,6 +197,75 @@ test("S1: the selection shows as a chip and goes with the message unless it is r
   await chat.showChat();
   await expect(chat.selectionChip).toHaveCount(0);
   await expect(chat.stopButton).toHaveCount(0);
+});
+
+test("a sent message shows the selection as a chip, and keeps it after a reload", async ({
+  page,
+}) => {
+  const { editor, chat } = await openEditorAndChat(page, true);
+  await editor.selectText(NOTE, 0, 5);
+  await chat.showChat();
+  await expect(chat.selectionChip).toBeVisible();
+  await chat.typeMessage("chip in history");
+  await chat.submit();
+  const chip = chat.sentSelectionChip("chip in history");
+  await expect(chip).toHaveText("chars 0-5 · note.band-test");
+  await expect(chat.userMessage("chip in history")).not.toContainText("Selected in");
+  await expect(chat.userMessage("chip in history")).not.toContainText("Address:");
+  // The agent still gets the whole block.
+  await expect.poll(() => promptTexts().some((t) => t.includes("chip in history"))).toBe(true);
+  expect(promptTexts().find((t) => t.includes("chip in history"))).toContain(
+    `Selected in ${NOTE} (text-editor/text): chars 0-5\nAddress: chars:0-5\nhello`,
+  );
+  // Hover shows the selected text; a tap does too.
+  await chip.hover();
+  await expect(chat.sentSelectionText).toHaveText("hello");
+  await chat.reload();
+  await chat.waitForReady();
+  await expect(chat.sentSelectionChip("chip in history")).toHaveText("chars 0-5 · note.band-test");
+  await chat.sentSelectionChip("chip in history").click();
+  await expect(chat.sentSelectionText).toHaveText("hello");
+});
+
+test("a message that only mentions Selected in stays plain text", async ({ page }) => {
+  const { chat } = await openEditorAndChat(page, false);
+  // The hub keeps an earlier test's selection; drop it from this message so none is attached.
+  if (await chat.selectionChip.isVisible()) await chat.removeSelectionChip();
+  await chat.typeMessage("Selected in the sheet yesterday");
+  await chat.submit();
+  await expect(chat.userMessage("Selected in the sheet yesterday")).toBeVisible();
+  await expect(chat.sentSelectionChip("Selected in the sheet yesterday")).toHaveCount(0);
+});
+
+test("closing the editor tab clears the chip on every device, a reload keeps it", async ({
+  page,
+  browser,
+}) => {
+  const { editor, chat } = await openEditorAndChat(page, true);
+  await editor.selectText(NOTE, 0, 5);
+  await chat.showChat();
+  await expect(chat.selectionChip).toBeVisible();
+
+  const second = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+  try {
+    const otherChat = new ChatPanePage(await second.newPage(), server.url, TOKEN);
+    await otherChat.goto(worktreeId);
+    await otherChat.waitForReady();
+    await expect(otherChat.selectionChip).toBeVisible();
+
+    // A reload only unmounts the editor: the selection stays.
+    await chat.reload();
+    await chat.waitForReady();
+    await expect(chat.selectionChip).toBeVisible();
+
+    await editor.showTab(NOTE);
+    await editor.closeTab(NOTE);
+    await chat.showChat();
+    await expect(chat.selectionChip).toHaveCount(0);
+    await expect(otherChat.selectionChip).toHaveCount(0);
+  } finally {
+    await second.close();
+  }
 });
 
 test("S3: the agent edits the open tab's document, the tab shows it unsaved, and saving writes it", async ({

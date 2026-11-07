@@ -202,14 +202,14 @@ Control messages are NDJSON on the service's stdin (worker to service) and stdou
 | `stream.open { streamId, name, params, worktreeKey, worktreePath }` | Opens a live stream. |
 | `stream.close { streamId }` | The viewer left. |
 | `worktree.env { worktreeKey, worktreePath }` | Answers `{ env }`: variables for the agents and terminals of the worktree. See above. |
-| `worktree.release { worktreeKey, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). |
+| `worktree.release { worktreeKey, worktreePath, reason }` | `removed` (delete state), `fenced` or `shutdown` (keep it). For a removed worktree the service did not serve since it started, `worktreeKey` is `""` and only `worktreePath` is set. |
 | `stop` | Exit after finishing up. The worker kills the process after 3 s. |
 
 The service sends the notification `stream.end { streamId }` to end a stream. Stream data does not use stdio. It goes over file descriptor 3, a pipe the worker opens beside stdio, as binary frames: a 4-byte big-endian length, a 4-byte stream id, a kind byte (0 text, 1 bytes) and the payload, in both directions. The hub reaches a service with the same `plugin.call` and `plugin.stream` link methods as a bundled worker plugin.
 
 ### Who can reach a service
 
-Same rule as a bundled worker plugin's stream. `GET /api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) accepts any device token, admin or not. The viewer is view-only until the person sends `{"type":"control","enabled":true}`, and the hub drops every other message from a view-only viewer before it reaches the service. Any number of viewers may hold a stream of one panel at once (two devices): each gets its own stream to the service, and the hub does not refuse a second one. An agent never reaches a service: the worker relay lists no such route (WebSocket routes are not relayed), `extensions.callService` is admin only, and `extensions.*` is left out of the MCP endpoint and the relay.
+Same rule as a bundled worker plugin's stream. `GET /api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) accepts any device token, admin or not. Text messages from the viewer reach the service from the start. The old `{"type":"control",...}` frame is accepted and ignored. An agent never reaches a service: the worker relay lists no such route (WebSocket routes are not relayed), `extensions.callService` is admin only, and `extensions.*` is left out of the MCP endpoint and the relay. Any number of viewers may hold a stream of one panel at once (two devices): each gets its own stream to the service, and the hub does not refuse a second one.
 
 ### Keeping a worker in step
 
@@ -236,7 +236,8 @@ defineWorkerService({
     },
   },
   worktreeEnv: ({ worktreeKey }) => ({ DISPLAY: ":7" }),
-  onRelease: (worktreeKey, reason) => {},
+  onRelease: (worktreeKey, reason, worktreePath) => {},
+  onReleasePath: (worktreePath) => {}, // a removed worktree this run never served
   onStop: () => {},
 });
 ```
@@ -246,7 +247,8 @@ defineWorkerService({
 ### Limits
 
 - Panels and tools are described above. `extensions.callService` (admin) and `/api/plugins/<capability>/worktrees/<worktreeId>/stream` (stream name `screen`) still reach a service directly.
-- A service's scopes (the worktrees it served) are kept in memory, so `worktree.release { reason: "removed" }` does not reach a worktree the service last served before a restart.
+- A service's scopes (the worktrees it served) are kept in memory. When a worktree is removed that the service has not served since it started, the worker sends `worktree.release` with an empty `worktreeKey` and the path, and the SDK calls `onReleasePath(path)`. A service that must act on such a worktree keeps its own index from key to path.
+- The worker passes one `BAND_*` variable to a service, `BAND_SIMULATOR_NAME_PREFIX`, which test runs set.
 
 ## Panels
 
@@ -259,15 +261,16 @@ An extension can add a worktree panel: a page in the center "+" menu that is not
 }
 ```
 
-`capability` must be the capability of one of the extension's own services. The menu offers the panel when the worktree's worker is online and its service runs there, so a restricted worker, a worker that fails `requires` and the hub's own machine show nothing. `icon` is one of `globe`, `terminal`, `monitor`, `smartphone`, `image`, `box`, `play`, `activity`; any other name gets a puzzle icon. The tab stays mounted while hidden and is saved with the other center tabs. A panel may set `"defaultControl": true` (default false): Band then sends the control request itself as soon as the first stream connects, and again after each reconnect, so input reaches the service without pressing Take control. Release still works and stays released for that tab until the page reconnects. The hub rule is unchanged, since a stream is view-only until the control message arrives.
+`capability` must be the capability of one of the extension's own services. The menu offers the panel when the worktree's worker is online and its service runs there, so a restricted worker, a worker that fails `requires` and the hub's own machine show nothing. `icon` is one of `globe`, `terminal`, `monitor`, `smartphone`, `image`, `box`, `play`, `activity`; any other name gets a puzzle icon. The tab stays mounted while hidden and is saved with the other center tabs. `"defaultControl"` is still accepted so existing manifests load, and has no effect: input is always on.
 
-A panel may set `"binaryInput": true` (default false) to send binary frames to the service, for a protocol such as VNC. The page sends them with `stream.send { id, message }` where `message` is an `ArrayBuffer` or typed array. While the person is in control, the hub passes each binary frame (1 MiB at most) to the service; while the stream is view-only the hub drops it. Without the flag every binary frame from the page is dropped, as before, and text frames behave the same either way.
+A panel may set `"binaryInput": true` (default false) to send binary frames to the service, for a protocol such as VNC. The page sends them with `stream.send { id, message }` where `message` is an `ArrayBuffer` or typed array. The hub passes each binary frame (1 MiB at most) to the service, from the start like text frames. Without the flag every binary frame from the page is dropped, as before, and text frames behave the same either way.
 
 The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like an editor, so it has no Band cookie, token or storage. Band posts `{ type: "band:hello", extensionApi: 1 }` with one transferred `MessagePort`. Everything else goes over that port.
 
 From Band to the page:
 
-- `init { worktreeId, theme, layout, visible }`, sent once. The page answers `{ type: "ready" }`.
+- `init { worktreeId, theme, layout, visible }`, sent once. `theme` is `{ mode, tokens }`, the same shape editors get. The page answers `{ type: "ready" }`.
+- `theme { mode, tokens }` whenever Band's theme changes (light or dark, Settings > Appearance edits), the same message editors get.
 - `stream.opened { id }`, `stream.frame { id, data }` (an `ArrayBuffer`), `stream.message { id, text }` and `stream.closed { id, code, reason }`.
 - `call.result { id, result }` and `call.error { id, message }`.
 - `control { enabled }`, `visible { visible }` and `layout { layout }`.
@@ -279,7 +282,7 @@ From the page to Band:
 - `stream.close { id }`.
 - `call { id, method, params }` calls `method` of the service on this worktree's worker and answers with `call.result` or `call.error`.
 
-A stream is view-only. The hub drops everything the page sends until the person presses Take control in Band's own toolbar above the frame. The page cannot press it. Releasing control returns the stream to view-only, and a stream that opens while the person has control starts in control mode. Binary messages from the page are always dropped.
+Input is always on. The hub passes every text message the page sends to the service from the start, and Band sends the page `control { enabled: true }` once its first stream opens, so pages written for the older view-only protocol enable their input. Band has no Take control button for panels. Binary messages from the page are always dropped.
 
 Frames go from the service through the worker, the link and the hub to the browser. In the desktop app, for a worktree on this Mac's own worker, the panel opens the stream on the worker's loopback listener instead (`ws://127.0.0.1:<port>/plugins/<capability>/stream?worktreeId=<id>&name=<stream>&params=<json>`, the same checks as the terminal socket: `Host`, `Origin`, token and worktree), and falls back to the hub route when that socket cannot open. Either way the service's `params` carry `profile`: `"direct"` on the loopback path (no hub link carries the frames, so a full-size, full-rate stream is fine) and `"hub"` through the hub (send smaller frames at a capped rate). Band sets `profile` after the page's own params, so the page cannot choose it. The hub route is `/api/extensions/<extension id>/worktrees/<worktree id>/stream?panel=<panel id>&name=<stream>&params=<json>`. It takes any device token and closes with code 4001 and a reason when the panel, the service or the worker is missing. Agents never reach it: the worker relay lists neither the route nor `extensions.panelCall`, and the MCP endpoint leaves `extensions.*` out.
 

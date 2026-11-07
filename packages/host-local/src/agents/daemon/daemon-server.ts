@@ -107,6 +107,8 @@ interface Held {
    * within the reattach timeout is an orphan: the hub that ran it is gone.
    */
   unattachedSince: number | null;
+  /** The daemon signalled the agent to stop (lease, orphan clock) and it has not exited yet. */
+  stopping?: boolean;
 }
 
 export interface DaemonOptions {
@@ -294,6 +296,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
 
   /** SIGTERM, then SIGKILL after the grace period for an agent that ignores it. */
   function killAgent(agent: Held): void {
+    agent.stopping = true;
     signalGroup(agent.child, "SIGTERM");
     const pid = agent.record.pid;
     if (pid) {
@@ -613,6 +616,15 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         t: "exit",
         id: agent.record.agentId,
         ...agent.record.exit,
+      } satisfies StreamEvent);
+    } else if (agent.stopping) {
+      // Signalled to stop and not gone yet (an adapter may take its grace period to die): a worker
+      // that attaches now must not start a turn on it. Its real exit follows and is ignored.
+      send(client, "stream", {
+        t: "exit",
+        id: agent.record.agentId,
+        code: null,
+        signal: "SIGTERM",
       } satisfies StreamEvent);
     }
     return { ...agent.record };

@@ -89,4 +89,7 @@ defineWorkerService({
   onRelease(key, reason) {
     released.push(`${key}:${reason}`);
   },
+  onReleasePath(path) {
+    released.push(`:path:${path}`);
+  },
 });
