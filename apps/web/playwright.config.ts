@@ -35,6 +35,7 @@ const quarantine = playwrightFilter(
 );
 
 export default defineConfig({
+  globalTeardown: "./e2e/global-teardown.ts",
   testDir: "./e2e",
   ...quarantine,
   // CI retries a failed spec once. The JSON reporter marks a spec that passed on the retry

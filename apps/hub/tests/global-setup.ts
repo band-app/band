@@ -6,6 +6,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+// @ts-expect-error plain .mjs without types
+import { sweepSimulatorTestDevices } from "../../../scripts/test-env.mjs";
 
 const CLI_DIR = resolve(import.meta.dirname, "..", "..", "cli");
 const EXE = process.platform === "win32" ? "band.exe" : "band";
@@ -37,6 +39,14 @@ function freshBuiltCli(sourceMtime: number): string | null {
     if (mtime >= sourceMtime && (!best || mtime > best.mtime)) best = { path, mtime };
   }
   return best?.path ?? null;
+}
+
+/**
+ * Runs after the suite, even when tests failed: deletes the simulator devices this run named with
+ * its `band-test-*` prefix and any older run's leftovers. Only names with that prefix are touched.
+ */
+export function teardown(): void {
+  sweepSimulatorTestDevices({ prefix: process.env.BAND_SIMULATOR_NAME_PREFIX });
 }
 
 export default function setup(): void {

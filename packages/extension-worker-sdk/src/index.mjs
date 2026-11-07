@@ -73,7 +73,8 @@ export function defineWorkerService(definition) {
         return null;
       }
       case "worktree.release":
-        await definition.onRelease?.(p.worktreeKey, p.reason);
+        if (p.worktreeKey) await definition.onRelease?.(p.worktreeKey, p.reason, p.worktreePath);
+        else if (p.worktreePath) await definition.onReleasePath?.(p.worktreePath);
         return null;
       case "stop":
         for (const [id, entry] of streams) {
