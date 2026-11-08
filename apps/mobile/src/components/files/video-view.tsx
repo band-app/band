@@ -7,6 +7,8 @@ import { colors } from "../../theme";
 /**
  * A worktree video from the hub, with the system's playback controls. The hub answers Range
  * requests, so seeking works. The player sends the Bearer token as a header, never in the URL.
+ * Frame analysis is off: iOS adds a "lift subject" overlay to a paused frame that competes with the
+ * controls for taps, and a viewer has no use for it.
  */
 export function VideoPlayer({
   hubUrl,
@@ -40,6 +42,7 @@ export function VideoPlayer({
         player={player}
         style={styles.fill}
         nativeControls
+        allowsVideoFrameAnalysis={false}
         contentFit="contain"
         accessibilityLabel={baseName(path)}
         testID="file__video"
