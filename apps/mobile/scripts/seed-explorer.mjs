@@ -5,8 +5,9 @@
  * of each change kind: modified, added (staged), renamed (staged), deleted and untracked.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const BULK_FILES = 3000;
 
@@ -57,6 +58,8 @@ export async function seedExplorer(state, root, { trpc, png }) {
   write(dir, "src/old.ts", "export const obsolete = true;\n");
   write(dir, "src/long-line.ts", `export const long = "${"x".repeat(300)}";\nexport const short = 1;\n`);
   write(dir, "assets/pixel.png", png);
+  // A 60 s clip with a running timecode, for the video viewer flows.
+  write(dir, "media/clip.mp4", readFileSync(fileURLToPath(new URL("../e2e/assets/clip.mp4", import.meta.url))));
   write(dir, "assets/blob.bin", Buffer.from([0x00, 0x01, 0x02, 0xff, 0x00, 0xfe]));
   write(dir, "data/big.txt", Array.from({ length: 30_000 }, (_, i) => `line ${i} of the big file, padded out to make it large`).join("\n"));
   for (let i = 1; i <= BULK_FILES; i++) {

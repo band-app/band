@@ -146,6 +146,7 @@ Check each tool first and install only what is missing. All of it is user space 
 | `perf-c3-fling.yaml` | Flings through a 1,610-event chat; no blank rows after the list settles, and the flow fails when the frame log's longest JS gap during the flings is over 100 ms (the numbers go into the report). Runs only with `--perf`. |
 | `x1-explorer-tree.yaml` | Views > Explorer lists the tree; a folder opens and closes; the 3,000-file `bulk` folder expands and scrolls. |
 | `x2-file-viewer.yaml` | Code with line numbers and Copy, markdown Rendered/Source, an image, and "Can't preview this file" for a binary, a file over 1 MB and a PDF. |
+| `x6-video.yaml` | `media/clip.mp4` (a 60 s clip with a timecode, from `e2e/assets/clip.mp4`) opens in the system player. A tap shows the controls and the centre button plays and pauses. The top-left button opens fullscreen, which covers the file header and follows rotation, and closing it returns to the file screen. A back swipe from the left edge returns to the explorer. AVKit draws the controls outside the accessibility tree, so the flow taps them by position and the screenshots are the evidence. |
 | `x3-search.yaml` | Name search (fuzzy) and content search; a content match opens the file at its line. |
 | `x4-changes-diff.yaml` | Changes shows the web's sections with counts; a change opens its native diff. |
 | `x5-refresh.yaml` | Pull to refresh picks up a file the control server's `/explorer-change` adds, and Changes re-reads on its own. |
