@@ -55,8 +55,8 @@ interface CrossPanelHandlers {
   onFileOpened: (worktreeId: string) => void;
   /** Called by a leaf to register/unregister its find-in-file callback. */
   onFindInFile: (worktreeId: string, fn: (() => void) | null) => void;
-  /** Bring the Files leaf to the foreground (external-open flow). */
-  onActivateFilesPanel: (worktreeId: string) => void;
+  /** Open a file outside the worktree as a focused external tab. */
+  onOpenExternalFile: (worktreeId: string, location: string) => void;
   /** Bring a Terminal leaf to the foreground ("Continue in terminal"). */
   onActivateTerminalPanel: (worktreeId: string) => void;
 }
@@ -69,7 +69,7 @@ export const crossPanelHandlers: CrossPanelHandlers = {
   onSelectFile: () => {},
   onFileOpened: () => {},
   onFindInFile: () => {},
-  onActivateFilesPanel: () => {},
+  onOpenExternalFile: () => {},
   onActivateTerminalPanel: () => {},
 };
 
@@ -242,11 +242,6 @@ export function SharedWorktreeLayout() {
     else findInFileRegistry.current.delete(worktreeId);
   }, []);
 
-  const handleActivateFilesPanel = useCallback((_worktreeId: string) => {
-    // "Reveal files" now means reveal the right sidepanel's Explorer tab.
-    revealRightPanel("explorer");
-  }, []);
-
   const handleActivateTerminalPanel = useCallback((worktreeId: string) => {
     if (worktreeId !== activeWorktreeIdRef.current) return;
     activateLeafOfKind(worktreeId, "term");
@@ -257,7 +252,7 @@ export function SharedWorktreeLayout() {
   crossPanelHandlers.onFileOpened = handleFileOpened;
   crossPanelHandlers.onSelectFile = handleSelectFile;
   crossPanelHandlers.onFindInFile = handleSetFindInFile;
-  crossPanelHandlers.onActivateFilesPanel = handleActivateFilesPanel;
+  crossPanelHandlers.onOpenExternalFile = handleOpenExternalFile;
   crossPanelHandlers.onActivateTerminalPanel = handleActivateTerminalPanel;
 
   // ---------------------------------------------------------------------
