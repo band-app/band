@@ -1,16 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   dispatchOpenFileEvent,
   type OpenFileDispatchHandlers,
 } from "../src/lib/dispatch-open-file";
-import { consumeExternalOpen } from "../src/lib/pending-external-open";
 
 // ---------------------------------------------------------------------------
 // dispatchOpenFileEvent — pure dispatcher for `band open` SSE events on
 // the desktop layout.
 //
 //   in-worktree   →  onOpenFile
-//   external       →  enqueue + onActivateFilesPanel
+//   external       →  onOpenExternalFile
 //
 // Mobile is handled by the caller (`__root.tsx`) — the SSE listener
 // short-circuits before reaching the dispatcher when `useDesktopLayout`
@@ -26,11 +25,11 @@ import { consumeExternalOpen } from "../src/lib/pending-external-open";
 
 function makeHandlers(): OpenFileDispatchHandlers & {
   onOpenFile: ReturnType<typeof vi.fn>;
-  onActivateFilesPanel: ReturnType<typeof vi.fn>;
+  onOpenExternalFile: ReturnType<typeof vi.fn>;
 } {
   return {
     onOpenFile: vi.fn(),
-    onActivateFilesPanel: vi.fn(),
+    onOpenExternalFile: vi.fn(),
   };
 }
 
@@ -46,14 +45,6 @@ function openFileEvent(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 describe("dispatchOpenFileEvent", () => {
-  // The pending-external-open store is module-level state; drain after
-  // every test so cross-test pollution can't make an "external" assertion
-  // pass spuriously because a previous test's entry was still around.
-  afterEach(() => {
-    consumeExternalOpen("my-repo-feat-x");
-    consumeExternalOpen("other-worktree");
-  });
-
   // -------------------------------------------------------------------
   // Happy paths
   // -------------------------------------------------------------------
@@ -67,12 +58,10 @@ describe("dispatchOpenFileEvent", () => {
       "my-repo-feat-x",
       "src/foo.rs:42:5",
     );
-    expect(handlers.onActivateFilesPanel).not.toHaveBeenCalled();
-    // External path is worktree-relative — no enqueue.
-    expect(consumeExternalOpen("my-repo-feat-x")).toBeUndefined();
+    expect(handlers.onOpenExternalFile).not.toHaveBeenCalled();
   });
 
-  it("external → enqueues + activates Files panel", () => {
+  it("external → onOpenExternalFile", () => {
     const handlers = makeHandlers();
     const result = dispatchOpenFileEvent(
       openFileEvent({ filePath: "/abs/path/foo.rs:7", external: true }),
@@ -80,13 +69,11 @@ describe("dispatchOpenFileEvent", () => {
     );
 
     expect(result).toEqual({ handled: true, kind: "external" });
-    expect(handlers.onActivateFilesPanel).toHaveBeenCalledExactlyOnceWith("my-repo-feat-x");
+    expect(handlers.onOpenExternalFile).toHaveBeenCalledExactlyOnceWith(
+      "my-repo-feat-x",
+      "/abs/path/foo.rs:7",
+    );
     expect(handlers.onOpenFile).not.toHaveBeenCalled();
-    // The CodeBrowserView in the (now-active) Files panel will drain
-    // this on its next subscriber tick.
-    expect(consumeExternalOpen("my-repo-feat-x")).toEqual({
-      filePath: "/abs/path/foo.rs:7",
-    });
   });
 
   // -------------------------------------------------------------------
@@ -105,7 +92,7 @@ describe("dispatchOpenFileEvent", () => {
 
     expect(result).toEqual({ handled: false, reason: "not-open-file" });
     expect(handlers.onOpenFile).not.toHaveBeenCalled();
-    expect(handlers.onActivateFilesPanel).not.toHaveBeenCalled();
+    expect(handlers.onOpenExternalFile).not.toHaveBeenCalled();
   });
 
   it("ignores open-file events with no worktreeId", () => {
@@ -138,13 +125,6 @@ describe("dispatchOpenFileEvent", () => {
 // ---------------------------------------------------------------------------
 
 describe("dispatchOpenFileEvent — suffix passthrough", () => {
-  beforeEach(() => {
-    // Defensive drain — the suite above already cleans up, but if these
-    // run in a different order or in isolation the assertions below
-    // must still see a fresh queue.
-    consumeExternalOpen("my-repo-feat-x");
-  });
-
   it("forwards :line:col suffix verbatim on the in-worktree path", () => {
     const handlers = makeHandlers();
     dispatchOpenFileEvent(openFileEvent({ filePath: "src/main.rs:42:5" }), handlers);
@@ -152,15 +132,13 @@ describe("dispatchOpenFileEvent — suffix passthrough", () => {
     expect(handlers.onOpenFile).toHaveBeenCalledWith("my-repo-feat-x", "src/main.rs:42:5");
   });
 
-  it("preserves suffix in the queued external entry", () => {
+  it("forwards the suffix on the external path", () => {
     const handlers = makeHandlers();
     dispatchOpenFileEvent(
       openFileEvent({ filePath: "/abs/logs.txt:2:3", external: true }),
       handlers,
     );
 
-    expect(consumeExternalOpen("my-repo-feat-x")).toEqual({
-      filePath: "/abs/logs.txt:2:3",
-    });
+    expect(handlers.onOpenExternalFile).toHaveBeenCalledWith("my-repo-feat-x", "/abs/logs.txt:2:3");
   });
 });

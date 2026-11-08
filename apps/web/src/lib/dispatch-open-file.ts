@@ -5,7 +5,7 @@
  * `open-file` event, decides which side-effecting handler to call:
  *
  *   in-worktree   →  onOpenFile
- *   external       →  enqueue + onActivateFilesPanel
+ *   external       →  onOpenExternalFile
  *
  * Mobile / narrow web is handled by the caller — it short-circuits before
  * reaching the dispatcher (see `__root.tsx`). Rationale: post the route-
@@ -14,8 +14,6 @@
  * open-file event has nowhere to land on mobile. `band open` is a
  * desktop developer affordance.
  */
-
-import { enqueueExternalOpen } from "./pending-external-open";
 
 export interface OpenFileDispatchHandlers {
   /**
@@ -27,12 +25,11 @@ export interface OpenFileDispatchHandlers {
    */
   onOpenFile: (worktreeId: string, filePath: string) => void;
   /**
-   * Layout path for external files. Activates the Files panel
-   * without touching its current-file state (the actual file open is
-   * driven by the pending-external-open queue, which the always-mounted
-   * `CodeBrowserView` drains).
+   * Layout path for external files (absolute paths outside the
+   * worktree). Opens and focuses an external tab, the same one Quick
+   * Open opens. `location` may carry a `:line[:col]` suffix.
    */
-  onActivateFilesPanel: (worktreeId: string) => void;
+  onOpenExternalFile: (worktreeId: string, location: string) => void;
 }
 
 export type OpenFileDispatchResult =
@@ -44,10 +41,7 @@ export type OpenFileDispatchResult =
 
 /**
  * Decide how to handle an `open-file` SSE event. Pure-ish — the only
- * side effect outside the supplied handlers is the
- * `enqueueExternalOpen` write for external paths, which is part of the
- * dispatcher's contract (the renderer-side queue is the only place
- * absolute paths can live without corrupting routing state).
+ * side effects are the supplied handlers.
  *
  * Accepts the raw SSE payload shape (`Record<string, unknown>`) rather
  * than `StatusEvent` because the SSE stream is shared across all event
@@ -69,10 +63,7 @@ export function dispatchOpenFileEvent(
   if (!filePath) return { handled: false, reason: "missing-file-path" };
 
   if (event.external === true) {
-    // External files: queue first (so a freshly-mounting CodeBrowserView
-    // catches it on mount), then surface the Files panel.
-    enqueueExternalOpen(worktreeId, filePath);
-    handlers.onActivateFilesPanel(worktreeId);
+    handlers.onOpenExternalFile(worktreeId, filePath);
     return { handled: true, kind: "external" };
   }
 

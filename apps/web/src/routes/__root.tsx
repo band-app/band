@@ -473,7 +473,7 @@ function AppShell() {
       if (!useDesktopLayoutRef.current) return;
       dispatchOpenFileEvent(event, {
         onOpenFile: crossPanelHandlers.onOpenFile,
-        onActivateFilesPanel: crossPanelHandlers.onActivateFilesPanel,
+        onOpenExternalFile: crossPanelHandlers.onOpenExternalFile,
       });
     });
     return unsubscribe;
