@@ -11,10 +11,18 @@ export interface BandNative {
   symbolPNG(name: string, pointSize: number, weight: number, scale: number): Buffer | null;
 }
 
-/** Where `native/build.mjs` writes the addon, relative to `dist/main/main/services`. In a packaged app it is unpacked from the asar. */
-export function nativeAddonPath(here: string = dirname(fileURLToPath(import.meta.url))): string {
-  const path = join(here, "..", "..", "..", "..", "native", "build", "band-native.node");
-  return path.replace(`app.asar${"/"}`, `app.asar.unpacked${"/"}`);
+/**
+ * Where the addon is. In a repo build `native/build.mjs` writes it beside `dist/`
+ * (`here` is `dist/main/main/services`). A packaged app runs from the asar and ships the addon as
+ * an extra resource, `Resources/native/band-native.node` (`electron-builder.yml`).
+ */
+export function nativeAddonPath(
+  here: string = dirname(fileURLToPath(import.meta.url)),
+  resourcesPath: string | undefined = process.resourcesPath,
+): string {
+  if (here.includes(`app.asar${"/"}`) && resourcesPath)
+    return join(resourcesPath, "native", "band-native.node");
+  return join(here, "..", "..", "..", "..", "native", "build", "band-native.node");
 }
 
 /**

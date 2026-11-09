@@ -94,13 +94,15 @@ describe("the optional native addon", () => {
     assert.equal(loadNative({}, "/x.node", "linux"), null);
   });
 
-  test("the addon path is unpacked from the asar in a packaged app", () => {
-    const path = nativeAddonPath(
-      "/Applications/Band.app/Contents/Resources/app.asar/dist/main/main/services",
+  test("a packaged app loads the addon from Resources/native, a repo build from native/build", () => {
+    const resources = "/Applications/Band.app/Contents/Resources";
+    assert.equal(
+      nativeAddonPath(`${resources}/app.asar/dist/main/main/services`, resources),
+      `${resources}/native/band-native.node`,
     );
     assert.equal(
-      path,
-      "/Applications/Band.app/Contents/Resources/app.asar.unpacked/native/build/band-native.node",
+      nativeAddonPath("/repo/apps/desktop/dist/main/main/services", resources),
+      "/repo/apps/desktop/native/build/band-native.node",
     );
   });
 });
