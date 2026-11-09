@@ -111,15 +111,17 @@ test.describe("Git pull with local changes", () => {
       "Pull skipped: commit or stash your local changes first (README.md).",
     );
 
-    // The card slides in from 8px lower, so wait for it to settle.
+    // The cards slide in from 8px lower, so wait for them to settle.
     await expect
       .poll(async () => {
-        const { bottom, viewportHeight } = await toasts.readPlacement(notice);
+        const { bottom, viewportHeight } = await toasts.readPlacement(toasts.host);
         return Math.round(viewportHeight - bottom);
       })
       .toBe(GUTTER);
+    // The stack sits in the corner; other notifications (CLI, hooks) may stack below this one.
+    const corner = await toasts.readPlacement(toasts.host);
+    expect(Math.round(corner.viewportWidth - corner.right)).toBe(GUTTER);
     const placement = await toasts.readPlacement(notice);
-    expect(Math.round(placement.viewportWidth - placement.right)).toBe(GUTTER);
     expect(placement.left).toBeGreaterThan(placement.viewportWidth / 2);
     expect(placement.top).toBeGreaterThan(placement.viewportHeight / 2);
   });
