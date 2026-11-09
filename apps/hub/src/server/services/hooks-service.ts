@@ -48,6 +48,20 @@ export function removeHooks(hostId: string = LOCAL_HOST_ID, agent?: HookAgentTyp
   return hostOf(hostId).agentEnv.removeHooks(agent);
 }
 
+/**
+ * The hub's own capability report. `info()` never waits for the first probe,
+ * so right after boot there is none; ask again for up to 15 seconds so a
+ * dashboard that loads then still lists the installed agents.
+ */
+async function localReport(host: ReturnType<typeof hostOf>) {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const report = (await host.info()).report;
+    if (report) return report;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return undefined;
+}
+
 async function agentOn(hostId: string, agents: string[], type: HookAgentType): Promise<boolean> {
   if (hostId !== LOCAL_HOST_ID) return agents.includes(type);
   const host = hostOf(hostId);
@@ -61,8 +75,8 @@ async function agentOn(hostId: string, agents: string[], type: HookAgentType): P
   try {
     // The hub's own machine reports which CLIs are installed. Launching an
     // agent resolves for every type, so it says nothing about the CLI.
-    const found = (await host.info()).report?.agents.find((a) => a.type === type);
-    return found?.installed === true;
+    const report = await localReport(host);
+    return report?.agents.find((a) => a.type === type)?.installed === true;
   } catch {
     return false;
   }
