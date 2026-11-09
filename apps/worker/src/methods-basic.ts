@@ -3,7 +3,14 @@ import type { Dirent } from "node:fs";
 import { readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
-import type { ClaudeCliArgs, ExecOptions, ScriptLabel, ScriptPlan } from "@band-app/host-api";
+import {
+  type ClaudeCliArgs,
+  type ExecOptions,
+  HOOK_AGENT_TYPES,
+  type HookAgentType,
+  type ScriptLabel,
+  type ScriptPlan,
+} from "@band-app/host-api";
 import { RpcError } from "@band-app/link";
 import { describeHost, type Registrar, type WorkerContext } from "./context.ts";
 import { PathDeniedError } from "./path-policy.ts";
@@ -357,9 +364,17 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
       audio: await readAudio(ctx, a.audio),
     }),
   );
-  r.json("agentEnv.hooksStatus", () => host.agentEnv.hooksStatus());
-  r.json("agentEnv.installHooks", () => host.agentEnv.installHooks());
-  r.json("agentEnv.removeHooks", () => host.agentEnv.removeHooks());
+  // `agent` is left out by a hub older than the Codex, Gemini and OpenCode hooks: Claude Code.
+  const hookAgent = (a: Record<string, unknown>): HookAgentType => {
+    const agent = optStr(a, "agent") ?? "claude-code";
+    if (!(HOOK_AGENT_TYPES as readonly string[]).includes(agent)) {
+      throw new Error(`No hooks for agent "${agent}"`);
+    }
+    return agent as HookAgentType;
+  };
+  r.json("agentEnv.hooksStatus", (a) => host.agentEnv.hooksStatus(hookAgent(a)));
+  r.json("agentEnv.installHooks", (a) => host.agentEnv.installHooks(hookAgent(a)));
+  r.json("agentEnv.removeHooks", (a) => host.agentEnv.removeHooks(hookAgent(a)));
 
   return () => {
     for (const plan of plans.values()) plan.dispose();

@@ -8,6 +8,14 @@
 export interface SpawnOptions {
   /** Shell command to auto-run after the PTY spawns. */
   command?: string;
+  /**
+   * Command that resumes the agent this terminal ran, from the hub's agent
+   * session record. Used only when a saved terminal is cold-restored and
+   * `command` is absent. `null` means the agent's session ended and nothing
+   * resumes; absent means the hub knows nothing, so the pool looks for the
+   * newest Claude Code transcript.
+   */
+  resumeCommand?: string | null;
   /** Working directory, resolved relative to the worktree root. */
   cwd?: string;
   /** Extra environment variables merged into the base env. */

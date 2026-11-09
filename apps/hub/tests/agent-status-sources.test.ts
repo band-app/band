@@ -180,6 +180,42 @@ describe("worktree status from chats and hook sessions", () => {
     expect(await worktreeStatus(server.url)).toBe("idle");
   });
 
+  it("a chat and a terminal each keep their own state on their tab", async () => {
+    const chatId = newChatId();
+    const terminalId = randomUUID();
+    const { done } = await startLongTurn(chatId);
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      dispatch: "terminal",
+      terminalId,
+      payload: claudeHook(repo, "chat-and-term", {
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+      }),
+    });
+    const data = await trpc<{ tabStatuses: Array<Record<string, string>> }>(
+      server.url,
+      "statuses.get",
+      { worktreeId: WORKTREE_ID },
+      "query",
+    );
+    expect(data.tabStatuses).toContainEqual({ chatId, status: "working" });
+    expect(data.tabStatuses).toContainEqual({ terminalId, status: "question" });
+    expect(await worktreeStatus(server.url)).toBe("question");
+
+    await trpc(server.url, "tasks.abort", { worktreeId: WORKTREE_ID, chatId });
+    await done;
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      payload: claudeHook(repo, "chat-and-term", { hook_event_name: "SessionEnd" }),
+      terminalId,
+      dispatch: "terminal",
+    });
+    expect(await worktreeStatus(server.url)).toBe("idle");
+  });
+
   it("two hook sessions in one worktree keep their own status", async () => {
     await notify(server.url, {
       cwd: repo,
@@ -359,12 +395,13 @@ describe("hooks are read with the sending agent's rules", () => {
   });
 
   it("falls back to the worktree's agent when the sender is unknown", async () => {
-    // Codex has no hook mapping, so any hook it sends means `working`.
+    // The worktree's agent is Codex. Its `Interrupt` hook means done; any other
+    // agent's rules would read an event they don't know as working.
     await notify(server.url, {
       cwd: repo,
-      payload: { session_id: "unknown-sender", cwd: repo, hook_event_name: "Stop" },
+      payload: { session_id: "unknown-sender", cwd: repo, hook_event_name: "Interrupt" },
     });
-    expect(await worktreeStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("done");
   });
 });
 
@@ -545,6 +582,64 @@ describe("tab statuses", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "tab-c", { hook_event_name: "SessionEnd" }),
     });
+    expect(await worktreeStatus(server.url)).toBe("idle");
+  });
+
+  it("two terminals in one worktree each show their own state, and the worktree the most urgent", async () => {
+    const terminalA = randomUUID();
+    const terminalB = randomUUID();
+    await trpc(server.url, "terminal.create", { worktreeId: WORKTREE_ID, id: terminalA });
+    await trpc(server.url, "terminal.create", { worktreeId: WORKTREE_ID, id: terminalB });
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      dispatch: "terminal",
+      terminalId: terminalA,
+      payload: claudeHook(repo, "two-a", {
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+      }),
+    });
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      dispatch: "terminal",
+      terminalId: terminalB,
+      payload: claudeHook(repo, "two-b", { hook_event_name: "PreToolUse", tool_name: "Read" }),
+    });
+    const sorted = async () =>
+      (await tabStatuses()).sort((x, y) => `${x.terminalId}`.localeCompare(`${y.terminalId}`));
+    const expected = [
+      { terminalId: terminalA, status: "question" },
+      { terminalId: terminalB, status: "working" },
+    ].sort((x, y) => x.terminalId.localeCompare(y.terminalId));
+    expect(await sorted()).toEqual(expected);
+    expect(await worktreeStatus(server.url)).toBe("question");
+
+    await trpc(server.url, "terminal.kill", { terminalId: terminalA });
+    await trpc(server.url, "terminal.kill", { terminalId: terminalB });
+    await expect.poll(() => worktreeStatus(server.url)).toBe("idle");
+  });
+
+  it("a manual status combines with session statuses and survives them", async () => {
+    await trpc(server.url, "statuses.update", {
+      worktreeId: WORKTREE_ID,
+      agent: { status: "failed" },
+    });
+    expect(await worktreeStatus(server.url)).toBe("failed");
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      payload: claudeHook(repo, "manual-a", { hook_event_name: "PreToolUse", tool_name: "Read" }),
+    });
+    expect(await worktreeStatus(server.url)).toBe("failed");
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      payload: claudeHook(repo, "manual-a", { hook_event_name: "SessionEnd" }),
+    });
+    expect(await worktreeStatus(server.url)).toBe("failed");
+    await clearAttention(server.url);
     expect(await worktreeStatus(server.url)).toBe("idle");
   });
 });

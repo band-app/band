@@ -7,9 +7,16 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { foldSubagents, mapHookPayloadToStatus, type SubagentHold } from "../src/hook-status.ts";
+import {
+  foldSubagents,
+  hookSessionId,
+  isHookSessionEnd,
+  mapHookPayloadToStatus,
+  type SubagentHold,
+} from "../src/hook-status.ts";
 
 describe("mapHookPayloadToStatus — claude-code", () => {
   const map = (payload: Record<string, unknown>) => mapHookPayloadToStatus("claude-code", payload);
@@ -101,8 +108,11 @@ describe("mapHookPayloadToStatus — claude-code", () => {
 });
 
 describe("mapHookPayloadToStatus — unknown agent type", () => {
-  it("defaults to working (agent has no hook integration yet)", async () => {
-    assert.equal(await mapHookPayloadToStatus("codex", { hook_event_name: "Stop" }), "working");
+  it("defaults to working (agent has no hook integration)", async () => {
+    assert.equal(
+      await mapHookPayloadToStatus("cursor-cli", { hook_event_name: "Stop" }),
+      "working",
+    );
   });
 });
 
@@ -143,5 +153,56 @@ describe("foldSubagents", () => {
       foldSubagents(hold, { hook_event_name: "SubagentStop", agent_id: "a" }, "working"),
       "working",
     );
+  });
+});
+
+// Per-agent payload fixtures under tests/fixtures/hooks. Each file names the CLI
+// version it came from and marks which payloads were recorded from the real CLI.
+
+interface HookFixture {
+  agent: string;
+  cliVersion: string;
+  payloads: { recorded: boolean; expect: string; payload: Record<string, unknown> }[];
+  sessionEnd?: { payload: Record<string, unknown> };
+}
+
+for (const agent of ["codex", "gemini-cli", "opencode"]) {
+  const fixture = JSON.parse(
+    readFileSync(new URL(`./fixtures/hooks/${agent}.json`, import.meta.url), "utf-8"),
+  ) as HookFixture;
+
+  describe(`hook payload fixtures — ${agent} (${fixture.cliVersion})`, () => {
+    it("records the CLI version", () => {
+      assert.match(fixture.cliVersion, /\d+\.\d+/);
+    });
+
+    for (const { payload, expect } of fixture.payloads) {
+      it(`${String(payload.hook_event_name)} → ${expect}`, async () => {
+        assert.equal(await mapHookPayloadToStatus(agent, payload), expect);
+        assert.equal(hookSessionId(payload), payload.session_id);
+      });
+    }
+
+    if (fixture.sessionEnd) {
+      it("SessionEnd ends the session", () => {
+        assert.equal(isHookSessionEnd(agent, fixture.sessionEnd!.payload), true);
+      });
+    }
+  });
+}
+
+describe("hook payload edge cases", () => {
+  it("a Gemini notification that is not a permission prompt stays working", async () => {
+    assert.equal(
+      await mapHookPayloadToStatus("gemini-cli", {
+        hook_event_name: "Notification",
+        notification_type: "Other",
+      }),
+      "working",
+    );
+  });
+
+  it("Codex has no SessionEnd", () => {
+    assert.equal(isHookSessionEnd("codex", { hook_event_name: "SessionEnd" }), false);
   });
 });

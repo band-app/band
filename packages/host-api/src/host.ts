@@ -775,6 +775,16 @@ export interface InstallSkillsResult {
   warnings: string[];
 }
 
+/** The coding agents whose status hooks Band can install, as `band notify --agent <type>` names them. */
+export type HookAgentType = "claude-code" | "codex" | "gemini-cli" | "opencode";
+
+export const HOOK_AGENT_TYPES: readonly HookAgentType[] = [
+  "claude-code",
+  "codex",
+  "gemini-cli",
+  "opencode",
+];
+
 export interface HooksStatus {
   /** Band's current hook is present for every hook event. */
   installed: boolean;
@@ -868,12 +878,12 @@ export interface HostAgentEnv {
    * skill as `skipped` and says why in `warnings`.
    */
   installSkills(options?: { home?: string }): Promise<InstallSkillsResult>;
-  /** Whether Band's hooks are in the host's Claude Code settings. */
-  hooksStatus(): Promise<HooksStatus>;
-  /** Installs Band's agent hooks into the host's Claude Code settings. Rejects when the host has no `band` CLI. */
-  installHooks(): Promise<void>;
-  /** Removes Band's entries from the host's Claude Code settings and leaves everything else. */
-  removeHooks(): Promise<void>;
+  /** Whether Band's hooks are in the host's config for `agent` (Claude Code when left out). */
+  hooksStatus(agent?: HookAgentType): Promise<HooksStatus>;
+  /** Installs Band's hooks into the host's config for `agent` (Claude Code when left out). Rejects when the host has no `band` CLI or the config does not parse. */
+  installHooks(agent?: HookAgentType): Promise<void>;
+  /** Removes Band's entries from the host's config for `agent` and leaves everything else. */
+  removeHooks(agent?: HookAgentType): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

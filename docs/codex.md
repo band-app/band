@@ -32,11 +32,15 @@ In a chat, Band shows messages, tool calls and plans. When Codex asks to run a t
 
 ## Hooks and skills
 
-Band installs no hooks for Codex, so a Codex session in a terminal reports no status to the sidebar. A chat reports its status without hooks.
+Hooks tell Band what a Codex session in a terminal is doing, so the sidebar shows working, question or done. A chat needs no hooks. Band installs them only when you ask, from the banner or Settings > Agent hooks (a Codex row appears under each worker that has the Codex CLI).
+
+The install adds six events (`UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, `Interrupt`) to `hooks.json` in `CODEX_HOME` (`~/.codex` by default), each running `"<band>" notify --agent codex >/dev/null 2>&1 || true`. Codex runs a hook only after its hash is in `config.toml`, so the install also writes one `[hooks.state."<path>:<event>:<group>:0"]` table per event with `enabled = true` and the `trusted_hash`. Your own hooks and tables stay as they are. Band refuses to write when `hooks.json` is not JSON or `config.toml` is not TOML. Remove deletes Band's hooks and tables only.
+
+A permission prompt shows as a question, `Stop` and `Interrupt` as done. Codex has no failed-turn hook, so Codex never shows failed. Payloads were recorded against codex-cli 0.153.4. Codex keys trust by the hook's position in the event. A hook of yours added after Band's changes nothing; one placed before it moves Band's position, and the row in Settings > Agent hooks reads Outdated until you reinstall.
 
 `band skills install` links the Band skills into `~/.codex/skills` when `~/.codex` exists. `CODEX_HOME` is honored. See [agent skills](agent-skills.md).
 
 ## Limits
 
-- No hooks for terminal sessions.
+- Hooks show no failed state.
 - A Codex API key login does not override a Codex login or provider already on the machine.

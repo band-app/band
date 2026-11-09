@@ -48,9 +48,9 @@ beforeAll(async () => {
       ('r-wait', 'r', 'wait', '/nowhere/wait', 'claude-code', 'waiting', 1),
       ('r-work', 'r', 'work', '/nowhere/work', 'claude-code', 'working', 1);
     INSERT INTO worktree_status_sources (worktree_id, source_id, status, updated_at) VALUES
-      ('r-attn', 'chat:a', 'needs_attention', 1),
-      ('r-wait', 'chat:b', 'waiting', 1),
-      ('r-work', 'chat:c', 'working', 1);
+      ('r-attn', 'manual', 'needs_attention', 1),
+      ('r-wait', 'manual', 'waiting', 1),
+      ('r-work', 'manual', 'working', 1);
   `);
   sqlite.close();
 
@@ -85,9 +85,9 @@ describe("agent status states migration", () => {
       const rows = sqlite
         .prepare("SELECT source_id, status FROM worktree_status_sources ORDER BY source_id")
         .all();
-      // The boot reset drops source rows that are not done or failed, so the
+      // The boot reset drops manual source rows that are not done or failed, so the
       // waiting row (now idle) and the working row are gone. The done one stays.
-      expect(rows).toEqual([{ source_id: "chat:a", status: "done" }]);
+      expect(rows).toEqual([{ source_id: "manual", status: "done" }]);
     } finally {
       sqlite.close();
     }

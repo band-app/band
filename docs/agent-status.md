@@ -42,7 +42,7 @@ A manual mark is shared by every device you use, including the phone. Opening th
 
 Chats need no setup. A chat talks to its agent over the Agent Client Protocol, and Band reads the state from the turn: a started turn is working, a permission or form request is a question, and a finished turn is done. Some agents, Claude Code among them, start turns of their own, for example from a scheduled wake-up. Band shows those as working and settles the chat after 10 seconds of silence (`BAND_AGENT_QUIET_MS`).
 
-Terminals have no protocol. When you run Claude Code in a terminal, it reports through hooks that call `band notify`. Chats and other agents in terminals do not use hooks.
+Terminals have no protocol. When you run Claude Code, Codex, Gemini CLI or OpenCode in a terminal, it reports through hooks (OpenCode through a plugin) that call `band notify --agent <type>`. Each agent that reports this way becomes an agent session of its terminal, listed by `band agents list`, and the session carries its own state. Chats do not use hooks. Other agents in terminals report nothing.
 
 ### Claude Code hooks
 
@@ -53,6 +53,8 @@ To get notifications from agents running in a terminal, Claude Code hooks need t
 ```
 
 Click Install to add the hooks, or the close button to dismiss the banner. Dismissing it is remembered until a newer set of hooks exists.
+
+The banner names every agent that is missing hooks, for example "Claude Code, Codex hooks need to be installed", and Install adds them all. See [Codex](codex.md), [Gemini CLI](gemini-cli.md) and [OpenCode](opencode.md) for what each one writes.
 
 Settings > Agent hooks lists every worker with its state (Installed, Outdated, Not installed or Worker offline). Install, Reinstall and Remove act on that worker's Claude Code settings file and touch Band's entries only. Managing hooks needs an admin token.
 

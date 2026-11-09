@@ -1,14 +1,22 @@
+import { HOOK_AGENT_TYPES, type HookAgentType } from "@band-app/host-api";
 import { z } from "zod";
 import { checkHooks, installHooks, listHostHooks, removeHooks } from "../../services/hooks-service";
 import { adminProcedure, t } from "../trpc";
 
 /**
  * Manages the `band notify` hooks Band registers in a host's
- * `~/.claude/settings.json`. Every call names a host (the hub's own machine
+ * `~/.claude/settings.json`, or in the config of Codex, Gemini CLI or OpenCode
+ * when `agent` names one. Every call names a host (the hub's own machine
  * when `hostId` is left out), and nothing installs unless one of these is
  * called. The calls change files on a machine, so they need an admin token.
  */
-const hostInput = z.object({ hostId: z.string().optional() }).default({});
+const hostInput = z
+  .object({
+    hostId: z.string().optional(),
+    /** Claude Code when left out. */
+    agent: z.enum(HOOK_AGENT_TYPES as [HookAgentType, ...HookAgentType[]]).optional(),
+  })
+  .default({});
 
 function failure(err: unknown): Error {
   return new Error(err instanceof Error ? err.message : String(err));
@@ -17,7 +25,7 @@ function failure(err: unknown): Error {
 export const hooksRouter = t.router({
   /** The hub's own host. */
   check: adminProcedure.input(hostInput).query(async ({ input }) => {
-    return await checkHooks(input.hostId);
+    return await checkHooks(input.hostId, input.agent);
   }),
 
   /** Every host with its hooks status. */
@@ -25,7 +33,7 @@ export const hooksRouter = t.router({
 
   install: adminProcedure.input(hostInput).mutation(async ({ input }) => {
     try {
-      await installHooks(input.hostId);
+      await installHooks(input.hostId, input.agent);
       return { ok: true };
     } catch (err) {
       throw failure(err);
@@ -35,7 +43,7 @@ export const hooksRouter = t.router({
   /** Removes Band's entries and leaves every other hook and setting. */
   remove: adminProcedure.input(hostInput).mutation(async ({ input }) => {
     try {
-      await removeHooks(input.hostId);
+      await removeHooks(input.hostId, input.agent);
       return { ok: true };
     } catch (err) {
       throw failure(err);

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeProjectSlug } from "@band-app/shared/claude-session";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -174,6 +174,178 @@ describe("terminal cold restore", () => {
     } finally {
       await reopenedSocket.close();
     }
+  });
+
+  // Restoring an agent. The stub `claude` appends its argv to a file, so each
+  // test reads exactly what the restore ran.
+  describe("agent resume", () => {
+    const OLD_SESSION = "aaaaaaaa-2222-3333-4444-555555555555";
+    const NEW_SESSION = "bbbbbbbb-2222-3333-4444-555555555555";
+
+    function stubClaude(): { stubDir: string; log: string; env: Record<string, string> } {
+      const stubDir = `${tmpHome}/stub-bin`;
+      const log = `${tmpHome}/claude-argv.log`;
+      mkdirSync(stubDir, { recursive: true });
+      writeFileSync(join(stubDir, "claude"), '#!/bin/sh\necho "$*" >> "$STUB_LOG"\n', {
+        mode: 0o755,
+      });
+      return { stubDir, log, env: { PATH: `${stubDir}:${process.env.PATH}`, STUB_LOG: log } };
+    }
+
+    function seedTranscript(sessionId: string, ageSeconds: number): void {
+      const dir = join(tmpHome, ".claude", "projects", claudeProjectSlug(`${worktree}/subdir`));
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `${sessionId}.jsonl`);
+      writeFileSync(file, "");
+      const at = new Date(Date.now() - ageSeconds * 1000);
+      utimesSync(file, at, at);
+    }
+
+    const argvLines = (log: string) =>
+      existsSync(log)
+        ? readFileSync(log, "utf8")
+            .split("\n")
+            .filter((l, i, a) => l || i < a.length - 1)
+        : [];
+
+    async function reportHook(terminalId: string, sessionId: string, event: string) {
+      if (!server) throw new Error("no server");
+      const res = await trpcMutate(
+        server.url,
+        "statuses.notify",
+        {
+          cwd: `${worktree}/subdir`,
+          agent: "claude-code",
+          terminalId,
+          payload: {
+            session_id: sessionId,
+            transcript_path: join(tmpHome, ".claude", "projects", "x", `${sessionId}.jsonl`),
+            cwd: `${worktree}/subdir`,
+            hook_event_name: event,
+          },
+        },
+        TOKEN,
+      );
+      expect(res.status).toBe(200);
+    }
+
+    async function restartAndReopen(terminalId: string, env: Record<string, string>) {
+      if (!server) throw new Error("no server");
+      const restartRes = await trpcMutate(server.url, "terminal.restartDaemon", undefined, TOKEN);
+      expect(restartRes.status).toBe(200);
+      await createTerminal({ id: terminalId, env });
+      const socket = await TerminalSocket.open(server, {
+        worktreeId: WORKTREE_ID,
+        terminalId,
+        token: TOKEN,
+      });
+      try {
+        await socket.waitForOutput("session restored");
+      } finally {
+        await socket.close();
+      }
+    }
+
+    it("resumes the session id the hooks reported, past a newer transcript and without the launch prompt", async () => {
+      server = await startServer({ remoteHost: false, tmpHome });
+      const { log, env } = stubClaude();
+      seedTranscript(OLD_SESSION, 600);
+      seedTranscript(NEW_SESSION, 0);
+      const terminalId = randomUUID();
+      await createTerminal({
+        id: terminalId,
+        cwd: "subdir",
+        command: "claude 'ORIGINAL_PROMPT'",
+        env,
+      });
+      await waitFor(async () => (argvLines(log).length === 1 ? true : undefined), {
+        label: "first run of the stub",
+      });
+      await reportHook(terminalId, OLD_SESSION, "UserPromptSubmit");
+
+      await restartAndReopen(terminalId, env);
+      await waitFor(async () => (argvLines(log).length === 2 ? true : undefined), {
+        label: "restore ran the stub",
+      });
+      expect(argvLines(log)).toEqual(["ORIGINAL_PROMPT", `--resume ${OLD_SESSION}`]);
+    });
+
+    it("resumes an agent typed by hand in the shell", async () => {
+      server = await startServer({ remoteHost: false, tmpHome });
+      const { log, env } = stubClaude();
+      seedTranscript(NEW_SESSION, 0);
+      const terminalId = randomUUID();
+      await createTerminal({ id: terminalId, cwd: "subdir", env });
+      const socket = await TerminalSocket.open(server, {
+        worktreeId: WORKTREE_ID,
+        terminalId,
+        token: TOKEN,
+      });
+      socket.type("claude\r");
+      await waitFor(async () => (argvLines(log).length === 1 ? true : undefined), {
+        label: "hand-typed stub ran",
+      });
+      await socket.close();
+      await reportHook(terminalId, OLD_SESSION, "UserPromptSubmit");
+
+      await restartAndReopen(terminalId, env);
+      await waitFor(async () => (argvLines(log).length === 2 ? true : undefined), {
+        label: "restore ran the stub",
+      });
+      expect(argvLines(log)).toEqual(["", `--resume ${OLD_SESSION}`]);
+    });
+
+    it("resumes the newest transcript, without the prompt, when the command is an absolute path and no id is known", async () => {
+      server = await startServer({ remoteHost: false, tmpHome });
+      const { stubDir, log, env } = stubClaude();
+      seedTranscript(OLD_SESSION, 600);
+      seedTranscript(NEW_SESSION, 0);
+      const terminalId = randomUUID();
+      await createTerminal({
+        id: terminalId,
+        cwd: "subdir",
+        command: `${stubDir}/claude 'ORIGINAL_PROMPT'`,
+        env,
+      });
+      await waitFor(async () => (argvLines(log).length === 1 ? true : undefined), {
+        label: "first run of the stub",
+      });
+
+      await restartAndReopen(terminalId, env);
+      await waitFor(async () => (argvLines(log).length === 2 ? true : undefined), {
+        label: "restore ran the stub",
+      });
+      expect(argvLines(log)).toEqual(["ORIGINAL_PROMPT", `--resume ${NEW_SESSION}`]);
+    });
+
+    it("does not resume an agent that sent SessionEnd", async () => {
+      server = await startServer({ remoteHost: false, tmpHome });
+      const { log, env } = stubClaude();
+      seedTranscript(OLD_SESSION, 0);
+      const terminalId = randomUUID();
+      await createTerminal({ id: terminalId, cwd: "subdir", command: "claude", env });
+      await waitFor(async () => (argvLines(log).length === 1 ? true : undefined), {
+        label: "first run of the stub",
+      });
+      await reportHook(terminalId, OLD_SESSION, "UserPromptSubmit");
+      await reportHook(terminalId, OLD_SESSION, "SessionEnd");
+
+      await restartAndReopen(terminalId, env);
+      // The shell runs input in order, so once it echoes a marker typed now,
+      // any resume command the restore wrote earlier has already run.
+      const socket = await TerminalSocket.open(server, {
+        worktreeId: WORKTREE_ID,
+        terminalId,
+        token: TOKEN,
+      });
+      try {
+        socket.type("echo AFTER_RESTORE_$((40+2))\r");
+        await socket.waitForOutput("AFTER_RESTORE_42");
+      } finally {
+        await socket.close();
+      }
+      expect(argvLines(log)).toEqual([""]);
+    });
   });
 
   it("does not restore scrollback for a terminalId that was explicitly killed", async () => {

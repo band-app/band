@@ -26,6 +26,7 @@
     "@xterm/addon-unicode11": "0.10.0-beta.300",
     "@xterm/headless": "6.1.0-beta.302",
     "node-pty": "^1.1.0",
+    "smol-toml": "1.6.1",
     "zod": "^3.25.67"
   },
   "devDependencies": {
