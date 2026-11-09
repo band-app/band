@@ -19,6 +19,7 @@ import {
   deleteTerminalLayout,
   removeTerminalFromLayout,
 } from "./_utils/terminal-layout-manager";
+import { resumeCommandFor } from "./_utils/agent-resume-command";
 import { agentLoginService } from "./agent-login-service";
 import { clientActivityService } from "./client-activity-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
@@ -274,16 +275,20 @@ export class TerminalService {
         })
       : null;
     const spawnEnv = { ...options?.env, ...login?.env, ...grant?.env };
+    // A saved terminal whose PTY was lost resumes the agent it ran, by the
+    // provider session id the agent's hooks reported.
+    const resumeCommand = options?.command ? undefined : resumeCommandFor(terminalId);
     const request = {
       worktreeId,
       terminalId,
       worktreeRoot: root,
       options:
-        grant || login
+        grant || login || resumeCommand !== undefined
           ? {
               ...options,
               env: spawnEnv,
               ...(login?.unsetEnv.length ? { unsetEnv: login.unsetEnv } : {}),
+              ...(resumeCommand !== undefined ? { resumeCommand } : {}),
             }
           : options,
       cleanupOnExit: opts?.cleanupOnExit,

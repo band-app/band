@@ -34,6 +34,7 @@ import {
   type WorktreeAgentInfo,
   type WorktreeStatusSnapshot,
 } from "../infra/events/status-event-bus";
+import { agentSessionRegistry } from "./agent-session-registry-service";
 import { SettingsService, settingsService } from "./settings-service";
 
 const worktreeStatusQueries = new WorktreeStatusQueries();
@@ -495,6 +496,14 @@ export interface HookNotification {
   terminalId?: string;
   /** The host the agent runs on (`BAND_HOST_ID`); `local` when absent. */
   hostId?: string;
+  /** `BAND_AGENT_LAUNCH_TOKEN` of a `band agents launch --mode tui` agent. */
+  launchToken?: string;
+}
+
+/** The configured agent definition of a type, else the type itself. */
+function agentDefinitionIdFor(agentType: string): string {
+  const agents = settingsService.get().codingAgents ?? [];
+  return agents.find((agent) => agent.type === agentType)?.id ?? agentType;
 }
 
 /** Subagents a hook session still runs, by source id. */
@@ -540,6 +549,17 @@ export async function applyHookNotification(
     detectHookAgentType(payload) ||
     settingsService.getAgentDefinition(getWorktreeStatus(worktreeId)?.agent?.codingAgentId).type;
   const sourceId = `hook:${hookSessionId(payload) ?? agentType}`;
+
+  if (notification.terminalId) {
+    agentSessionRegistry.recordTerminalHook({
+      worktreeId,
+      terminalId: notification.terminalId,
+      agentDefinitionId: agentDefinitionIdFor(agentType),
+      providerSessionId: hookSessionId(payload),
+      launchToken: notification.launchToken,
+      sessionEnd: isHookSessionEnd(agentType, payload),
+    });
+  }
 
   if (isHookSessionEnd(agentType, payload)) {
     dropSubagentHold(worktreeId, sourceId);

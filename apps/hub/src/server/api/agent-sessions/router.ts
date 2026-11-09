@@ -14,7 +14,8 @@ import { TaskConflictError } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 export const agentSessionsRouter = t.router({
-  list: publicProcedure.input(z.object({ worktreeId: z.string() })).query(({ input }) => {
+  // Without a worktree id: every open session, in every worktree.
+  list: publicProcedure.input(z.object({ worktreeId: z.string().optional() })).query(({ input }) => {
     return { agentSessions: agentSessionRegistry.listOpen(input.worktreeId) };
   }),
 

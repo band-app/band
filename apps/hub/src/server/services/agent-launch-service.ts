@@ -17,7 +17,7 @@ import type { AgentMode, AgentSessionRecord } from "@band-app/shared/agent-sessi
 import { WorktreeNotFoundError } from "../errors";
 import { commandFor } from "./_utils/agent-command";
 import { formatShellCommand } from "./_utils/format-shell-command";
-import { agentSessionRegistry } from "./agent-session-registry-service";
+import { agentSessionRegistry, newLaunchToken } from "./agent-session-registry-service";
 import { chatService } from "./chat-service";
 import { settingsService } from "./settings-service";
 import { taskService } from "./task-service";
@@ -142,19 +142,28 @@ export class AgentLaunchService {
   ): LaunchAgentResult {
     const { worktreeId } = input;
     const terminalId = input.terminalId ?? randomUUID();
+    // The token goes into the agent's PTY env. Its hooks forward it through
+    // `band notify`, which is how they attach to this row and not to a second one.
+    const launchToken = newLaunchToken();
     const agentSession = agentSessionRegistry.create({
       worktreeId,
       agentDefinitionId,
       mode: "tui",
       terminalId,
+      launchToken,
     });
     const ready = terminalService
-      .spawn(worktreeId, terminalId, { command }, { agentType })
+      .spawn(
+        worktreeId,
+        terminalId,
+        { command, env: { BAND_AGENT_LAUNCH_TOKEN: launchToken } },
+        { agentType },
+      )
       .then(() => {
         emit({ kind: "terminal-created", worktreeId, terminalId });
       });
     ready.catch((err) => {
-      agentSessionRegistry.end(agentSession.id);
+      agentSessionRegistry.end(agentSession.id, "failed");
       log.error(
         { err: err instanceof Error ? err.message : String(err), worktreeId, terminalId },
         "failed to spawn the agent's terminal",

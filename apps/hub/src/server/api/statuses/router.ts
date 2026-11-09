@@ -113,6 +113,7 @@ export const statusesRouter = t.router({
         dispatch: z.string().max(64).optional(),
         terminalId: z.string().max(256).optional(),
         hostId: z.string().max(256).optional(),
+        launchToken: z.string().max(256).optional(),
       }),
     )
     .mutation(async ({ input }) => {
