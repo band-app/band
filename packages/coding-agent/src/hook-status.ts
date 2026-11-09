@@ -90,6 +90,64 @@ export function mapClaudeCodeHookStatus(payload: Record<string, unknown>): Agent
   }
 }
 
+/**
+ * Translate a Codex hook payload (recorded against codex-cli 0.153.4; same
+ * shape as Claude Code's: `hook_event_name`, `session_id` = the thread id)
+ * into a status. `PermissionRequest` waits on the user, `Stop` and
+ * `Interrupt` (an Esc-cancelled turn) end the turn, and everything else
+ * (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`) is work. Codex has no
+ * failed-turn hook, so `failed` is never reported.
+ */
+export function mapCodexHookStatus(payload: Record<string, unknown>): AgentHookStatus {
+  switch (payload.hook_event_name) {
+    case "PermissionRequest":
+      return "question";
+    case "Stop":
+    case "Interrupt":
+      return "done";
+    default:
+      return "working";
+  }
+}
+
+/**
+ * Translate a Gemini CLI hook payload (`hook_event_name`, `session_id`;
+ * recorded against Gemini CLI 0.61.0) into a status. `Notification` with
+ * `notification_type: "ToolPermission"` is a permission prompt; any other
+ * notification leaves the turn as it was (`working`). `AfterAgent` ends the
+ * turn. Gemini reports no failed turn, so `failed` is never reported.
+ */
+export function mapGeminiHookStatus(payload: Record<string, unknown>): AgentHookStatus {
+  switch (payload.hook_event_name) {
+    case "Notification":
+      return payload.notification_type === "ToolPermission" ? "question" : "working";
+    case "AfterAgent":
+      return "done";
+    default:
+      return "working";
+  }
+}
+
+/**
+ * Translate the payload Band's OpenCode plugin sends (`hook_event_name`,
+ * `session_id`, `cwd`) into a status. OpenCode has no hook config, so the
+ * plugin (`hooks-opencode.ts` in host-local) turns session events into these
+ * names: `SessionBusy`, `PermissionRequest` (a permission or a question),
+ * `SessionIdle` and `SessionError`.
+ */
+export function mapOpenCodeHookStatus(payload: Record<string, unknown>): AgentHookStatus {
+  switch (payload.hook_event_name) {
+    case "PermissionRequest":
+      return "question";
+    case "SessionIdle":
+      return "done";
+    case "SessionError":
+      return "failed";
+    default:
+      return "working";
+  }
+}
+
 /** Subagents of one hook session that are running, and the end of the turn they hold back. */
 export interface SubagentHold {
   running: Set<string>;
@@ -145,9 +203,7 @@ export function foldSubagents(
  * server dispatches.
  *
  * Agent types without a hook integration (no `case` below) default to
- * `working`: a notification arrived, so the agent is at least active. Today
- * only Claude Code registers hooks, so other types only reach this path in
- * unusual setups. Async for call-site compatibility with the earlier
+ * `working`: a notification arrived, so the agent is at least active. Async for call-site compatibility with the earlier
  * adapter-backed dispatcher.
  */
 export async function mapHookPayloadToStatus(
@@ -157,6 +213,12 @@ export async function mapHookPayloadToStatus(
   switch (agentType) {
     case "claude-code":
       return mapClaudeCodeHookStatus(payload);
+    case "codex":
+      return mapCodexHookStatus(payload);
+    case "gemini-cli":
+      return mapGeminiHookStatus(payload);
+    case "opencode":
+      return mapOpenCodeHookStatus(payload);
     default:
       return "working";
   }
@@ -182,7 +244,10 @@ export function detectHookAgentType(payload: Record<string, unknown>): string | 
  * worktree's.
  */
 export function isHookSessionEnd(agentType: string, payload: Record<string, unknown>): boolean {
-  return agentType === "claude-code" && payload.hook_event_name === "SessionEnd";
+  return (
+    (agentType === "claude-code" || agentType === "gemini-cli" || agentType === "opencode") &&
+    payload.hook_event_name === "SessionEnd"
+  );
 }
 
 /** The session a hook payload belongs to, when the agent reports one. */

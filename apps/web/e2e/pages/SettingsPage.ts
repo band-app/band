@@ -391,7 +391,7 @@ export class SettingsPage {
 
   /** The banner's dismiss (×) button. */
   get hooksBannerDismiss(): Locator {
-    return this.page.getByTestId("hooks-banner__dismiss");
+    return this.page.getByTestId("hooks-banner__close");
   }
 
   /** The Agent hooks row of one worker (`AgentHooksSettings.tsx`). Its `data-state` is
@@ -410,6 +410,21 @@ export class SettingsPage {
   /** Remove on a worker's Agent hooks row. */
   hooksRemoveButton(hostId: string): Locator {
     return this.hooksHostRow(hostId).getByTestId("settings__hooks-remove");
+  }
+
+  /** The row of one non-Claude agent under a worker's Agent hooks row. */
+  hooksAgentRow(hostId: string, agent: string): Locator {
+    return this.dialog
+      .getByTestId("settings__hooks-agent")
+      .and(this.page.locator(`[data-host-id="${hostId}"][data-agent="${agent}"]`));
+  }
+
+  hooksAgentInstallButton(hostId: string, agent: string): Locator {
+    return this.hooksAgentRow(hostId, agent).getByTestId("settings__hooks-agent-install");
+  }
+
+  hooksAgentRemoveButton(hostId: string, agent: string): Locator {
+    return this.hooksAgentRow(hostId, agent).getByTestId("settings__hooks-agent-remove");
   }
 
   /** "Play sound when an agent needs you or finishes" toggle. */

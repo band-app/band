@@ -7,6 +7,7 @@
 
 import { expect, type FrameLocator, type Locator, type Page, test } from "@playwright/test";
 import { ChatPanePage } from "./ChatPanePage";
+import { ToastHostPage } from "./ToastHostPage";
 
 export class ExtensionPanelPage {
   readonly chat: ChatPanePage;
@@ -74,6 +75,7 @@ export class ExtensionPanelPage {
 
   async open(worktreeId: string): Promise<void> {
     await test.step(`Open worktree ${worktreeId}`, async () => {
+      await new ToastHostPage(this.page).closeSetupNoticesWhenShown();
       await this.chat.goto(worktreeId);
       await this.chat.waitForReady();
     });

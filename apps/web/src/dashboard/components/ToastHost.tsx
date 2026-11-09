@@ -1,21 +1,12 @@
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@band-app/ui";
-import { CircleAlert, Info } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { subscribeToastObstructions, toastObstructions } from "../../lib/toast-obstructions";
 import { INFO_NOTICE_MS, type Notice } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import { HubVersionNotice } from "./HubVersionNotice";
+import { Notification } from "./Notification";
 import { ReinstallHomeScreenNotice } from "./ReinstallHomeScreenNotice";
 import { ThisComputerWorkerPrompt } from "./ThisComputerWorkerPrompt";
-import { ToastCard } from "./ToastCard";
+import { registerToastSlot } from "./toast-slot";
 import { UpdateToast } from "./UpdateToast";
 
 /** Space between the stack and an element it moves above, in CSS px. */
@@ -46,6 +37,8 @@ export function ToastHost() {
       <HubVersionNotice />
       <ThisComputerWorkerPrompt />
       <ReinstallHomeScreenNotice />
+      {/* The CLI and hooks setup notices render here through `ToastPortal`. */}
+      <div ref={registerToastSlot} className="contents" />
       {notices.map((notice) => (
         <NoticeToast key={notice.id} notice={notice} />
       ))}
@@ -55,65 +48,23 @@ export function ToastHost() {
 
 function NoticeToast({ notice }: { notice: Notice }) {
   const dismissNotice = useDashboardStore((s) => s.dismissNotice);
-  const [showDetails, setShowDetails] = useState(false);
-  const isError = notice.tone === "error";
+  const autoDismiss = notice.tone === "info";
 
   useEffect(() => {
-    if (isError) return;
+    if (!autoDismiss) return;
     const timer = setTimeout(() => dismissNotice(notice.id), INFO_NOTICE_MS);
     return () => clearTimeout(timer);
-  }, [isError, notice.id, dismissNotice]);
+  }, [autoDismiss, notice.id, dismissNotice]);
 
   return (
-    <ToastCard
+    <Notification
       testId={`toast-host__notice--${notice.tone}`}
+      severity={notice.tone}
+      title={notice.message}
+      details={notice.details}
+      actions={notice.actions}
       onClose={() => dismissNotice(notice.id)}
-    >
-      <div className="flex gap-2.5 pr-6">
-        {isError ? (
-          <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
-        ) : (
-          <Info className="mt-0.5 size-4 shrink-0 text-info" />
-        )}
-        <p className="min-w-0 line-clamp-4 break-words">{notice.message}</p>
-      </div>
-      {isError && (
-        <div className="mt-2 flex justify-end">
-          <Button variant="ghost" size="xs" onClick={() => setShowDetails(true)}>
-            Details
-          </Button>
-        </div>
-      )}
-      <Dialog open={showDetails} onOpenChange={setShowDetails}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-destructive">Error</DialogTitle>
-            <DialogDescription>Click the error text to select it.</DialogDescription>
-          </DialogHeader>
-          <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 text-sm select-all">
-            {notice.message}
-          </pre>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigator.clipboard.writeText(notice.message)}
-            >
-              Copy
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setShowDetails(false);
-                dismissNotice(notice.id);
-              }}
-            >
-              Dismiss
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </ToastCard>
+    />
   );
 }
 

@@ -172,3 +172,24 @@ describe("shared files", () => {
     assert.equal(sharedFileWorktree("/api/shared/band-main"), null);
   });
 });
+
+describe("video time", () => {
+  it("formats, maps touches and skips", async () => {
+    const { formatVideoTime, positionFromTouch, skipTime } = await import(
+      "../src/lib/files/video-time.ts"
+    );
+    assert.equal(formatVideoTime(0), "0:00");
+    assert.equal(formatVideoTime(65.9), "1:05");
+    assert.equal(formatVideoTime(3661), "1:01:01");
+    assert.equal(formatVideoTime(Number.NaN), "0:00");
+    assert.equal(formatVideoTime(-4), "0:00");
+    assert.equal(positionFromTouch(50, 100, 20), 10);
+    assert.equal(positionFromTouch(-5, 100, 20), 0);
+    assert.equal(positionFromTouch(500, 100, 20), 20);
+    assert.equal(positionFromTouch(5, 0, 20), 0);
+    assert.equal(skipTime(5, -10, 30), 0);
+    assert.equal(skipTime(25, 10, 30), 30);
+    assert.equal(skipTime(12, 10, 30), 22);
+    assert.equal(skipTime(12, 10, 0), 22);
+  });
+});

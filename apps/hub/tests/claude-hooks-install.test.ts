@@ -142,6 +142,9 @@ describe("Claude Code hooks per host", () => {
           ...process.env,
           HOME: workerHome,
           BAND_HOME: join(workerHome, ".band"),
+          // The agents' own config homes, so a CI runner's settings don't move the files.
+          CODEX_HOME: join(workerHome, ".codex"),
+          XDG_CONFIG_HOME: join(workerHome, ".config"),
           PATH: `${workerBin}:${process.env.PATH ?? ""}`,
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -209,6 +212,43 @@ describe("Claude Code hooks per host", () => {
     await mutate("hooks.remove", { hostId: workerId });
     expect(bandEntries(workerHome)).toEqual([]);
     expect(existsSync(settingsPath(workerHome))).toBe(true);
+  });
+
+  it("installs and removes Codex, Gemini CLI and OpenCode hooks in the worker's own files", async () => {
+    const codexHooks = join(workerHome, ".codex", "hooks.json");
+    const geminiSettings = join(workerHome, ".gemini", "settings.json");
+    const opencodePlugin = join(workerHome, ".config", "opencode", "plugins", "band-status.js");
+    mkdirSync(join(workerHome, ".gemini"), { recursive: true });
+    writeFileSync(
+      geminiSettings,
+      JSON.stringify({ hooks: { AfterAgent: [{ hooks: [USER_HOOK] }] } }),
+    );
+
+    for (const agent of ["codex", "gemini-cli", "opencode"]) {
+      await mutate("hooks.install", { hostId: workerId, agent });
+    }
+    expect(Object.keys(JSON.parse(readFileSync(codexHooks, "utf-8")).hooks)).toContain("Stop");
+    expect(readFileSync(join(workerHome, ".codex", "config.toml"), "utf-8")).toContain(
+      "trusted_hash",
+    );
+    expect(JSON.parse(readFileSync(geminiSettings, "utf-8")).hooks.AfterAgent[0]).toEqual({
+      hooks: [USER_HOOK],
+    });
+    expect(existsSync(opencodePlugin)).toBe(true);
+    // The hub's own machine and Claude Code's file are untouched.
+    expect(existsSync(join(hubHome, ".codex", "hooks.json"))).toBe(false);
+    expect(bandEntries(workerHome)).toEqual([]);
+
+    for (const agent of ["codex", "gemini-cli", "opencode"]) {
+      expect(
+        (await query<{ installed: boolean }>("hooks.check", { hostId: workerId, agent })).installed,
+      ).toBe(true);
+      await mutate("hooks.remove", { hostId: workerId, agent });
+    }
+    expect(existsSync(opencodePlugin)).toBe(false);
+    expect(JSON.parse(readFileSync(geminiSettings, "utf-8"))).toEqual({
+      hooks: { AfterAgent: [{ hooks: [USER_HOOK] }] },
+    });
   });
 
   it("rejects hooks calls without the band_token cookie (401)", async () => {

@@ -21,7 +21,6 @@ import {
   ListFilter,
   Plus,
   Settings,
-  X,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToastObstruction } from "../../lib/toast-obstructions";
@@ -50,10 +49,12 @@ import { collapsibleKeys, ORIGIN_COLLAPSE_KEY } from "../lib/sidebar-grouping";
 import { useDashboardStore } from "../stores/index";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { GroupNameDialog } from "./GroupDialogs";
+import { Notification } from "./Notification";
 import { OPEN_SETTINGS_SECTION_EVENT } from "./QuickCommandsMenu";
 import { RepoList } from "./RepoList";
 import { ReposPanel } from "./ReposPanel";
 import { SettingsPage, type SettingsSectionId } from "./SettingsPage";
+import { ToastPortal } from "./toast-slot";
 import { UpdateAvailableBadge } from "./UpdateAvailableBadge";
 
 interface DashboardShellProps {
@@ -129,6 +130,8 @@ export function DashboardShell({
   const hooksSetup = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
 
+  // Closing the CLI notice hides it until the page reloads.
+  const [cliNoticeDismissed, setCliNoticeDismissed] = useState(false);
   const [appTitle, setAppTitle] = useState("Band");
 
   useEffect(() => {
@@ -588,64 +591,40 @@ export function DashboardShell({
         }}
       />
 
-      {(cliState.status === "manual" || cliState.status === "conflict") && (
-        <div
-          role="status"
-          data-testid="cli-banner"
-          className="mx-4 mb-2 px-4 py-2 bg-info-bg border border-info/30 rounded-lg text-sm flex items-center justify-between gap-2"
-        >
-          <span className="min-w-0 break-words text-info" data-testid="cli-banner__message">
-            {cliState.status === "conflict"
-              ? "A different `band` binary exists — replace it to use the bundled CLI"
-              : `Install band CLI${cliState.status === "manual" && cliState.reason ? ` — ${cliState.reason}` : ""}`}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 text-xs"
-            data-testid="cli-banner__install"
-            onClick={installCli}
-          >
-            Install
-          </Button>
-        </div>
-      )}
-
-      {hooksSetup.visible && (
-        <div
-          role="status"
-          data-testid="hooks-banner"
-          className="mx-4 mb-2 px-4 py-2 bg-info-bg border border-info/30 rounded-lg text-sm flex items-center justify-between gap-2"
-        >
-          <span className="text-info">
-            To get notifications from agents running in a terminal, Claude Code hooks need to be
-            installed.
-            {hooksSetup.error ? ` ${hooksSetup.error}` : ""}
-          </span>
-          <span className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              disabled={hooksSetup.installing}
-              data-testid="hooks-banner__install"
-              onClick={hooksSetup.install}
-            >
-              Install
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              aria-label="Dismiss"
-              data-testid="hooks-banner__dismiss"
-              onClick={hooksSetup.dismiss}
-            >
-              <X className="size-4" />
-            </Button>
-          </span>
-        </div>
-      )}
+      <ToastPortal>
+        {!cliNoticeDismissed &&
+          (cliState.status === "manual" || cliState.status === "conflict") && (
+            <Notification
+              testId="cli-banner"
+              severity="info"
+              title={cliState.status === "conflict" ? "Replace the band CLI" : "Install band CLI"}
+              details={
+                cliState.status === "conflict"
+                  ? "A different `band` binary exists. Replace it to use the bundled CLI."
+                  : cliState.reason || undefined
+              }
+              actions={[{ label: "Install", onClick: installCli, testId: "cli-banner__install" }]}
+              onClose={() => setCliNoticeDismissed(true)}
+            />
+          )}
+        {hooksSetup.visible && (
+          <Notification
+            testId="hooks-banner"
+            severity={hooksSetup.error ? "error" : "info"}
+            title="Install agent hooks"
+            details={`To get notifications from agents running in a terminal, ${hooksSetup.agentNames.length > 1 ? `${hooksSetup.agentNames.slice(0, -1).join(", ")} and ${hooksSetup.agentNames.at(-1)}` : hooksSetup.agentNames[0]} hooks need to be installed.${hooksSetup.error ? ` ${hooksSetup.error}` : ""}`}
+            actions={[
+              {
+                label: "Install",
+                onClick: hooksSetup.install,
+                busy: hooksSetup.installing,
+                testId: "hooks-banner__install",
+              },
+            ]}
+            onClose={hooksSetup.dismiss}
+          />
+        )}
+      </ToastPortal>
 
       {/* Persistent bottom action bar. Left: a single Settings button (gear
           icon, tooltip "Settings") that opens the Settings dialog. Right: the

@@ -19,9 +19,11 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DIRECT_FALLBACK_CLOSE_CODE, type DirectAccess } from "@band-app/shared/direct-access";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { stopTerminalDaemons } from "../../worker/src/terminals";
+import type { AppRouter } from "../src/server/api/router";
 import { TEST_TOKEN } from "./helpers/acp-chat";
 import { installTsLsp, TS_LSP_KEY, waitForLanguageServer } from "./helpers/lsp-extension";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -1095,6 +1097,265 @@ describe("other hosts keep the hub path (S5)", () => {
   it("offers no direct path for a worktree on the hub's machine or another host", async () => {
     expect(await accessFor(toWorktreeId("proj", "main", "local"))).toBeNull();
     expect(await accessFor(WT_A, "h-000000000000")).toBeNull();
+  });
+});
+
+/** A raw `terminal.create` POST, for the `Host` and `Origin` headers `fetch` will not let a caller set. */
+function rawTerminalCreate(
+  port: number,
+  token: string,
+  headers: Record<string, string>,
+  body: unknown,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/direct/terminal.create",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          ...headers,
+        },
+      },
+      (res) => {
+        res.resume();
+        res.once("end", () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.once("error", reject);
+    req.end(JSON.stringify(body));
+  });
+}
+
+interface DirectCreated {
+  terminalId: string;
+  worktreeId: string;
+  pid: number;
+}
+
+async function directCreate(
+  worktreeId: string,
+  input: { command?: string; cwd?: string; id?: string } = {},
+): Promise<DirectCreated> {
+  const id = input.id ?? crypto.randomUUID();
+  const res = await directCall(await liveAccess(worktreeId), "terminal.create", {
+    worktreeId,
+    ...input,
+    id,
+  });
+  expect(res.status, await res.clone().text()).toBe(200);
+  return ((await res.json()) as { result: DirectCreated }).result;
+}
+
+const listedTerminals = async (worktreeId: string) =>
+  (
+    await q<{ terminals: Array<{ terminalId: string; pid: number }> }>("terminal.list", {
+      worktreeId,
+    })
+  ).terminals;
+
+describe("terminal.create on the direct path (S1, S2)", () => {
+  it("spawns the PTY on the worker, and the hub then lists, writes to and kills it", async () => {
+    // The hub's status stream tells every device about a new terminal. Count it for this id.
+    class CookieWebSocket extends WebSocket {
+      constructor(address: string, protocols?: string | string[]) {
+        super(address, protocols, { headers: { Cookie: `band_token=${TEST_TOKEN}` } });
+      }
+    }
+    const wsClient = createWSClient({
+      url: `${server.url.replace("http", "ws")}/trpc`,
+      WebSocket: CookieWebSocket as unknown as typeof globalThis.WebSocket,
+    });
+    const client = createTRPCClient<AppRouter>({ links: [wsLink({ client: wsClient })] });
+    const events: Array<{ kind: string; terminalId?: string }> = [];
+    const sub = client.status.stream.subscribe(undefined, {
+      onData: (event) => events.push(event as { kind: string; terminalId?: string }),
+    });
+    try {
+      const created = await directCreate(WT_A);
+      expect(created).toMatchObject({ worktreeId: WT_A, pid: expect.any(Number) });
+
+      // The worker told the hub, so the hub's own listing has it.
+      await waitFor(
+        async () =>
+          (await listedTerminals(WT_A)).some((t) => t.terminalId === created.terminalId) ||
+          undefined,
+        { label: "the hub lists the direct terminal" },
+      );
+      expect(
+        (await listedTerminals(WT_A)).find((t) => t.terminalId === created.terminalId)?.pid,
+      ).toBe(created.pid);
+
+      // `terminal.send` writes to it; the output comes back over the direct socket.
+      const socket = await TerminalSocket.openDirect(await liveAccess(WT_A), {
+        worktreeId: WT_A,
+        terminalId: created.terminalId,
+      });
+      await m("terminal.send", { terminalId: created.terminalId, data: "echo sent-$((7+8))\r" });
+      await socket.waitForOutput("sent-15");
+
+      // One `terminal-created` for it, not two.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(
+        events.filter((e) => e.kind === "terminal-created" && e.terminalId === created.terminalId),
+      ).toHaveLength(1);
+
+      // Closed first: a socket the kill already ended has no close left to wait for.
+      await socket.close();
+      await m("terminal.kill", { terminalId: created.terminalId });
+      await waitFor(
+        async () =>
+          !(await listedTerminals(WT_A)).some((t) => t.terminalId === created.terminalId) ||
+          undefined,
+        { label: "the killed terminal leaves the listing" },
+      );
+    } finally {
+      sub.unsubscribe();
+      wsClient.close();
+    }
+  });
+
+  it("runs an optional command in an optional directory", async () => {
+    const created = await directCreate(WT_A, {
+      command: "echo ran-$((9+9)) in $(basename $PWD)",
+      cwd: "src",
+    });
+    const socket = await TerminalSocket.openDirect(await liveAccess(WT_A), {
+      worktreeId: WT_A,
+      terminalId: created.terminalId,
+    });
+    await socket.waitForOutput("ran-18 in src");
+    await socket.close();
+  });
+});
+
+describe("what terminal.create refuses (S6)", () => {
+  const spawnedNothing = async (worktreeId: string, id: string) => {
+    expect((await listedTerminals(worktreeId)).some((t) => t.terminalId === id)).toBe(false);
+    const res = await trpcQuery(server.url, "terminal.output", { terminalId: id }, TEST_TOKEN);
+    expect(res.status).toBe(404);
+  };
+
+  it("answers 401 without a usable token and 403 for another worktree", async () => {
+    const access = await liveAccess(WT_A);
+    const id = crypto.randomUUID();
+    const body = { worktreeId: WT_A, id };
+    expect((await directCall({ port: access.port }, "terminal.create", body)).status).toBe(401);
+    expect((await directCall(access, "terminal.create", { worktreeId: WT_B, id })).status).toBe(
+      403,
+    );
+    // A token the worker never registered, and the hub's own credential, open nothing.
+    for (const token of ["bwd_not-registered", TEST_TOKEN]) {
+      expect((await directCall({ port: access.port, token }, "terminal.create", body)).status).toBe(
+        401,
+      );
+    }
+    await spawnedNothing(WT_A, id);
+    await spawnedNothing(WT_B, id);
+  });
+
+  it("refuses a foreign Host or Origin", async () => {
+    const access = await liveAccess(WT_A);
+    const id = crypto.randomUUID();
+    const body = { worktreeId: WT_A, id };
+    const post = (headers: Record<string, string>) =>
+      rawTerminalCreate(access.port, access.token, headers, body);
+    expect(await post({ host: `other.example:${access.port}` })).toBe(421);
+    expect(await post({ origin: "https://other.example" })).toBe(403);
+    expect(await post({ origin: "app://local" })).toBe(403);
+    await spawnedNothing(WT_A, id);
+  });
+
+  it("refuses a cwd outside the worktree, and a body that is not a plain create", async () => {
+    const access = await liveAccess(WT_A);
+    const outsideCwds = ["..", "../feat-b", tmp("band-direct-cwd-")];
+    for (const cwd of outsideCwds) {
+      const id = crypto.randomUUID();
+      const res = await directCall(access, "terminal.create", { worktreeId: WT_A, id, cwd });
+      expect(res.status, cwd).toBe(403);
+      await spawnedNothing(WT_A, id);
+    }
+    const id = crypto.randomUUID();
+    // An environment or an agent type is the hub's to handle.
+    for (const extra of [{ env: { A: "1" } }, { agentType: "claude" }, { id: "not-a-uuid" }]) {
+      const res = await directCall(access, "terminal.create", { worktreeId: WT_A, id, ...extra });
+      expect(res.status, JSON.stringify(extra)).toBe(400);
+    }
+    await spawnedNothing(WT_A, id);
+  });
+});
+
+describe("a direct terminal's relay token (S3)", () => {
+  it("lets the shell call the hub for its worktree only, and stops working when the terminal ends", async () => {
+    const created = await directCreate(WT_A, {
+      command: 'echo "relay=$BAND_SERVER_URL token=$BAND_TOKEN"; sleep 600',
+    });
+    const socket = await TerminalSocket.openDirect(await liveAccess(WT_A), {
+      worktreeId: WT_A,
+      terminalId: created.terminalId,
+    });
+    await socket.waitForOutput("token=brt_");
+    const match = /relay=(http:\/\/127\.0\.0\.1:\d+) token=(brt_[A-Za-z0-9_-]+)/.exec(
+      socket.output,
+    );
+    expect(match, socket.output).not.toBeNull();
+    const [, relayUrl = "", relayToken = ""] = match ?? [];
+    // The worker's relay, not the hub.
+    expect(relayUrl).not.toBe(server.url);
+
+    const list = (worktreeId: string) =>
+      trpcQuery(relayUrl, "terminal.list", { worktreeId }, relayToken);
+    expect((await list(WT_A)).status).toBe(200);
+    // The relay checks a call's terminal against the host that runs it, which the hub knows from the worker's notice.
+    const output = await trpcQuery(
+      relayUrl,
+      "terminal.output",
+      { terminalId: created.terminalId },
+      relayToken,
+    );
+    expect(output.status).toBe(200);
+
+    await socket.close();
+    await m("terminal.kill", { terminalId: created.terminalId });
+    await waitFor(async () => ((await list(WT_A)).status === 401 ? true : undefined), {
+      label: "the relay token is revoked with the terminal",
+    });
+  });
+});
+
+describe("a direct create and a hub create of one id (S4)", () => {
+  it("is one PTY when the hub creates it again, as the UI's fallback does", async () => {
+    const id = crypto.randomUUID();
+    const created = await directCreate(WT_A, { id });
+    const again = await m<DirectCreated>("terminal.create", { worktreeId: WT_A, id });
+    expect(again.pid).toBe(created.pid);
+    expect((await listedTerminals(WT_A)).filter((t) => t.terminalId === id)).toHaveLength(1);
+  });
+
+  it("is one PTY when the direct create comes after the hub's", async () => {
+    const id = crypto.randomUUID();
+    const first = await m<DirectCreated>("terminal.create", { worktreeId: WT_A, id });
+    const second = await directCreate(WT_A, { id });
+    expect(second.pid).toBe(first.pid);
+    expect((await listedTerminals(WT_A)).filter((t) => t.terminalId === id)).toHaveLength(1);
+  });
+
+  it("advertises the capability in worktree.directAccess", async () => {
+    expect((await liveAccess(WT_A)).terminalCreate).toBe(true);
+  });
+});
+
+describe("other terminal creates keep the hub path (S7)", () => {
+  it("still creates a terminal through the hub's own procedure", async () => {
+    // The agent launch path (`agentType`, with its login env) is `agent-launch-service` and is
+    // covered by `agent-logins-worker.test.ts`; script and cronjob terminals call the service.
+    const id = crypto.randomUUID();
+    const viaHub = await m<DirectCreated>("terminal.create", { worktreeId: WT_A, id });
+    expect(viaHub.terminalId).toBe(id);
+    expect((await listedTerminals(WT_A)).some((t) => t.terminalId === id)).toBe(true);
   });
 });
 
