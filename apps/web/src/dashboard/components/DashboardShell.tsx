@@ -618,8 +618,11 @@ export function DashboardShell({
           className="mx-4 mb-2 px-4 py-2 bg-info-bg border border-info/30 rounded-lg text-sm flex items-center justify-between gap-2"
         >
           <span className="text-info">
-            To get notifications from agents running in a terminal, Claude Code hooks need to be
-            installed.
+            To get notifications from agents running in a terminal,{" "}
+            {hooksSetup.agentNames.length > 1
+              ? `${hooksSetup.agentNames.slice(0, -1).join(", ")} and ${hooksSetup.agentNames.at(-1)}`
+              : hooksSetup.agentNames[0]}{" "}
+            hooks need to be installed.
             {hooksSetup.error ? ` ${hooksSetup.error}` : ""}
           </span>
           <span className="flex shrink-0 items-center gap-1">

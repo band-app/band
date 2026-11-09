@@ -9,8 +9,8 @@
  * is covered with a real `band-worker` in `apps/hub/tests/claude-hooks-install.test.ts`.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   cleanupTmpHome,
@@ -25,7 +25,7 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-agent-hooks-token";
 const BANNER_TEXT =
-  "To get notifications from agents running in a terminal, Claude Code hooks need to be installed.";
+  "To get notifications from agents running in a terminal, Claude Code and Codex hooks need to be installed.";
 const USER_HOOK = { type: "command", command: "/usr/bin/true user-own-hook" };
 const DISMISSED_KEY = "band:agent-hooks-banner-dismissed";
 
@@ -48,15 +48,23 @@ test.beforeAll(async () => {
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(bin, "band"), "#!/bin/sh\nexit 0\n");
   chmodSync(join(bin, "band"), 0o755);
+  // A Codex CLI the hub can see. PATH holds no other agent, so the machine's own
+  // Gemini CLI and OpenCode stay out of the run.
+  writeFileSync(join(bin, "codex"), '#!/bin/sh\necho "codex-cli 0.153.4"\n');
+  chmodSync(join(bin, "codex"), 0o755);
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
   });
-  server = await startServer({ tmpHome, env: { PATH: `${bin}:${process.env.PATH ?? ""}` } });
+  server = await startServer({
+    tmpHome,
+    env: { PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
+  });
 });
 
 test.beforeEach(() => {
   resetClientState(tmpHome);
+  rmSync(join(tmpHome, ".codex"), { recursive: true, force: true });
   mkdirSync(join(tmpHome, ".claude"), { recursive: true });
   writeFileSync(settingsFile(), `${JSON.stringify(userSettings, null, 2)}\n`);
 });
@@ -133,4 +141,28 @@ test("Settings > Agent hooks lists the host, installs, and removes only Band's e
   await expect(row).toHaveAttribute("data-state", "not_installed");
   expect(existsSync(settingsFile())).toBe(true);
   expect(readSettings()).toEqual(userSettings);
+});
+
+test("Settings > Agent hooks has a row per installed agent, and Codex installs next to the user's own", async ({
+  page,
+}) => {
+  const settings = new SettingsPage(page, server.url, TOKEN);
+  await settings.goto();
+  await settings.openDialog("agent-hooks");
+
+  const codex = settings.hooksAgentRow("local", "codex");
+  await expect(codex).toHaveAttribute("data-state", "not_installed");
+  // OpenCode and Gemini CLI are not on this machine's PATH, so they have no row.
+  await expect(settings.hooksAgentRow("local", "opencode")).toHaveCount(0);
+  await expect(settings.hooksAgentRow("local", "gemini-cli")).toHaveCount(0);
+
+  await settings.hooksAgentInstallButton("local", "codex").click();
+  await expect(codex).toHaveAttribute("data-state", "installed");
+  const codexHooks = JSON.parse(readFileSync(join(tmpHome, ".codex", "hooks.json"), "utf8"));
+  expect(JSON.stringify(codexHooks)).toContain("notify --agent codex");
+  // Claude Code's file is untouched by it.
+  expect(bandEntryCount()).toBe(0);
+
+  await settings.hooksAgentRemoveButton("local", "codex").click();
+  await expect(codex).toHaveAttribute("data-state", "not_installed");
 });

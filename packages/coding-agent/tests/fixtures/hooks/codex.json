@@ -1,0 +1,98 @@
+{
+  "agent": "codex",
+  "cliVersion": "codex-cli 0.153.4",
+  "source": "Recorded from `codex exec` with a capture script as the command of every hook (CODEX_HOME in a temp dir). PermissionRequest and Interrupt follow the hook names in codex-rs and were not triggered in the recording.",
+  "payloads": [
+    {
+      "recorded": true,
+      "expect": "working",
+      "payload": {
+        "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
+        "transcript_path": "/tmp/codex/sessions/rollout.jsonl",
+        "cwd": "/tmp/w",
+        "hook_event_name": "SessionStart",
+        "model": "gpt-5.6-terra",
+        "permission_mode": "bypassPermissions",
+        "source": "startup"
+      }
+    },
+    {
+      "recorded": true,
+      "expect": "working",
+      "payload": {
+        "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
+        "turn_id": "01a1c1c3-ae44-7402-9614-ec5be1531107",
+        "cwd": "/tmp/w",
+        "hook_event_name": "UserPromptSubmit",
+        "model": "gpt-5.6-terra",
+        "permission_mode": "bypassPermissions",
+        "prompt": "run the shell command: echo hi"
+      }
+    },
+    {
+      "recorded": true,
+      "expect": "working",
+      "payload": {
+        "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
+        "turn_id": "01a1c1c3-ae44-7402-9614-ec5be1531107",
+        "cwd": "/tmp/w",
+        "hook_event_name": "PreToolUse",
+        "model": "gpt-5.6-terra",
+        "permission_mode": "bypassPermissions",
+        "tool_name": "Bash",
+        "tool_input": { "command": "echo hi" },
+        "tool_use_id": "exec-9d99888a"
+      }
+    },
+    {
+      "recorded": true,
+      "expect": "working",
+      "payload": {
+        "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
+        "turn_id": "01a1c1c3-ae44-7402-9614-ec5be1531107",
+        "cwd": "/tmp/w",
+        "hook_event_name": "PostToolUse",
+        "model": "gpt-5.6-terra",
+        "permission_mode": "bypassPermissions",
+        "tool_name": "Bash",
+        "tool_input": { "command": "echo hi" },
+        "tool_response": "hi\n",
+        "tool_use_id": "exec-9d99888a"
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "question",
+      "payload": {
+        "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
+        "cwd": "/tmp/w",
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": { "command": "rm -rf build" }
+      }
+    },
+    {
+      "recorded": true,
+      "expect": "done",
+      "payload": {
+        "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
+        "turn_id": "01a1c1c3-ae44-7402-9614-ec5be1531107",
+        "cwd": "/tmp/w",
+        "hook_event_name": "Stop",
+        "model": "gpt-5.6-terra",
+        "permission_mode": "bypassPermissions",
+        "stop_hook_active": false,
+        "last_assistant_message": "hi"
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "done",
+      "payload": {
+        "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
+        "cwd": "/tmp/w",
+        "hook_event_name": "Interrupt"
+      }
+    }
+  ]
+}
