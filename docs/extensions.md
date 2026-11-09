@@ -143,7 +143,7 @@ The tab sends it to the hub with `editors.setSelection`. The hub keeps the lates
 
 Keyboard focus inside the frame does not reach Band, so the editor handles Cmd+S itself and sends `save`.
 
-Band saves with `PUT /api/worktree-file/<worktreeId>/<path>`, a raw body up to 50 MB, for an existing file in the worktree. A worktree on a worker is written on that worker. Any device token may save, as with the built-in editor. An agent cannot call this route.
+Band saves with `PUT /api/worktree-file/<worktreeId>/<path>`, a raw body up to 50 MB, for an existing file in the worktree. A worktree on a worker is written on that worker. In the desktop app, for a worktree on this Mac's worker, the editor reads and saves over loopback with the same rules (see [local direct path](local-direct-path.md)), and uses the hub route when the direct path is unavailable. Any device token may save, as with the built-in editor. An agent cannot call this route.
 
 ### Reloading
 

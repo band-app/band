@@ -242,7 +242,7 @@ export class DirectListener {
       res.writeHead(204, {
         ...cors,
         // GET is the chat event stream, read with fetch so it can carry the token.
-        "Access-Control-Allow-Methods": "GET, POST",
+        "Access-Control-Allow-Methods": "GET, POST, PUT",
         "Access-Control-Allow-Headers": "authorization, content-type, range",
         // Chrome's private network access preflight, for a page calling loopback.
         ...(req.headers["access-control-request-private-network"] === "true" && {

@@ -460,3 +460,48 @@ export async function fetchDirectFile(
   await res.body?.cancel();
   return null;
 }
+
+const WRITE_TIMEOUT_MS = 60_000;
+
+/**
+ * Saves bytes over an existing worktree file on this computer's worker, or returns null when the
+ * hub must do it (no direct access, a refused token, a worker that is down or too old to take a
+ * `PUT` (405), or any answer that is not final). A 204 or a 400/404/413 from the worker is
+ * final and returned. Writing the same bytes through the hub after a null is safe.
+ */
+export async function putDirectFile(
+  url: string,
+  body: Uint8Array<ArrayBuffer>,
+): Promise<Response | null> {
+  const worktreeId = fileRouteWorktreeId(url);
+  if (!worktreeId) return null;
+  const access = await directAccessFor(worktreeId);
+  if (!access) return null;
+  const parsed = new URL(url, "http://hub.invalid");
+  const target = new URL(`http://127.0.0.1:${access.port}${parsed.pathname}`);
+  let res: Response;
+  try {
+    res = await fetch(target, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${access.token}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body,
+      credentials: "omit",
+      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+    });
+  } catch {
+    markDirectDown(worktreeId);
+    return null;
+  }
+  if (res.status === 401) {
+    forgetDirectToken(worktreeId);
+    return null;
+  }
+  // 403 is not final: the worker also answers it for a refused Origin or a token of another
+  // worktree, and the hub route would then save the file.
+  if ([204, 400, 404, 413].includes(res.status)) return res;
+  await res.body?.cancel();
+  return null;
+}

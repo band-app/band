@@ -6,6 +6,7 @@
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -16,7 +17,7 @@ import {
 import { request } from "node:http";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DIRECT_FALLBACK_CLOSE_CODE, type DirectAccess } from "@band-app/shared/direct-access";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
@@ -695,6 +696,105 @@ describe("file routes on the direct path (S2)", () => {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
     expect(hub.status).toBe(200);
+  });
+});
+
+describe("saving a file over PUT on the direct path", () => {
+  const directPut = (
+    access: { port: number; token?: string },
+    path: string,
+    body: Uint8Array | string,
+    headers: Record<string, string> = {},
+  ) =>
+    fetch(`http://127.0.0.1:${access.port}${path}`, {
+      method: "PUT",
+      headers: {
+        ...(access.token && { authorization: `Bearer ${access.token}` }),
+        "content-type": "application/octet-stream",
+        ...headers,
+      },
+      body,
+    });
+
+  beforeAll(() => {
+    const dir = worktreeDir("feat-a");
+    mkdirSync(join(dir, "docs"), { recursive: true });
+    writeFileSync(join(dir, "docs", "sheet.bin"), "old");
+    writeFileSync(join(dir, "docs", "keep.txt"), "keep");
+    symlinkSync(join(root, "put-outside.txt"), join(dir, "docs", "escape-put.txt"));
+    writeFileSync(join(root, "put-outside.txt"), "outside");
+  });
+
+  it("writes the bytes to disk, and the hub reads them back", async () => {
+    const access = await liveAccess(WT_A);
+    const bytes = Buffer.from(Array.from({ length: 2048 }, (_, i) => (i * 7) % 256));
+    const res = await directPut(access, filePath(WT_A, "docs/sheet.bin"), bytes);
+    expect(res.status).toBe(204);
+    expect(readFileSync(join(worktreeDir("feat-a"), "docs", "sheet.bin")).equals(bytes)).toBe(true);
+    const hub = await fetch(`${server.url}${filePath(WT_A, "docs/sheet.bin")}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(Buffer.from(await hub.arrayBuffer()).equals(bytes)).toBe(true);
+  });
+
+  it("refuses no token, a bad token, a hub token, another worktree, a foreign Host and Origin", async () => {
+    const access = await liveAccess(WT_A);
+    const path = filePath(WT_A, "docs/keep.txt");
+    expect((await directPut({ port: access.port }, path, "x")).status).toBe(401);
+    expect((await directPut({ port: access.port, token: "bwd_unknown" }, path, "x")).status).toBe(
+      401,
+    );
+    expect((await directPut({ port: access.port, token: TEST_TOKEN }, path, "x")).status).toBe(401);
+    expect((await directPut(access, filePath(WT_B, "hello.txt"), "x")).status).toBe(403);
+    expect((await directPut(access, path, "x", { Origin: "https://evil.example" })).status).toBe(
+      403,
+    );
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = request(
+        {
+          host: "127.0.0.1",
+          port: access.port,
+          path,
+          method: "PUT",
+          headers: { host: "rebind.example", authorization: `Bearer ${access.token}` },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.once("error", reject);
+      req.end("x");
+    });
+    expect(status).toBe(421);
+    expect(readFileSync(join(worktreeDir("feat-a"), "docs", "keep.txt"), "utf8")).toBe("keep");
+  });
+
+  it("answers 400 for a path or symlink out and for .git, 404 for a missing file, and creates nothing", async () => {
+    const access = await liveAccess(WT_A);
+    const dir = worktreeDir("feat-a");
+    const out = `/api/worktree-file/${encodeURIComponent(WT_A)}/${encodeURIComponent("../put-new.txt")}`;
+    expect((await directPut(access, out, "x")).status).toBe(400);
+    expect(existsSync(join(dirname(dir), "put-new.txt"))).toBe(false);
+    expect((await directPut(access, filePath(WT_A, "docs/escape-put.txt"), "x")).status).toBe(400);
+    expect(readFileSync(join(root, "put-outside.txt"), "utf8")).toBe("outside");
+    expect((await directPut(access, filePath(WT_A, ".git/config"), "x")).status).toBe(400);
+    expect((await directPut(access, filePath(WT_A, "docs/none.bin"), "x")).status).toBe(404);
+    expect(existsSync(join(dir, "docs", "none.bin"))).toBe(false);
+    expect((await directPut(access, filePath(WT_A, "docs"), "x")).status).toBe(400);
+  });
+
+  it("refuses an agent's headers with 403 and a body over 50 MB with 413", async () => {
+    const access = await liveAccess(WT_A);
+    const path = filePath(WT_A, "docs/keep.txt");
+    for (const header of ["x-band-chat-id", "x-band-worktree-id", "x-band-terminal-id"]) {
+      expect((await directPut(access, path, "agent", { [header]: "x" })).status).toBe(403);
+    }
+    const big = new Uint8Array(50 * 1024 * 1024 + 1);
+    const res = await directPut(access, path, big).catch(() => null);
+    // The worker may close the socket once it has answered 413.
+    if (res) expect(res.status).toBe(413);
+    expect(readFileSync(join(worktreeDir("feat-a"), "docs", "keep.txt"), "utf8")).toBe("keep");
   });
 });
 

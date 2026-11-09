@@ -26,6 +26,107 @@ function decode(segment: string): string | null {
   }
 }
 
+/** The largest body `PUT /api/worktree-file/...` accepts, as on the hub. */
+export const MAX_PUT_BYTES = 50 * 1024 * 1024;
+
+/**
+ * `PUT /api/worktree-file/<worktreeId>/<path>`: replaces one existing file of the token's worktree
+ * with the raw body, with the hub route's rules (`worktree-file-put.ts`): 403 for an agent's
+ * headers, 413 over 50 MB, 400 for `..`, a symlink out or `.git`, 404 for a missing file. The
+ * worker never creates a file. Any failure other than those answers 500, so the client asks the
+ * hub, which writes the same bytes.
+ */
+async function putDirectFile(
+  ctx: WorkerContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  scope: DirectScopeParams,
+  cors: Record<string, string>,
+): Promise<void> {
+  const end = (status: number, text: string) => {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    if (!req.complete) req.resume();
+    res.writeHead(status, { "Content-Type": "text/plain", "Cache-Control": "no-store", ...cors });
+    res.end(text);
+  };
+  if (!url.pathname.startsWith(DIRECT_FILE_ROUTES.worktreeFile)) return end(405, "Use GET");
+  if (
+    req.headers["x-band-chat-id"] ||
+    req.headers["x-band-worktree-id"] ||
+    req.headers["x-band-terminal-id"]
+  ) {
+    return end(403, "Agents cannot save through this route");
+  }
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > MAX_PUT_BYTES)
+    return end(413, "The file is over 50 MB");
+  const rest = url.pathname.slice(DIRECT_FILE_ROUTES.worktreeFile.length);
+  const slash = rest.indexOf("/");
+  if (slash === -1) return end(400, "Bad request");
+  const worktreeId = decode(rest.slice(0, slash));
+  const rawPath = decode(rest.slice(slash + 1));
+  if (!worktreeId || !rawPath) return end(400, "Bad request");
+  if (worktreeId !== scope.worktreeId) return end(403, "The token is for another worktree");
+  const root = scope.path;
+  const target = resolve(join(root, rawPath));
+  if (!target.startsWith(root + sep)) return end(400, "Bad request");
+  if (target.slice(root.length + 1).split(sep)[0] === ".git") {
+    return end(400, "Cannot write into .git");
+  }
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  let tooLarge = false;
+  try {
+    await new Promise<void>((done, fail) => {
+      req.on("data", (chunk: Buffer) => {
+        total += chunk.byteLength;
+        if (total > MAX_PUT_BYTES) {
+          tooLarge = true;
+          chunks.length = 0;
+          return;
+        }
+        if (!tooLarge) chunks.push(chunk);
+      });
+      req.on("end", done);
+      req.on("error", fail);
+      req.on("aborted", () => fail(new Error("aborted")));
+    });
+  } catch {
+    return end(500, "Could not read the body");
+  }
+  if (tooLarge) return end(413, "The file is over 50 MB");
+
+  const { fs } = ctx.host;
+  res.once("close", ctx.activity.hold());
+  try {
+    const [realRoot, realTarget] = await Promise.all([fs.realpath(root), fs.realpath(target)]);
+    if (!realTarget.startsWith(realRoot + sep)) return end(400, "Bad request");
+    if (
+      realTarget
+        .slice(realRoot.length + 1)
+        .split(sep)[0]
+        ?.toLowerCase() === ".git"
+    ) {
+      return end(400, "Cannot write into .git");
+    }
+    await ctx.policy.resolve(realTarget);
+    const info = await fs.stat(realTarget, { followSymlinks: true });
+    if (info.kind !== "file") return end(400, "Not a file");
+    await fs.writeFile(realTarget, new Uint8Array(Buffer.concat(chunks)));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return end(404, "Not found");
+    return end(500, "Could not write the file");
+  }
+  res.writeHead(204, { "Cache-Control": "no-store", ...cors });
+  res.end();
+}
+
 /**
  * Serves `GET /api/worktree-file`, `/api/uploads` and `/api/shared` for the
  * token's worktree from this worker's disk, with the hub routes' path rules
@@ -49,6 +150,7 @@ export async function serveDirectFile(
     res.writeHead(status, { "Content-Type": "text/plain", "Cache-Control": "no-store", ...cors });
     res.end(text);
   };
+  if (req.method === "PUT") return putDirectFile(ctx, req, res, url, scope, cors);
   if (req.method !== "GET" && req.method !== "HEAD") return end(405, "Use GET");
 
   const { pathname } = url;
