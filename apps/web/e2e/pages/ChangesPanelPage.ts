@@ -24,6 +24,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FileViewerPage } from "./FileViewerPage";
 import { FindWidget } from "./FindWidget";
+import { ToastHostPage } from "./ToastHostPage";
 import { WorktreePage } from "./WorktreePage";
 
 export type DiffViewMode = "unified" | "split";
@@ -101,6 +102,7 @@ export class ChangesPanelPage {
    *  tab's body is mounted, so the picker and tree exist only after this. */
   async goto(worktreeId: string): Promise<void> {
     this.currentWorktreeId = worktreeId;
+    await new ToastHostPage(this.page).closeSetupNoticesWhenShown();
     await this.worktree.goto(worktreeId);
     await this.worktree.waitForReady();
     await this.worktree.revealRightPanel();

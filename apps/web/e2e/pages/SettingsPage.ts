@@ -391,7 +391,7 @@ export class SettingsPage {
 
   /** The banner's dismiss (×) button. */
   get hooksBannerDismiss(): Locator {
-    return this.page.getByTestId("hooks-banner__dismiss");
+    return this.page.getByTestId("hooks-banner__close");
   }
 
   /** The Agent hooks row of one worker (`AgentHooksSettings.tsx`). Its `data-state` is

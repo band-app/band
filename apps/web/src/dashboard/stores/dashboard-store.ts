@@ -13,13 +13,26 @@ import type {
 /**
  * A message shown in the bottom-right toast stack. `info` is an expected
  * outcome the user should know about (a pull git refused because of local
- * changes) and closes itself; `error` is a failure and stays until closed.
+ * changes) and closes itself; `warning` and `error` stay until closed.
  */
 export interface Notice {
   id: number;
-  tone: "info" | "error";
+  tone: "info" | "warning" | "error";
+  /** The notification's title. */
   message: string;
+  details?: string;
+  actions?: { label: string; onClick: () => void; primary?: boolean }[];
 }
+
+export interface NotifyOptions {
+  title?: string;
+  details?: string;
+  actions?: Notice["actions"];
+}
+
+/** Messages longer than this show a generic title, with the message as the details. */
+const LONG_TITLE = 80;
+const TONE_TITLES = { info: "Notice", warning: "Warning", error: "Error" } as const;
 
 /** How long an `info` notice stays on screen. */
 export const INFO_NOTICE_MS = 6000;
@@ -56,7 +69,7 @@ export interface DashboardState {
   refreshBranchStatus: (worktreeId: string) => void;
   /** Show `err` as an error notice. */
   setError: (err: unknown) => void;
-  notify: (tone: Notice["tone"], message: string) => void;
+  notify: (tone: Notice["tone"], message: string, options?: NotifyOptions) => void;
   dismissNotice: (id: number) => void;
   replaceAllStatuses: (statuses: WorktreeStatus[]) => void;
   updateStatus: (status: WorktreeStatus) => void;
@@ -135,8 +148,15 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
 
     setError: (err: unknown) => get().notify("error", describeError(err)),
 
-    notify: (tone: Notice["tone"], message: string) => {
-      const notice = { id: nextNoticeId++, tone, message };
+    notify: (tone: Notice["tone"], message: string, options?: NotifyOptions) => {
+      const long = message.length > LONG_TITLE || message.includes("\n");
+      const notice: Notice = {
+        id: nextNoticeId++,
+        tone,
+        message: options?.title ?? (long ? TONE_TITLES[tone] : message),
+        details: options?.details ?? (options?.title === undefined && long ? message : undefined),
+        actions: options?.actions,
+      };
       set((state) => ({ notices: [...state.notices, notice].slice(-MAX_NOTICES) }));
     },
 

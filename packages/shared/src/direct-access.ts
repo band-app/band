@@ -36,6 +36,29 @@ export function isDirectProcedure(path: string): path is DirectProcedure {
 export const DIRECT_CALL_PREFIX = "/direct/";
 
 /**
+ * `POST /direct/terminal.create`: opens a plain terminal (no `agentType`, no `env`) in the token's
+ * worktree. The worker spawns the PTY, mints the shell's relay token itself and tells the hub
+ * afterwards. The body is `{ worktreeId, id, command?, cwd? }` (`DirectTerminalCreateInput`). Not a
+ * tRPC procedure of the worker's `worktree-ops`, so it is not in `DIRECT_PROCEDURES`.
+ */
+export const DIRECT_TERMINAL_CREATE = "terminal.create";
+
+/** The body of {@link DIRECT_TERMINAL_CREATE}. `id` is the UUID the client picked. */
+export interface DirectTerminalCreateInput {
+  worktreeId: string;
+  id: string;
+  command?: string;
+  cwd?: string;
+}
+
+/** What {@link DIRECT_TERMINAL_CREATE} answers with, the same as the hub's `terminal.create`. */
+export interface DirectTerminalCreateResult {
+  terminalId: string;
+  worktreeId: string;
+  pid: number;
+}
+
+/**
  * The file routes a worker's direct listener serves with `GET`, by the hub's
  * own path. The token is an `Authorization: Bearer` header, so a page reads
  * them with `fetch` and shows a Blob. Never put it in a URL.
@@ -93,6 +116,8 @@ export interface DirectAccess {
   token: string;
   /** Epoch ms. The client asks for a new token before then. */
   expiresAt: number;
+  /** The worker serves {@link DIRECT_TERMINAL_CREATE}. Absent for a worker from before it. */
+  terminalCreate?: boolean;
 }
 
 /** What a direct call answers with: the procedure's result, or the error the hub would have sent. */

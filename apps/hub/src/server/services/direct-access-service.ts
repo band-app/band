@@ -9,6 +9,7 @@ import { createLogger } from "@band-app/logger";
 import type { DirectAccess } from "@band-app/shared/direct-access";
 import { WorktreeNotFoundError } from "../errors";
 import { LOCAL_HOST_ID } from "./local-host-policy";
+import { terminalService } from "./terminal-service";
 import {
   worktreeService as defaultWorktreeService,
   type WorktreeService,
@@ -51,7 +52,11 @@ export class DirectAccessService {
         },
         tokenTtlMs(),
       );
-      return { hostId, ...grant };
+      return {
+        hostId,
+        ...grant,
+        ...(terminalService.supportsDirectCreate(hostId) && { terminalCreate: true }),
+      };
     } catch (err) {
       log.debug(
         { hostId, worktreeId, message: err instanceof Error ? err.message : String(err) },
