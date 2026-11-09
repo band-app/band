@@ -1,7 +1,5 @@
-import { Button } from "@band-app/ui";
-import { CircleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ToastCard } from "./ToastCard";
+import { Notification } from "./Notification";
 
 const DISMISSED_KEY = "band:reinstall-home-screen-dismissed";
 
@@ -65,22 +63,13 @@ export function ReinstallHomeScreenNotice() {
   };
 
   return (
-    <ToastCard testId="reinstall-home-screen-notice" onClose={dismiss}>
-      <div className="flex gap-2.5 pr-6">
-        <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-        <div className="min-w-0">
-          <p className="font-medium">Add Band to your Home Screen again</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            This copy was added with an older setup, so it doesn't fit the screen. Remove it from
-            the Home Screen, then open Band in Safari and choose Share, Add to Home Screen.
-          </p>
-        </div>
-      </div>
-      <div className="mt-3 flex justify-end">
-        <Button variant="ghost" size="xs" onClick={dismiss}>
-          Got it
-        </Button>
-      </div>
-    </ToastCard>
+    <Notification
+      testId="reinstall-home-screen-notice"
+      severity="warning"
+      title="Add Band to your Home Screen again"
+      details="This copy was added with an older setup, so it doesn't fit the screen. Remove it from the Home Screen, then open Band in Safari and choose Share, Add to Home Screen."
+      actions={[{ label: "Got it", onClick: dismiss }]}
+      onClose={dismiss}
+    />
   );
 }

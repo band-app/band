@@ -1,13 +1,12 @@
-import { Button, Spinner } from "@band-app/ui";
-import { CircleAlert, CircleCheck, Download, RotateCw } from "lucide-react";
-import type { ReactNode } from "react";
+import { Spinner } from "@band-app/ui";
+import { RotateCw } from "lucide-react";
 import { openExternalUrl } from "../../lib/open-external-url";
 import type { UpdateRelease } from "../adapter";
 import { useAppUpdate } from "../hooks/use-app-update";
-import { ToastCard } from "./ToastCard";
+import { Notification } from "./Notification";
 
 /**
- * Toast for the desktop auto-updater, shown in the bottom-right stack. Shows "Checking for
+ * Notification for the desktop auto-updater, shown in the bottom-right stack. Shows "Checking for
  * updates…" and the result of a user-initiated check, and any update a
  * background check finds, then follows it through download and restart.
  * Renders nothing outside the desktop shell.
@@ -15,134 +14,91 @@ import { ToastCard } from "./ToastCard";
 export function UpdateToast() {
   const { status, download, restart, retry, dismiss } = useAppUpdate();
   if (!status) return null;
+  const testId = "update-toast";
 
-  let body: ReactNode;
-  let closable = true;
   switch (status.state) {
     case "checking":
-      closable = false;
-      body = <ToastHeader icon={<Spinner className="size-4" />} title="Checking for updates…" />;
-      break;
-    case "up-to-date":
-      body = (
-        <ToastHeader
-          icon={<CircleCheck className="size-4 text-success" />}
-          title="You're on the latest version"
-          detail={`Band v${status.currentVersion}`}
+      return (
+        <Notification
+          testId={testId}
+          severity="info"
+          icon={<Spinner className="size-4" />}
+          title="Checking for updates…"
         />
       );
-      break;
+    case "up-to-date":
+      return (
+        <Notification
+          testId={testId}
+          severity="success"
+          title="You're on the latest version"
+          details={`Band v${status.currentVersion}`}
+          onClose={dismiss}
+        />
+      );
     case "available":
-      body = (
-        <>
-          <ToastHeader
-            icon={<Download className="size-4 text-info" />}
-            title={`Band v${status.version} is available`}
-            detail={`You have v${status.currentVersion}.`}
-          />
+      return (
+        <Notification
+          testId={testId}
+          severity="info"
+          title={`Band v${status.version} is available`}
+          details={`You have v${status.currentVersion}.`}
+          actions={[
+            { label: "Later", onClick: dismiss },
+            { label: "Update", onClick: download, primary: true },
+          ]}
+          onClose={dismiss}
+        >
           <ReleaseInfo release={status} />
-          <ToastActions>
-            <Button variant="ghost" size="xs" onClick={dismiss}>
-              Later
-            </Button>
-            <Button size="xs" onClick={download}>
-              Update
-            </Button>
-          </ToastActions>
-        </>
+        </Notification>
       );
-      break;
     case "downloading":
-      closable = false;
-      body = (
-        <>
-          <ToastHeader
-            icon={<Spinner className="size-4" />}
-            title={`Downloading Band v${status.version}…`}
-            detail={`${status.percent}%`}
-          />
-          <div
-            role="progressbar"
-            aria-label="Update download"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={status.percent}
-            className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted"
-          >
-            <div
-              className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
-              style={{ width: `${status.percent}%` }}
-            />
-          </div>
-        </>
+      return (
+        <Notification
+          testId={testId}
+          severity="info"
+          icon={<Spinner className="size-4" />}
+          title={`Downloading Band v${status.version}…`}
+          details={`${status.percent}%`}
+          progress={status.percent / 100}
+          progressLabel="Update download"
+        />
       );
-      break;
     case "downloaded":
-      body = (
-        <>
-          <ToastHeader
-            icon={<CircleCheck className="size-4 text-success" />}
-            title={`Band v${status.version} is ready`}
-            detail="Restart Band to finish updating. It also installs when you quit."
-          />
-          <ToastActions>
-            <Button variant="ghost" size="xs" onClick={dismiss}>
-              Later
-            </Button>
-            <Button size="xs" onClick={restart}>
-              <RotateCw />
-              Restart to update
-            </Button>
-          </ToastActions>
-        </>
+      return (
+        <Notification
+          testId={testId}
+          severity="success"
+          title={`Band v${status.version} is ready`}
+          details="Restart Band to finish updating. It also installs when you quit."
+          actions={[
+            { label: "Later", onClick: dismiss },
+            { label: "Restart to update", onClick: restart, primary: true, icon: <RotateCw /> },
+          ]}
+          onClose={dismiss}
+        />
       );
-      break;
     case "error":
-      body = (
-        <>
-          <ToastHeader
-            icon={<CircleAlert className="size-4 text-destructive" />}
-            title={
-              status.phase === "download"
-                ? "Couldn't download the update"
-                : "Couldn't check for updates"
-            }
-            detail={status.message}
-          />
-          <ToastActions>
-            <Button variant="outline" size="xs" onClick={retry}>
-              Retry
-            </Button>
-          </ToastActions>
-        </>
+      return (
+        <Notification
+          testId={testId}
+          severity="error"
+          title={
+            status.phase === "download"
+              ? "Couldn't download the update"
+              : "Couldn't check for updates"
+          }
+          details={status.message}
+          actions={[{ label: "Retry", onClick: retry }]}
+          onClose={dismiss}
+        />
       );
-      break;
   }
-
-  return (
-    <ToastCard testId="update-toast" onClose={closable ? dismiss : undefined}>
-      {body}
-    </ToastCard>
-  );
-}
-
-function ToastHeader({ icon, title, detail }: { icon: ReactNode; title: string; detail?: string }) {
-  return (
-    <div className="flex gap-2.5 pr-6">
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      <div className="min-w-0">
-        <p className="font-medium">{title}</p>
-        {detail && (
-          <p className="mt-0.5 line-clamp-3 break-words text-xs text-muted-foreground">{detail}</p>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function ReleaseInfo({ release }: { release: UpdateRelease }) {
   return (
-    <div className="mt-2 pl-6.5">
+    <>
       {release.releaseNotes && (
         <p className="max-h-28 overflow-y-auto whitespace-pre-line text-xs text-muted-foreground">
           {release.releaseNotes}
@@ -155,10 +111,6 @@ function ReleaseInfo({ release }: { release: UpdateRelease }) {
       >
         Release notes on GitHub
       </button>
-    </div>
+    </>
   );
-}
-
-function ToastActions({ children }: { children: ReactNode }) {
-  return <div className="mt-3 flex justify-end gap-2">{children}</div>;
 }

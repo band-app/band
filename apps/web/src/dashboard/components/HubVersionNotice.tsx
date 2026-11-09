@@ -1,10 +1,8 @@
-import { Button } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
-import { CircleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { compareHubVersion, isOldHubGap, setAppNewerThanHub } from "../../lib/hub-version";
 import { trpc } from "../../lib/trpc-client";
-import { ToastCard } from "./ToastCard";
+import { Notification } from "./Notification";
 
 const DISMISSED_KEY = "band:hub-older-notice-dismissed";
 
@@ -57,22 +55,13 @@ export function HubVersionNotice() {
   };
 
   return (
-    <ToastCard testId="hub-version-notice" onClose={dismiss}>
-      <div className="flex gap-2.5 pr-6">
-        <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-        <div className="min-w-0">
-          <p className="font-medium">Update the hub</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            The hub runs {hubVersion}, this app is {__BAND_VERSION__}. Some features need a newer
-            hub.
-          </p>
-        </div>
-      </div>
-      <div className="mt-3 flex justify-end">
-        <Button variant="ghost" size="xs" onClick={dismiss}>
-          Dismiss
-        </Button>
-      </div>
-    </ToastCard>
+    <Notification
+      testId="hub-version-notice"
+      severity="warning"
+      title="Update the hub"
+      details={`The hub runs ${hubVersion}, this app is ${__BAND_VERSION__}. Some features need a newer hub.`}
+      actions={[{ label: "Dismiss", onClick: dismiss }]}
+      onClose={dismiss}
+    />
   );
 }
