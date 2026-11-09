@@ -13,7 +13,7 @@ import {
 } from "./helpers/server";
 import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 import { TerminalSocket } from "./helpers/terminal-socket";
-import { HOOK_HOST_ID, testWorktreeId } from "./helpers/test-host";
+import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 // Cold restore: a terminal reopened after its daemon died or was restarted
@@ -217,7 +217,6 @@ describe("terminal cold restore", () => {
           cwd: `${worktree}/subdir`,
           agent: "claude-code",
           terminalId,
-          hostId: HOOK_HOST_ID,
           payload: {
             session_id: sessionId,
             transcript_path: join(tmpHome, ".claude", "projects", "x", `${sessionId}.jsonl`),
