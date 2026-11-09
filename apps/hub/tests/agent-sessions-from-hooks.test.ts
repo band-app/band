@@ -85,8 +85,9 @@ function hook(
   sessionId: string,
   event: Record<string, unknown>,
   env: Record<string, string> = {},
+  agent = "claude-code",
 ): void {
-  const result = spawnSync(cli as string, ["notify", "--agent", "claude-code"], {
+  const result = spawnSync(cli as string, ["notify", "--agent", agent], {
     input: JSON.stringify(claudePayload(cwd, sessionId, event)),
     env: cliEnv({ BAND_DISPATCH: "terminal", BAND_TERMINAL_ID: terminalId, ...env }),
     timeout: 10_000,
@@ -316,6 +317,22 @@ describe.skipIf(!cli)("agent sessions from hook events", () => {
     expect(JSON.stringify(row)).not.toContain(token);
     expect(JSON.stringify(mine)).not.toContain("launch_token");
     await mutate("terminal.kill", { terminalId });
+  });
+
+  it("hooks of Codex, Gemini CLI and OpenCode create sessions too", async () => {
+    for (const agent of ["codex", "gemini-cli", "opencode"]) {
+      const terminalId = await createTerminal(WT_A);
+      const sessionId = randomUUID();
+      const event = agent === "opencode" ? "SessionBusy" : "UserPromptSubmit";
+      hook(terminalId, dirA, sessionId, { hook_event_name: event }, {}, agent);
+      const session = await waitFor(
+        async () => (await listSessions(WT_A)).find((s) => s.providerSessionId === sessionId),
+        { label: `${agent} session created` },
+      );
+      expect(session).toMatchObject({ mode: "tui", agentDefinitionId: agent, terminalId });
+      expect(session.status).toBe("working");
+      await mutate("terminal.kill", { terminalId });
+    }
   });
 
   it("S4: --all lists every worktree's open sessions", async () => {
