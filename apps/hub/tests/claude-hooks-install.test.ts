@@ -142,6 +142,9 @@ describe("Claude Code hooks per host", () => {
           ...process.env,
           HOME: workerHome,
           BAND_HOME: join(workerHome, ".band"),
+          // The agents' own config homes, so a CI runner's settings don't move the files.
+          CODEX_HOME: join(workerHome, ".codex"),
+          XDG_CONFIG_HOME: join(workerHome, ".config"),
           PATH: `${workerBin}:${process.env.PATH ?? ""}`,
         },
         stdio: ["ignore", "pipe", "pipe"],

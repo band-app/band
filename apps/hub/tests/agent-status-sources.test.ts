@@ -359,12 +359,13 @@ describe("hooks are read with the sending agent's rules", () => {
   });
 
   it("falls back to the worktree's agent when the sender is unknown", async () => {
-    // Codex has no hook mapping, so any hook it sends means `working`.
+    // The worktree's agent is Codex. Its `Interrupt` hook means done; any other
+    // agent's rules would read an event they don't know as working.
     await notify(server.url, {
       cwd: repo,
-      payload: { session_id: "unknown-sender", cwd: repo, hook_event_name: "Stop" },
+      payload: { session_id: "unknown-sender", cwd: repo, hook_event_name: "Interrupt" },
     });
-    expect(await worktreeStatus(server.url)).toBe("working");
+    expect(await worktreeStatus(server.url)).toBe("done");
   });
 });
 
