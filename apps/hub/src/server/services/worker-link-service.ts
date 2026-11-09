@@ -257,6 +257,7 @@ export class WorkerLinkService {
     workerLeaseService.attach(session);
     extensionWorkerService.attach(session);
     chatOwnershipService.attach(session);
+    terminalService.attachWorker(session);
   }
 
   private async onConnected(session: ServerSession): Promise<void> {

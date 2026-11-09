@@ -18,6 +18,7 @@ import {
   DIRECT_FALLBACK_CLOSE_CODE,
   DIRECT_FILE_ROUTES,
   DIRECT_LSP_PATH,
+  DIRECT_TERMINAL_CREATE,
   DIRECT_TERMINAL_PATH,
   DIRECT_WATCH_PATH,
   type DirectAccess,
@@ -38,6 +39,8 @@ const RETRY_AFTER_MS = 15_000;
 const RENEW_BEFORE_MS = 2 * 60_000;
 /** How long a direct call may take before the hub gets it instead. */
 const CALL_TIMEOUT_MS = 15_000;
+/** How long a direct terminal create may take before the hub gets it instead. The shell starts in ~150 ms. */
+const TERMINAL_CREATE_TIMEOUT_MS = 8_000;
 /** How long the hub may take to issue a token before the call goes to the hub instead. */
 const ACCESS_TIMEOUT_MS = 5_000;
 /** How long a failed background renewal, or a token request the hub did not answer, waits before the next one. */
@@ -274,10 +277,15 @@ async function callDirect(
   input: unknown,
   worktreeId: string,
   signal: AbortSignal | null | undefined,
+  options: {
+    timeoutMs?: number;
+    needs?: (access: DirectAccess) => boolean;
+    errorsGoToHub?: boolean;
+  } = {},
 ): Promise<DirectResult> {
   const access = await directAccessFor(worktreeId);
-  if (!access) return null;
-  const timeout = AbortSignal.timeout(CALL_TIMEOUT_MS);
+  if (!access || (options.needs && !options.needs(access))) return null;
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? CALL_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`http://127.0.0.1:${access.port}${DIRECT_CALL_PREFIX}${procedure}`, {
@@ -306,9 +314,25 @@ async function callDirect(
   }
   if (res.status === 200 && "result" in body) return { kind: "data", data: body.result };
   // The procedure itself failed. The hub would run the same code and fail the same way.
-  if (res.status === 500 && "error" in body) return { kind: "error", message: body.error.message };
+  if (!options.errorsGoToHub && res.status === 500 && "error" in body)
+    return { kind: "error", message: body.error.message };
   // Anything else (a listener that refuses the call, an older worker) is the hub's to answer.
   return null;
+}
+
+/**
+ * A plain terminal create the worker can serve: a UUID id, no environment. Anything else (an
+ * agent launch passes through other services, a script terminal has its own env) takes the hub.
+ */
+function directTerminalCreateInput(input: unknown): { worktreeId: string; body: object } | null {
+  if (typeof input !== "object" || input === null) return null;
+  const { worktreeId, id, command, cwd, ...rest } = input as Record<string, unknown>;
+  if (typeof worktreeId !== "string" || typeof id !== "string") return null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+  if (Object.values(rest).some((v) => v !== undefined)) return null;
+  if (command !== undefined && typeof command !== "string") return null;
+  if (cwd !== undefined && typeof cwd !== "string") return null;
+  return { worktreeId, body: { worktreeId, id, command, cwd } };
 }
 
 /**
@@ -319,13 +343,28 @@ async function callDirect(
 export function directWorkerLink(): TRPCLink<AppRouter> {
   return () =>
     ({ op, next }) => {
-      if (op.type === "subscription" || !isDirectProcedure(op.path)) return next(op);
-      const worktreeId = (op.input as { worktreeId?: unknown } | undefined)?.worktreeId;
+      const terminalCreate =
+        op.type === "mutation" && op.path === "terminal.create"
+          ? directTerminalCreateInput(op.input)
+          : null;
+      if (!terminalCreate && (op.type === "subscription" || !isDirectProcedure(op.path))) {
+        return next(op);
+      }
+      const worktreeId =
+        terminalCreate?.worktreeId ??
+        (op.input as { worktreeId?: unknown } | undefined)?.worktreeId;
       if (typeof worktreeId !== "string") return next(op);
       return observable((observer) => {
         let unsubscribe: (() => void) | null = null;
         let done = false;
-        callDirect(op.path, op.input, worktreeId, op.signal).then(
+        const call = terminalCreate
+          ? callDirect(DIRECT_TERMINAL_CREATE, terminalCreate.body, worktreeId, op.signal, {
+              timeoutMs: TERMINAL_CREATE_TIMEOUT_MS,
+              needs: (access) => access.terminalCreate === true,
+              errorsGoToHub: true,
+            })
+          : callDirect(op.path, op.input, worktreeId, op.signal);
+        call.then(
           (result) => {
             if (done) return;
             if (result?.kind === "data") {
