@@ -49,6 +49,7 @@ import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { setFileEditorChoice } from "../lib/extensions";
 import { isDesktop } from "../lib/is-desktop";
 import { keepLastWorktreeOnce, pickStartWorktree, recordLastWorktree } from "../lib/last-worktree";
+import { applyModsUrlParam, ModsLoader } from "../lib/mods";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { startPowerState } from "../lib/power-state";
 import { installRendererErrorReporting } from "../lib/renderer-error-reporting";
@@ -199,6 +200,7 @@ function PowerSync() {
     // Saving power must never stop the app from rendering.
     try {
       startPowerState();
+      applyModsUrlParam();
       startActivityReporter();
     } catch (err) {
       console.error("power saver failed to start", err);
@@ -1044,6 +1046,7 @@ function RootLayout() {
       <PowerSync />
       <ZoomSync />
       <ReloadSync />
+      <ModsLoader />
       <TooltipProvider>
         <ClientStateGate>
           <AppShell />

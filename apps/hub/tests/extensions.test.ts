@@ -116,6 +116,125 @@ describe("editor extensions", () => {
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10 });
   });
 
+  describe("client mods", () => {
+    const MOD_FOLDERS = [
+      [
+        "mod-ok",
+        {
+          id: "mod-ok",
+          name: "Mod ok",
+          version: "1.0.0",
+          extensionApi: 1,
+          contributes: {
+            mod: {
+              css: ["mod.css"],
+              module: "mod.js",
+              window: {
+                material: "sidebar",
+                toolbar: "unified",
+                trafficLightPosition: { x: 20, y: 18 },
+              },
+            },
+          },
+        },
+      ],
+      [
+        "mod-css-string",
+        {
+          id: "mod-css-string",
+          name: "Mod css string",
+          version: "1.0.0",
+          extensionApi: 1,
+          contributes: { mod: { css: "mod.css" } },
+        },
+      ],
+      [
+        "mod-unknown-key",
+        {
+          id: "mod-unknown-key",
+          name: "x",
+          version: "1",
+          extensionApi: 1,
+          contributes: { mod: { css: [], surprise: 1 } },
+        },
+      ],
+      [
+        "mod-bad-window",
+        {
+          id: "mod-bad-window",
+          name: "x",
+          version: "1",
+          extensionApi: 1,
+          contributes: { mod: { window: { material: "plastic" } } },
+        },
+      ],
+    ] as const;
+
+    beforeAll(async () => {
+      for (const [folder, manifest] of MOD_FOLDERS) {
+        mkdirSync(join(extensionsDir, folder));
+        writeFileSync(join(extensionsDir, folder, "band-extension.json"), JSON.stringify(manifest));
+      }
+      await reload();
+    });
+
+    afterAll(async () => {
+      for (const [folder] of MOD_FOLDERS) {
+        rmSync(join(extensionsDir, folder), { recursive: true, force: true });
+      }
+      await reload();
+    });
+
+    it("lists a mod's css, module and window options", async () => {
+      const { extensions } = await list();
+      const mod = extensions.find((e) => e.id === "mod-ok") as unknown as {
+        contributes: { mod: unknown };
+      };
+
+      expect(mod.contributes.mod).toEqual({
+        css: ["mod.css"],
+        module: "mod.js",
+        window: {
+          material: "sidebar",
+          toolbar: "unified",
+          trafficLightPosition: { x: 20, y: 18 },
+        },
+      });
+    });
+
+    it("reads a single css file name as a list of one", async () => {
+      const { extensions } = await list();
+      const mod = extensions.find((e) => e.id === "mod-css-string") as unknown as {
+        contributes: { mod: { css: string[] } };
+      };
+
+      expect(mod.contributes.mod.css).toEqual(["mod.css"]);
+    });
+
+    it("rejects an unknown mod key and a bad window value with the path", async () => {
+      const { extensions, errors } = await list();
+      const byFolder = Object.fromEntries(errors.map((e) => [e.folder, e.error]));
+
+      expect(extensions.map((e) => e.id)).not.toContain("mod-unknown-key");
+      expect(extensions.map((e) => e.id)).not.toContain("mod-bad-window");
+      expect(byFolder["mod-unknown-key"]).toContain("contributes.mod");
+      expect(byFolder["mod-bad-window"]).toContain("contributes.mod.window.material");
+    });
+
+    it("reports modsOff false by default and true with BAND_MODS=off", async () => {
+      const res = await trpcQuery(server.url, "extensions.list", undefined, TOKEN);
+      expect((await trpcData<{ modsOff: boolean }>(res)).modsOff).toBe(false);
+
+      const off = await startServer({ tmpHome, env: { BAND_MODS: "off" } });
+      try {
+        const reply = await trpcQuery(off.url, "extensions.list", undefined, TOKEN);
+        expect((await trpcData<{ modsOff: boolean }>(reply)).modsOff).toBe(true);
+      } finally {
+        await off.close();
+      }
+    });
+  });
+
   describe("GET /ext/<id>/<path>", () => {
     it("serves a file with no token, any origin allowed and no cookie", async () => {
       const res = await fetch(`${server.url}/ext/text-editor/index.html`, {

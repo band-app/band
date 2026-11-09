@@ -155,6 +155,17 @@ export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
 export type { SSEEvent } from "./lib/sse";
+export {
+  applySidebarTransforms,
+  clearMods,
+  type ModError,
+  Overridable,
+  recordModError,
+  registerOverride,
+  registerSidebarTransform,
+  useModErrors,
+  useModVersion,
+} from "./mods/registry";
 // Query
 export { queryClient, queryKeys } from "./query-client";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";

@@ -73,6 +73,13 @@ extraResources:
 files:
   - dist/**/*
   - package.json
+  - native/build/*.node
+
+# The optional native addon (`native/band-native.mm`: the window toolbar and SF Symbols for a
+# client mod) is a .node file, which cannot run from inside the asar. A missing addon leaves the
+# plain title bar and the mod's own icons.
+asarUnpack:
+  - "native/build/*.node"
 
 # Hook lifecycle order on macOS:
 #   afterPack → (electron-builder codesigns the outer .app) → afterSign

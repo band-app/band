@@ -24,6 +24,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
+import { Overridable } from "@/dashboard/mods/registry";
 import { beginLayoutResize, endLayoutResize } from "../../lib/layout-resizing";
 import { useFileDropTarget } from "../../lib/use-file-drop-target";
 import {
@@ -449,6 +450,49 @@ const GroupView = memo(function GroupView({
     isGroupActive,
   };
 
+  const headerEl = () => (
+    <div
+      className="band-layout-header"
+      data-testid="layout-header"
+      data-file-drop-over={fileDrop.over ? "" : undefined}
+      {...(ctx.fileDropNotify ? fileDrop.handlers : {})}
+    >
+      {Prefix && (
+        <div className="band-layout-pre-actions">
+          <Prefix {...actionProps} />
+        </div>
+      )}
+      <div
+        ref={tabsRef}
+        className="band-layout-tabs"
+        data-testid="layout-tab-list"
+        role="tablist"
+        aria-orientation="horizontal"
+      >
+        {group.panels.map((panel, i) => (
+          <TabItem
+            key={panel.id}
+            panel={panel}
+            params={panel.params}
+            selected={group.activePanel === panel}
+            first={i === 0}
+          />
+        ))}
+      </div>
+      {Left && (
+        <div className="band-layout-left-actions">
+          <Left {...actionProps} />
+        </div>
+      )}
+      <div className="band-layout-void" data-testid="layout-header-void" />
+      {Right && (
+        <div className="band-layout-right-actions">
+          <Right {...actionProps} />
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div
       ref={elRef}
@@ -466,46 +510,22 @@ const GroupView = memo(function GroupView({
         visibility: hidden ? "hidden" : undefined,
       }}
     >
-      <div
-        className="band-layout-header"
-        data-testid="layout-header"
-        data-file-drop-over={fileDrop.over ? "" : undefined}
-        {...(ctx.fileDropNotify ? fileDrop.handlers : {})}
-      >
-        {Prefix && (
-          <div className="band-layout-pre-actions">
-            <Prefix {...actionProps} />
-          </div>
-        )}
-        <div
-          ref={tabsRef}
-          className="band-layout-tabs"
-          data-testid="layout-tab-list"
-          role="tablist"
-          aria-orientation="horizontal"
-        >
-          {group.panels.map((panel, i) => (
-            <TabItem
-              key={panel.id}
-              panel={panel}
-              params={panel.params}
-              selected={group.activePanel === panel}
-              first={i === 0}
-            />
-          ))}
-        </div>
-        {Left && (
-          <div className="band-layout-left-actions">
-            <Left {...actionProps} />
-          </div>
-        )}
-        <div className="band-layout-void" data-testid="layout-header-void" />
-        {Right && (
-          <div className="band-layout-right-actions">
-            <Right {...actionProps} />
-          </div>
-        )}
-      </div>
+      {ctx.kind === "center" ? (
+        <Overridable
+          name="worktree.header"
+          props={{
+            groupId: group.id,
+            tabs: group.panels.map((p) => ({
+              id: p.id,
+              title: p.api.title || p.id,
+              selected: group.activePanel === p,
+            })),
+          }}
+          render={headerEl}
+        />
+      ) : (
+        headerEl()
+      )}
       <div ref={contentRef} className="band-layout-content" />
     </div>
   );

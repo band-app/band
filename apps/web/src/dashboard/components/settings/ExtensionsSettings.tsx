@@ -16,7 +16,8 @@ import {
 } from "@band-app/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, RefreshCcw, Trash2, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   BUILTIN_EDITOR,
   type CatalogEntryView,
@@ -30,7 +31,9 @@ import {
   useExtensions,
 } from "../../../lib/extensions";
 import { hubFetch } from "../../../lib/hub-config";
+import { setModsTurnedOff, useModsTurnedOff } from "../../../lib/mods";
 import { trpc } from "../../../lib/trpc-client";
+import { useModErrors } from "../../mods/registry";
 import { useIsAdmin } from "./DevicesSettings";
 import { SettingsRow } from "./SettingsRow";
 
@@ -64,6 +67,56 @@ function ErrorIcon({
         <span data-testid={`${testid}-text`}>{children}</span>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * The "Turn off mods" switch. It lives in a shadow root on a fixed host that is a direct child of
+ * the body, with inline `!important` styles, so mod CSS (which can hide any other element)
+ * cannot reach it. It stays while this settings section is open.
+ */
+function ModsSafeSwitch({ off }: { off: boolean }) {
+  const [root, setRoot] = useState<ShadowRoot | null>(null);
+  useEffect(() => {
+    const host = document.createElement("div");
+    host.dataset.bandModsSafe = "";
+    host.setAttribute(
+      "style",
+      "all:initial !important;position:fixed !important;right:16px !important;bottom:16px !important;z-index:2147483647 !important;display:block !important;visibility:visible !important;opacity:1 !important;",
+    );
+    document.body.appendChild(host);
+    setRoot(host.attachShadow({ mode: "open" }));
+    return () => host.remove();
+  }, []);
+  if (!root) return null;
+  return createPortal(
+    <div
+      style={{
+        font: "13px system-ui, sans-serif",
+        background: "Canvas",
+        color: "CanvasText",
+        border: "1px solid GrayText",
+        borderRadius: 8,
+        padding: "8px 12px",
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+      }}
+    >
+      <span>Turn off mods</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={off}
+        aria-label="Turn off mods"
+        data-testid="settings-extensions__mods-off"
+        onClick={() => setModsTurnedOff(!off)}
+        style={{ cursor: "pointer", padding: "2px 10px" }}
+      >
+        {off ? "On" : "Off"}
+      </button>
+    </div>,
+    root,
   );
 }
 
@@ -197,6 +250,9 @@ export function ExtensionsSettings() {
 
   const extensions = list?.extensions ?? [];
   const errors = list?.errors ?? [];
+  const modsOff = useModsTurnedOff();
+  const modErrors = useModErrors();
+  const mods = (list?.extensions ?? []).filter((e) => e.contributes.mod);
   const selectors = [...new Set([...selectorsOf(list), ...Object.keys(defaults)])];
 
   return (
@@ -394,6 +450,43 @@ export function ExtensionsSettings() {
           ) : null}
         </SettingsRow>
       ))}
+
+      {mods.length > 0 || modsOff ? (
+        <>
+          <SettingsRow
+            variant="stacked"
+            label="Mods"
+            description={`A mod is trusted code that runs in this page with this device's token and can change anything in the UI. Installing the extension is the approval. ${list?.modsOff ? "The hub runs with BAND_MODS=off, so no mod loads. " : ""}Mods stack in install order. If a mod breaks the page, add ?mods=off to the URL.`}
+          >
+            <span />
+          </SettingsRow>
+          {mods.map((ext, i) => (
+            <SettingsRow
+              key={`mod-${ext.id}`}
+              variant="inline"
+              label={
+                <span
+                  data-testid={`settings-extensions__mod--${ext.id}`}
+                >{`${i + 1}. ${ext.name}`}</span>
+              }
+              description={modsOff || list?.modsOff ? "Not loaded" : "Loaded"}
+            >
+              {modErrors
+                .filter((e) => e.extensionId === ext.id)
+                .map((e) => (
+                  <ErrorIcon
+                    key={e.region}
+                    label={`${ext.name} mod failed in ${e.region}`}
+                    testid={`settings-extensions__mod-error--${ext.id}--${e.region}`}
+                  >
+                    {`${ext.name} (${e.region}): ${e.message}`}
+                  </ErrorIcon>
+                ))}
+            </SettingsRow>
+          ))}
+          <ModsSafeSwitch off={modsOff} />
+        </>
+      ) : null}
 
       {errors.map((entry) => (
         <SettingsRow

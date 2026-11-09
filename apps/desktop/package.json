@@ -7,7 +7,8 @@
   "type": "module",
   "main": "dist/main/main/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && node scripts/postbuild.mjs",
+    "build:native": "node native/build.mjs",
+    "build": "node native/build.mjs && tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && node scripts/postbuild.mjs",
     "dev": "pnpm build && electron .",
     "test": "node --experimental-strip-types --import ./tests/register-loader.mjs --test 'tests/**/*.test.ts' 'tests/**/*.test.mjs'",
     "package": "electron-builder build --config electron-builder.yml",
@@ -21,6 +22,8 @@
     "@types/node": "^22.19.13",
     "electron": "^42.2.0",
     "electron-builder": "^25.0.0",
+    "node-addon-api": "^7.1.1",
+    "node-api-headers": "^1.9.0",
     "typescript": "^5.7.0"
   },
   "dependencies": {

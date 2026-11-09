@@ -162,4 +162,13 @@ describe("app hosts and CSP", () => {
     const none = buildCsp(null);
     assert.match(none, /connect-src 'self'(;|$)/);
   });
+
+  test("the CSP lets the page load a client mod's css and module from the hub's /ext/ path only", () => {
+    const csp = buildCsp("http://localhost:4567");
+    assert.match(csp, /style-src 'self' 'unsafe-inline' http:\/\/localhost:4567\/ext\/(;|$)/);
+    assert.match(csp, /script-src [^;]*http:\/\/localhost:4567\/ext\/(;|$)/);
+    assert.ok(!/(style|script)-src [^;]*http:\/\/localhost:4567(?!\/ext\/)/.test(csp));
+    const none = buildCsp(null);
+    assert.ok(!none.includes("/ext/"));
+  });
 });

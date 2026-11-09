@@ -23,6 +23,8 @@ const DEFAULTS_EVENT = "band:extension-defaults-changed";
 export interface ExtensionList {
   extensions: ExtensionManifest[];
   errors: { folder: string; error: string }[];
+  /** The hub runs with `BAND_MODS=off`. */
+  modsOff?: boolean;
   /** How each installed extension got here. */
   sources?: { id: string; official: boolean; source: "official" | "url" | "file" | "unknown" }[];
 }

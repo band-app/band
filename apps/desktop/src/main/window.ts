@@ -18,14 +18,30 @@
  */
 
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, powerMonitor, screen, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  nativeTheme,
+  powerMonitor,
+  screen,
+  shell,
+  systemPreferences,
+} from "electron";
 import { type HubFallbackAction, hubFallbackAction } from "./hub-unreachable.js";
 import { resolveAppIcon } from "./icon.js";
 import { decideNavigation, decideOpen } from "./navigation-guard.js";
-import { createLogger } from "./services/log.js";
-import { applyPowerToWindow } from "./services/window-power.js";
+import { bandHome, createLogger } from "./services/log.js";
+import {
+  readModWindowOptions,
+  resolveWindowChrome,
+  TOOLBAR_STYLE,
+  vibrancyFor,
+} from "./services/mod-window.js";
+import { loadNative } from "./services/native.js";
+import { watchSystemColors } from "./services/system-colors.js";
+import { applyPowerToWindow, setWindowVibrancy } from "./services/window-power.js";
 import {
   fitToDisplays,
   loadWindowState,
@@ -113,6 +129,11 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
   // Diagnostic: log the resolved preload path AND whether the file exists.
   // The most common preload-not-loading cause is a path mismatch.
   log.info({ preload, exists: existsSync(preload) }, "preload path");
+  // Window options of an installed client mod; without one these are the defaults.
+  const modOptions = readModWindowOptions(join(bandHome(), "extensions"));
+  const modActive = Object.keys(modOptions).length > 0;
+  const chrome = resolveWindowChrome(modOptions);
+  const vibrancy = vibrancyFor(chrome.material);
   const win = new BrowserWindow({
     title: "Band",
     width: 1200,
@@ -128,16 +149,20 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     // `visualEffectState: "active"` keeps the blur when the window loses
     // focus, like Finder's sidebar.
     ...(process.platform === "darwin"
-      ? { backgroundColor: "#00000000", vibrancy: "sidebar", visualEffectState: "active" }
+      ? {
+          backgroundColor: "#00000000",
+          ...(vibrancy ? { vibrancy } : {}),
+          visualEffectState: "active" as const,
+        }
       : { backgroundColor: "#000000" }),
     // BrowserWindow.icon is honoured on Windows/Linux; on macOS the dock
     // icon comes from the .icns in the packaged app, so we set it via
     // app.dock.setIcon() below for dev mode.
     icon: iconPath ?? undefined,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    titleBarStyle: process.platform === "darwin" ? chrome.titleBarStyle : "default",
     // Higher than Tauri's `y: 16` so the lights vertically align with the
     // toolbar icons inside the 38px title bar.
-    trafficLightPosition: process.platform === "darwin" ? { x: 13, y: 10 } : undefined,
+    trafficLightPosition: process.platform === "darwin" ? chrome.trafficLightPosition : undefined,
     webPreferences: {
       preload,
       contextIsolation: true,
@@ -175,7 +200,33 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     return { action: "deny" };
   });
 
+  const native = process.platform === "darwin" && modActive ? loadNative() : null;
+  if (process.platform === "darwin" && chrome.toolbar !== "none") {
+    if (native) native.setWindowToolbar(win.getNativeWindowHandle(), TOOLBAR_STYLE[chrome.toolbar]);
+    else log.warn("Window toolbar unavailable (native addon did not load)");
+  }
+  setWindowVibrancy(win, vibrancy);
   applyPowerToWindow(win, powerMonitor.isOnBatteryPower());
+
+  // A mod gets the AppKit colors (label, separator, selection, accent) as `--mac-*` CSS variables.
+  if (modActive && process.platform === "darwin") {
+    watchSystemColors(
+      win.webContents,
+      {
+        getColor: (name) => systemPreferences.getColor(name as never),
+        getAccentColor: () => systemPreferences.getAccentColor(),
+        onChange: (fn) => {
+          nativeTheme.on("updated", fn);
+          systemPreferences.on("accent-color-changed", fn);
+          return () => {
+            nativeTheme.off("updated", fn);
+            systemPreferences.off("accent-color-changed", fn);
+          };
+        },
+      },
+      { symbols: native !== null },
+    );
+  }
 
   const saved = restoreWindowState(win);
   trackWindowState(win);

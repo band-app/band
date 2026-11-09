@@ -23,3 +23,4 @@ apps/desktop/binaries/*
 !apps/desktop/binaries/.gitkeep
 apps/desktop/dist-builder/
 !apps/website/public/docs/screenshots/
+apps/desktop/native/build/
