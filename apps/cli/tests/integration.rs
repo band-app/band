@@ -2029,6 +2029,7 @@ fn band_notify_with_env(
         .env_remove("BAND_SERVER_URL")
         .env_remove("BAND_DISPATCH")
         .env_remove("BAND_TERMINAL_ID")
+        .env_remove("BAND_AGENT_LAUNCH_TOKEN")
         .env_remove("BAND_HOST_ID")
         .env_remove("BAND_WORKER_ID")
         .envs(extra_env.iter().copied())
@@ -2123,30 +2124,30 @@ fn notify_forwards_payload_to_server() {
     );
 }
 
-/// Query the terminal a hook source was reported from.
-fn query_source_terminal(band_dir: &Path, source_id: &str) -> Option<String> {
+/// Query the terminal of the agent session a hook reported under a provider session id.
+fn query_session_terminal(band_dir: &Path, provider_session_id: &str) -> Option<String> {
     let db_path = band_dir.join("band.db");
     let script = format!(
         r#"
         const {{ DatabaseSync }} = await import("node:sqlite");
         const db = new DatabaseSync("{db}");
         const row = db.prepare(
-            "SELECT terminal_id FROM worktree_status_sources WHERE source_id = ?"
+            "SELECT terminal_id FROM agent_sessions WHERE provider_session_id = ?"
         ).get("{source}");
         console.log(JSON.stringify({{ terminal: row ? row.terminal_id : null }}));
         db.close();
         "#,
         db = db_path.to_string_lossy().replace('\\', "/"),
-        source = source_id,
+        source = provider_session_id,
     );
     let output = command("node")
         .args(["--input-type=module", "-e", &script])
         .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .output()
-        .expect("query_source_terminal failed");
+        .expect("query_session_terminal failed");
     assert!(
         output.status.success(),
-        "query_source_terminal failed: {}",
+        "query_session_terminal failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let json: serde_json::Value =
@@ -2155,8 +2156,8 @@ fn query_source_terminal(band_dir: &Path, source_id: &str) -> Option<String> {
 }
 
 /// The installed hook passes `--agent claude-code`, and a hook inside a Band
-/// terminal forwards `BAND_TERMINAL_ID` so closing the terminal can drop the
-/// session's status.
+/// terminal forwards `BAND_TERMINAL_ID`, which the server keeps on the agent
+/// session.
 #[test]
 fn notify_forwards_agent_and_terminal_id() {
     let env = TestEnv::new();
@@ -2180,7 +2181,7 @@ fn notify_forwards_agent_and_terminal_id() {
         Some("done"),
     );
     assert_eq!(
-        query_source_terminal(&env.band_dir, "hook:cli-session").as_deref(),
+        query_session_terminal(&env.band_dir, "cli-session").as_deref(),
         Some("term-123"),
     );
 }

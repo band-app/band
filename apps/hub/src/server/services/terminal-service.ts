@@ -20,6 +20,7 @@ import { createLogger } from "@band-app/logger";
 import type { WorktreeTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
 import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
+import { resumeCommandFor } from "./_utils/agent-resume-command";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
@@ -280,16 +281,20 @@ export class TerminalService {
         })
       : null;
     const spawnEnv = { ...options?.env, ...login?.env, ...grant?.env };
+    // A saved terminal whose PTY was lost resumes the agent it ran, by the
+    // provider session id the agent's hooks reported.
+    const resumeCommand = options?.command ? undefined : resumeCommandFor(terminalId);
     const request = {
       worktreeId,
       terminalId,
       worktreeRoot: root,
       options:
-        grant || login
+        grant || login || resumeCommand !== undefined
           ? {
               ...options,
               env: spawnEnv,
               ...(login?.unsetEnv.length ? { unsetEnv: login.unsetEnv } : {}),
+              ...(resumeCommand !== undefined ? { resumeCommand } : {}),
             }
           : options,
       cleanupOnExit: opts?.cleanupOnExit,

@@ -10,6 +10,7 @@ import type { IPty } from "node-pty";
 import { defaultShell, shellPath } from "../process/path";
 import {
   buildClaudeResumeCommand,
+  claudeBinaryOf,
   findLatestClaudeSessionId,
   isResumableClaudeCommand,
 } from "./claude-resume";
@@ -548,7 +549,11 @@ export class TerminalPool {
     // a saved Claude Code session for this cwd — its resume command. Any
     // other saved command is deliberately NOT re-run automatically; a cold
     // restore only shows the saved scrollback for those.
-    const commandToRun = options?.command ?? this.claudeResumeCommand(checkpoint, historyMeta, cwd);
+    const commandToRun =
+      options?.command ??
+      (options?.resumeCommand !== undefined
+        ? (checkpoint ? options.resumeCommand : null) || undefined
+        : this.claudeResumeCommand(checkpoint, historyMeta, cwd));
     if (commandToRun) {
       this.autoRunCommand(session, commandToRun);
     }
@@ -680,8 +685,9 @@ export class TerminalPool {
   ): string | undefined {
     const command = meta?.sessionCommand;
     if (!checkpoint || !command || !isResumableClaudeCommand(command)) return undefined;
-    const sessionId = findLatestClaudeSessionId(cwd);
-    return sessionId ? buildClaudeResumeCommand(command, sessionId) : undefined;
+    const binary = claudeBinaryOf(command);
+    const sessionId = binary ? findLatestClaudeSessionId(cwd) : null;
+    return binary && sessionId ? buildClaudeResumeCommand(binary, sessionId) : undefined;
   }
 
   /**

@@ -8,6 +8,14 @@
 
 export type AgentMode = "gui" | "tui";
 
+export type AgentSessionEndReason =
+  | "killed"
+  | "session-end"
+  | "replaced"
+  | "removed"
+  | "failed"
+  | "lost";
+
 export type AgentSessionState = "starting" | "running" | "ended";
 
 export interface AgentSessionRecord {
@@ -22,6 +30,16 @@ export interface AgentSessionRecord {
   /** Set for `tui` sessions. */
   terminalId: string | null;
   state: AgentSessionState;
+  /**
+   * Why the session ended, null while it is open. `killed` (the terminal was
+   * closed) and `session-end` (the agent said it exited) mean the user is
+   * done with it; `replaced` (another session took the terminal) and
+   * `removed` (its chat went away) are bookkeeping.
+   */
+  endReason: AgentSessionEndReason | null;
+  /** question, failed, working, monitoring, done or idle. */
+  status: string;
+  statusUpdatedAt: number;
   createdAt: number;
   updatedAt: number;
 }

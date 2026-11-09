@@ -11,9 +11,13 @@
  * behind a chat pane.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
-import type { AgentMode, AgentSessionRecord } from "@band-app/shared/agent-sessions";
+import type {
+  AgentMode,
+  AgentSessionEndReason,
+  AgentSessionRecord,
+} from "@band-app/shared/agent-sessions";
 import { AgentSessionQueries } from "../infra/db/queries/agent-sessions";
 import { subscribe } from "../infra/events/status-event-bus";
 import { emit } from "./watcher-service";
@@ -27,6 +31,33 @@ export interface CreateAgentSessionInput {
   chatId?: string;
   terminalId?: string;
   providerSessionId?: string;
+  status?: string;
+  /** The launch token placed in the agent's PTY env; only its hash is stored. */
+  launchToken?: string;
+}
+
+/** A coding-agent hook event seen in a Band terminal. */
+export interface TerminalHookEvent {
+  worktreeId: string;
+  /** Absent for an agent outside a Band terminal; its session is keyed by provider id. */
+  terminalId?: string;
+  /** The definition id the session shows under. */
+  agentDefinitionId: string;
+  /** The agent's own session id, when the payload carried one. */
+  providerSessionId: string | null;
+  /** `BAND_AGENT_LAUNCH_TOKEN` of the agent's process, when `band notify` forwarded it. */
+  launchToken?: string;
+  /** The agent said its session is over. */
+  sessionEnd: boolean;
+}
+
+/** A fresh secret for one TUI launch. */
+export function newLaunchToken(): string {
+  return randomBytes(24).toString("hex");
+}
+
+function hashLaunchToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 export class AgentSessionRegistryService {
@@ -44,7 +75,7 @@ export class AgentSessionRegistryService {
       if (event.kind === "chat-removed" && event.chatId) {
         this.endForChat(event.chatId);
       } else if (event.kind === "terminal-killed" && event.terminalId) {
-        this.endForTerminal(event.terminalId);
+        this.endForTerminal(event.terminalId, "killed");
       }
     });
   }
@@ -53,9 +84,14 @@ export class AgentSessionRegistryService {
     return this.queries.find(id);
   }
 
-  /** Sessions of a worktree that haven't ended. */
-  listOpen(worktreeId: string): AgentSessionRecord[] {
-    return this.queries.findOpenByWorktree(worktreeId);
+  /** Sessions of a worktree that haven't ended; every worktree's with no id. */
+  listOpen(worktreeId?: string): AgentSessionRecord[] {
+    return worktreeId ? this.queries.findOpenByWorktree(worktreeId) : this.queries.findAllOpen();
+  }
+
+  /** The newest session a terminal had, open or not. */
+  latestForTerminal(terminalId: string): AgentSessionRecord | undefined {
+    return this.queries.findLatestByTerminal(terminalId);
   }
 
   findOpenByChat(chatId: string): AgentSessionRecord | undefined {
@@ -77,10 +113,13 @@ export class AgentSessionRegistryService {
       chatId: input.chatId ?? null,
       terminalId: input.terminalId ?? null,
       state: input.providerSessionId ? "running" : "starting",
+      endReason: null,
+      status: input.status ?? "idle",
+      statusUpdatedAt: now,
       createdAt: now,
       updatedAt: now,
     };
-    this.queries.insert(record);
+    this.queries.insert(record, input.launchToken ? hashLaunchToken(input.launchToken) : undefined);
     emit({ kind: "agent-session-created", worktreeId: record.worktreeId, agentSession: record });
     log.info(
       { agentSessionId: record.id, worktreeId: record.worktreeId, mode: record.mode },
@@ -105,9 +144,10 @@ export class AgentSessionRegistryService {
       if (providerSessionId) this.update(open.id, { providerSessionId, state: "running" });
       return;
     }
-    if (open) this.end(open.id);
+    if (open) this.end(open.id, "replaced");
     if (!providerSessionId) return;
     this.create({
+      status: open?.status,
       worktreeId: chat.worktreeId,
       agentDefinitionId: chat.agent,
       mode: "gui",
@@ -116,18 +156,134 @@ export class AgentSessionRegistryService {
     });
   }
 
+  /** The chat's open session, created (id not known yet) when the chat has none. */
+  ensureChatSession(chat: { id: string; worktreeId: string; agent: string }): AgentSessionRecord {
+    return (
+      this.queries.findOpenByChat(chat.id) ??
+      this.create({
+        worktreeId: chat.worktreeId,
+        agentDefinitionId: chat.agent,
+        mode: "gui",
+        chatId: chat.id,
+      })
+    );
+  }
+
+  /** Record what a session is doing. Returns the updated record. */
+  setStatus(id: string, status: string): AgentSessionRecord | undefined {
+    const updated = this.queries.update(id, {
+      status,
+      statusUpdatedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    if (updated) {
+      emit({
+        kind: "agent-session-updated",
+        worktreeId: updated.worktreeId,
+        agentSession: updated,
+      });
+    }
+    return updated;
+  }
+
+  /** Open sessions with a status, for deriving a worktree's. */
+  openWithStatus(): AgentSessionRecord[] {
+    return this.queries.findAllOpen();
+  }
+
+  /** `done` and `failed` sessions of a worktree go back to `idle`. Returns how many changed. */
+  acknowledge(worktreeId: string): number {
+    return this.queries.acknowledge(worktreeId, Date.now());
+  }
+
+  /** Hub start: no agent is running, so active statuses reset and detached hook sessions end. */
+  resetOnBoot(): void {
+    this.queries.resetActiveStatuses(Date.now());
+    this.queries.endDetached(Date.now());
+  }
+
   endForChat(chatId: string): void {
     const open = this.queries.findOpenByChat(chatId);
-    if (open) this.end(open.id);
+    if (open) this.end(open.id, "removed");
   }
 
-  endForTerminal(terminalId: string): void {
+  endForTerminal(terminalId: string, reason: AgentSessionEndReason): void {
     const open = this.queries.findOpenByTerminal(terminalId);
-    if (open) this.end(open.id);
+    if (open) this.end(open.id, reason);
   }
 
-  end(id: string): void {
-    const ended = this.queries.update(id, { state: "ended", updatedAt: Date.now() });
+  /**
+   * Apply a hook event from an agent in a Band terminal. Every agent that
+   * reports through hooks gets a `tui` session, launched by Band or typed by
+   * hand; the row is created once and its provider session id filled in.
+   *
+   * - A launched row (it has a launch token) takes its provider session id
+   *   only from an event that carries the token, so a stray event from that
+   *   terminal never claims the launch's identity.
+   * - A different provider session id from the same terminal means the
+   *   agent started a new conversation (`/clear`, a new run): the open row
+   *   ends and a new one opens.
+   * - `sessionEnd` ends the row.
+   *
+   * Returns the session the event belongs to, or null when it ended one or
+   * was refused.
+   */
+  recordTerminalHook(event: TerminalHookEvent): AgentSessionRecord | null {
+    // The id ends up as an argument of the resume command, so a value that
+    // looks like a flag must never be stored.
+    if (event.providerSessionId && !SAFE_PROVIDER_SESSION_ID.test(event.providerSessionId)) {
+      event = { ...event, providerSessionId: null };
+    }
+    const open = event.terminalId
+      ? this.queries.findOpenByTerminal(event.terminalId)
+      : this.queries.findOpenDetached(
+          event.worktreeId,
+          event.providerSessionId,
+          event.agentDefinitionId,
+        );
+    if (open && event.terminalId && open.worktreeId !== event.worktreeId) return null;
+    const tokenHash = event.launchToken ? hashLaunchToken(event.launchToken) : null;
+    if (event.sessionEnd) {
+      if (
+        open &&
+        (!event.providerSessionId ||
+          open.providerSessionId === event.providerSessionId ||
+          open.providerSessionId === null)
+      ) {
+        this.end(open.id, "session-end");
+      }
+      return null;
+    }
+    if (open) {
+      if (!event.providerSessionId || open.providerSessionId === event.providerSessionId) {
+        return open;
+      }
+      if (open.providerSessionId === null) {
+        const launched = this.queries.hasLaunchToken(open.id);
+        if (launched && !(tokenHash && this.queries.launchTokenMatches(open.id, tokenHash))) {
+          // Status still applies (an older CLI sends no token); only the identity claim is withheld.
+          return open;
+        }
+        this.update(open.id, { providerSessionId: event.providerSessionId, state: "running" });
+        return this.queries.find(open.id) ?? open;
+      }
+      this.end(open.id, "replaced");
+    }
+    return this.create({
+      worktreeId: event.worktreeId,
+      agentDefinitionId: event.agentDefinitionId,
+      mode: "tui",
+      terminalId: event.terminalId,
+      providerSessionId: event.providerSessionId ?? undefined,
+    });
+  }
+
+  end(id: string, reason: AgentSessionEndReason): void {
+    const ended = this.queries.update(id, {
+      state: "ended",
+      endReason: reason,
+      updatedAt: Date.now(),
+    });
     if (!ended) return;
     emit({ kind: "agent-session-ended", worktreeId: ended.worktreeId, agentSession: ended });
   }
@@ -150,5 +306,7 @@ export class AgentSessionRegistryService {
     });
   }
 }
+
+const SAFE_PROVIDER_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export const agentSessionRegistry = new AgentSessionRegistryService();

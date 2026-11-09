@@ -240,11 +240,12 @@ To start an agent in a new worktree, use `band worktrees create --prompt` instea
 
 ```sh
 band agents list [worktree_id]
+band agents list --all
 ```
 
-An agent session is one run of a coding agent, in a chat (`gui`) or in a terminal (`tui`). A session keeps its mode for its whole life. Ended sessions are not listed.
+An agent session is one run of a coding agent, in a chat (`gui`) or in a terminal (`tui`). A session keeps its mode for its whole life. A `tui` session exists for every agent that reports through hooks in a Band terminal, whether Band launched it or you typed it. Ended sessions are not listed. `--all` lists the open sessions of every worktree.
 
-Text output: `SESSION ID\tAGENT\tMODE\tSTATE\tPANE\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions; PROVIDER SESSION is the agent's own session ID once it is known.
+Text output: `SESSION ID\tAGENT\tMODE\tSTATE\tPANE\tPROVIDER SESSION` (tab-separated table); with `--all` a `WORKTREE` column follows the session id. PANE is the chat ID for gui sessions and the terminal ID for tui sessions; PROVIDER SESSION is the agent's own session ID once it is known.
 JSON output: `{"agentSessions": [{"id": "...", "worktreeId": "...", "agentDefinitionId": "...", "providerSessionId": "..." | null, "mode": "gui" | "tui", "chatId": "..." | null, "terminalId": "..." | null, "state": "starting" | "running", "createdAt": N, "updatedAt": N}]}`
 
 ### Show current settings
