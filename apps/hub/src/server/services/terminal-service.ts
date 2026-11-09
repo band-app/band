@@ -14,12 +14,12 @@ import { createLogger } from "@band-app/logger";
 import type { WorktreeTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
 import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
+import { resumeCommandFor } from "./_utils/agent-resume-command";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
   removeTerminalFromLayout,
 } from "./_utils/terminal-layout-manager";
-import { resumeCommandFor } from "./_utils/agent-resume-command";
 import { agentLoginService } from "./agent-login-service";
 import { clientActivityService } from "./client-activity-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";

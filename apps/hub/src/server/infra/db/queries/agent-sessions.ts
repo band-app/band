@@ -9,12 +9,21 @@
  */
 
 import type { AgentSessionRecord } from "@band-app/shared/agent-sessions";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { getDb } from "../connection";
 import { agentSessions } from "../schema";
 
 export type AgentSessionPatch = Partial<
-  Pick<AgentSessionRecord, "providerSessionId" | "state" | "chatId" | "terminalId" | "endReason">
+  Pick<
+    AgentSessionRecord,
+    | "providerSessionId"
+    | "state"
+    | "chatId"
+    | "terminalId"
+    | "endReason"
+    | "status"
+    | "statusUpdatedAt"
+  >
 > & { updatedAt: number };
 
 type AgentSessionRow = typeof agentSessions.$inferSelect;
@@ -105,6 +114,74 @@ export class AgentSessionQueries {
       .orderBy(desc(agentSessions.createdAt), desc(sql`rowid`))
       .get();
     return row && toRecord(row);
+  }
+
+  /** The open session without a terminal or chat that a hook reported under this provider id (or, with no id, this agent). */
+  findOpenDetached(
+    worktreeId: string,
+    providerSessionId: string | null,
+    agentDefinitionId: string,
+  ): AgentSessionRecord | undefined {
+    const row = getDb()
+      .select()
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.worktreeId, worktreeId),
+          providerSessionId
+            ? eq(agentSessions.providerSessionId, providerSessionId)
+            : and(
+                isNull(agentSessions.providerSessionId),
+                eq(agentSessions.agentDefinitionId, agentDefinitionId),
+              ),
+          isNull(agentSessions.terminalId),
+          isNull(agentSessions.chatId),
+          ne(agentSessions.state, "ended"),
+        ),
+      )
+      .get();
+    return row && toRecord(row);
+  }
+
+  /** Set the worktree's open `done` and `failed` sessions to `idle`. Returns how many changed. */
+  acknowledge(worktreeId: string, now: number): number {
+    const result = getDb()
+      .update(agentSessions)
+      .set({ status: "idle", statusUpdatedAt: now })
+      .where(
+        and(
+          eq(agentSessions.worktreeId, worktreeId),
+          ne(agentSessions.state, "ended"),
+          inArray(agentSessions.status, ["done", "failed"]),
+        ),
+      )
+      .run();
+    return Number(result.changes);
+  }
+
+  /** Hub start: every open session that is not `done` or `failed` becomes `idle`. */
+  resetActiveStatuses(now: number): void {
+    getDb()
+      .update(agentSessions)
+      .set({ status: "idle", statusUpdatedAt: now })
+      .where(notInArray(agentSessions.status, ["done", "failed", "idle"]))
+      .run();
+  }
+
+  /** Hub start: end terminal-less tui sessions, which nothing can show to be alive. */
+  endDetached(now: number): void {
+    getDb()
+      .update(agentSessions)
+      .set({ state: "ended", endReason: "lost", updatedAt: now })
+      .where(
+        and(
+          eq(agentSessions.mode, "tui"),
+          isNull(agentSessions.terminalId),
+          isNull(agentSessions.chatId),
+          ne(agentSessions.state, "ended"),
+        ),
+      )
+      .run();
   }
 
   deleteForWorktree(worktreeId: string): void {

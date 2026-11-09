@@ -1,11 +1,12 @@
 import type { AgentHookStatus } from "@band-app/coding-agent";
+import { agentSessionRegistry } from "./agent-session-registry-service";
 import { agentSessionService } from "./agent-session-service";
 import { chatService } from "./chat-service";
-import { chatStatusSource, setWorktreeSourceStatus } from "./state";
+import { setSessionStatus } from "./state";
 import { emit as emitStatusEvent } from "./watcher-service";
 
 /**
- * The status a chat reports on its worktree (source `chat:<id>`):
+ * The status a chat reports on its worktree (the status of its agent session):
  * `working`, `monitoring`, `question`, `done`, `failed` or `idle`.
  *
  * `task-service` drives it for turns Band starts. Turns the agent starts on
@@ -40,8 +41,15 @@ let runningTurn: (chatId: string) => boolean = () => false;
 export function setChatStatus(worktreeId: string, chatId: string, status: AgentHookStatus): void {
   if (status === "monitoring") monitoringChats.add(chatId);
   else monitoringChats.delete(chatId);
-  const updated = setWorktreeSourceStatus(worktreeId, chatStatusSource(chatId), { status });
-  emitStatusEvent({ kind: "update", status: updated });
+  const chat = chatService.get(chatId);
+  if (!chat) return;
+  const session = agentSessionRegistry.ensureChatSession({
+    id: chatId,
+    worktreeId,
+    agent: chat.agent,
+  });
+  const updated = setSessionStatus(session.id, status);
+  if (updated) emitStatusEvent({ kind: "update", status: updated });
 }
 
 /** The status a chat settles to when its agent has nothing running right now. */

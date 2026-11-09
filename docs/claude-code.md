@@ -30,7 +30,7 @@ Settings > Coding Agents > Claude Code lists the models the agent reports. Pick 
 
 In a chat, Band shows messages, tool calls, plans and permission questions. When Claude Code asks to run a tool, the chat shows a card with the options the agent offers.
 
-In a terminal tab you get Claude Code's own interface. A prompt passed on the command line, such as `band agents launch --mode tui --prompt "..."`, arrives as the first message. When Band restores a terminal that ran a plain `claude` command after its shell was lost, it resumes the newest Claude Code session in that folder with `--resume`.
+In a terminal tab you get Claude Code's own interface. A prompt passed on the command line, such as `band agents launch --mode tui --prompt "..."`, arrives as the first message. When Band restores a terminal after its shell was lost, it resumes the Claude Code session that terminal last reported through hooks with `claude --resume <id>`, without the launch prompt, whether Claude was launched by Band or typed by hand. A terminal whose agent sent `SessionEnd` is not resumed. With no reported id, a terminal whose command was `claude` (a plain name or a path) resumes the newest session in that folder.
 
 ## Hooks
 

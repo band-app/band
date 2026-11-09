@@ -688,6 +688,10 @@ export const agentSessions = sqliteTable(
     launchTokenHash: text("launch_token_hash"),
     /** Why the session ended: `killed`, `session-end`, `replaced`, `lost`, `removed`. */
     endReason: text("end_reason").$type<AgentSessionEndReason>(),
+    /** What the agent is doing: question, failed, working, monitoring, done or idle. */
+    status: text("status").notNull().default("idle"),
+    /** When `status` last changed; a terminal agent stuck on `working` stops counting after a while. */
+    statusUpdatedAt: integer("status_updated_at").notNull().default(0),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

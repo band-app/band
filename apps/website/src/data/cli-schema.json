@@ -1512,9 +1512,9 @@
       ]
     },
     {
-      "description": "List the running agent sessions of a worktree",
+      "description": "List the running agent sessions of a worktree, or of every worktree with --all",
       "name": "agents list",
-      "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"worktreeId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`",
+      "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. A tui session exists for every agent that reports through hooks in a Band terminal, launched by Band or typed by hand. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table); with `--all` a `WORKTREE` column follows the session id. PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"worktreeId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`",
       "parameters": [
         {
           "description": "Worktree ID (auto-detected from cwd if omitted)",
@@ -1522,6 +1522,12 @@
           "positional": true,
           "required": false,
           "type": "string"
+        },
+        {
+          "description": "List the open sessions of every worktree",
+          "name": "--all",
+          "required": false,
+          "type": "boolean"
         }
       ]
     },
@@ -1706,7 +1712,7 @@
     {
       "description": "Receive coding-agent hook notifications (reads JSON from stdin)",
       "name": "notify",
-      "notes": "Not called directly — registered as a coding-agent hook when the user installs hooks from the banner or Settings (`band notify --agent claude-code`). Always exits 0 and prints nothing, within about a second, whatever happens. Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status.",
+      "notes": "Not called directly — registered as a coding-agent hook when the user installs hooks from the banner or Settings (`band notify --agent claude-code`). Always exits 0 and prints nothing, within about a second, whatever happens. Forwards the raw payload, plus `BAND_DISPATCH`, `BAND_TERMINAL_ID` and `BAND_AGENT_LAUNCH_TOKEN` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status.",
       "parameters": [
         {
           "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the worktree.",

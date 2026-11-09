@@ -332,8 +332,19 @@ describe("terminal cold restore", () => {
       await reportHook(terminalId, OLD_SESSION, "SessionEnd");
 
       await restartAndReopen(terminalId, env);
-      // The restore runs its command right after the shell starts; give it time.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // The shell runs input in order, so once it echoes a marker typed now,
+      // any resume command the restore wrote earlier has already run.
+      const socket = await TerminalSocket.open(server, {
+        worktreeId: WORKTREE_ID,
+        terminalId,
+        token: TOKEN,
+      });
+      try {
+        socket.type("echo AFTER_RESTORE_$((40+2))\r");
+        await socket.waitForOutput("AFTER_RESTORE_42");
+      } finally {
+        await socket.close();
+      }
       expect(argvLines(log)).toEqual([""]);
     });
   });

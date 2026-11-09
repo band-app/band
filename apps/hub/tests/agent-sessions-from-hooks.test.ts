@@ -27,12 +27,11 @@ import {
 } from "./helpers/server";
 import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 import { TerminalSocket } from "./helpers/terminal-socket";
-import { testWorktreeId } from "./helpers/test-host";
 import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "agent-sessions-from-hooks-token";
-const WT_A = testWorktreeId("hookrepo", "main", false);
-const WT_B = testWorktreeId("hookrepo2", "main", false);
+const WT_A = "hookrepo-main";
+const WT_B = "hookrepo2-main";
 
 const cli = findCliBinary();
 
@@ -165,15 +164,14 @@ describe.skipIf(!cli)("agent sessions from hook events", () => {
     ]) {
       hook(terminalId, dirA, sessionId, event);
     }
+    // The last event (Stop) sets the status to done, so every event has landed by then.
     const sessions = await waitFor(
       async () => {
         const open = (await listSessions(WT_A)).filter((s) => s.terminalId === terminalId);
-        return open.length > 0 ? open : undefined;
+        return open.length > 0 && open[0]?.status === "done" ? open : undefined;
       },
-      { label: "tui session created by a hook" },
+      { label: "tui session created by a hook and finished by Stop" },
     );
-    // Let the later events land before counting.
-    await new Promise((resolve) => setTimeout(resolve, 500));
     const after = (await listSessions(WT_A)).filter((s) => s.terminalId === terminalId);
     expect(sessions).toHaveLength(1);
     expect(after).toHaveLength(1);
@@ -279,7 +277,16 @@ describe.skipIf(!cli)("agent sessions from hook events", () => {
     // and opens no second row.
     const stray = randomUUID();
     hook(terminalId, dirA, stray, { hook_event_name: "UserPromptSubmit" });
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    // The stray prompt still sets the status, which shows the hub processed it.
+    await waitFor(
+      async () =>
+        (await listSessions(WT_A)).some(
+          (s) => s.terminalId === terminalId && s.status === "working",
+        )
+          ? true
+          : undefined,
+      { label: "stray event applied" },
+    );
     let mine = (await listSessions(WT_A)).filter((s) => s.terminalId === terminalId);
     expect(mine).toHaveLength(1);
     expect(mine[0]?.providerSessionId).toBeNull();

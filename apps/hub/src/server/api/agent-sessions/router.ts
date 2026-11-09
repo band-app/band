@@ -15,9 +15,11 @@ import { publicProcedure, t } from "../trpc";
 
 export const agentSessionsRouter = t.router({
   // Without a worktree id: every open session, in every worktree.
-  list: publicProcedure.input(z.object({ worktreeId: z.string().optional() })).query(({ input }) => {
-    return { agentSessions: agentSessionRegistry.listOpen(input.worktreeId) };
-  }),
+  list: publicProcedure
+    .input(z.object({ worktreeId: z.string().optional() }))
+    .query(({ input }) => {
+      return { agentSessions: agentSessionRegistry.listOpen(input.worktreeId) };
+    }),
 
   /**
    * Start an agent. `mode` is the calling device's choice; without it the

@@ -7,6 +7,7 @@ import {
   mapHookPayloadToStatus,
   type SubagentHold,
 } from "@band-app/coding-agent";
+import type { AgentSessionRecord } from "@band-app/shared/agent-sessions";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import {
   type RepoKind,
@@ -24,7 +25,6 @@ import {
 import {
   WorktreeStatusQueries,
   WorktreeStatusSourceQueries,
-  type WorktreeStatusSourceRow,
 } from "../infra/db/queries/worktree-statuses";
 import { type WorktreeIdentity, WorktreeQueries } from "../infra/db/queries/worktrees";
 import {
@@ -162,15 +162,15 @@ export function worktreesDir(): string {
  * worktree's rows in `worktree_status_sources`.
  */
 export function loadCurrentStatuses(): WorktreeStatus[] {
-  const sourcesByWorktree = new Map<string, WorktreeStatusSourceRow[]>();
-  for (const source of statusSourceQueries.listAll()) {
-    const list = sourcesByWorktree.get(source.worktreeId);
-    if (list) list.push(source);
-    else sourcesByWorktree.set(source.worktreeId, [source]);
+  const sessionsByWorktree = new Map<string, AgentSessionRecord[]>();
+  for (const session of agentSessionRegistry.openWithStatus()) {
+    const list = sessionsByWorktree.get(session.worktreeId);
+    if (list) list.push(session);
+    else sessionsByWorktree.set(session.worktreeId, [session]);
   }
   return worktreeStatusQueries.loadCurrent().map((status) => ({
     ...status,
-    tabStatuses: toTabStatuses(sourcesByWorktree.get(status.worktreeId) ?? []),
+    tabStatuses: toTabStatuses(sessionsByWorktree.get(status.worktreeId) ?? []),
   }));
 }
 
@@ -319,27 +319,28 @@ export function resolveWorktreeIdByCwd(cwd: string, hostId?: string): string | n
 }
 
 // -----------------------------------------------------------------------------
-// Status sources.
+// Agent status.
 //
-// Several agents can report into one worktree: every chat pane's ACP turns,
-// and every hook-reporting CLI session (a Claude Code in a terminal). Each
-// keeps its own row in `worktree_status_sources`, and the worktree's
-// `agent_status` is derived from all of them, so one agent finishing never
-// overwrites another that is still working or waiting on the user.
+// Every agent in a worktree is an agent session (`agent_sessions`), a chat
+// pane's or a terminal's, and each carries its own `status`. The worktree's
+// `agent_status` is derived from its open sessions plus the manual source
+// (`statuses.update`, the only row left in `worktree_status_sources`), so
+// one agent finishing never overwrites another that is still working or
+// waiting on the user.
 //
-// A hook session can vanish without saying so: Claude Code runs no hook when
-// the user interrupts a turn, and one killed or running outside a Band
-// terminal sends no `SessionEnd`. So a hook source that has said `working`
-// and then gone quiet for `STALE_HOOK_WORKING_MS` stops counting. A live
-// Claude Code reports every tool call, and its longest tool call (a Bash
-// command) times out after 10 minutes.
+// A terminal agent can vanish without saying so: Claude Code runs no hook
+// when the user interrupts a turn, and one killed or running outside a Band
+// terminal sends no `SessionEnd`. So a terminal session that has said
+// `working` and then gone quiet for `STALE_HOOK_WORKING_MS` stops counting.
+// A live Claude Code reports every tool call, and its longest tool call (a
+// Bash command) times out after 10 minutes.
 // -----------------------------------------------------------------------------
 
 const STALE_HOOK_WORKING_MS = 15 * 60_000;
 
-/** Higher wins when sources disagree; statuses not listed rank lowest. */
 const LOCAL_HOST_ID = "local";
 
+/** Higher wins when sources disagree; statuses not listed rank lowest. */
 const STATUS_PRIORITY: Record<string, number> = {
   question: 6,
   failed: 5,
@@ -349,59 +350,47 @@ const STATUS_PRIORITY: Record<string, number> = {
   idle: 1,
 };
 
-const CHAT_SOURCE_PREFIX = "chat:";
-
-/** Source id of a chat pane's ACP turns. */
-export function chatStatusSource(chatId: string): string {
-  return `${CHAT_SOURCE_PREFIX}${chatId}`;
-}
-
 /** Source id of `statuses.update`, which sets a status by hand. */
 export const MANUAL_STATUS_SOURCE = "manual";
 
-/** A hook source that said `working` and then went quiet stops counting. */
-function isStaleSource(
-  { sourceId, status, updatedAt }: WorktreeStatusSourceRow,
-  staleBefore: number,
-): boolean {
-  return sourceId.startsWith("hook:") && status === "working" && updatedAt < staleBefore;
+/** A terminal session that said `working` and then went quiet stops counting. */
+function isStaleSession(session: AgentSessionRecord, staleBefore: number): boolean {
+  return (
+    session.mode === "tui" && session.status === "working" && session.statusUpdatedAt < staleBefore
+  );
 }
 
 function deriveWorktreeStatus(worktreeId: string): string {
   const staleBefore = Date.now() - STALE_HOOK_WORKING_MS;
   let best: string | null = null;
-  for (const source of statusSourceQueries.listForWorktree(worktreeId)) {
-    if (isStaleSource(source, staleBefore)) continue;
-    const { status } = source;
+  const consider = (status: string) => {
     if (best === null || (STATUS_PRIORITY[status] ?? 0) > (STATUS_PRIORITY[best] ?? 0)) {
       best = status;
     }
+  };
+  for (const source of statusSourceQueries.listForWorktree(worktreeId)) consider(source.status);
+  for (const session of agentSessionRegistry.listOpen(worktreeId)) {
+    if (!isStaleSession(session, staleBefore)) consider(session.status);
   }
   return best ?? "idle";
 }
 
 /**
- * The status each chat and terminal shows on its tab: a chat's own ACP
- * source, and every hook session reported from a Band terminal (the
- * higher-priority status when a terminal has several). Idle sources are
- * left out.
+ * The status each chat and terminal shows on its tab: its open session's.
+ * Idle sessions are left out.
  */
-function toTabStatuses(sources: WorktreeStatusSourceRow[]): TabAgentStatus[] {
+function toTabStatuses(sessions: AgentSessionRecord[]): TabAgentStatus[] {
   const staleBefore = Date.now() - STALE_HOOK_WORKING_MS;
   const byTab = new Map<string, TabAgentStatus>();
-  for (const source of sources) {
-    const { status } = source;
+  for (const session of sessions) {
+    const { status } = session;
     if (status === "idle" || !(status in STATUS_PRIORITY)) continue;
-    if (isStaleSource(source, staleBefore)) continue;
+    if (isStaleSession(session, staleBefore)) continue;
     const tabStatus = status as TabAgentStatus["status"];
     let tab: TabAgentStatus;
-    if (source.sourceId.startsWith(CHAT_SOURCE_PREFIX)) {
-      tab = { chatId: source.sourceId.slice(CHAT_SOURCE_PREFIX.length), status: tabStatus };
-    } else if (source.terminalId) {
-      tab = { terminalId: source.terminalId, status: tabStatus };
-    } else {
-      continue;
-    }
+    if (session.chatId) tab = { chatId: session.chatId, status: tabStatus };
+    else if (session.terminalId) tab = { terminalId: session.terminalId, status: tabStatus };
+    else continue;
     const key = tab.chatId ? `chat:${tab.chatId}` : `terminal:${tab.terminalId}`;
     const prev = byTab.get(key);
     if (!prev || STATUS_PRIORITY[status] > STATUS_PRIORITY[prev.status]) byTab.set(key, tab);
@@ -410,23 +399,23 @@ function toTabStatuses(sources: WorktreeStatusSourceRow[]): TabAgentStatus[] {
 }
 
 function listTabStatuses(worktreeId: string): TabAgentStatus[] {
-  return toTabStatuses(statusSourceQueries.listForWorktree(worktreeId));
+  return toTabStatuses(agentSessionRegistry.listOpen(worktreeId));
 }
 
 /**
- * Record one source's status and write the worktree status derived from
- * every source. Returns the worktree snapshot to broadcast.
+ * Record the manual status and write the worktree status derived from every
+ * agent session and the manual source. Returns the worktree snapshot to
+ * broadcast.
  */
-export function setWorktreeSourceStatus(
+export function setManualStatus(
   worktreeId: string,
-  sourceId: string,
-  agent: { status: string; lastActivity?: string; terminalId?: string },
+  agent: { status: string; lastActivity?: string },
 ): WorktreeStatus {
   statusSourceQueries.upsert({
     worktreeId,
-    sourceId,
+    sourceId: MANUAL_STATUS_SOURCE,
     status: agent.status,
-    terminalId: agent.terminalId ?? null,
+    terminalId: null,
     updatedAt: Date.now(),
   });
   return upsertWorktreeStatus(worktreeId, {
@@ -435,50 +424,57 @@ export function setWorktreeSourceStatus(
   });
 }
 
-/** Re-derive a worktree's status after sources went away. `null` when it has no row. */
+/**
+ * Record one agent session's status and write the worktree status derived
+ * from every session. Returns the worktree snapshot to broadcast, or `null`
+ * when the session is gone.
+ */
+export function setSessionStatus(
+  sessionId: string,
+  status: string,
+  lastActivity?: string,
+): WorktreeStatus | null {
+  const session = agentSessionRegistry.setStatus(sessionId, status);
+  if (!session) return null;
+  return upsertWorktreeStatus(session.worktreeId, {
+    status: deriveWorktreeStatus(session.worktreeId),
+    lastActivity,
+  });
+}
+
+/** Re-derive a worktree's status after sessions went away. `null` when it has no row. */
 function rederiveWorktreeStatus(worktreeId: string): WorktreeStatus | null {
   if (!worktreeStatusQueries.findRow(worktreeId)) return null;
   return upsertWorktreeStatus(worktreeId, { status: deriveWorktreeStatus(worktreeId) });
 }
 
 /**
- * Drop one source (its chat was removed, its session ended). Returns the
- * re-derived worktree snapshot, or `null` when nothing changed.
- */
-export function removeWorktreeSource(worktreeId: string, sourceId: string): WorktreeStatus | null {
-  if (!statusSourceQueries.remove(worktreeId, sourceId)) return null;
-  return rederiveWorktreeStatus(worktreeId);
-}
-
-/**
- * The user has seen the worktree: every source that finished (`done` or
- * `failed`) goes back to `idle`. A `question` stays until it is answered.
- * Returns the worktree snapshot to broadcast, or `null` when it has none.
+ * The user has seen the worktree: every source and session that finished
+ * (`done` or `failed`) goes back to `idle`. A `question` stays until it is
+ * answered. Returns the worktree snapshot to broadcast, or `null` when it
+ * has none.
  */
 export function acknowledgeWorktreeAttention(worktreeId: string): WorktreeStatus | null {
   const existing = getWorktreeStatus(worktreeId);
   if (!existing) return null;
-  if (statusSourceQueries.acknowledge(worktreeId, Date.now()) === 0) return existing;
+  const changed =
+    statusSourceQueries.acknowledge(worktreeId, Date.now()) +
+    agentSessionRegistry.acknowledge(worktreeId);
+  if (changed === 0) return existing;
   return upsertWorktreeStatus(worktreeId, { status: deriveWorktreeStatus(worktreeId) });
 }
 
 /**
- * Drop sources whose chat or terminal goes away, and broadcast the
- * re-derived worktree status. Called once at boot.
+ * Re-derive and broadcast a worktree's status when one of its sessions ends
+ * (its chat or terminal went away, `SessionEnd`), and drop the session's
+ * subagent hold. Called once at boot.
  */
 export function startStatusSourceCleanup(): () => void {
   return subscribe((event) => {
-    const changed: WorktreeStatus[] = [];
-    if (event.kind === "chat-removed" && event.chatId && event.worktreeId) {
-      const status = removeWorktreeSource(event.worktreeId, chatStatusSource(event.chatId));
-      if (status) changed.push(status);
-    } else if (event.kind === "terminal-killed" && event.terminalId) {
-      for (const worktreeId of statusSourceQueries.removeForTerminal(event.terminalId)) {
-        const status = rederiveWorktreeStatus(worktreeId);
-        if (status) changed.push(status);
-      }
-    }
-    for (const status of changed) emit({ kind: "update", status });
+    if (event.kind !== "agent-session-ended" || !event.agentSession) return;
+    dropSubagentHold(event.agentSession.id);
+    const status = rederiveWorktreeStatus(event.agentSession.worktreeId);
+    if (status) emit({ kind: "update", status });
   });
 }
 
@@ -500,27 +496,26 @@ export interface HookNotification {
   launchToken?: string;
 }
 
-/** The configured agent definition of a type, else the type itself. */
-function agentDefinitionIdFor(agentType: string): string {
-  const agents = settingsService.get().codingAgents ?? [];
-  return agents.find((agent) => agent.type === agentType)?.id ?? agentType;
-}
-
-/** Subagents a hook session still runs, by source id. */
+/** Subagents an agent session still runs, by agent session id. */
 const subagentHolds = new Map<string, SubagentHold>();
 
-function subagentHold(worktreeId: string, sourceId: string): SubagentHold {
-  const key = `${worktreeId}\0${sourceId}`;
-  let hold = subagentHolds.get(key);
+function subagentHold(sessionId: string): SubagentHold {
+  let hold = subagentHolds.get(sessionId);
   if (!hold) {
     hold = { running: new Set(), deferred: null };
-    subagentHolds.set(key, hold);
+    subagentHolds.set(sessionId, hold);
   }
   return hold;
 }
 
-function dropSubagentHold(worktreeId: string, sourceId: string): void {
-  subagentHolds.delete(`${worktreeId}\0${sourceId}`);
+function dropSubagentHold(sessionId: string): void {
+  subagentHolds.delete(sessionId);
+}
+
+/** The configured agent definition of a type, else the type itself. */
+function agentDefinitionIdFor(agentType: string): string {
+  const agents = settingsService.get().codingAgents ?? [];
+  return agents.find((agent) => agent.type === agentType)?.id ?? agentType;
 }
 
 /**
@@ -529,12 +524,13 @@ function dropSubagentHold(worktreeId: string, sourceId: string): void {
  *
  * The hook is read with the rules of the agent that sent it: the one the
  * hook command names, else the one its payload identifies, else the
- * worktree's configured agent. Each agent session is its own status source
- * (`hook:<session id>`). Returns the updated status snapshot, or `null` when
- * nothing changed: `cwd` maps to no known worktree (matching the
- * fire-and-forget hook contract), or the hook came from a chat pane's agent,
- * whose status its ACP turn already reports. The caller broadcasts the
- * returned snapshot.
+ * worktree's configured agent. The hook belongs to an agent session: the
+ * terminal's (`BAND_TERMINAL_ID`), or, outside a Band terminal, the one
+ * keyed by the agent's own session id. Its status is the session's. Returns
+ * the updated status snapshot, or `null` when nothing changed: `cwd` maps
+ * to no known worktree (matching the fire-and-forget hook contract), or the
+ * hook came from a chat pane's agent, whose status its ACP turn already
+ * reports. The caller broadcasts the returned snapshot.
  */
 export async function applyHookNotification(
   notification: HookNotification,
@@ -548,33 +544,25 @@ export async function applyHookNotification(
     notification.agent ||
     detectHookAgentType(payload) ||
     settingsService.getAgentDefinition(getWorktreeStatus(worktreeId)?.agent?.codingAgentId).type;
-  const sourceId = `hook:${hookSessionId(payload) ?? agentType}`;
 
-  if (notification.terminalId) {
-    agentSessionRegistry.recordTerminalHook({
-      worktreeId,
-      terminalId: notification.terminalId,
-      agentDefinitionId: agentDefinitionIdFor(agentType),
-      providerSessionId: hookSessionId(payload),
-      launchToken: notification.launchToken,
-      sessionEnd: isHookSessionEnd(agentType, payload),
-    });
-  }
-
-  if (isHookSessionEnd(agentType, payload)) {
-    dropSubagentHold(worktreeId, sourceId);
-    return removeWorktreeSource(worktreeId, sourceId);
-  }
+  const sessionEnd = isHookSessionEnd(agentType, payload);
+  const session = agentSessionRegistry.recordTerminalHook({
+    worktreeId,
+    terminalId: notification.terminalId,
+    agentDefinitionId: agentDefinitionIdFor(agentType),
+    providerSessionId: hookSessionId(payload),
+    launchToken: notification.launchToken,
+    sessionEnd,
+  });
+  // `SessionEnd` ended the session, and its listener re-derived the status.
+  if (sessionEnd) return rederiveWorktreeStatus(worktreeId);
+  if (!session) return null;
 
   let status: AgentHookStatus = await mapHookPayloadToStatus(agentType, payload);
   if (agentType === "claude-code") {
-    status = foldSubagents(subagentHold(worktreeId, sourceId), payload, status);
+    status = foldSubagents(subagentHold(session.id), payload, status);
   }
-  return setWorktreeSourceStatus(worktreeId, sourceId, {
-    status,
-    lastActivity: new Date().toISOString(),
-    terminalId: notification.terminalId,
-  });
+  return setSessionStatus(session.id, status, new Date().toISOString());
 }
 
 /**
@@ -586,7 +574,8 @@ export async function applyHookNotification(
  */
 export function resetAgentStatuses(): number {
   subagentHolds.clear();
-  statusSourceQueries.removeActive();
+  statusSourceQueries.removeAllButSettled();
+  agentSessionRegistry.resetOnBoot();
   return worktreeStatusQueries.resetActiveToIdle(Date.now());
 }
 

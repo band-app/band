@@ -22,7 +22,7 @@ export function resumeCommandFor(terminalId: string): string | null | undefined 
   const row = agentSessionRegistry.latestForTerminal(terminalId);
   if (!row || row.mode !== "tui") return undefined;
   if (row.endReason === "killed" || row.endReason === "session-end") return null;
-  if (!row.providerSessionId) return undefined;
+  if (!row.providerSessionId || row.providerSessionId.startsWith("-")) return undefined;
   const definition = settingsService
     .get()
     .codingAgents?.find((agent) => agent.id === row.agentDefinitionId);

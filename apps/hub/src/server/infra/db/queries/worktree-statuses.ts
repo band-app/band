@@ -11,7 +11,7 @@
  * SQL leaves `services/state.ts` too.
  */
 
-import { and, eq, inArray, notInArray, or } from "drizzle-orm";
+import { and, eq, inArray, ne, notInArray, or } from "drizzle-orm";
 import type { WorktreeStatusSnapshot } from "../../events/status-event-bus";
 import { getDb } from "../connection";
 import {
@@ -205,17 +205,6 @@ export class WorktreeStatusSourceQueries {
     return Number(result.changes) > 0;
   }
 
-  /** Delete every source reported from a terminal; returns their worktrees. */
-  removeForTerminal(terminalId: string): string[] {
-    const db = getDb();
-    const rows = db
-      .delete(worktreeStatusSourcesTable)
-      .where(eq(worktreeStatusSourcesTable.terminalId, terminalId))
-      .returning({ worktreeId: worktreeStatusSourcesTable.worktreeId })
-      .all();
-    return [...new Set(rows.map((r) => r.worktreeId))];
-  }
-
   /** Delete every source of a worktree. */
   removeForWorktree(worktreeId: string): void {
     const db = getDb();
@@ -225,13 +214,20 @@ export class WorktreeStatusSourceQueries {
   }
 
   /**
-   * Delete every source that is not `done` or `failed`. Used at server
-   * startup: no running agent survives it, but a finished one stays.
+   * Hub start: delete every source but a manual `done` or `failed`. No
+   * running agent survives a start, but a finished one stays. Agent
+   * statuses live on `agent_sessions` now, so older `chat:` and `hook:` rows
+   * go too.
    */
-  removeActive(): void {
+  removeAllButSettled(): void {
     getDb()
       .delete(worktreeStatusSourcesTable)
-      .where(notInArray(worktreeStatusSourcesTable.status, ["done", "failed"]))
+      .where(
+        or(
+          ne(worktreeStatusSourcesTable.sourceId, "manual"),
+          notInArray(worktreeStatusSourcesTable.status, ["done", "failed"]),
+        ),
+      )
       .run();
   }
 

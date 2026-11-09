@@ -8,7 +8,13 @@
 
 export type AgentMode = "gui" | "tui";
 
-export type AgentSessionEndReason = "killed" | "session-end" | "replaced" | "removed" | "failed";
+export type AgentSessionEndReason =
+  | "killed"
+  | "session-end"
+  | "replaced"
+  | "removed"
+  | "failed"
+  | "lost";
 
 export type AgentSessionState = "starting" | "running" | "ended";
 
@@ -31,6 +37,9 @@ export interface AgentSessionRecord {
    * `removed` (its chat went away) are bookkeeping.
    */
   endReason: AgentSessionEndReason | null;
+  /** question, failed, working, monitoring, done or idle. */
+  status: string;
+  statusUpdatedAt: number;
   createdAt: number;
   updatedAt: number;
 }

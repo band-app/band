@@ -31,6 +31,7 @@ export interface CreateAgentSessionInput {
   chatId?: string;
   terminalId?: string;
   providerSessionId?: string;
+  status?: string;
   /** The launch token placed in the agent's PTY env; only its hash is stored. */
   launchToken?: string;
 }
@@ -38,7 +39,8 @@ export interface CreateAgentSessionInput {
 /** A coding-agent hook event seen in a Band terminal. */
 export interface TerminalHookEvent {
   worktreeId: string;
-  terminalId: string;
+  /** Absent for an agent outside a Band terminal; its session is keyed by provider id. */
+  terminalId?: string;
   /** The definition id the session shows under. */
   agentDefinitionId: string;
   /** The agent's own session id, when the payload carried one. */
@@ -112,6 +114,8 @@ export class AgentSessionRegistryService {
       terminalId: input.terminalId ?? null,
       state: input.providerSessionId ? "running" : "starting",
       endReason: null,
+      status: input.status ?? "idle",
+      statusUpdatedAt: now,
       createdAt: now,
       updatedAt: now,
     };
@@ -143,12 +147,59 @@ export class AgentSessionRegistryService {
     if (open) this.end(open.id, "replaced");
     if (!providerSessionId) return;
     this.create({
+      status: open?.status,
       worktreeId: chat.worktreeId,
       agentDefinitionId: chat.agent,
       mode: "gui",
       chatId: chat.id,
       providerSessionId,
     });
+  }
+
+  /** The chat's open session, created (id not known yet) when the chat has none. */
+  ensureChatSession(chat: { id: string; worktreeId: string; agent: string }): AgentSessionRecord {
+    return (
+      this.queries.findOpenByChat(chat.id) ??
+      this.create({
+        worktreeId: chat.worktreeId,
+        agentDefinitionId: chat.agent,
+        mode: "gui",
+        chatId: chat.id,
+      })
+    );
+  }
+
+  /** Record what a session is doing. Returns the updated record. */
+  setStatus(id: string, status: string): AgentSessionRecord | undefined {
+    const updated = this.queries.update(id, {
+      status,
+      statusUpdatedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    if (updated) {
+      emit({
+        kind: "agent-session-updated",
+        worktreeId: updated.worktreeId,
+        agentSession: updated,
+      });
+    }
+    return updated;
+  }
+
+  /** Open sessions with a status, for deriving a worktree's. */
+  openWithStatus(): AgentSessionRecord[] {
+    return this.queries.findAllOpen();
+  }
+
+  /** `done` and `failed` sessions of a worktree go back to `idle`. Returns how many changed. */
+  acknowledge(worktreeId: string): number {
+    return this.queries.acknowledge(worktreeId, Date.now());
+  }
+
+  /** Hub start: no agent is running, so active statuses reset and detached hook sessions end. */
+  resetOnBoot(): void {
+    this.queries.resetActiveStatuses(Date.now());
+    this.queries.endDetached(Date.now());
   }
 
   endForChat(chatId: string): void {
@@ -178,7 +229,19 @@ export class AgentSessionRegistryService {
    * was refused.
    */
   recordTerminalHook(event: TerminalHookEvent): AgentSessionRecord | null {
-    const open = this.queries.findOpenByTerminal(event.terminalId);
+    // The id ends up as an argument of the resume command, so a value that
+    // looks like a flag must never be stored.
+    if (event.providerSessionId && !SAFE_PROVIDER_SESSION_ID.test(event.providerSessionId)) {
+      event = { ...event, providerSessionId: null };
+    }
+    const open = event.terminalId
+      ? this.queries.findOpenByTerminal(event.terminalId)
+      : this.queries.findOpenDetached(
+          event.worktreeId,
+          event.providerSessionId,
+          event.agentDefinitionId,
+        );
+    if (open && event.terminalId && open.worktreeId !== event.worktreeId) return null;
     const tokenHash = event.launchToken ? hashLaunchToken(event.launchToken) : null;
     if (event.sessionEnd) {
       if (
@@ -198,7 +261,8 @@ export class AgentSessionRegistryService {
       if (open.providerSessionId === null) {
         const launched = this.queries.hasLaunchToken(open.id);
         if (launched && !(tokenHash && this.queries.launchTokenMatches(open.id, tokenHash))) {
-          return null;
+          // Status still applies (an older CLI sends no token); only the identity claim is withheld.
+          return open;
         }
         this.update(open.id, { providerSessionId: event.providerSessionId, state: "running" });
         return this.queries.find(open.id) ?? open;
@@ -242,5 +306,7 @@ export class AgentSessionRegistryService {
     });
   }
 }
+
+const SAFE_PROVIDER_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export const agentSessionRegistry = new AgentSessionRegistryService();
