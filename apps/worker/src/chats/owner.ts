@@ -247,6 +247,9 @@ export class ChatOwner {
       createdAt: Date.now(),
     });
     this.ctx.log.info({ chatId, taskId: started.event.taskId }, "closed a turn the worker stopped");
+    // The rebuild finishes after the link may be up, so the pass `onConnected` started has already
+    // looked for rows and found none. Without this the hub gets the row only at the next one.
+    this.kickReplication();
   }
 
   /** The link is up: lease ids, finish copying logs, resend what the hub lacks, report each chat. */

@@ -468,14 +468,46 @@ describe("hub state follows the owner's events (S5)", () => {
     // depend on the daemon's watchdog). The restarted worker then finds no agent to take over.
     // With an agent that survives, the turn carries on: chat-ownership-reattach.test.ts.
     const agentPid = (w.stubRequests(owner, "session/prompt").at(-1) as { pid?: number }).pid;
+    const started = await w.q<{ task: { id: string } | null }>("tasks.get", {
+      worktreeId: wt,
+      chatId,
+    });
+    const taskId = started.task?.id;
+    expect(taskId).toBeTruthy();
     await w.killWorker(owner, "SIGKILL", { waitForLease: false });
-    if (agentPid) process.kill(agentPid, "SIGKILL");
+    // The process guard may have stopped the agent already (it follows its worker within 2 s).
+    if (agentPid) {
+      try {
+        process.kill(agentPid, "SIGKILL");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ESRCH") throw err;
+      }
+    }
     owner = await w.restartWorker(owner);
+    // The turn ends when the hub holds the worker's turn-ended row for it.
+    await waitFor(
+      () =>
+        hubLog(chatId).some(
+          (r) =>
+            r.kind === "turn-ended" &&
+            (JSON.parse(r.payload) as { taskId: string }).taskId === taskId,
+        )
+          ? true
+          : undefined,
+      { label: "the hub's turn-ended row for the interrupted turn", timeoutMs: 30_000 },
+    ).catch(async (err: Error) => {
+      const turns = hubLog(chatId)
+        .filter((r) => r.kind === "turn-started" || r.kind === "turn-ended")
+        .map((r) => `${r.id}:${r.kind}:${r.payload}`);
+      throw new Error(
+        `${err.message}\nworktree status: ${await worktreeStatus(wt)}\nhub turn rows:\n${turns.join("\n")}\n${owner.output()}`,
+      );
+    });
     await waitFor(async () => ((await worktreeStatus(wt)) === "failed" ? true : undefined), {
       label: "status failed after the restart",
-      timeoutMs: 30_000,
-    }).catch((err: Error) => {
-      throw new Error(`${err.message}\n${owner.output()}`);
+      timeoutMs: 10_000,
+    }).catch(async (err: Error) => {
+      throw new Error(`${err.message}\nlast worktree status: ${await worktreeStatus(wt)}`);
     });
     await waitQuiet(wt, chatId);
     const tasks = await w.q<{ tasks: Array<{ prompt: string; status: string }> }>("tasks.list", {
