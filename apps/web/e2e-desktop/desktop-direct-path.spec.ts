@@ -245,6 +245,15 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   expect(directSockets().length).toBeGreaterThan(0);
   expect(directSockets()[0]).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/terminal\?/);
   expect(hubSockets()).toEqual([]);
+  // The tab's `terminal.create` went to the worker too, and the hub got no create call for it.
+  const directTerminalCreates = () =>
+    requests.filter((u) => /^http:\/\/127\.0\.0\.1:\d+\/direct\/terminal\.create$/.test(u));
+  const hubTerminalCreates = () =>
+    requests.filter(
+      (u) => portOf(u) === hubPort && /\/trpc\/(?:[^?]*,)?terminal\.create(?:[,?]|$)/.test(u),
+    );
+  expect(directTerminalCreates().length).toBeGreaterThan(0);
+  expect(hubTerminalCreates()).toEqual([]);
   // S2: the file tree and a file read go there too, and not to the hub.
   const files = new FileTreesPage(desktop.window, worktreePage);
   const viewer = new FileViewerPage(desktop.window);
@@ -342,12 +351,15 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   // Once the listener is back and the UI's retry pause is over, a new tab in the same page
   // (no reload, which would forget the pause) connects to the worker again.
   const directBefore = directSockets().length;
+  const createsBeforeRetry = directTerminalCreates().length;
   await expect(async () => {
     await worktreePage.pressNewTerminalShortcut();
     await expect
       .poll(() => directSockets().length, { timeout: 5_000 })
       .toBeGreaterThan(directBefore);
   }).toPass({ timeout: 60_000, intervals: [5_000] });
+  // The same tab (⌘T) created its terminal on the worker again, with no create call at the hub.
+  expect(directTerminalCreates().length).toBeGreaterThan(createsBeforeRetry);
 
   // Chat ownership S1: this Mac's worker runs the chat, and the message and its event stream go
   // to the worker's port, not the hub's. A packaged run has no stub agent.

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { Duplex } from "node:stream";
 import type { FsEntry, FsStat, Host, HostFs, HostGit, HostSearch } from "@band-app/host-api";
 import { TitlePoller } from "@band-app/host-local/terminals/title-poller";
@@ -9,19 +10,23 @@ import {
   type DirectRegisterReply,
   type DirectScopeParams,
   METHOD_DIRECT_REGISTER,
+  METHOD_TERMINAL_CREATED,
   RPC_INTERNAL_ERROR,
   RpcError,
+  type TerminalCreatedParams,
 } from "@band-app/link";
 import {
   DIRECT_CALL_PREFIX,
   DIRECT_FALLBACK_CLOSE_CODE,
   DIRECT_LSP_PATH,
   DIRECT_PLUGIN_STREAM_PATH,
+  DIRECT_TERMINAL_CREATE,
   DIRECT_TERMINAL_PATH,
   DIRECT_TOKEN_PREFIX,
   DIRECT_WATCH_ENDED_CLOSE_CODE,
   DIRECT_WATCH_PATH,
   type DirectCallReply,
+  type DirectTerminalCreateResult,
   isDirectProcedure,
 } from "@band-app/shared/direct-access";
 import { DiffService } from "@band-app/worktree-ops/diff";
@@ -39,11 +44,15 @@ import {
   type TerminalSocketBackend,
 } from "@band-app/worktree-ops/terminal-socket";
 import { WebSocketServer } from "ws";
+import { z } from "zod";
 import { handleChatRoute, isChatRoute } from "./chats/local-http.ts";
 import type { ChatOwner } from "./chats/owner.ts";
 import { hostDirs, type Registrar, type WorkerContext } from "./context.ts";
 import { isFileRoute, serveDirectFile } from "./direct-files.ts";
+import { spawnTerminal } from "./methods-streams.ts";
+import { PathDeniedError } from "./path-policy.ts";
 import { pluginRouter } from "./plugins.ts";
+import { relayOf } from "./relay.ts";
 import { mapError, num, type Params, str } from "./rpc-util.ts";
 
 /** Largest request body, a saved file included. The editor opens files of up to 1 MB. */
@@ -64,6 +73,16 @@ const PTY_POLL_MS = 100;
  * pages (`app://local`) never take the direct path, and their CSP keeps them off loopback.
  */
 const ALLOWED_ORIGIN = /^app:\/\/h-[0-9a-f]{12}$/;
+
+/** The body of `terminal.create`: the UUID the client picked, and an optional command and directory. */
+const terminalCreateInput = z
+  .object({
+    worktreeId: z.string(),
+    id: z.string().uuid(),
+    command: z.string().optional(),
+    cwd: z.string().optional(),
+  })
+  .strict();
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -271,6 +290,7 @@ export class DirectListener {
     }
     if (!url.pathname.startsWith(DIRECT_CALL_PREFIX)) return fail(404, "NOT_FOUND", "Not found");
     const procedure = url.pathname.slice(DIRECT_CALL_PREFIX.length);
+    if (procedure === DIRECT_TERMINAL_CREATE) return this.createTerminal(req, res, reply, fail);
     if (!isDirectProcedure(procedure)) return fail(404, "NOT_FOUND", "Not found");
     if (req.method !== "POST") return fail(405, "METHOD_NOT_SUPPORTED", "Use POST");
 
@@ -301,6 +321,114 @@ export class DirectListener {
       );
       reply(200, { result: result ?? null });
     } catch (err) {
+      fail(500, "INTERNAL_SERVER_ERROR", err instanceof Error ? err.message : String(err));
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * `POST /direct/terminal.create`: spawns a plain terminal for the token's worktree, with a relay
+   * token the worker mints and registers itself, and tells the hub afterwards. A PTY that already
+   * exists for the id (a hub create that got there first) is returned as it is, with no new token,
+   * because its shell holds the earlier one.
+   */
+  private async createTerminal(
+    req: IncomingMessage,
+    _res: ServerResponse,
+    reply: (status: number, body: DirectCallReply) => void,
+    fail: (status: number, code: string, message: string) => void,
+  ): Promise<void> {
+    if (req.method !== "POST") return fail(405, "METHOD_NOT_SUPPORTED", "Use POST");
+    const scope = this.scopeOf(bearerToken(req));
+    if (!scope) return fail(401, "UNAUTHORIZED", "Unauthorized");
+    let raw: unknown;
+    try {
+      const body = await readBody(req);
+      raw = body.length === 0 ? {} : JSON.parse(body.toString("utf8"));
+    } catch {
+      return fail(400, "BAD_REQUEST", "The body must be JSON of at most 16 MB");
+    }
+    const parsed = terminalCreateInput.safeParse(raw);
+    if (!parsed.success) return fail(400, "BAD_REQUEST", parsed.error.message);
+    const input = parsed.data;
+    if (input.worktreeId !== scope.worktreeId) {
+      return fail(403, "FORBIDDEN", "The token is for another worktree");
+    }
+    const relay = relayOf(this.ctx);
+    if (!relay) return fail(500, "INTERNAL_SERVER_ERROR", "The relay is not running");
+
+    const release = this.ctx.activity.hold();
+    let revoke: (() => void) | undefined;
+    try {
+      const root = await this.ctx.policy.resolve(scope.path, true);
+      this.ctx.lease.assertMayRun(root);
+      if (input.cwd !== undefined) {
+        // The pool resolves `cwd` inside the worktree root. It must stay there, not only inside a root the worker allows.
+        const target = await this.ctx.policy
+          .resolve(resolve(root, input.cwd))
+          .catch((err: unknown) => (err instanceof PathDeniedError ? null : Promise.reject(err)));
+        const rel = target === null ? ".." : relative(root, target);
+        if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+          return fail(403, "FORBIDDEN", "The directory is outside the worktree");
+        }
+      }
+      const existing = await this.ptyInfo(input.id);
+      if (existing) {
+        if (existing.worktreeId !== scope.worktreeId) {
+          return fail(403, "FORBIDDEN", "The terminal belongs to another worktree");
+        }
+        const done: DirectTerminalCreateResult = {
+          terminalId: input.id,
+          worktreeId: scope.worktreeId,
+          pid: existing.pid,
+        };
+        return reply(200, { result: done });
+      }
+      const grant = await relay.issue({ worktreeId: scope.worktreeId, terminalId: input.id });
+      revoke = grant.revoke;
+      // The token ends with the terminal, as the hub ends the ones it issues.
+      const unsubscribe = this.ctx.host.pty.onExit((event) => {
+        if (event.terminalId !== input.id) return;
+        unsubscribe();
+        grant.revoke();
+      });
+      let entry: Awaited<ReturnType<typeof spawnTerminal>>;
+      try {
+        entry = await spawnTerminal(this.ctx, {
+          worktreeId: scope.worktreeId,
+          terminalId: input.id,
+          worktreeRoot: root,
+          options: { command: input.command, cwd: input.cwd, env: grant.env },
+        });
+      } catch (err) {
+        unsubscribe();
+        throw err;
+      }
+      revoke = undefined;
+      const notice: TerminalCreatedParams = {
+        worktreeId: scope.worktreeId,
+        terminalId: input.id,
+        ...(input.command !== undefined && { command: input.command }),
+        ...(input.cwd !== undefined && { cwd: input.cwd }),
+      };
+      try {
+        this.ctx.session.notify(METHOD_TERMINAL_CREATED, notice);
+      } catch (err) {
+        // Without the notice the hub finds the terminal the first time something asks for it.
+        this.ctx.log.warn(
+          { message: err instanceof Error ? err.message : String(err) },
+          "could not tell the hub about a terminal",
+        );
+      }
+      const done: DirectTerminalCreateResult = {
+        terminalId: input.id,
+        worktreeId: scope.worktreeId,
+        pid: entry.pid,
+      };
+      reply(200, { result: done });
+    } catch (err) {
+      revoke?.();
       fail(500, "INTERNAL_SERVER_ERROR", err instanceof Error ? err.message : String(err));
     } finally {
       release();

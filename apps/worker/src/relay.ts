@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -91,6 +91,36 @@ export class Relay {
   register(token: string, scope: RelayScopeParams): void {
     this.scopes.set(sha256(token).toString("hex"), scope);
     this.save();
+  }
+
+  /**
+   * Mints a token for a process this worker starts itself (a terminal opened on the direct
+   * listener), as the hub's `RemoteHost.relay.issue` does for one it starts. The environment is the
+   * one the hub would have put in the spawn. `revoke` is idempotent.
+   */
+  async issue(
+    scope: RelayScopeParams,
+  ): Promise<{ env: Record<string, string>; revoke: () => void }> {
+    const token = `brt_${randomBytes(24).toString("base64url")}`;
+    this.register(token, scope);
+    let url: string;
+    try {
+      url = await this.url();
+    } catch (err) {
+      this.revoke(token);
+      throw err;
+    }
+    return {
+      env: {
+        BAND_SERVER_URL: url,
+        BAND_TOKEN: token,
+        BAND_CDP_PORT_FILE: join(
+          browserProfileDir(this.ctx.stateDir, scope.worktreeId),
+          "DevToolsActivePort",
+        ),
+      },
+      revoke: () => this.revoke(token),
+    };
   }
 
   revoke(token: string): void {
@@ -272,12 +302,20 @@ function onceDrained(res: ServerResponse): Promise<void> {
   });
 }
 
+const relays = new WeakMap<WorkerContext, Relay>();
+
+/** The relay `registerRelayMethods` started for this worker, if it did. */
+export function relayOf(ctx: WorkerContext): Relay | undefined {
+  return relays.get(ctx);
+}
+
 /**
  * Registers the methods the hub uses to issue and revoke tokens. Returns a
  * function that stops the relay.
  */
 export function registerRelayMethods(r: Registrar, ctx: WorkerContext): () => Promise<void> {
   const relay = new Relay(ctx);
+  relays.set(ctx, relay);
   // Agents and terminals that outlived the last worker call the saved port, so listen before the hub registers anything.
   if (relay.hasSavedState) {
     void relay
