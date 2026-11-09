@@ -40,11 +40,13 @@ In a chat, Band shows messages, tool calls and plans. In a terminal tab you get 
 
 ## Hooks and skills
 
-Band installs no hooks for Gemini CLI, so a terminal session reports no status to the sidebar. A chat reports its status without hooks.
+Install hooks from the banner or Settings > Agent hooks (a Gemini CLI row appears under each worker that has the CLI). The install adds six events (`BeforeAgent`, `AfterAgent`, `BeforeTool`, `AfterTool`, `Notification`, `SessionEnd`) to `~/.gemini/settings.json`, each running `"<band>" notify --agent gemini-cli >/dev/null 2>&1 || true` with a 5000 ms timeout. Gemini CLI has no async flag, so the command runs before Gemini continues; `band notify` returns within about a second. A tool permission notification is a question, `AfterAgent` is done, and `SessionEnd` ends the status. Gemini reports no failed turn, so it never shows failed. Your own hooks stay, and Band refuses to write a settings file that is not JSON.
+
+`SessionStart` and `SessionEnd` payloads were recorded against Gemini CLI 0.61.0. The others follow the CLI's hook reference, because the Google account used for testing is not eligible for the CLI any more, so no model turn ran.
 
 `band skills install` links the Band skills into `~/.gemini/skills` when `~/.gemini` exists. See [agent skills](agent-skills.md).
 
 ## Limits
 
-- No hooks for terminal sessions.
+- Hooks show no failed state.
 - No session resume in a terminal.

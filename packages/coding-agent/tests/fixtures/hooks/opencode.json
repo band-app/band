@@ -1,0 +1,51 @@
+{
+  "agent": "opencode",
+  "cliVersion": "opencode v2.1.1",
+  "source": "The payloads are the ones Band's plugin (host-local hooks-opencode.ts) sends, built from OpenCode's session events. The model turn did not complete on this Mac in a standalone run, so the event stream was not recorded; the event names follow OpenCode's plugin API.",
+  "payloads": [
+    {
+      "recorded": false,
+      "expect": "working",
+      "payload": {
+        "hook_event_name": "SessionBusy",
+        "session_id": "ses_2f0c1a8b9ffeWq2",
+        "cwd": "/tmp/w"
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "question",
+      "payload": {
+        "hook_event_name": "PermissionRequest",
+        "session_id": "ses_2f0c1a8b9ffeWq2",
+        "cwd": "/tmp/w"
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "done",
+      "payload": {
+        "hook_event_name": "SessionIdle",
+        "session_id": "ses_2f0c1a8b9ffeWq2",
+        "cwd": "/tmp/w"
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "failed",
+      "payload": {
+        "hook_event_name": "SessionError",
+        "session_id": "ses_2f0c1a8b9ffeWq2",
+        "cwd": "/tmp/w"
+      }
+    }
+  ],
+  "sessionEnd": {
+    "recorded": false,
+    "payload": {
+      "hook_event_name": "SessionEnd",
+      "session_id": "ses_2f0c1a8b9ffeWq2",
+      "cwd": "/tmp/w"
+    }
+  }
+}

@@ -70,7 +70,7 @@ import {
 import { HeldAgentProcess } from "./agents/daemon/held-agent";
 import type { AgentHolder } from "./agents/daemon/holder";
 import { AgentDaemonUnavailableError } from "./agents/daemon/holder";
-import { checkHooks, installHooks, removeHooks } from "./agents/hooks-install";
+import { checkHooks, installHooks, removeHooks } from "./agents/hooks-agents";
 import { openMcpStdio } from "./agents/mcp-stdio";
 import { installSkills } from "./agents/skills-install";
 import { ChromiumManager } from "./browser/chromium";
@@ -235,9 +235,9 @@ export class LocalHost implements Host {
       getUsageReader(agent.agentType, { command: agent.command }),
     installSkills: (options) => installSkills(options),
     accountUsage: (options) => readAccountUsage(options),
-    hooksStatus: () => checkHooks(),
-    installHooks: () => installHooks(),
-    removeHooks: () => removeHooks(),
+    hooksStatus: (agent) => checkHooks(agent),
+    installHooks: (agent) => installHooks(agent),
+    removeHooks: (agent) => removeHooks(agent),
   };
 
   constructor(private readonly options: LocalHostOptions) {

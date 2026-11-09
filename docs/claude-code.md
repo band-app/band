@@ -63,5 +63,5 @@ The entry is marked async with a 5 second timeout. The command discards its outp
 
 ## Limits
 
-- Hooks work for Claude Code only. Codex, OpenCode and Gemini CLI sessions in a terminal show no status from hooks.
+- Settings > Agent hooks installs hooks for Codex, Gemini CLI and OpenCode too. See [Codex](codex.md), [Gemini CLI](gemini-cli.md) and [OpenCode](opencode.md).
 - A setup token login cannot use Remote Control or claude.ai connectors.

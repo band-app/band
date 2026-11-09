@@ -611,8 +611,8 @@ export function DashboardShell({
           <Notification
             testId="hooks-banner"
             severity={hooksSetup.error ? "error" : "info"}
-            title="Install Claude Code hooks"
-            details={`To get notifications from agents running in a terminal, Claude Code hooks need to be installed.${hooksSetup.error ? ` ${hooksSetup.error}` : ""}`}
+            title="Install agent hooks"
+            details={`To get notifications from agents running in a terminal, ${hooksSetup.agentNames.length > 1 ? `${hooksSetup.agentNames.slice(0, -1).join(", ")} and ${hooksSetup.agentNames.at(-1)}` : hooksSetup.agentNames[0]} hooks need to be installed.${hooksSetup.error ? ` ${hooksSetup.error}` : ""}`}
             actions={[
               {
                 label: "Install",

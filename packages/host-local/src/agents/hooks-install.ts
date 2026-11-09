@@ -34,17 +34,17 @@ const HOOK_EVENTS = [
 export const HOOKS_VERSION = 2;
 
 /** Seconds Claude Code waits for a hook. A hook that hangs must not hold the agent. */
-const HOOK_TIMEOUT_SECONDS = 5;
+export const HOOK_TIMEOUT_SECONDS = 5;
 
-type HookCommand = { type?: string; command?: string; [key: string]: unknown };
-type HookEntry = { hooks?: HookCommand[]; [key: string]: unknown };
+export type HookCommand = { type?: string; command?: string; [key: string]: unknown };
+export type HookEntry = { hooks?: HookCommand[]; [key: string]: unknown };
 
-function claudeSettingsPath(): string {
+export function claudeSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");
 }
 
 /** The parsed settings file and how it was written, so a rewrite keeps its layout. */
-interface LoadedSettings {
+export interface LoadedSettings {
   settings: Record<string, unknown>;
   indent: string | number;
   trailingNewline: boolean;
@@ -55,10 +55,10 @@ interface LoadedSettings {
  * that exists but is not a JSON object throws, so a write never replaces
  * settings Band could not read.
  */
-function loadClaudeSettings(): LoadedSettings {
+export function loadClaudeSettings(path: string = claudeSettingsPath()): LoadedSettings {
   let text: string;
   try {
-    text = readFileSync(claudeSettingsPath(), "utf-8");
+    text = readFileSync(path, "utf-8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { settings: {}, indent: 2, trailingNewline: false };
@@ -70,12 +70,10 @@ function loadClaudeSettings(): LoadedSettings {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`${claudeSettingsPath()} is not valid JSON; fix it before installing hooks.`);
+    throw new Error(`${path} is not valid JSON; fix it before installing hooks.`);
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(
-      `${claudeSettingsPath()} is not a JSON object; fix it before installing hooks.`,
-    );
+    throw new Error(`${path} is not a JSON object; fix it before installing hooks.`);
   }
   const indentMatch = /^([ \t]+)\S/m.exec(text);
   return {
@@ -90,8 +88,23 @@ function loadClaudeSettings(): LoadedSettings {
  * renames it over the original. A symlinked settings file is written through
  * (the link stays), and the original's permissions carry over.
  */
-function saveClaudeSettings({ settings, indent, trailingNewline }: LoadedSettings): void {
-  let path = claudeSettingsPath();
+export function saveClaudeSettings(
+  { settings, indent, trailingNewline }: LoadedSettings,
+  settingsPath: string = claudeSettingsPath(),
+): void {
+  writeTextAtomic(
+    settingsPath,
+    JSON.stringify(settings, null, indent) + (trailingNewline ? "\n" : ""),
+  );
+}
+
+/**
+ * Writes `text` through a temporary file beside the real file, then renames
+ * it over the original. A symlinked file is written through (the link
+ * stays), and the original's permissions carry over.
+ */
+export function writeTextAtomic(filePath: string, text: string): void {
+  let path = filePath;
   mkdirSync(dirname(path), { recursive: true });
   let mode = 0o600;
   try {
@@ -102,11 +115,7 @@ function saveClaudeSettings({ settings, indent, trailingNewline }: LoadedSetting
   }
   const temp = `${path}.band-${process.pid}-${Date.now()}.tmp`;
   try {
-    writeFileSync(temp, JSON.stringify(settings, null, indent) + (trailingNewline ? "\n" : ""), {
-      encoding: "utf-8",
-      mode,
-      flag: "wx",
-    });
+    writeFileSync(temp, text, { encoding: "utf-8", mode, flag: "wx" });
     renameSync(temp, path);
   } catch (err) {
     try {
@@ -121,11 +130,11 @@ function saveClaudeSettings({ settings, indent, trailingNewline }: LoadedSetting
 /** `band notify` as a command line: the older `/usr/local/bin/band notify` and today's wrapped form. */
 const BAND_NOTIFY = /(^|[\s"'/\\])band(\.exe|\.cmd)?["']?\s+notify(\s|$)/;
 
-function isBandHook(command: string): boolean {
+export function isBandHook(command: string): boolean {
   return BAND_NOTIFY.test(command);
 }
 
-function isBandEntry(entry: unknown): boolean {
+export function isBandEntry(entry: unknown): boolean {
   const hooks = (entry as HookEntry | null)?.hooks;
   return (
     Array.isArray(hooks) &&
@@ -140,17 +149,21 @@ function isBandEntry(entry: unknown): boolean {
  * shell discards its output and its exit code, so a missing `band` binary
  * or a failing hub never reaches Claude Code.
  */
-function isCurrentCommand(hook: HookCommand): boolean {
+export function isCurrentCommand(
+  hook: HookCommand,
+  agent: string = "claude-code",
+  needsAsync: boolean = true,
+): boolean {
   const command = hook.command ?? "";
   return (
-    command.includes("--agent claude-code") &&
+    command.includes(`--agent ${agent} `) &&
     command.includes(">/dev/null 2>&1") &&
     command.trimEnd().endsWith("|| true") &&
-    hook.async === true
+    (!needsAsync || hook.async === true)
   );
 }
 
-function hooksOf(settings: Record<string, unknown>): Record<string, unknown> {
+export function hooksOf(settings: Record<string, unknown>): Record<string, unknown> {
   const hooks = settings.hooks;
   return hooks !== null && typeof hooks === "object" && !Array.isArray(hooks)
     ? (hooks as Record<string, unknown>)
@@ -193,17 +206,19 @@ export async function checkHooks(): Promise<HooksStatus> {
   return statusOf(bandEvents, current, otherHookCount > 0);
 }
 
-function statusOf(
+export function statusOf(
   bandEvents: number,
   currentEvents: number,
   otherHooksExist: boolean,
+  totalEvents: number = HOOK_EVENTS.length,
+  version: number = HOOKS_VERSION,
 ): HooksStatus {
-  const installed = currentEvents >= HOOK_EVENTS.length && bandEvents === currentEvents;
+  const installed = currentEvents >= totalEvents && bandEvents === currentEvents;
   return {
     installed,
     outdated: !installed && bandEvents > 0,
     other_hooks_exist: otherHooksExist,
-    version: HOOKS_VERSION,
+    version,
   };
 }
 
@@ -213,11 +228,11 @@ function statusOf(
  * invisible to Claude Code. Claude Code runs hooks through Git Bash on
  * Windows, so the same form serves there.
  */
-function hookCommand(bandPath: string): string {
-  return `"${bandPath}" notify --agent claude-code >/dev/null 2>&1 || true`;
+export function hookCommand(bandPath: string, agent: string = "claude-code"): string {
+  return `"${bandPath}" notify --agent ${agent} >/dev/null 2>&1 || true`;
 }
 
-async function findBand(): Promise<string> {
+export async function findBand(): Promise<string> {
   // The `/usr/local/bin/band` symlink is POSIX-only; on Windows resolve it
   // off PATH (`where band`) instead.
   if (process.platform !== "win32") {
@@ -234,7 +249,7 @@ async function findBand(): Promise<string> {
 }
 
 /** `hooks` without Band's entries; events left empty are dropped. */
-function withoutBandEntries(hooks: Record<string, unknown>): Record<string, unknown> {
+export function withoutBandEntries(hooks: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [event, eventHooks] of Object.entries(hooks)) {
     if (!Array.isArray(eventHooks)) {

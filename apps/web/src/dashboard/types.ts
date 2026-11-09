@@ -354,6 +354,16 @@ export interface HostHooks {
   hasClaudeCode: boolean;
   status: HooksStatus | null;
   error?: string;
+  /** Codex, Gemini CLI and OpenCode, for the agents the worker can start. */
+  agents: HostAgentHooks[];
+}
+
+export type HookAgentType = "claude-code" | "codex" | "gemini-cli" | "opencode";
+
+export interface HostAgentHooks {
+  agent: HookAgentType;
+  status: HooksStatus | null;
+  error?: string;
 }
 
 export type CliStatus =
