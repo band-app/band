@@ -53,6 +53,18 @@ export class ToastHostPage {
     });
   }
 
+  /**
+   * Closes the CLI and hooks setup notifications whenever one appears, so it cannot cover the
+   * right-hand panel a spec clicks in. A spec about the notifications themselves does not call this.
+   */
+  async closeSetupNoticesWhenShown(): Promise<void> {
+    for (const notice of [this.cliNotice, this.hooksNotice]) {
+      await this.page.addLocatorHandler(notice, async () => {
+        await this.closeButton(notice).click();
+      });
+    }
+  }
+
   /** The close button of `toast`. */
   closeButton(toast: Locator): Locator {
     return toast.getByRole("button", { name: "Close" });
