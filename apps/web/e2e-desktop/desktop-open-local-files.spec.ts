@@ -96,6 +96,8 @@ async function launch(
     hubPort: world.port,
     openFilesBeforeUi,
   });
+  // Docked DevTools take much of the page's width and squeeze the editor under the side panels.
+  await desktop.closeDevTools();
   const dashboard = new DesktopDashboardPage(desktop.window);
   await dashboard.expectRepoListed("alpha");
   return { dashboard, app: desktop };

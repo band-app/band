@@ -573,6 +573,71 @@ function AppShell() {
     return undefined;
   }, []);
 
+  // Only a layout the user chose is saved: while they drag or press a
+  // separator, or just after a toggle (button, shortcut, reveal). When the
+  // window gets too narrow, the library collapses a panel below its minimum
+  // size and squeezes the others; saving that would keep the sidebar hidden
+  // after the window is wide again.
+  const panelIntentUntil = useRef(0);
+  const separatorDragging = useRef(false);
+  const markPanelIntent = useCallback(() => {
+    panelIntentUntil.current = performance.now() + 1000;
+  }, []);
+  const userPanelIntent = useCallback(
+    () => separatorDragging.current || performance.now() < panelIntentUntil.current,
+    [],
+  );
+  useEffect(() => {
+    const up = () => {
+      if (!separatorDragging.current) return;
+      separatorDragging.current = false;
+      markPanelIntent();
+    };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [markPanelIntent]);
+  const separatorIntentProps = useMemo(
+    () => ({
+      onPointerDown: () => {
+        separatorDragging.current = true;
+      },
+      onKeyDown: markPanelIntent,
+      onDoubleClick: markPanelIntent,
+    }),
+    [markPanelIntent],
+  );
+  // A panel the library collapsed for lack of room, to reopen once there is room.
+  const sidebarAutoCollapsed = useRef(false);
+  const rightAutoCollapsed = useRef(false);
+  // Set by a toggle (button, shortcut, reveal) and consumed by the open/closed
+  // change it causes, so that change counts as the user's however late it lands.
+  const sidebarToggled = useRef(false);
+  const rightToggled = useRef(false);
+  // Reopens a panel the library collapsed once its group has room for the panel's
+  // minimum next to the neighbour's minimum share. Not marked as intent, so the
+  // saved state stays as the user left it.
+  const reopenAutoCollapsed = useCallback(() => {
+    const rootFont = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const px = (size: string) =>
+      size.endsWith("rem") ? Number.parseFloat(size) * rootFont : Number.parseFloat(size);
+    const room = (panel: HTMLElement | null, min: string, neighbourShare: number) => {
+      const group = panel?.parentElement;
+      return group != null && group.clientWidth * (1 - neighbourShare) >= px(min) + 8;
+    };
+    const sidebar = sidebarPanelRef.current;
+    if (sidebarAutoCollapsed.current && sidebar?.isCollapsed()) {
+      if (room(sidebarElRef.current, SIDEBAR_MIN_SIZE, 0.2)) sidebar.expand();
+    }
+    const right = rightPanelRef.current;
+    if (rightAutoCollapsed.current && right?.isCollapsed()) {
+      if (room(rightPanelElRef.current, RIGHT_PANEL_MIN_SIZE, 0.3)) right.expand();
+    }
+  }, [sidebarPanelRef, rightPanelRef]);
+
   // Skip the first layout callback: it fires during mount with the restored
   // layout, which we don't want to re-persist.
   const skipFirstSidebarLayout = useRef(true);
@@ -580,47 +645,55 @@ function AppShell() {
   // so coalesce the persist to at most one localStorage write per frame.
   const pendingSidebarWidthRef = useRef<number | null>(null);
   const sidebarWidthRafRef = useRef<number | null>(null);
-  const handleSidebarLayoutChanged = useCallback((layout: Record<string, number>) => {
-    if (skipFirstSidebarLayout.current) {
-      skipFirstSidebarLayout.current = false;
-      return;
-    }
-    // Only persist a real (visible) width — a 0 here means the panel is
-    // collapsed, and storing that would lose the user's chosen width on the
-    // next expand.
-    if (layout.sidebar == null || layout.sidebar <= 0) return;
-    pendingSidebarWidthRef.current = layout.sidebar;
-    if (sidebarWidthRafRef.current != null) return;
-    sidebarWidthRafRef.current = requestAnimationFrame(() => {
-      sidebarWidthRafRef.current = null;
-      if (pendingSidebarWidthRef.current != null) {
-        saveSidebarWidth(pendingSidebarWidthRef.current);
-        pendingSidebarWidthRef.current = null;
+  const handleSidebarLayoutChanged = useCallback(
+    (layout: Record<string, number>) => {
+      if (skipFirstSidebarLayout.current) {
+        skipFirstSidebarLayout.current = false;
+        return;
       }
-    });
-  }, []);
+      // Only persist a real (visible) width — a 0 here means the panel is
+      // collapsed, and storing that would lose the user's chosen width on the
+      // next expand.
+      if (layout.sidebar == null || layout.sidebar <= 0) return;
+      if (!userPanelIntent()) return;
+      pendingSidebarWidthRef.current = layout.sidebar;
+      if (sidebarWidthRafRef.current != null) return;
+      sidebarWidthRafRef.current = requestAnimationFrame(() => {
+        sidebarWidthRafRef.current = null;
+        if (pendingSidebarWidthRef.current != null) {
+          saveSidebarWidth(pendingSidebarWidthRef.current);
+          pendingSidebarWidthRef.current = null;
+        }
+      });
+    },
+    [userPanelIntent],
+  );
 
   // The nested center|rightpanel group persists the right panel's width, same
   // RAF-coalesced pattern as the sidebar above.
   const skipFirstCenterLayout = useRef(true);
   const pendingRightWidthRef = useRef<number | null>(null);
   const rightWidthRafRef = useRef<number | null>(null);
-  const handleCenterLayoutChanged = useCallback((layout: Record<string, number>) => {
-    if (skipFirstCenterLayout.current) {
-      skipFirstCenterLayout.current = false;
-      return;
-    }
-    if (layout.rightpanel == null || layout.rightpanel <= 0) return;
-    pendingRightWidthRef.current = layout.rightpanel;
-    if (rightWidthRafRef.current != null) return;
-    rightWidthRafRef.current = requestAnimationFrame(() => {
-      rightWidthRafRef.current = null;
-      if (pendingRightWidthRef.current != null) {
-        saveRightPanelWidth(pendingRightWidthRef.current);
-        pendingRightWidthRef.current = null;
+  const handleCenterLayoutChanged = useCallback(
+    (layout: Record<string, number>) => {
+      if (skipFirstCenterLayout.current) {
+        skipFirstCenterLayout.current = false;
+        return;
       }
-    });
-  }, []);
+      if (layout.rightpanel == null || layout.rightpanel <= 0) return;
+      if (!userPanelIntent()) return;
+      pendingRightWidthRef.current = layout.rightpanel;
+      if (rightWidthRafRef.current != null) return;
+      rightWidthRafRef.current = requestAnimationFrame(() => {
+        rightWidthRafRef.current = null;
+        if (pendingRightWidthRef.current != null) {
+          saveRightPanelWidth(pendingRightWidthRef.current);
+          pendingRightWidthRef.current = null;
+        }
+      });
+    },
+    [userPanelIntent],
+  );
 
   // Single source of truth for the toggle button's pressed state + the
   // persisted visibility. Fires for the toggle button, ⌘B, and drag-to-
@@ -639,9 +712,17 @@ function AppShell() {
       if (visible === lastSidebarVisibleRef.current) return;
       lastSidebarVisibleRef.current = visible;
       setSidebarVisible(visible);
-      saveSidebarCollapsed(!visible);
+      const intent = sidebarToggled.current || userPanelIntent();
+      sidebarToggled.current = false;
+      if (intent) {
+        sidebarAutoCollapsed.current = false;
+        saveSidebarCollapsed(!visible);
+      } else {
+        sidebarAutoCollapsed.current = !visible;
+        if (!visible) requestAnimationFrame(reopenAutoCollapsed);
+      }
     },
-    [],
+    [userPanelIntent, reopenAutoCollapsed],
   );
 
   // Same collapsed/expanded tracking for the right sidepanel.
@@ -653,9 +734,17 @@ function AppShell() {
       if (visible === lastRightVisibleRef.current) return;
       lastRightVisibleRef.current = visible;
       setRightVisible(visible);
-      saveRightPanelCollapsed(!visible);
+      const intent = rightToggled.current || userPanelIntent();
+      rightToggled.current = false;
+      if (intent) {
+        rightAutoCollapsed.current = false;
+        saveRightPanelCollapsed(!visible);
+      } else {
+        rightAutoCollapsed.current = !visible;
+        if (!visible) requestAnimationFrame(reopenAutoCollapsed);
+      }
     },
-    [],
+    [userPanelIntent, reopenAutoCollapsed],
   );
 
   // Arm a one-shot width transition on both panels so a programmatic sidebar
@@ -666,6 +755,8 @@ function AppShell() {
   // it). Removed as soon as it finishes so dragging the separator stays
   // pixel-exact — a persistent transition would make the drag lag.
   const animateSidebarToggle = useCallback(() => {
+    // Every programmatic expand or collapse passes through here, so it is the user's choice.
+    sidebarToggled.current = true;
     // Guard first: the cleanup that strips the transition back off is keyed on
     // the sidebar element's `transitionend`. Without the sidebar we have no way
     // to schedule that cleanup, so never write the transition (onto either
@@ -706,6 +797,7 @@ function AppShell() {
   // toggle slides instead of snapping. Keyed on the right panel's own
   // `transitionend` for cleanup.
   const animateRightToggle = useCallback(() => {
+    rightToggled.current = true;
     const right = rightPanelElRef.current;
     if (!right) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -769,6 +861,23 @@ function AppShell() {
       window.removeEventListener("band:show-right-panel", onShow);
     };
   }, [toggleRightPanel, rightPanelRef, animateRightToggle]);
+
+  // A window that grows again can make room for a panel the library collapsed.
+  useEffect(() => {
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        reopenAutoCollapsed();
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [reopenAutoCollapsed]);
 
   // Cancel a pending sidebar-width RAF on unmount so it can't fire (and write
   // localStorage) after the component is gone — matches the cleanup discipline
@@ -902,6 +1011,7 @@ function AppShell() {
                 accent tints over `--background`. */}
               {/* react-resizable-panels writes `id` into `data-testid`. */}
               <Separator
+                {...separatorIntentProps}
                 id="app-shell__sidebar-separator"
                 className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize"
               />
@@ -937,7 +1047,10 @@ function AppShell() {
                         </div>
                       </div>
                     </Panel>
-                    <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+                    <Separator
+                      {...separatorIntentProps}
+                      className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize"
+                    />
                     <Panel
                       id="rightpanel"
                       panelRef={rightPanelRef}
