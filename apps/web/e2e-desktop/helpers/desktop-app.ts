@@ -63,6 +63,8 @@ export interface LaunchedDesktop {
    * a few hundred pixels wide.
    */
   closeDevTools: () => Promise<void>;
+  /** Resize the main window, as the user dragging its edge would. */
+  resizeWindow: (width: number, height: number) => Promise<void>;
   close: () => Promise<void>;
 }
 
@@ -222,24 +224,38 @@ export async function launchDesktop(opts: {
     },
     emitOpenFile: emit,
     windowCount: () => app.windows().length,
+    resizeWindow: async (width, height) => {
+      await app.evaluate(
+        ({ BrowserWindow }, size) => {
+          const win = BrowserWindow.getAllWindows().find((w) => w.isVisible());
+          win?.setSize(size.width, size.height);
+        },
+        { width, height },
+      );
+    },
     closeDevTools: async () => {
-      // The app opens them on `ready-to-show`, which may come after the window is found.
+      // An unpackaged app opens them on `ready-to-show`, which may come after the window is
+      // found, and they open docked, taking much of the page's width. So the poll settles only
+      // once every window is shown and, unpackaged, after it has closed them once.
       await expect
         .poll(
           () =>
-            app.evaluate(({ BrowserWindow }) => {
-              let open = false;
+            app.evaluate(({ app: electronApp, BrowserWindow }) => {
+              const seen = globalThis as { __bandDevToolsClosed?: boolean };
+              let settled = true;
               for (const w of BrowserWindow.getAllWindows()) {
+                if (!w.isVisible()) settled = false;
                 if (w.webContents.isDevToolsOpened()) {
                   w.webContents.closeDevTools();
-                  open = true;
+                  seen.__bandDevToolsClosed = true;
+                  settled = false;
                 }
               }
-              return open;
+              return settled && (electronApp.isPackaged || seen.__bandDevToolsClosed === true);
             }),
           { timeout: 15_000, intervals: [250, 500, 1000] },
         )
-        .toBe(false);
+        .toBe(true);
     },
     close: async () => {
       // Quitting waits out the local hub's 3 s shutdown grace. If it hangs,

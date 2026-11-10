@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, sep } from "node:path";
+import { SYMBOL_SCHEME } from "./services/symbols.js";
 
 export const APP_SCHEME = "app";
 
@@ -64,11 +65,14 @@ export function buildCsp(hubOrigin: string | null, opts: { loopback?: boolean } 
       ]
     : [];
   const self = (...extra: string[]) => ["'self'", ...extra].join(" ");
+  // A client mod's CSS and module are served by the hub under `/ext/` (the `app://` page is a
+  // different origin from the hub, so `'self'` does not cover them). Only that path is allowed.
+  const ext = hubOrigin ? [`${hubOrigin}/ext/`] : [];
   return [
     "default-src 'self'",
-    `script-src ${self("'unsafe-inline'", "'wasm-unsafe-eval'")}`,
-    `style-src ${self("'unsafe-inline'")}`,
-    `img-src ${self("data:", "blob:", "https:", ...(hubOrigin ? [hubOrigin] : []))}`,
+    `script-src ${self("'unsafe-inline'", "'wasm-unsafe-eval'", ...ext)}`,
+    `style-src ${self("'unsafe-inline'", ...ext)}`,
+    `img-src ${self("data:", "blob:", "https:", `${SYMBOL_SCHEME}:`, ...(hubOrigin ? [hubOrigin] : []))}`,
     `font-src ${self("data:")}`,
     `connect-src ${self(...hub)}`,
     `worker-src ${self("blob:")}`,

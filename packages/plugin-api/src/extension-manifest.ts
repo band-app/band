@@ -155,6 +155,58 @@ export const toolSchema = z
   })
   .strict();
 
+/** The vibrancy materials a mod may ask the desktop app for (`none` removes the vibrancy layer). */
+export const MOD_WINDOW_MATERIALS = [
+  "none",
+  "sidebar",
+  "titlebar",
+  "selection",
+  "menu",
+  "popover",
+  "header",
+  "sheet",
+  "window",
+  "hud",
+  "fullscreen-ui",
+  "tooltip",
+  "content",
+  "under-window",
+  "under-page",
+] as const;
+
+/** Desktop window options of a mod. Missing fields keep the app's defaults. */
+export const modWindowSchema = z
+  .object({
+    material: z.enum(MOD_WINDOW_MATERIALS).optional(),
+    titleBarStyle: z.enum(["hiddenInset", "hidden", "default"]).optional(),
+    /** An empty native toolbar, which gives the window the large corner radius of a toolbar window. */
+    toolbar: z.enum(["none", "unified", "compact"]).optional(),
+    trafficLightPosition: z
+      .object({ x: z.number().int().min(0).max(200), y: z.number().int().min(0).max(200) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+/**
+ * A client mod: trusted code that runs in the page with the device token. `css` files are added to
+ * the page, `module` is an ES module whose default export is called with the `band` host object
+ * (see `mod-api.ts`), and `window` sets desktop window options. Installing the extension is the
+ * approval.
+ */
+export const modSchema = z
+  .object({
+    /** One file or a list. A single file is read as a list of one. */
+    css: z
+      .union([entrySchema.transform((file) => [file]), z.array(entrySchema).max(16)])
+      .default([]),
+    module: entrySchema
+      .refine((p) => /\.(m?js)$/.test(p), "A mod module is a .js or .mjs file")
+      .optional(),
+    window: modWindowSchema.optional(),
+  })
+  .strict();
+
 /**
  * `band-extension.json`. The hub validates the manifest with this schema before it serves the
  * extension's files. An unknown key is an error.
@@ -179,6 +231,7 @@ export const extensionManifestSchema = z
         panels: z.array(panelSchema).default([]),
         tools: z.array(toolSchema).default([]),
         languageServers: z.array(languageServerSchema).default([]),
+        mod: modSchema.optional(),
       })
       .strict()
       .default({}),
@@ -216,6 +269,8 @@ export const extensionManifestSchema = z
 export type FileEditorManifest = z.infer<typeof fileEditorSchema>;
 export type PanelManifest = z.infer<typeof panelSchema>;
 export type LanguageServerManifest = z.infer<typeof languageServerSchema>;
+export type ModManifest = z.infer<typeof modSchema>;
+export type ModWindowOptions = z.infer<typeof modWindowSchema>;
 export type ToolManifest = z.infer<typeof toolSchema>;
 export type WorkerServiceManifest = z.infer<typeof workerServiceSchema>;
 export type ExtensionManifest = z.infer<typeof extensionManifestSchema>;

@@ -35,7 +35,8 @@ async function installedView() {
       : (record?.source ?? "unknown");
     return { id: m.id, official, source };
   });
-  return { ...list, sources: extensions };
+  // `BAND_MODS=off` is the hub-side safe mode: the web app loads no mod CSS or module.
+  return { ...list, sources: extensions, modsOff: process.env.BAND_MODS === "off" };
 }
 
 export const extensionsRouter = t.router({

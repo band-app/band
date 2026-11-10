@@ -108,6 +108,12 @@ import {
   type DeleteWorktreeEventDetail,
   deleteDialogInfoFor,
 } from "../lib/worktree-delete";
+import {
+  applySidebarTransforms,
+  hasSidebarTransforms,
+  Overridable,
+  useModVersion,
+} from "../mods/registry";
 import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
@@ -368,201 +374,212 @@ function SortableRepo({
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="min-w-0 px-2">
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          {/* The header is a click/tap target on both desktop and mobile.
+    <Overridable
+      name="sidebar.repoGroup"
+      props={{
+        repoName: repo.name,
+        kind: repo.kind,
+        collapsed,
+        worktreeCount: repo.worktrees.length,
+      }}
+      render={() => (
+        <div ref={setNodeRef} style={style} className="min-w-0 px-2">
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              {/* The header is a click/tap target on both desktop and mobile.
               For git repos it toggles collapse; for plain repos it
               opens the implicit worktree (the repo IS the worktree).
               Keyboard nav lives at the worktree-card level for git
               repos; for plain repos the same role moves up here. */}
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the RepoList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
-          <div
-            className={headerClassName}
-            data-testid={`repo-list__repo-header--${repo.name}`}
-            onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(repo.name))}
-          >
-            {/* Drag listeners live on the title (folder icon + repo name)
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the RepoList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
+              <div
+                className={headerClassName}
+                data-testid={`repo-list__repo-header--${repo.name}`}
+                onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(repo.name))}
+              >
+                {/* Drag listeners live on the title (folder icon + repo name)
                 so the repo name itself is the drag handle. The 8px
                 MouseSensor / 250ms TouchSensor thresholds mean a still
                 click/tap bubbles up to the outer onClick without starting
                 a drag. */}
-            <div
-              className="flex items-center gap-2 min-w-0 cursor-grab"
-              {...attributes}
-              {...listeners}
-            >
-              {isPlain ? (
-                // Plain repo: agent-status dot when the agent is
-                // working / needs attention, otherwise a repo-sized
-                // (size-4) Folder icon. Inlined rather than routing
-                // through AgentStatusIndicator's idle dot so the idle
-                // icon can match a git repo's folder size — the faint dot
-                // would make plain headers read as nested worktree cards
-                // (see #427 review).
-                plainAgent && isActiveAgentStatus(plainAgent.status) ? (
-                  <AgentStatusIndicator
-                    agent={plainAgent}
-                    tabStatuses={statuses.get(plainWorktreeId)?.tabStatuses}
-                  />
-                ) : (
-                  <Folder className="size-4 shrink-0 text-muted-foreground" />
-                )
-              ) : (
-                // Git repo: the GitHub owner's avatar when `origin` is
-                // on GitHub, else an initial on a coloured square.
-                <RepoAvatar
-                  name={repo.name}
-                  avatar={repo.avatar}
-                  className="size-4"
-                  testId={`repo-list__repo-avatar--${repo.name}`}
-                />
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  {/* Same repo-bold treatment regardless of kind so a
+                <div
+                  className="flex items-center gap-2 min-w-0 cursor-grab"
+                  {...attributes}
+                  {...listeners}
+                >
+                  {isPlain ? (
+                    // Plain repo: agent-status dot when the agent is
+                    // working / needs attention, otherwise a repo-sized
+                    // (size-4) Folder icon. Inlined rather than routing
+                    // through AgentStatusIndicator's idle dot so the idle
+                    // icon can match a git repo's folder size — the faint dot
+                    // would make plain headers read as nested worktree cards
+                    // (see #427 review).
+                    plainAgent && isActiveAgentStatus(plainAgent.status) ? (
+                      <AgentStatusIndicator
+                        agent={plainAgent}
+                        tabStatuses={statuses.get(plainWorktreeId)?.tabStatuses}
+                      />
+                    ) : (
+                      <Folder className="size-4 shrink-0 text-muted-foreground" />
+                    )
+                  ) : (
+                    // Git repo: the GitHub owner's avatar when `origin` is
+                    // on GitHub, else an initial on a coloured square.
+                    <RepoAvatar
+                      name={repo.name}
+                      avatar={repo.avatar}
+                      className="size-4"
+                      testId={`repo-list__repo-avatar--${repo.name}`}
+                    />
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      {/* Same repo-bold treatment regardless of kind so a
                       plain repo reads as a top-level repo rather
                       than a nested branch row. Active plain repos
                       bump to full-foreground for the same emphasis a
                       WorktreeCard would get. */}
-                  <h2
-                    className={`text-[13px] truncate ${
-                      (isPlain && plainIsActive) || gitHeaderIsActive
-                        ? "font-bold text-foreground"
-                        : "font-semibold text-foreground/90"
-                    }`}
-                  >
-                    {repo.name}
-                  </h2>
-                </TooltipTrigger>
-                {/* Anchored to the right so a long repo name doesn't
+                      <h2
+                        className={`text-[13px] truncate ${
+                          (isPlain && plainIsActive) || gitHeaderIsActive
+                            ? "font-bold text-foreground"
+                            : "font-semibold text-foreground/90"
+                        }`}
+                      >
+                        {repo.name}
+                      </h2>
+                    </TooltipTrigger>
+                    {/* Anchored to the right so a long repo name doesn't
                     cover the row above — matches the `side="right"`
                     treatment on `WorktreeCard`'s label tooltip. */}
-                <TooltipContent side="right">{repo.name}</TooltipContent>
-              </Tooltip>
-            </div>
-            {/* The "+" and "⋮" buttons are revealed on hover (or keyboard
+                    <TooltipContent side="right">{repo.name}</TooltipContent>
+                  </Tooltip>
+                </div>
+                {/* The "+" and "⋮" buttons are revealed on hover (or keyboard
                 focus) to keep the header uncluttered while scanning the list;
                 the same actions live in the right-click / long-press context
                 menu below. `opacity-0` (not `hidden`) reserves the space so the
                 row doesn't reflow on hover. On touch devices there's no hover
                 and no room to spare, so the cluster is hidden entirely — the
                 actions are reached via long-press instead. */}
-            <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:hidden">
-              {/* "⋮" opens the same action list as right-click, so the menu is
+                <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:hidden">
+                  {/* "⋮" opens the same action list as right-click, so the menu is
                   reachable with a plain left click (and on touch, where there's
                   no right-click). Sits to the left of the "+" quick action. */}
-              {!isPlain && (
-                <DropdownMenu>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label="Repo actions"
-                          data-testid={`repo-list__repo-menu-trigger--${repo.name}`}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreVertical />
-                        </Button>
-                      </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent>More actions</TooltipContent>
-                  </Tooltip>
-                  <DropdownMenuContent align="end">
-                    {renderMenuItems({
-                      Item: DropdownMenuItem,
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              {/* Plain (non-git) repos have a single implicit worktree
+                  {!isPlain && (
+                    <DropdownMenu>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              aria-label="Repo actions"
+                              data-testid={`repo-list__repo-menu-trigger--${repo.name}`}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreVertical />
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>More actions</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="end">
+                        {renderMenuItems({
+                          Item: DropdownMenuItem,
+                        })}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  {/* Plain (non-git) repos have a single implicit worktree
                   and don't support `git worktree add`, so the "+" Add
                   worktree button is hidden — see #427. The server also
                   rejects `worktrees.create` as a backstop. */}
-              {!isPlain && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setWorktreeDialog(repo.name);
-                      }}
-                    >
-                      <Plus />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Add worktree</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          {renderMenuItems({
-            Item: ContextMenuItem,
-          })}
-        </ContextMenuContent>
-      </ContextMenu>
+                  {!isPlain && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setWorktreeDialog(repo.name);
+                          }}
+                        >
+                          <Plus />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Add worktree</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              {renderMenuItems({
+                Item: ContextMenuItem,
+              })}
+            </ContextMenuContent>
+          </ContextMenu>
 
-      {/* Nested worktrees section — only meaningful for git repos.
+          {/* Nested worktrees section — only meaningful for git repos.
           Plain repos are flat: the header above IS the worktree.
           `ml-3` indents the branch list so the worktrees read as children of
           the repo header above, not as sibling rows. The indentation alone
           (no divider rail) conveys the hierarchy, keeping the list uncluttered. */}
-      {!isPlain && (
-        <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
-          {provisioning.map((request) => (
-            <ProvisioningWorktreeCard key={request.id} request={request} />
-          ))}
-          <MainMissingRow repo={repo} hosts={hosts} />
-          {repo.worktrees.length === 0 ? (
-            hasPinnedSiblings || provisioning.length > 0 ? null : (
-              <p className="text-[13px] text-foreground/60 px-4 py-2">No worktrees yet</p>
-            )
-          ) : (
-            repo.worktrees.map((wt) => {
-              const wsId = toWorktreeId(repo.name, wt.name, wt.hostId);
-              const currentIndex = worktreeIndex++;
-              return (
-                // Keyed by name, not id: a move changes the id, and a remount would drop the
-                // open "Open on another host" dialog before it shows the result.
-                <DragRow
-                  key={wt.name}
-                  dndId={`wt:${wsId}`}
-                  data={{
-                    kind: "wt",
-                    worktreeId: wsId,
-                    repoName: repo.name,
-                    hostId: hostIdOf(wt),
-                  }}
-                >
-                  <WorktreeCard
-                    worktree={wt}
-                    repoName={repo.name}
-                    defaultBranch={repo.defaultBranch}
-                    repoKind={repo.kind}
-                    status={statuses.get(wsId)}
-                    branchStatus={branchStatuses.get(wsId)}
-                    setupStatus={setupStatuses.get(wsId)}
-                    isFocused={!collapsed && currentIndex === focusedIndex}
-                    onShowDeleteDialog={onShowDeleteDialog}
-                    onTogglePinned={onTogglePinned}
-                    hostTag={repoSpansHosts(repo) ? hostLabel(hostIdOf(wt), hosts) : undefined}
-                    allowedHostIds={repo.allowedHostIds}
-                  />
-                </DragRow>
-              );
-            })
+          {!isPlain && (
+            <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
+              {provisioning.map((request) => (
+                <ProvisioningWorktreeCard key={request.id} request={request} />
+              ))}
+              <MainMissingRow repo={repo} hosts={hosts} />
+              {repo.worktrees.length === 0 ? (
+                hasPinnedSiblings || provisioning.length > 0 ? null : (
+                  <p className="text-[13px] text-foreground/60 px-4 py-2">No worktrees yet</p>
+                )
+              ) : (
+                repo.worktrees.map((wt) => {
+                  const wsId = toWorktreeId(repo.name, wt.name, wt.hostId);
+                  const currentIndex = worktreeIndex++;
+                  return (
+                    // Keyed by name, not id: a move changes the id, and a remount would drop the
+                    // open "Open on another host" dialog before it shows the result.
+                    <DragRow
+                      key={wt.name}
+                      dndId={`wt:${wsId}`}
+                      data={{
+                        kind: "wt",
+                        worktreeId: wsId,
+                        repoName: repo.name,
+                        hostId: hostIdOf(wt),
+                      }}
+                    >
+                      <WorktreeCard
+                        worktree={wt}
+                        repoName={repo.name}
+                        defaultBranch={repo.defaultBranch}
+                        repoKind={repo.kind}
+                        status={statuses.get(wsId)}
+                        branchStatus={branchStatuses.get(wsId)}
+                        setupStatus={setupStatuses.get(wsId)}
+                        isFocused={!collapsed && currentIndex === focusedIndex}
+                        onShowDeleteDialog={onShowDeleteDialog}
+                        onTogglePinned={onTogglePinned}
+                        hostTag={repoSpansHosts(repo) ? hostLabel(hostIdOf(wt), hosts) : undefined}
+                        allowedHostIds={repo.allowedHostIds}
+                      />
+                    </DragRow>
+                  );
+                })
+              )}
+            </CollapsibleSection>
           )}
-        </CollapsibleSection>
+        </div>
       )}
-    </div>
+    />
   );
 }
 
@@ -670,7 +687,17 @@ export function RepoList({ groupFilter }: RepoListProps) {
   // Worktrees in the order the user dragged them to, and the pins with their subtrees. The group
   // filter applies to pins too: a pin shows only when it is in the selected group, and its
   // children follow the same rule.
-  const sortedRepos = useMemo(() => sortRepoWorktrees(repos), [repos]);
+  const modVersion = useModVersion();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: modVersion marks a change of mod transforms
+  const sortedRepos = useMemo(
+    () =>
+      sortRepoWorktrees(repos).map((r) =>
+        hasSidebarTransforms()
+          ? { ...r, worktrees: applySidebarTransforms(r.worktrees, r.name) }
+          : r,
+      ),
+    [repos, modVersion],
+  );
   const visibleRepos = useMemo(
     () =>
       groupFilter

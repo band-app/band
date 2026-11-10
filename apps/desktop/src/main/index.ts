@@ -52,11 +52,13 @@ import { HubService } from "./services/hub-service.js";
 import { KeepAwakeController } from "./services/keep-awake.js";
 import { LocalPreviewRegistry } from "./services/local-preview.js";
 import { createLogger } from "./services/log.js";
+import { loadNative } from "./services/native.js";
 import { OpenFileQueue } from "./services/open-file-queue.js";
 import { killPort } from "./services/port.js";
 import { scriptLaunchRefusal } from "./services/script-launch-guard.js";
 import { createTestSecretStore, setSecretStore } from "./services/secret-store.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
+import { SYMBOL_SCHEME, SYMBOL_SCHEME_PRIVILEGES, symbolResponse } from "./services/symbols.js";
 import { applyTestProfile } from "./services/test-profile.js";
 import { resolveWorkerLocation, ThisComputerWorker } from "./services/this-computer-worker.js";
 import { resolveUiDir } from "./services/ui-paths.js";
@@ -522,6 +524,8 @@ async function bootstrap(): Promise<void> {
     { scheme: "band-action", privileges: { standard: false, supportFetchAPI: false } },
     // `app://band/` serves the bundled UI (see `app-protocol.ts`).
     { scheme: APP_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } },
+    // SF Symbols for a client mod's CSS (`mask-image`), rendered by the native addon.
+    { scheme: SYMBOL_SCHEME, privileges: { ...SYMBOL_SCHEME_PRIVILEGES } },
   ]);
 
   await app.whenReady();
@@ -639,6 +643,12 @@ async function bootstrap(): Promise<void> {
   // when its guest attaches (`prepareBrowserSession`), whichever partition
   // (default or browser profile) it uses.
   session.defaultSession.protocol.handle("band-action", () => new Response(null, { status: 204 }));
+  // Loaded once and on first use of a symbol; null (every symbol 404s) without the addon.
+  let symbolNative: ReturnType<typeof loadNative> | undefined;
+  session.defaultSession.protocol.handle(SYMBOL_SCHEME, (request) => {
+    if (symbolNative === undefined) symbolNative = loadNative();
+    return symbolResponse(request.url, symbolNative);
+  });
 
   keepAwake.restore();
   const unregisterIpc = registerIpc({

@@ -46,6 +46,7 @@ import {
   useStatusWatcher,
 } from "../hooks/use-status";
 import { collapsibleKeys, ORIGIN_COLLAPSE_KEY } from "../lib/sidebar-grouping";
+import { Overridable } from "../mods/registry";
 import { useDashboardStore } from "../stores/index";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { GroupNameDialog } from "./GroupDialogs";
@@ -418,162 +419,168 @@ export function DashboardShell({
         </div>
       )}
 
-      <ReposPanel
-        tall={matchMobileHeader}
-        count={loading ? null : repos.length}
-        actions={
-          <div className="flex min-w-0 items-center gap-0.5">
-            {admin.data?.admin ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
+      <Overridable
+        name="sidebar"
+        props={{ repoCount: loading ? null : repos.length }}
+        render={() => (
+          <ReposPanel
+            tall={matchMobileHeader}
+            count={loading ? null : repos.length}
+            actions={
+              <div className="flex min-w-0 items-center gap-0.5">
+                {admin.data?.admin ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        className="w-6 text-muted-foreground"
+                        aria-label="Add repo"
+                        data-testid="repos-panel__add-repo"
+                        onClick={() => setAddingRepo(true)}
+                      >
+                        <Plus className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Add repo</TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {repos.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        data-testid="dashboard__group-filter-trigger"
+                        className={`min-w-6 shrink max-w-[5rem] text-[11px] h-5 px-1.5 gap-1 ${groupFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
+                      >
+                        {activeGroup ? (
+                          <>
+                            <span
+                              className="size-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: activeGroup.color }}
+                            />
+                            <span className="truncate">{activeGroup.name}</span>
+                          </>
+                        ) : (
+                          <>
+                            <ListFilter className="size-3.5 shrink-0" />
+                            <span className="truncate">All</span>
+                          </>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="start"
+                      collisionPadding={8}
+                      data-testid="dashboard__group-filter-menu"
+                    >
+                      <DropdownMenuItem
+                        data-testid="dashboard__group-filter-item--all"
+                        onClick={() => setGroupFilter(null)}
+                      >
+                        <ListFilter />
+                        <span className="truncate">All</span>
+                        {!groupFilter && <Check className="size-3 shrink-0" />}
+                        <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                          ⌘0
+                        </span>
+                      </DropdownMenuItem>
+                      {groups.map((grp, idx) => (
+                        <DropdownMenuItem
+                          key={grp.id}
+                          data-testid={`dashboard__group-filter-item--${grp.id}`}
+                          onClick={() => setGroupFilter(grp.id)}
+                        >
+                          <span
+                            className="size-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: grp.color }}
+                          />
+                          <span className="truncate">{grp.name}</span>
+                          {groupFilter === grp.id && <Check className="size-3 shrink-0" />}
+                          {idx < 9 && (
+                            <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                              ⌘{idx + 1}
+                            </span>
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        data-testid="dashboard__group-filter-new-group"
+                        onClick={() => setNamingGroup(true)}
+                      >
+                        <Plus />
+                        <span>New group…</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                {repos.length > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        className="w-6 text-muted-foreground"
+                        aria-label={allCollapsed ? "Expand all" : "Collapse all"}
+                        data-testid="repos-panel__toggle-all"
+                        data-next-action={allCollapsed ? "expand" : "collapse"}
+                        disabled={!hasCollapsible}
+                        onClick={toggleAll}
+                      >
+                        {allCollapsed ? (
+                          <ChevronsUpDown className="size-4" />
+                        ) : (
+                          <ChevronsDownUp className="size-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {allCollapsed ? "Expand all" : "Collapse all"}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            }
+            onListClick={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest("button, a, input, select, textarea, [tabindex]")) return;
+              e.currentTarget
+                .querySelector<HTMLElement>('[tabindex="-1"]')
+                ?.focus({ preventScroll: true });
+            }}
+          >
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Spinner className="size-5 text-muted-foreground" />
+              </div>
+            ) : repos.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                <FolderPlus className="size-8 text-muted-foreground/50" />
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">No repos yet</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">
+                    Add a folder from a worker or a repo by its remote URL.
+                  </p>
+                </div>
+                {admin.data?.admin ? (
                   <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="w-6 text-muted-foreground"
-                    aria-label="Add repo"
-                    data-testid="repos-panel__add-repo"
+                    variant="outline"
+                    size="sm"
+                    data-testid="repo-list__add-repo"
                     onClick={() => setAddingRepo(true)}
                   >
-                    <Plus className="size-4" />
+                    Add repo
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Add repo</TooltipContent>
-              </Tooltip>
-            ) : null}
-            {repos.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    data-testid="dashboard__group-filter-trigger"
-                    className={`min-w-6 shrink max-w-[5rem] text-[11px] h-5 px-1.5 gap-1 ${groupFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
-                  >
-                    {activeGroup ? (
-                      <>
-                        <span
-                          className="size-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: activeGroup.color }}
-                        />
-                        <span className="truncate">{activeGroup.name}</span>
-                      </>
-                    ) : (
-                      <>
-                        <ListFilter className="size-3.5 shrink-0" />
-                        <span className="truncate">All</span>
-                      </>
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="start"
-                  collisionPadding={8}
-                  data-testid="dashboard__group-filter-menu"
-                >
-                  <DropdownMenuItem
-                    data-testid="dashboard__group-filter-item--all"
-                    onClick={() => setGroupFilter(null)}
-                  >
-                    <ListFilter />
-                    <span className="truncate">All</span>
-                    {!groupFilter && <Check className="size-3 shrink-0" />}
-                    <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                      ⌘0
-                    </span>
-                  </DropdownMenuItem>
-                  {groups.map((grp, idx) => (
-                    <DropdownMenuItem
-                      key={grp.id}
-                      data-testid={`dashboard__group-filter-item--${grp.id}`}
-                      onClick={() => setGroupFilter(grp.id)}
-                    >
-                      <span
-                        className="size-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: grp.color }}
-                      />
-                      <span className="truncate">{grp.name}</span>
-                      {groupFilter === grp.id && <Check className="size-3 shrink-0" />}
-                      {idx < 9 && (
-                        <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                          ⌘{idx + 1}
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    data-testid="dashboard__group-filter-new-group"
-                    onClick={() => setNamingGroup(true)}
-                  >
-                    <Plus />
-                    <span>New group…</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                ) : null}
+              </div>
+            ) : (
+              <RepoList groupFilter={groupFilter} />
             )}
-            {repos.length > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="w-6 text-muted-foreground"
-                    aria-label={allCollapsed ? "Expand all" : "Collapse all"}
-                    data-testid="repos-panel__toggle-all"
-                    data-next-action={allCollapsed ? "expand" : "collapse"}
-                    disabled={!hasCollapsible}
-                    onClick={toggleAll}
-                  >
-                    {allCollapsed ? (
-                      <ChevronsUpDown className="size-4" />
-                    ) : (
-                      <ChevronsDownUp className="size-4" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {allCollapsed ? "Expand all" : "Collapse all"}
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-        }
-        onListClick={(e) => {
-          const target = e.target as HTMLElement;
-          if (target.closest("button, a, input, select, textarea, [tabindex]")) return;
-          e.currentTarget
-            .querySelector<HTMLElement>('[tabindex="-1"]')
-            ?.focus({ preventScroll: true });
-        }}
-      >
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Spinner className="size-5 text-muted-foreground" />
-          </div>
-        ) : repos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-            <FolderPlus className="size-8 text-muted-foreground/50" />
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">No repos yet</p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
-                Add a folder from a worker or a repo by its remote URL.
-              </p>
-            </div>
-            {admin.data?.admin ? (
-              <Button
-                variant="outline"
-                size="sm"
-                data-testid="repo-list__add-repo"
-                onClick={() => setAddingRepo(true)}
-              >
-                Add repo
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <RepoList groupFilter={groupFilter} />
+          </ReposPanel>
         )}
-      </ReposPanel>
+      />
       <GroupNameDialog
         open={namingGroup}
         onOpenChange={setNamingGroup}

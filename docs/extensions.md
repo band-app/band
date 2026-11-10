@@ -329,6 +329,88 @@ An extension can give agents tools that its worker service answers:
 
 Band adds each tool to the built-in `band` MCP server as `<extension id>_<name>`, for example `echo-service_echo`. A call goes to `method` on the service `service`, on the worker of the calling chat's worktree, with the call's arguments as `params`. The service's result is the tool result. A plain result is returned as JSON text. A result of the form `{ "content": [ ... ] }` is passed to the agent as the MCP tool result, with two block types: `{ "type": "text", "text": "..." }` and `{ "type": "image", "data": "<base64>", "mimeType": "image/png" | "image/jpeg" }`. An image is at most 5 MB decoded. Any other block type, another image type, bad base64 or an oversized image makes the call a tool error that names the problem. Images reach only the chat that made the call. No tab has to be open. The arguments cannot name another worktree. When the chat's worker does not run the service, the tool answers an error that names the worker. `"agent": false` leaves the tool out of the agent's list. `inputSchema` is a JSON Schema and is advertised as written. The service validates its own arguments.
 
+## Mods
+
+A mod adapts something Band already does: it restyles and restructures the web and desktop UI. It is one contribution of an extension (`contributes.mod`). One mod per extension. Several installed mods stack in install order (folder name order), and Settings > Extensions lists them in that order.
+
+**A mod is trusted code.** It runs in the page with this device's token and can change or read anything the UI can. There is no sandbox. Installing the extension (an admin action) is the approval. Settings > Extensions says so next to the mod list.
+
+```json
+{
+  "id": "macos-look",
+  "name": "macOS look",
+  "version": "0.1.0",
+  "extensionApi": 1,
+  "contributes": {
+    "mod": {
+      "css": ["mod.css"],
+      "module": "mod.js",
+      "window": {
+        "material": "sidebar",
+        "titleBarStyle": "hiddenInset",
+        "toolbar": "unified",
+        "trafficLightPosition": { "x": 20, "y": 18 }
+      }
+    }
+  }
+}
+```
+
+- `css`: a file name or a list of them, added to the page as `<link rel="stylesheet" data-band-mod="<id>">`. They may use any value. Prefer Band's CSS variables (`globals.css`) so Settings > Appearance still works.
+- `module`: an ES module (`.js` or `.mjs`) in the folder, loaded with `import()` from `/ext/<id>/<file>?v=<version>`. Its default export is called with the `band` host object. The module must not import or bundle React: use `band.React`, which is Band's instance.
+- `window`: desktop window options, applied by the Electron main process when it creates the window. Each field is optional and a missing one keeps today's default.
+  - `material`: `sidebar` (default), `none` (no vibrancy layer), or any Electron vibrancy name (`titlebar`, `selection`, `menu`, `popover`, `header`, `sheet`, `window`, `hud`, `fullscreen-ui`, `tooltip`, `content`, `under-window`, `under-page`).
+  - `titleBarStyle`: `hiddenInset` (default), `hidden`, `default`.
+  - `toolbar`: `none` (default), `unified` or `compact`. Adds an empty native toolbar, which gives the window the large corner radius of a macOS toolbar window (about 19 px without, 25 px compact, 33 px unified, estimated from window captures). The page keeps running under the title bar. Needs the native addon, otherwise it is ignored with a log line (`BAND_FORCE_NATIVE_LOAD_FAIL=1` forces that for a test).
+  - `trafficLightPosition`: `{ x, y }` in CSS px (default 13, 10).
+  - The window options are read at window creation from `<BAND_HOME>/extensions/*/band-extension.json`, so a change needs a restart of the app.
+
+The manifest is strict: an unknown key, or a bad `window` value, is refused with its path (`contributes.mod.window.material`) and the folder is listed under errors.
+
+### Desktop bridge
+
+When the desktop app runs with an installed mod that has `window` options, it gives the page:
+
+- `--mac-*` CSS variables with the live AppKit colors: `--mac-label`, `--mac-label-secondary`, `--mac-label-tertiary`, `--mac-label-quaternary`, `--mac-separator`, `--mac-selected-content`, `--mac-selected-content-inactive`, `--mac-window-background`, `--mac-control-background`, `--mac-under-page`, `--mac-link` and `--mac-accent`. They follow the macOS appearance and the accent color and are updated when either changes. They follow the macOS appearance, not Band's theme, so use them only when the two agree (`prefers-color-scheme` against `.dark`) and fall back to fixed values otherwise. The CSS keyword `AccentColor` does not work in this Chromium.
+- `--mac-symbols: 1`, set only when the native addon loaded, and the `band-symbol://<name>?pt=13&w=0&s=4` protocol: a PNG of the SF Symbol `<name>` (black on transparent, `w` is an NSFontWeight from -0.8 to 0.8, `s` the pixel scale). Use it as `mask-image` with `background: currentColor`. The scheme is allowed by the app's `img-src`. Gate rules with `@container style(--mac-symbols: 1)` so a browser keeps its own icons.
+
+### The module
+
+```js
+export default function (band) {
+  const h = band.React.createElement;
+  band.override("sidebar.worktreeCard", (props, Default) => {
+    const status = band.hooks.useAgentStatus(props.worktreeId);
+    return h("div", null, h(Default), h("small", null, `${props.branch} ${status ?? ""}`));
+  });
+  band.transformSidebarItems((items, { repoName }) => items.filter((i) => i.name !== "scratch"));
+}
+```
+
+The types are in `packages/plugin-api/src/mod-api.ts` (`BandModHost`, `ModRegionProps`). The props are a public API, versioned with `extensionApi`.
+
+An override is `(props, Default) => element`. `Default` renders the stock component with the stock props, so wrapping it keeps clicks, drag and drop and menus. The function is rendered as a component, so it may call `band.hooks.*`. A later override of the same region wraps the earlier one.
+
+| Region | Wraps | Props |
+| --- | --- | --- |
+| `sidebar` | the repos panel (header, list, footer actions) | `repoCount` |
+| `sidebar.repoGroup` | one repo's header and its worktree list | `repoName`, `kind`, `collapsed`, `worktreeCount` |
+| `sidebar.worktreeCard` | one worktree row | `worktreeId`, `repoName`, `branch`, `hostId`, `isActive`, `pinned`, `isRoot` |
+| `worktree.header` | the tab strip of each group of the center layout | `groupId`, `tabs` (`id`, `title`, `selected`) |
+
+Other parts of the UI are reachable through CSS only.
+
+`band.transformSidebarItems(fn)` receives the worktrees of one repo in stock order (`name`, `branch`, `hostId`, `pinned`) and the context `{ repoName }`, and returns the ones to show, in order. Without the mod the stock order returns.
+
+`band.hooks`: `useAgentStatus(worktreeId)`, `useBranchStatus(worktreeId)`, `useWorktrees()`. `band.extensionApi` and `band.extensionId` are also set.
+
+### Errors and safe mode
+
+- An override that throws while it renders makes Band render the stock component for that region. Settings > Extensions shows an error icon with a popover next to the mod (`aria-label` "<mod> mod failed in <region>"). A transform that throws is skipped and reported as `sidebar.items`, a module that fails to load as `load`.
+- Safe mode loads no mod CSS and no module. Three ways in: `BAND_MODS=off` on the hub (`extensions.list` returns `modsOff`), the "Turn off mods" switch in Settings > Extensions (a per-device setting in `localStorage`, `band:mods-off`), and `?mods=off` in the URL, which sets the same setting. The switch is rendered in a shadow root on a fixed host that is a direct child of the body, with inline `!important` styles, so mod CSS cannot hide it. The desktop app also skips the mod's window options when `BAND_MODS=off` is in its environment.
+
+Tests: `apps/hub/tests/extensions.test.ts` (manifest), `apps/web/e2e/mods.spec.ts` with the fixture `apps/web/e2e/fixtures/extensions/test-mod/`, `apps/desktop/tests/mod-window.test.ts`.
+
 ## Agent hint
 
 A manifest may set `"agentHint"`, a string of at most 300 characters. The built-in `band` MCP server sends one line per extension that has a hint (`- <extension id>: <hint>`, ordered by id) as its MCP `instructions`, so an agent sees the hint in its system prompt before it loads any tool. Newlines in a hint become spaces. An extension without a hint adds nothing. Use it for the one fact an agent needs to pick your tools, for example "Use simulator_* tools to drive the iOS Simulator".

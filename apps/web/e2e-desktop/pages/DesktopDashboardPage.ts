@@ -160,6 +160,26 @@ export class DesktopDashboardPage {
     });
   }
 
+  /** The sidebar panel's width in px; 0 when collapsed (its content can still overflow it). */
+  async sidebarWidth(): Promise<number> {
+    const box = await this.page.getByTestId("sidebar").boundingBox();
+    return box?.width ?? 0;
+  }
+
+  async expectSidebarOpen(): Promise<void> {
+    await expect.poll(() => this.sidebarWidth()).toBeGreaterThan(100);
+  }
+
+  async expectSidebarCollapsed(): Promise<void> {
+    await expect.poll(() => this.sidebarWidth()).toBeLessThan(1);
+  }
+
+  async toggleSidebar(): Promise<void> {
+    await test.step("Toggle the sidebar", async () => {
+      await this.page.getByTestId("desktop-title-bar__sidebar-toggle").click();
+    });
+  }
+
   /** The hub's repo shows in the sidebar, which proves the UI reached the hub. */
   async expectRepoListed(repoName: string): Promise<void> {
     await expect(this.repoHeader(repoName)).toBeVisible({ timeout: 30_000 });

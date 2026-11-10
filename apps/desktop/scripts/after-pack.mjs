@@ -98,6 +98,12 @@ export default async function afterPack(context, opts = {}) {
     );
   }
 
+  // 1c. The optional native addon at Resources/native/band-native.node.
+  const nativeResources = join(appPath, "Contents", "Resources", "native");
+  if (existsSync(nativeResources)) {
+    deepSignMac({ root: nativeResources, entitlements, runner: opts.runner, log: opts.log });
+  }
+
   // 2. Sign the CLI sidecar (Rust Mach-O at Resources/binaries/band).
   //    Tauri's `externalBin` mechanism signed this automatically; electron-
   //    builder's `extraResources` does not. Without this step notarization

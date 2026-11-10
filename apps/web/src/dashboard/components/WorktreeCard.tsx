@@ -45,6 +45,7 @@ import { timeAgo, useHostSeen } from "../hooks/use-host-status";
 import { useRemoveWorktree } from "../hooks/use-repo-mutations";
 import { showChecksTab } from "../lib/checks-tab";
 import { deleteDialogInfoFor } from "../lib/worktree-delete";
+import { Overridable } from "../mods/registry";
 import { queryKeys } from "../query-client";
 import { isWorktreeDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
@@ -241,7 +242,7 @@ interface Props {
   onTogglePinned: (repo: string, name: string, currentlyPinned: boolean, hostId?: string) => void;
 }
 
-export const WorktreeCard = memo(function WorktreeCard({
+const WorktreeCardDefault = memo(function WorktreeCardDefault({
   worktree,
   repoName,
   defaultBranch,
@@ -875,5 +876,27 @@ export const WorktreeCard = memo(function WorktreeCard({
         />
       )}
     </ContextMenu>
+  );
+});
+
+/** The sidebar row of a worktree. A client mod may override it (`sidebar.worktreeCard`). */
+export const WorktreeCard = memo(function WorktreeCard(props: Props) {
+  const { worktree, repoName, defaultBranch, repoKind } = props;
+  const worktreeId = toWorktreeId(repoName, worktree.name, worktree.hostId);
+  const isActive = useDashboardStore((s) => s.activeWorktreeId === worktreeId);
+  return (
+    <Overridable
+      name="sidebar.worktreeCard"
+      props={{
+        worktreeId,
+        repoName,
+        branch: worktree.name,
+        hostId: worktree.hostId,
+        isActive,
+        pinned: worktree.pinned,
+        isRoot: repoKind !== "plain" && worktree.name === defaultBranch,
+      }}
+      render={() => <WorktreeCardDefault {...props} />}
+    />
   );
 });

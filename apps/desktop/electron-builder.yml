@@ -66,6 +66,14 @@ extraResources:
   # path resolver expects this exact relative location.
   - from: binaries/band
     to: binaries/band
+  # The optional native addon (`native/band-native.mm`: the window toolbar and SF Symbols for a
+  # client mod) at Resources/native/band-native.node. A .node file cannot load from inside the
+  # asar, and an asarUnpack pattern makes electron-builder reject the symlinked workspace packages.
+  # A build without the addon (no Xcode) ships no file, and the app keeps the plain title bar.
+  - from: native/build
+    to: native
+    filter:
+      - "*.node"
 
 # Limit the JS bundle shipped inside the .asar to the compiled main + preload
 # output and the package manifest. Source TypeScript and tsconfig files are
