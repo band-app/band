@@ -33,8 +33,8 @@ import { WorktreePage } from "./pages/WorktreePage";
 
 const TOKEN = "e2e-center-tab-agent-status-token";
 // One repo per test, so one test's agent status doesn't reach the other.
-const REPOS = ["tabstatuschat", "tabstatusterm", "tabstatusswitch"];
-const [CHAT_WS, TERM_WS, SWITCH_WS] = REPOS.map((p) => toWorktreeId(p, "main", "local"));
+const REPOS = ["tabstatuschat", "tabstatusterm", "tabstatusswitch", "tabstatusicon"];
+const [CHAT_WS, TERM_WS, SWITCH_WS, ICON_WS] = REPOS.map((p) => toWorktreeId(p, "main", "local"));
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -193,4 +193,48 @@ test("the Ctrl+Tab list shows a chat's session title and working spinner", async
   await expect(focus.rowStatus(row)).toHaveAttribute("data-status", "working");
   await focus.pressEscapeWhileHeld();
   await focus.releaseControl();
+});
+
+test("a terminal tab shows its agent's icon from SessionStart until the session ends", async ({
+  page,
+}) => {
+  const chatPane = new ChatPanePage(page, server.url, TOKEN);
+  const worktree = new WorktreePage(page, server.url, TOKEN);
+  const cwd = join(tmpHome, "tabstatusicon");
+  await chatPane.goto(ICON_WS);
+  await chatPane.waitForReady();
+  const terminalId = await worktree.firstTerminalTabId();
+  expect(terminalId).not.toBe("");
+  // A plain terminal has no icon.
+  await expect(worktree.terminalTabAgentIcon(terminalId)).toHaveCount(0);
+
+  // The page stays open: the icon appears when the session starts, with no prompt yet.
+  await worktree.reportTerminalHook({
+    cwd,
+    terminalId,
+    sessionId: "icon-session",
+    hook: { hook_event_name: "SessionStart", source: "startup" },
+  });
+  await expect(worktree.terminalTabAgentIcon(terminalId)).toHaveAttribute(
+    "data-agent-type",
+    "claude-code",
+  );
+  await expect(worktree.tabStatus("terminal")).toHaveCount(0);
+
+  // It stays while the agent works, and goes when the session ends.
+  await worktree.reportTerminalHook({
+    cwd,
+    terminalId,
+    sessionId: "icon-session",
+    hook: { hook_event_name: "PreToolUse", tool_name: "Bash" },
+  });
+  await expect(worktree.tabStatus("terminal")).toHaveAttribute("data-status", "working");
+  await expect(worktree.terminalTabAgentIcon(terminalId)).toHaveCount(1);
+  await worktree.reportTerminalHook({
+    cwd,
+    terminalId,
+    sessionId: "icon-session",
+    hook: { hook_event_name: "SessionEnd", reason: "exit" },
+  });
+  await expect(worktree.terminalTabAgentIcon(terminalId)).toHaveCount(0);
 });

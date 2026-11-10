@@ -53,6 +53,17 @@ export interface WorktreeStatusSnapshot {
    * comes straight from the row (the repos list).
    */
   tabStatuses?: TabAgentStatus[];
+  /**
+   * The agent type of each terminal with an open agent session, idle or
+   * not, for the terminal tab's icon.
+   */
+  terminalAgents?: TerminalAgent[];
+}
+
+/** A terminal that runs a coding agent, and the agent's type (`claude-code`, `codex`, ...). */
+export interface TerminalAgent {
+  terminalId: string;
+  agentType: string;
 }
 
 /**

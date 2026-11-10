@@ -21,6 +21,14 @@ import {
 describe("mapHookPayloadToStatus — claude-code", () => {
   const map = (payload: Record<string, unknown>) => mapHookPayloadToStatus("claude-code", payload);
 
+  it("maps SessionStart → idle", async () => {
+    assert.equal(await map({ hook_event_name: "SessionStart", source: "startup" }), "idle");
+  });
+
+  it("maps SessionStart with source compact → working", async () => {
+    assert.equal(await map({ hook_event_name: "SessionStart", source: "compact" }), "working");
+  });
+
   it("maps Stop → done", async () => {
     assert.equal(await map({ hook_event_name: "Stop" }), "done");
   });

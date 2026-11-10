@@ -5,7 +5,7 @@
   "payloads": [
     {
       "recorded": true,
-      "expect": "working",
+      "expect": "idle",
       "payload": {
         "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
         "transcript_path": "/tmp/gemini/chats/session.json",

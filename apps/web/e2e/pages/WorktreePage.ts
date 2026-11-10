@@ -1386,6 +1386,12 @@ export class WorktreePage {
     return this.tab(panelComponent).getByTestId(new RegExp(`^${prefix}`));
   }
 
+  /** The agent icon on one terminal tab, by terminal (tab) id. It carries
+   *  `data-agent-type`; a plain terminal has none. */
+  terminalTabAgentIcon(terminalId: string): Locator {
+    return this.page.getByTestId(`center-term-tab__agent--${terminalId}`).filter({ visible: true });
+  }
+
   /** The agent status indicator of one chat tab, by chat id. */
   chatTabStatusById(chatId: string): Locator {
     return this.page.getByTestId(`center-chat-tab__status--${chatId}`).filter({ visible: true });

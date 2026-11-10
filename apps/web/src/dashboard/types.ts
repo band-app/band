@@ -37,6 +37,8 @@ export interface WorktreeStatus {
   agent?: AgentInfo;
   /** Chats and terminals whose agent is not idle. */
   tabStatuses?: TabAgentStatus[];
+  /** Terminals that run a coding agent (idle or not), for the tab icon. */
+  terminalAgents?: { terminalId: string; agentType: string }[];
 }
 
 /**

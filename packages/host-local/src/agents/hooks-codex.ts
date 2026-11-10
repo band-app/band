@@ -19,6 +19,7 @@ import {
  * Codex has no `StopFailure`; an interrupted turn fires `Interrupt`.
  */
 export const CODEX_HOOK_EVENTS = [
+  "SessionStart",
   "UserPromptSubmit",
   "PreToolUse",
   "PermissionRequest",
@@ -28,10 +29,11 @@ export const CODEX_HOOK_EVENTS = [
 ] as const;
 
 /** Raised when the event list or the command shape changes; the banner shows again once. */
-export const CODEX_HOOKS_VERSION = 3;
+export const CODEX_HOOKS_VERSION = 4;
 
 /** The label Codex keys a hook's trust by (`hooks.state."<file>:<label>:<group>:<handler>"`). */
 const EVENT_LABEL: Record<(typeof CODEX_HOOK_EVENTS)[number], string> = {
+  SessionStart: "session_start",
   UserPromptSubmit: "user_prompt_submit",
   PreToolUse: "pre_tool_use",
   PermissionRequest: "permission_request",

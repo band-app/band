@@ -66,6 +66,19 @@ export function useTerminalTabStatus(
   });
 }
 
+/**
+ * The agent type of a terminal tab: the first split pane with an open agent
+ * session. Idle agents count, so the icon shows before the first prompt.
+ */
+export function useTerminalTabAgentType(worktreeId: string, leafId: string): string | undefined {
+  return useDashboardStore((s) => {
+    for (const t of s.statuses.get(worktreeId)?.terminalAgents ?? []) {
+      if ((ownerOfTerminal(t.terminalId) ?? t.terminalId) === leafId) return t.agentType;
+    }
+    return undefined;
+  });
+}
+
 export function readCachedTabMeta(chatId: string): { title?: string; agentType?: string } {
   if (!chatId) return {};
   try {

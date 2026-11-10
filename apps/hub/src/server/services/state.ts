@@ -31,6 +31,7 @@ import {
   emit,
   subscribe,
   type TabAgentStatus,
+  type TerminalAgent,
   type WorktreeAgentInfo,
   type WorktreeStatusSnapshot,
 } from "../infra/events/status-event-bus";
@@ -168,16 +169,24 @@ export function loadCurrentStatuses(): WorktreeStatus[] {
     if (list) list.push(session);
     else sessionsByWorktree.set(session.worktreeId, [session]);
   }
-  return worktreeStatusQueries.loadCurrent().map((status) => ({
-    ...status,
-    tabStatuses: toTabStatuses(sessionsByWorktree.get(status.worktreeId) ?? []),
-  }));
+  return worktreeStatusQueries.loadCurrent().map((status) => {
+    const sessions = sessionsByWorktree.get(status.worktreeId) ?? [];
+    return {
+      ...status,
+      tabStatuses: toTabStatuses(sessions),
+      terminalAgents: toTerminalAgents(sessions),
+    };
+  });
 }
 
 export function getWorktreeStatus(worktreeId: string): WorktreeStatus | null {
   const status = worktreeStatusQueries.getByWorktreeId(worktreeId);
   if (!status) return null;
-  return { ...status, tabStatuses: listTabStatuses(worktreeId) };
+  return {
+    ...status,
+    tabStatuses: listTabStatuses(worktreeId),
+    terminalAgents: listTerminalAgents(worktreeId),
+  };
 }
 
 export function upsertWorktreeStatus(
@@ -290,6 +299,7 @@ export function upsertWorktreeStatus(
       codingAgentId: mergedAgent.codingAgentId ?? undefined,
     },
     tabStatuses: listTabStatuses(worktreeId),
+    terminalAgents: listTerminalAgents(worktreeId),
   };
 }
 
@@ -396,6 +406,27 @@ function toTabStatuses(sessions: AgentSessionRecord[]): TabAgentStatus[] {
     if (!prev || STATUS_PRIORITY[status] > STATUS_PRIORITY[prev.status]) byTab.set(key, tab);
   }
   return [...byTab.values()];
+}
+
+/**
+ * The agent behind each terminal that has an open session, idle or not, so a
+ * terminal tab shows the agent's icon from the moment it starts.
+ */
+function toTerminalAgents(sessions: AgentSessionRecord[]): TerminalAgent[] {
+  if (!sessions.some((s) => s.terminalId)) return [];
+  const agents = settingsService.get().codingAgents ?? [];
+  const out: TerminalAgent[] = [];
+  for (const session of sessions) {
+    if (!session.terminalId) continue;
+    const agentType =
+      agents.find((a) => a.id === session.agentDefinitionId)?.type ?? session.agentDefinitionId;
+    out.push({ terminalId: session.terminalId, agentType });
+  }
+  return out;
+}
+
+function listTerminalAgents(worktreeId: string): TerminalAgent[] {
+  return toTerminalAgents(agentSessionRegistry.listOpen(worktreeId));
 }
 
 function listTabStatuses(worktreeId: string): TabAgentStatus[] {
