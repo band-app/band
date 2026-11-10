@@ -351,6 +351,9 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
 
   test("a terminal opens under app:// and runs a command", async () => {
     const { app } = await launchLocal();
+    // Docked DevTools leave the page a few hundred pixels wide on the CI Mac. The terminal then
+    // gets 8 columns and the result line wraps, so the line match below fails.
+    await app.closeDevTools();
     const dashboard = new DesktopDashboardPage(app.window);
     await dashboard.expectRepoListed("localproj");
     const terminal = await dashboard.openTerminal(LOCAL_WORKTREE);
