@@ -343,7 +343,9 @@ export class WireTap {
   private batchOpen = false;
 
   private begin(): void {
-    if (this.batchOpen) return;
+    // A disposed tap commits no more batches (`schedule` returns early), so one opened now would
+    // stay open in the shared store and hold back every later write of the worker.
+    if (this.batchOpen || this.closed) return;
     this.batchOpen = true;
     this.hooks.begin();
   }
