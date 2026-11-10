@@ -11,6 +11,7 @@ import type { JsonHooksSpec } from "./hooks-json-agent";
  * `SessionEnd` drops the session's status source.
  */
 export const GEMINI_HOOK_EVENTS = [
+  "SessionStart",
   "BeforeAgent",
   "AfterAgent",
   "BeforeTool",
@@ -20,7 +21,7 @@ export const GEMINI_HOOK_EVENTS = [
 ] as const;
 
 /** Raised when the event list or the command shape changes; the banner shows again once. */
-export const GEMINI_HOOKS_VERSION = 3;
+export const GEMINI_HOOKS_VERSION = 4;
 
 /** Gemini CLI hook timeouts are in milliseconds. */
 const GEMINI_HOOK_TIMEOUT_MS = 5000;

@@ -61,6 +61,8 @@ function hasBackgroundWork(payload: Record<string, unknown>): boolean {
  *   - `PermissionRequest` (any tool) and `PreToolUse` for an interactive tool
  *     → `question`. A terminal session is not auto-approved, so a permission
  *     request always waits on the user.
+ *   - `SessionStart` → `idle`: the agent is at its prompt. With
+ *     `source: "compact"` it is `working`, since compaction runs mid-turn.
  *   - `Stop` → `done`, or `monitoring` while `session_crons` or
  *     `background_tasks` show work that outlives the turn.
  *   - `StopFailure` → `failed`.
@@ -75,6 +77,9 @@ export function mapClaudeCodeHookStatus(payload: Record<string, unknown>): Agent
   const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
 
   switch (hookEvent) {
+    case "SessionStart":
+      // A compaction mid-turn fires `SessionStart` with `source: "compact"`; the turn goes on.
+      return payload.source === "compact" ? "working" : "idle";
     case "PermissionRequest":
       return "question";
     case "PreToolUse":
@@ -100,6 +105,8 @@ export function mapClaudeCodeHookStatus(payload: Record<string, unknown>): Agent
  */
 export function mapCodexHookStatus(payload: Record<string, unknown>): AgentHookStatus {
   switch (payload.hook_event_name) {
+    case "SessionStart":
+      return "idle";
     case "PermissionRequest":
       return "question";
     case "Stop":
@@ -119,6 +126,8 @@ export function mapCodexHookStatus(payload: Record<string, unknown>): AgentHookS
  */
 export function mapGeminiHookStatus(payload: Record<string, unknown>): AgentHookStatus {
   switch (payload.hook_event_name) {
+    case "SessionStart":
+      return "idle";
     case "Notification":
       return payload.notification_type === "ToolPermission" ? "question" : "working";
     case "AfterAgent":

@@ -13,10 +13,12 @@ import type { HooksStatus } from "@band-app/host-api";
 import { whichBinary } from "../process/path";
 
 /**
- * The Claude Code events Band listens to. `SessionEnd` drops the session's
+ * The Claude Code events Band listens to. `SessionStart` opens the terminal's
+ * agent session before the first prompt. `SessionEnd` drops the session's
  * status source when Claude Code exits.
  */
 const HOOK_EVENTS = [
+  "SessionStart",
   "UserPromptSubmit",
   "PreToolUse",
   "PostToolUse",
@@ -31,7 +33,7 @@ const HOOK_EVENTS = [
 ];
 
 /** Raised when the event list or the command shape changes; the banner shows again once. */
-export const HOOKS_VERSION = 2;
+export const HOOKS_VERSION = 3;
 
 /** Seconds Claude Code waits for a hook. A hook that hangs must not hold the agent. */
 export const HOOK_TIMEOUT_SECONDS = 5;

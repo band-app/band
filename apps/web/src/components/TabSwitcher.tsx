@@ -5,6 +5,7 @@ import {
   readCachedTabMeta,
   TabStatusIndicator,
   useChatTabStatus,
+  useTerminalTabAgentType,
   useTerminalTabStatus,
 } from "./tab-status";
 
@@ -15,6 +16,18 @@ export interface SwitcherItem {
   kind: string;
   /** The panel's params: the owning worktree and the chat or terminal id. */
   params?: { worktreeId?: string; chatId?: string; terminalId?: string };
+}
+
+function TermItemIcon({ item, className }: { item: SwitcherItem; className: string }) {
+  const agentType = useTerminalTabAgentType(
+    item.params?.worktreeId ?? "",
+    item.params?.terminalId ?? "",
+  );
+  return agentType ? (
+    <AgentIcon type={agentType} className="size-4 shrink-0" />
+  ) : (
+    <TerminalSquare className={className} />
+  );
 }
 
 function ItemIcon({ item }: { item: SwitcherItem }) {
@@ -30,7 +43,7 @@ function ItemIcon({ item }: { item: SwitcherItem }) {
       );
     }
     case "term":
-      return <TerminalSquare className={className} />;
+      return <TermItemIcon item={item} className={className} />;
     case "browser":
       return <Globe className={className} />;
     case "diff":

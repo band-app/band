@@ -21,6 +21,7 @@ type Entry = { hooks: { type: string; command: string; [key: string]: unknown }[
 
 const USER_HOOK: Entry = { hooks: [{ type: "command", command: "/usr/bin/true user-own-hook" }] };
 const EVENTS = [
+  "SessionStart",
   "UserPromptSubmit",
   "PreToolUse",
   "PostToolUse",
@@ -61,6 +62,10 @@ describe("Claude Code hooks install", () => {
   const read = () => JSON.parse(readFileSync(settingsPath, "utf8"));
   const bandCommand = (hooks: Record<string, Entry[]>, event: string) =>
     hooks[event].flatMap((e) => e.hooks).find((h) => h.command.includes("notify"))!;
+
+  it("is at hook set version 3, so the banner offers SessionStart once", () => {
+    assert.equal(HOOKS_VERSION, 3);
+  });
 
   it("registers every event with a silent, async, short-timeout command", async () => {
     await installHooks();

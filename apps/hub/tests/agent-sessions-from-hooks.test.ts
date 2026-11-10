@@ -196,6 +196,32 @@ describe.skipIf(!cli)("agent sessions from hook events", () => {
     ).toContain(sessionId);
   });
 
+  it("a SessionStart hook opens an idle session before any prompt, and a resume keeps it", async () => {
+    const terminalId = await createTerminal(WT_A);
+    const sessionId = randomUUID();
+    hook(terminalId, dirA, sessionId, { hook_event_name: "SessionStart", source: "startup" });
+    const session = await waitFor(
+      async () => (await listSessions(WT_A)).find((s) => s.terminalId === terminalId),
+      { label: "session created by SessionStart" },
+    );
+    expect(session).toMatchObject({
+      mode: "tui",
+      agentDefinitionId: "claude-code",
+      providerSessionId: sessionId,
+      status: "idle",
+    });
+    hook(terminalId, dirA, sessionId, { hook_event_name: "SessionStart", source: "resume" });
+    hook(terminalId, dirA, sessionId, { hook_event_name: "UserPromptSubmit" });
+    await waitFor(
+      async () => {
+        const open = (await listSessions(WT_A)).filter((s) => s.terminalId === terminalId);
+        return open[0]?.status === "working" ? open : undefined;
+      },
+      { label: "prompt after resume marks the same session working" },
+    );
+    expect((await listSessions(WT_A)).filter((s) => s.terminalId === terminalId)).toHaveLength(1);
+  });
+
   it("S2: SessionEnd, a killed terminal or a new session id end or replace the session", async () => {
     const terminalId = await createTerminal(WT_A);
     const first = randomUUID();

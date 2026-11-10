@@ -5,7 +5,7 @@
   "payloads": [
     {
       "recorded": true,
-      "expect": "working",
+      "expect": "idle",
       "payload": {
         "session_id": "01a1c1c3-ade5-7db1-af6a-58ab6d98d2ec",
         "transcript_path": "/tmp/codex/sessions/rollout.jsonl",

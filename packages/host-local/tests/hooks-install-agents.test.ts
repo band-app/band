@@ -78,6 +78,7 @@ describe("agent hooks install", () => {
         "PermissionRequest",
         "PostToolUse",
         "PreToolUse",
+        "SessionStart",
         "Stop",
         "UserPromptSubmit",
       ]);
@@ -193,6 +194,7 @@ describe("agent hooks install", () => {
         "BeforeTool",
         "Notification",
         "SessionEnd",
+        "SessionStart",
       ]);
       assert.deepEqual(settings.hooks.AfterAgent[0], { hooks: [USER_HOOK] });
       const band = settings.hooks.AfterAgent[1].hooks[0];

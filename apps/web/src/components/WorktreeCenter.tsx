@@ -237,6 +237,7 @@ import {
   readCachedTabMeta,
   TabStatusIndicator,
   useChatTabStatus,
+  useTerminalTabAgentType,
   useTerminalTabStatus,
   writeCachedTabMeta,
 } from "./tab-status";
@@ -2623,6 +2624,7 @@ function TerminalTab(props: LayoutTabProps<TermLeafParams>) {
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
   const agentStatus = useTerminalTabStatus(props.params.worktreeId, terminalId);
+  const agentType = useTerminalTabAgentType(props.params.worktreeId, terminalId);
 
   useEffect(() => {
     const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? "Terminal"));
@@ -2646,7 +2648,17 @@ function TerminalTab(props: LayoutTabProps<TermLeafParams>) {
       <ContextMenuTrigger asChild>
         <div className={TAB_ROOT_CLASS} data-testid={`center-term-tab--${terminalId}`}>
           <div className={TAB_CONTENT_WRAP}>
-            <TerminalSquare className="size-3.5 shrink-0 text-muted-foreground" />
+            {agentType ? (
+              <span
+                className="inline-flex size-3.5 shrink-0 items-center justify-center"
+                data-testid={`center-term-tab__agent--${terminalId}`}
+                data-agent-type={agentType}
+              >
+                <AgentIcon type={agentType} className="size-3.5" />
+              </span>
+            ) : (
+              <TerminalSquare className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
             <span className={TAB_TITLE_CLASS} title={title}>
               {title}
             </span>
