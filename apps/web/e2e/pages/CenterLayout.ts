@@ -114,7 +114,7 @@ export class CenterLayout {
       // that event in an effect after the render. A mouse-up sent right after the final move
       // can run first and drop on the previous target (the tab stayed last in CI). Wait until
       // the indicator shows the spot the pointer is over, then release.
-      if (options.expectDrop !== false) await this.waitForDropTarget(toGroup, at);
+      if (options.expectDrop !== false) await this.waitForDropTarget(toGroup, at, { x, y });
       if (options.release !== false) await this.page.mouse.up();
     });
   }
@@ -148,11 +148,23 @@ export class CenterLayout {
   }
 
   /** Wait until the drop indicator shows where a pointer at `at` of group `toGroup` would drop. */
-  private async waitForDropTarget(toGroup: number, at: DropAt): Promise<void> {
+  private async waitForDropTarget(
+    toGroup: number,
+    at: DropAt,
+    pointer: { x: number; y: number },
+  ): Promise<void> {
     if (at === "tabs-start" || at === "tabs-end") {
       const tabs = this.groups.nth(toGroup).locator("[data-panel-id]");
+      let nudge = 0;
       await expect
         .poll(async () => {
+          // The indicator is placed from the tab rects at the last pointer move. Tabs are as wide
+          // as their titles, so anything that resizes a tab after that move shifts the strip
+          // under a pointer that no longer moves, and the indicator stays at the old spot for good.
+          // A person's hand moves a pixel; do the same so the layout hit-tests the strip as it is
+          // now.
+          nudge = 1 - nudge;
+          await this.page.mouse.move(pointer.x + nudge, pointer.y);
           if ((await this.dropIndicator.getAttribute("data-zone")) !== "tabs") return false;
           const line = await this.dropIndicator.boundingBox();
           const edge =

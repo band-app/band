@@ -14,6 +14,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
+import {
+  branchRepository,
+  prNode,
+  workflowSuite,
+} from "../../hub/tests/fixtures/branch-status-data";
 import { type GhStub, ghStub } from "../../hub/tests/fixtures/gh-stub";
 import {
   checkRunNode,
@@ -41,6 +46,8 @@ const REPO = "widgets";
 const COMMENT_BRANCH = "feat/comment";
 const CHECK_BRANCH = "feat/check";
 const QUIET_BRANCH = "feat/quiet";
+/** Longer than the hub's one-second coalescing window for `review-changed` events. */
+const SIGNAL_WINDOW_MS = 2_500;
 const FULL_NAME = `${FAKE_REPO.owner}/${FAKE_REPO.name}`.toLowerCase();
 
 let tmpHome: string;
@@ -131,6 +138,19 @@ test.beforeAll(async () => {
     quietLookups++;
     return commentData([]);
   });
+  // The sidebar's CI state comes from the hub's batched branch-status query. Left unstubbed it
+  // answers "none" for the quiet branch while the panel shows "success", and the two keep
+  // correcting each other: a panel lookup that changes the state asks for a CI refresh, the next
+  // tick sets the other state, and the page looks up again. Answering with the panel's state ends
+  // that loop, so the only lookups left are the ones a delivery causes.
+  stub.setBranchStatusQuery(FAKE_REPO, (branch) =>
+    branch === QUIET_BRANCH
+      ? branchRepository({
+          pullRequests: [prNode({ number: 801 })],
+          suites: [workflowSuite({ workflow: "CI", conclusion: "SUCCESS" })],
+        })
+      : undefined,
+  );
   server = await startServer({
     tmpHome,
     env: { ...stub.env, BAND_GITHUB_WEBHOOK_SECRET: SECRET },
@@ -190,11 +210,15 @@ test("a webhook for another branch makes no lookup for this worktree", async ({ 
   // The panel's own startup lookups can land after goto returns; take the baseline once they stop.
   // Two equal readings of zero mean the first lookup has not arrived yet, not that they stopped
   // (the plugin activates on the first lookup, which a loaded runner can hold up past 500 ms).
+  // The sidebar's first CI state comes from the branch-status poller's batched query and makes
+  // the panel look up once more, so the baseline also waits for that query to have been sent.
+  const branchStatusPolled = () =>
+    stub.requests.some((r) => String(r.fields?.query ?? "").includes("ws_0: repository"));
   let last = -1;
   await expect
     .poll(
       () => {
-        const settled = quietLookups > 0 && quietLookups === last;
+        const settled = quietLookups > 0 && branchStatusPolled() && quietLookups === last;
         last = quietLookups;
         return settled;
       },
@@ -217,8 +241,16 @@ test("a webhook for another branch makes no lookup for this worktree", async ({ 
     sender: { login: "github-actions" },
   });
 
-  // A delivery for this branch is the control: the panel refetches once for it, which shows
-  // the earlier ones, coalesced into the same second, added no lookup of their own.
+  // The hub sends one `review-changed` event a second after the first delivery
+  // (COALESCE_MS in review-signal-service.ts). A negative has to outwait that window, or a
+  // lookup the deliveries caused would arrive after the check. Nothing in the page says that the
+  // window passed without an event, so this is the one place a fixed wait is the proof.
+  await new Promise((resolve) => setTimeout(resolve, SIGNAL_WINDOW_MS));
+  expect(quietLookups).toBe(before);
+
+  // A delivery for this branch is the control: it makes the panel look up, so the check above
+  // could have seen a lookup. One delivery causes more than one (the refetch is followed by the
+  // sidebar's CI sync), so the control asserts that a lookup happens, not how many.
   await deliver("check_run", {
     action: "completed",
     repository: { full_name: FULL_NAME },
@@ -226,5 +258,4 @@ test("a webhook for another branch makes no lookup for this worktree", async ({ 
     sender: { login: "github-actions" },
   });
   await expect.poll(() => quietLookups, { timeout: 5_000 }).toBeGreaterThan(before);
-  expect(quietLookups).toBe(before + 1);
 });
