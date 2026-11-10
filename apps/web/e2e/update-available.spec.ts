@@ -134,7 +134,7 @@ test.describe("a newer release exists", () => {
     const row = settings.hostRow(behind.hostId);
     await settings.expectRowVisible(row);
     await expect(update.hostsVersion(row)).toHaveAttribute("data-version", "0.49.0");
-    await expect(update.hostsVersionState(row)).toHaveAttribute("data-state", "behind");
+    await expect(settings.hostUpdatePill(behind.hostId)).toContainText(`Update to ${HUB_VERSION}`);
     const old = settings.hostRow(legacy.hostId);
     await expect(update.hostsVersion(old)).toHaveAttribute("data-version", "unknown");
     await expect(update.hostsVersionState(old)).toHaveAttribute("data-state", "unknown");
@@ -247,7 +247,7 @@ test.describe("check for updates now", () => {
       await settings.goto();
       await settings.openDialog("hosts");
       await expect(update.badge).toHaveCount(0);
-      await expect(settings.checkUpdatesLast()).toContainText("Last checked");
+      await expect(settings.checkUpdatesLast()).toContainText("Checked");
 
       // A newer release, published after the hub's own check. Nothing reloads.
       stub.setLatest("v9.0.0");

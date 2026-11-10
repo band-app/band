@@ -168,6 +168,7 @@ test("S1, S2, S4, S5, S6: an extension editor reads and saves on this Mac's work
   await expect(thisComputer.prompt).toBeVisible({ timeout: 30_000 });
   await thisComputer.promptNotNow.click();
   await thisComputer.openHostsSettings();
+  await thisComputer.showAddForm();
   await thisComputer.add.click();
   await expect(thisComputer.state).toHaveAttribute("data-status", "online", { timeout: 90_000 });
   const hostId = workerId();

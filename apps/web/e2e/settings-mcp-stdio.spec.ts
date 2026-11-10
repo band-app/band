@@ -90,6 +90,7 @@ test("adds a stdio server on a worker host, tests it, limits its tools and serve
 
   await settingsPage.addWorker("stdio-box", "");
   const env = parseWorkerCommand(await settingsPage.readWorkerCommand());
+  await settingsPage.finishAddWorker();
   const hostId = env.BAND_WORKER_ID;
   const root = tmpDir("band-e2e-stdio-root-");
   worker = startWorker({

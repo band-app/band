@@ -56,10 +56,11 @@ test("an admin picks a trust level and the hub stores it", async ({ page }) => {
   await settingsPage.goto();
   await settingsPage.openDialog("hosts");
 
-  await expect(settingsPage.hostTrustSelect(hostId)).toHaveValue("standard");
+  await settingsPage.openHostDrawer(hostId);
+  await expect(settingsPage.hostTrustOption(hostId, "standard")).toBeChecked();
   await settingsPage.chooseHostTrust(hostId, "admin");
   await expect.poll(storedTrust).toBe("admin");
-  await expect(settingsPage.hostTrustSelect(hostId)).toHaveValue("admin");
+  await expect(settingsPage.hostTrustOption(hostId, "admin")).toBeChecked();
 
   await settingsPage.chooseHostTrust(hostId, "restricted");
   await expect.poll(storedTrust).toBe("restricted");
@@ -79,5 +80,6 @@ test("a device token without the admin flag sees the level but cannot change it"
   await settingsPage.openDialog("hosts");
 
   await expect(settingsPage.hostTrustBadge(hostId)).toBeVisible();
-  await expect(settingsPage.hostTrustSelect(hostId)).toHaveCount(0);
+  await settingsPage.openHostDrawer(hostId);
+  await expect(settingsPage.hostTrustControl(hostId)).toHaveCount(0);
 });

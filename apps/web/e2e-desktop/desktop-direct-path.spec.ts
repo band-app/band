@@ -188,6 +188,7 @@ test("S1, S2, S4: a terminal and files on this Mac's worker go to 127.0.0.1, and
   await expect(thisComputer.prompt).toBeVisible({ timeout: 30_000 });
   await thisComputer.promptNotNow.click();
   await thisComputer.openHostsSettings();
+  await thisComputer.showAddForm();
   await thisComputer.add.click();
   await expect(thisComputer.state).toHaveAttribute("data-status", "online", { timeout: 90_000 });
   const hostId = workerId();

@@ -23,7 +23,7 @@ Settings are kept in `~/.band/settings.json` on the hub's machine. `band setting
 ## Set up
 
 - **General.** The folder where new worktrees are created (empty means the default), code intelligence for TypeScript and JavaScript (hover types and go-to-definition, at the cost of memory per worktree), and preview tabs that a single click opens and a double click keeps.
-- **Hub.** Desktop app only. Chooses the hub the app talks to: Local runs the hub bundled with the app, Remote connects to a hub on another machine and starts nothing here. See [Run the hub on a server](run-the-hub-on-a-server.md).
+- **Hub.** The Connection card shows the hub you are talking to. In the desktop app it lists the mode (This Mac or Remote hub), the URL and whether a token is saved, and Change… opens the form to pick Local (the hub bundled with the app) or Remote (a hub on another machine, which starts nothing here). The Updates card, for admins, says Up to date, Update available, Updating, Waiting for agent turns, Failed or Cannot update itself, with an Update now button, the last update and a log dialog. The custom update command is under Advanced. See [Updates](updates.md) and [Run the hub on a server](run-the-hub-on-a-server.md).
 - **Web Server.** The port the hub listens on for mobile and browser access (default 3456, needs a restart) and whether the server and tunnel start when the app launches. See [Remote access](remote-access.md).
 - **Terminal.** GPU-accelerated rendering and the "Restart terminal service" button. See [Terminals](terminals.md).
 - **Browser.** Browser profiles (separate cookie jars) and a switch that streams the desktop app's browser tabs to web clients, marked experimental. See [Browser](browser.md).
@@ -39,7 +39,7 @@ Settings are kept in `~/.band/settings.json` on the hub's machine. `band setting
 
 ## Infrastructure
 
-- **Workers.** The computers that run worktrees and agents, and the tokens they use to connect. Also installs, updates and removes workers. See [Adding workers](adding-workers.md) and [Updates](updates.md).
+- **Workers.** The computers that run worktrees and agents, one table row each (this Mac included in the desktop app, with a "This computer" badge). A banner names the workers that are behind the hub, with Update all workers, and one Check for updates covers the page. A click on a row opens a drawer with Updates, Agents, Trust and access, Details and a Danger zone (Move all worktrees…, Remove worker, which asks first). Add worker opens one dialog for the one-command and manual installs. Activity and Tokens are tabs next to Workers. See [Adding workers](adding-workers.md) and [Updates](updates.md).
 - **Devices.** Phones, tablets and browsers signed in to the hub. Admin only. See [Devices](devices.md).
 - **Runners.** How the hub starts workers on demand. See [Runner hooks](runner-hooks.md).
 

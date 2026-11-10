@@ -42,6 +42,7 @@ test("an admin sets, sees and clears an agent command on a worker", async ({ pag
   await settingsPage.goto();
   await settingsPage.openDialog("hosts");
 
+  await settingsPage.openHostDrawer("local");
   await expect(settingsPage.hostAgentCommandEffective("local", "claude-code")).toHaveAttribute(
     "data-effective",
     "",

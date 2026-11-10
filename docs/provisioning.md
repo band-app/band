@@ -32,7 +32,7 @@ With no provisioning repo, the script:
 
 1. Uses Node 24 or later if `node` is on the PATH. Otherwise it installs mise and Node 24 through it.
 2. Installs `@band-app/worker` pinned to the hub's version into `~/.band/npm` (the latest version when the hub runs from source).
-3. Runs `band-worker install-service --worker-id <worker id>` with the token in `BAND_WORKER_TOKEN`. That is what the npm service tab of Manual install does.
+3. Runs `band-worker install-service --worker-id <worker id>` with the token in `BAND_WORKER_TOKEN`. That is what the npm service tab of the Add worker dialog's Manual install does.
 4. On Linux, enables lingering with `sudo -n loginctl enable-linger`, then runs each `fix:` line that `band-worker doctor` prints (swap, inotify limit) with `sudo`.
 
 Two environment variables on the machine change this: `BAND_WORKER_CMD` and `BAND_PROVISION_ROOT_STEPS=off`, which skips step 4 (see [Details](#details)).

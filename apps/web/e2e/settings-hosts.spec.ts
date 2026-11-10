@@ -98,18 +98,20 @@ test("creates a worker bootstrap token and lists its offline host", async ({ pag
   expect(compose).toContain(`BAND_WORKER_ID: ${hostId}`);
   expect(compose).toContain("network_mode: host");
 
-  // The new host is listed, offline, with its labels.
-  const row = settingsPage.hostRow(hostId);
-  await settingsPage.expectRowVisible(row);
-  await expect(row).toHaveAttribute("data-status", "offline");
-  await expect(row).not.toContainText("os=linux");
-  await expect(await settingsPage.openHostDetails(hostId)).toContainText("os=linux, gpu");
-
-  // Closing the panel drops the secret from the page. A worker spends it on its first exchange.
+  // Closing the dialog drops the secret from the page. A worker spends it on its first exchange.
   await expect(settingsPage.bootstrapToken()).toBeVisible();
   await settingsPage.finishAddWorker();
   await expect(settingsPage.addWorkerButton()).toBeVisible();
   await expect(settingsPage.bootstrapToken()).toHaveCount(0);
+
+  // The new host is listed, offline, with its labels in the drawer's Details.
+  const row = settingsPage.hostRow(hostId);
+  await settingsPage.expectRowVisible(row);
+  await expect(row).toHaveAttribute("data-status", "offline");
+  await expect(row).not.toContainText("os=linux");
+  const details = await settingsPage.openHostDetails(hostId);
+  await expect(details).toContainText("os=linux");
+  await expect(details).toContainText("gpu");
 
   const issued = (await tokens()).find(
     (t) => t.kind === "worker_bootstrap" && t.label === "build-box",
@@ -130,6 +132,7 @@ test("revokes a worker bootstrap token, and keeps device tokens out of the list"
   expect(hostToken).toMatch(/^bwb_/);
   await settingsPage.finishAddWorker();
 
+  await settingsPage.openWorkersTab("tokens");
   const row = settingsPage.tokenRow("e2e revoke worker");
   await settingsPage.expectRowVisible(row);
   await expect(row).toHaveAttribute("data-state", "active");
@@ -153,6 +156,7 @@ test("a non-admin device token sees the hosts but is told worker tokens need an 
   await settingsPage.openDialog("hosts");
 
   await settingsPage.expectRowVisible(settingsPage.hostRow("local"));
+  await settingsPage.openWorkersTab("tokens");
   await settingsPage.expectRowVisible(settingsPage.tokensDenied());
   await expect(settingsPage.tokenRows()).toHaveCount(0);
 });

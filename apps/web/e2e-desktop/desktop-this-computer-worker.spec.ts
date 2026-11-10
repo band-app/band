@@ -181,7 +181,7 @@ test.describe("Desktop app: this computer as a worker", () => {
 
     await app.window.reload();
     await page.openHostsSettings();
-    await expect(page.add).toBeVisible();
+    await page.showAddForm();
     await expect(page.prompt).toBeHidden();
     expect(existsSync(plistFile(home))).toBe(false);
   });
@@ -199,14 +199,16 @@ test.describe("Desktop app: this computer as a worker", () => {
     await page.promptNotNow.click();
 
     await page.openHostsSettings();
+    await page.showAddForm();
     await page.add.click();
     await expect(page.state).toHaveAttribute("data-status", "online", { timeout: 90_000 });
     const installed = readPlist(home);
     const hostId = installed.env.BAND_WORKER_ID;
     expect((await hosts()).some((h) => h.id === hostId)).toBe(true);
 
+    await page.openDrawer();
     await page.remove.click();
-    await expect(page.add).toBeVisible({ timeout: 60_000 });
+    await page.showAddForm();
     expect(existsSync(plistFile(home))).toBe(false);
     await expect.poll(async () => (await hosts()).some((h) => h.id === hostId)).toBe(false);
   });
@@ -256,6 +258,7 @@ ${env}
 
     await page.openHostsSettings();
     await expect(page.prompt).toBeHidden();
+    await page.openDrawer();
     await expect(page.switchToBundled).toBeVisible();
     await page.switchToBundled.click();
     await expect(page.state).toHaveAttribute("data-status", "online", { timeout: 90_000 });

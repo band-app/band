@@ -60,7 +60,7 @@ Restart the worker afterwards.
 
 ### Update a worker automatically
 
-Settings > Workers has an "Update automatically when idle" switch on every worker row, and Settings > Hub has the same controls for the hub: the version, the latest release, "Check for updates", the update button and the switch. An admin on any client (web, desktop, phone) sees them. A worker row also shows the latest release and "Check for updates", which asks GitHub now (calls within 30 seconds share one answer).
+Each worker's drawer in Settings > Workers has an "Update automatically when idle" switch and its Update button, and Settings > Hub has the same controls for the hub: the version, the latest release, "Check for updates", Update now and the switch. An admin on any client (web, desktop, phone) sees them. Settings > Workers has one "Check for updates" for the whole page, which asks GitHub now (calls within 30 seconds share one answer). The worker that is this Mac in the desktop app shows "Updates with Band app" in its row, because the app updates the bundled worker.
 
 A worker with the switch on installs the hub's version by itself. The hub checks every minute (`BAND_WORKER_UPDATE_AUTO_POLL_MS`) and updates a worker when all of this holds:
 
@@ -142,7 +142,7 @@ Docker, compose, Helm and Kubernetes hubs still show the command to run. The upd
 
 ### The Update hub button
 
-An admin can set a command that the hub runs to update itself. Enter it in the "Hub update command" field of the "Update Band" panel, or set `hubUpdate.command` in `~/.band/settings.json`. When a command is set and a newer release exists, the panel shows an "Update hub" button.
+An admin can set a command that the hub runs to update itself. Enter it in the "Hub update command" field of the "Update Band" panel or under Advanced in Settings > Hub, or set `hubUpdate.command` in `~/.band/settings.json`. When a command is set and a newer release exists, the panel shows an "Update hub" button.
 
 Clicking it runs the command with `sh -c` on the hub's machine, in its own session, with `BAND_HUB_TARGET_VERSION` set to the target version. The output goes to `<BAND_HOME>/hub-update.log`. The panel shows "Updating the hub…" until the hub is back.
 

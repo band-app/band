@@ -1,87 +1,19 @@
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-} from "@band-app/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button, Input } from "@band-app/ui";
 import { useState } from "react";
-import { trpc } from "../../lib/trpc-client";
-import { UPDATE_STATUS_KEY, useUpdateStatus } from "../hooks/use-update-status";
-import { CopyCommand } from "./CopyCommand";
 import { UpdateControls } from "./settings/UpdateControls";
-
-/** Polls while a hub update runs, because the hub is gone for a moment when it restarts. */
-const POLL_MS = 2000;
+import { useHubUpdate } from "./useHubUpdate";
 
 /**
- * Admin controls for updating the hub from the panel: the command field, the Update hub button,
- * the state while the hub restarts, and the failure with the log tail. Without a command only the
- * field shows, and the panel keeps the manual command. In Settings > Hub (`inSettings`) it also
- * shows the version, the latest release and Check for updates, as each worker row does.
+ * Admin controls for updating the hub from the update panel: the command field, the Update hub
+ * button, the state while the hub restarts, and the failure with the log tail. Without a command
+ * only the field shows, and the panel keeps the manual command. Settings > Hub has its own
+ * `HubUpdateCard`.
  */
-export function HubUpdateControls({ inSettings = false }: { inSettings?: boolean }) {
-  const queryClient = useQueryClient();
-  const status = useUpdateStatus();
-  const settings = useQuery({
-    queryKey: ["settings.get", "hubUpdate"],
-    queryFn: () => trpc.settings.get.query(),
-  });
-  const savedUpdate = (
-    settings.data as { hubUpdate?: { command?: string; auto?: boolean } } | undefined
-  )?.hubUpdate;
+export function HubUpdateControls() {
+  const hub = useHubUpdate();
+  const { status, hubUpdate, updating, busy, error, savedUpdate } = hub;
   const saved = savedUpdate?.command;
   const [draft, setDraft] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [turns, setTurns] = useState<{ chatId: string; worktreeId: string }[]>([]);
-  const hubUpdate = status.data?.hubUpdate;
-  const updating = hubUpdate?.state === "updating";
-
-  useQuery({
-    queryKey: ["hub-update-poll"],
-    queryFn: async () => {
-      await queryClient.invalidateQueries({ queryKey: UPDATE_STATUS_KEY });
-      return null;
-    },
-    enabled: updating,
-    refetchInterval: POLL_MS,
-  });
-
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await fn();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-      await queryClient.invalidateQueries({ queryKey: UPDATE_STATUS_KEY });
-    }
-  };
-
-  const save = () =>
-    run(async () => {
-      await trpc.settings.update.mutate({ hubUpdate: { command: (draft ?? "").trim() } });
-      setDraft(null);
-      await queryClient.invalidateQueries({ queryKey: ["settings.get", "hubUpdate"] });
-    });
-
-  const setAuto = (auto: boolean) =>
-    run(async () => {
-      await trpc.settings.update.mutate({ hubUpdate: { auto } });
-      queryClient.setQueryData(["settings.get", "hubUpdate"], (old: object | undefined) => ({
-        ...old,
-        hubUpdate: { ...savedUpdate, auto },
-      }));
-      await queryClient.invalidateQueries({ queryKey: ["settings.get", "hubUpdate"] });
-    });
   const lastRun = hubUpdate?.lastRun;
 
   return (
@@ -89,10 +21,9 @@ export function HubUpdateControls({ inSettings = false }: { inSettings?: boolean
       <UpdateControls
         testId="hub-update"
         name="the hub"
-        showHeader={inSettings}
-        version={inSettings ? (status.data?.hubVersion ?? null) : undefined}
+        showHeader={false}
         auto={savedUpdate?.auto === true}
-        onAutoChange={(on) => void setAuto(on)}
+        onAutoChange={(on) => void hub.setAuto(on)}
         autoLabel="Update automatically when no agent turn runs"
         autoDisabledReason={null}
         busy={busy || hubUpdate?.builtIn === false}
@@ -104,18 +35,7 @@ export function HubUpdateControls({ inSettings = false }: { inSettings?: boolean
                 size="sm"
                 data-testid="hub-update__button"
                 disabled={busy || updating}
-                onClick={() =>
-                  void run(async () => {
-                    const { agents } = await trpc.workers.hubInterruptions.query();
-                    const running = agents.filter((a) => a.busy);
-                    if (running.length === 0) {
-                      await trpc.workers.updateHub.mutate();
-                      return;
-                    }
-                    setTurns(running);
-                    setConfirmOpen(true);
-                  })
-                }
+                onClick={() => void hub.startUpdate()}
               >
                 {updating ? "Updating the hub…" : "Update hub"}
               </Button>
@@ -127,65 +47,8 @@ export function HubUpdateControls({ inSettings = false }: { inSettings?: boolean
             </>
           ) : null
         }
-      >
-        {inSettings && hubUpdate && !hubUpdate.configured && status.data?.updateAvailable ? (
-          <div
-            className="space-y-1 text-xs text-muted-foreground"
-            data-testid="hub-update__manual-note"
-          >
-            <p>
-              This hub updates with a command. Run it on the hub's machine, then restart the hub:
-            </p>
-            {status.data.hubCommand ? (
-              <CopyCommand
-                command={status.data.hubCommand}
-                testId="hub-update__manual"
-                label="Copy the hub update command"
-              />
-            ) : null}
-          </div>
-        ) : null}
-      </UpdateControls>
-      <Dialog open={confirmOpen} onOpenChange={(next) => !busy && setConfirmOpen(next)}>
-        <DialogContent className="sm:max-w-[460px]" data-testid="hub-update__dialog">
-          <DialogHeader>
-            <DialogTitle>Update the hub?</DialogTitle>
-            <DialogDescription>
-              The hub restarts. Every agent it runs stops, and a turn in progress is lost.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="text-sm" data-testid="hub-update__agents">
-            <div className="mb-1 font-medium">
-              {turns.length === 1 ? "1 running turn" : `${turns.length} running turns`} will end:
-            </div>
-            <ul className="list-disc pl-5">
-              {turns.map((a) => (
-                <li key={a.chatId} data-testid="hub-update__agent">
-                  {a.worktreeId} (chat {a.chatId})
-                </li>
-              ))}
-            </ul>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={busy}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              data-testid="hub-update__confirm"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  await trpc.workers.updateHub.mutate({ confirmInterruptions: true });
-                  setConfirmOpen(false);
-                })
-              }
-            >
-              Update and restart
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      />
+      {hub.dialog}
       {hubUpdate?.state === "failed" ? (
         <div className="flex items-start justify-between gap-2 text-xs text-destructive">
           <pre
@@ -195,12 +58,7 @@ export function HubUpdateControls({ inSettings = false }: { inSettings?: boolean
           >
             {hubUpdate.error}
           </pre>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => void run(() => trpc.workers.dismissHubUpdate.mutate())}
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={() => void hub.dismiss()}>
             Dismiss
           </Button>
         </div>
@@ -259,7 +117,7 @@ export function HubUpdateControls({ inSettings = false }: { inSettings?: boolean
           size="sm"
           data-testid="hub-update__save"
           disabled={busy || draft === null || draft === (saved ?? "")}
-          onClick={() => void save()}
+          onClick={() => void hub.saveCommand(draft ?? "").then(() => setDraft(null))}
         >
           Save
         </Button>

@@ -1,16 +1,30 @@
 import { Button, Input } from "@band-app/ui";
+import { Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { isDesktop } from "../../../lib/is-desktop";
-import { pickFolder, useThisComputerWorker } from "../../../lib/this-computer-worker";
-import { SettingsRow } from "./SettingsRow";
+import {
+  pickFolder,
+  type ThisComputerStatus,
+  type useThisComputerWorker,
+} from "../../../lib/this-computer-worker";
+import { ErrorPopover } from "./ErrorPopover";
+
+export type ThisComputer = ReturnType<typeof useThisComputerWorker>;
+
+/** The worker id of this Mac when it is a worker of the hub the app is connected to, else null. */
+export function thisComputerHostId(status: ThisComputerStatus | null): string | null {
+  return status?.supported && status.installed && status.forThisHub ? status.hostId : null;
+}
 
 /**
- * The "This computer" section of Settings > Workers (desktop app only): whether this Mac is a
- * worker of the hub the app is connected to, with Add, Remove and, for a worker service that
- * was installed from npm, Switch to the one bundled in the app.
+ * The end of the Workers table in the desktop app. This Mac is a row of the table once it is a
+ * worker, so this renders only what the table cannot: an "Add this Mac as a worker" row, the note
+ * that a local hub already covers this computer, or the state of a worker that is installed but
+ * not (yet) listed by this hub.
  */
-export function ThisComputerSettings() {
-  const { status, busy, error, note, run } = useThisComputerWorker();
+export function ThisComputerRow({ computer }: { computer: ThisComputer }) {
+  const { status, busy, error, note, run } = computer;
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [roots, setRoots] = useState<string[]>([]);
 
@@ -25,51 +39,30 @@ export function ThisComputerSettings() {
     if (folder && !roots.includes(folder)) setRoots([...roots, folder]);
   };
 
-  let body: React.ReactNode;
+  const errorIcon = error ? (
+    <ErrorPopover
+      label="This computer action failed"
+      testId="this-computer__error"
+      message={error}
+    />
+  ) : null;
+
+  let body: React.ReactNode = null;
   if (!status.remoteHub && !status.installed) {
     body = (
       <p className="text-sm text-muted-foreground" data-testid="this-computer__local-hub">
         This app runs its own hub, which already covers this computer.
       </p>
     );
-  } else if (status.installed) {
-    const state = status.forThisHub ? (status.hostStatus ?? "unknown") : "connected to another hub";
+  } else if (status.installed && !status.forThisHub) {
     body = (
-      <div className="space-y-2 text-sm">
-        <div data-testid="this-computer__state" data-status={state}>
-          {status.name ?? "This computer"}: {state}
-          {status.bundled ? ` · worker ${status.version}` : " · installed from npm"}
-        </div>
-        {status.roots.length > 0 ? (
-          <div className="text-xs text-muted-foreground">Folders: {status.roots.join(", ")}</div>
-        ) : null}
-        <div className="flex gap-2">
-          {!status.bundled ? (
-            <Button
-              type="button"
-              size="sm"
-              data-testid="this-computer__switch"
-              disabled={busy}
-              onClick={() => void run("worker_switch_bundled")}
-            >
-              Switch to the worker in this app
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="this-computer__remove"
-            disabled={busy}
-            onClick={() => void run("worker_remove")}
-          >
-            {busy ? "Working…" : "Remove this computer"}
-          </Button>
-        </div>
+      <div className="text-sm" data-testid="this-computer__state" data-status="other-hub">
+        {status.name ?? "This computer"} is a worker of another hub
+        {status.bundled ? "" : " (installed from npm)"}.
       </div>
     );
-  } else {
-    body = (
+  } else if (!status.installed) {
+    body = open ? (
       <div className="space-y-2">
         <Input
           aria-label="Computer name"
@@ -84,7 +77,7 @@ export function ThisComputerSettings() {
             {root}
           </div>
         ))}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
@@ -103,30 +96,84 @@ export function ThisComputerSettings() {
           >
             {busy ? "Setting up…" : "Add this computer"}
           </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          {errorIcon}
         </div>
       </div>
+    ) : (
+      <button
+        type="button"
+        data-testid="this-computer__open"
+        className="flex w-full items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(true)}
+      >
+        <Plus className="size-4" />
+        Add this Mac as a worker
+        {errorIcon}
+      </button>
     );
   }
-
+  if (!body && !note) return null;
   return (
-    <SettingsRow
-      variant="stacked"
-      label="Use this computer as a worker"
-      description="Run worktrees and agents on this Mac from the hub the app is connected to. The service runs the worker bundled in this app, so an app update updates it."
+    <div
+      data-testid="this-computer"
+      className="mt-2 rounded-md border border-dashed border-border px-3 py-2.5"
     >
-      <div data-testid="this-computer">
-        {body}
-        {note ? <p className="mt-2 text-xs text-muted-foreground">{note}</p> : null}
-        {error ? (
-          <p
-            role="alert"
-            data-testid="this-computer__error"
-            className="mt-2 text-xs text-destructive"
+      {body}
+      {note ? <p className="mt-2 text-xs text-muted-foreground">{note}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * The "This computer" section of the drawer of the worker that is this Mac: Remove, and for a
+ * worker service installed from npm, Switch to the one bundled in the app.
+ */
+export function ThisComputerDrawerSection({ computer }: { computer: ThisComputer }) {
+  const { status, busy, error, run } = computer;
+  if (!status) return null;
+  return (
+    <div className="space-y-2 text-xs" data-testid="this-computer-section">
+      <p className="text-muted-foreground">
+        {status.bundled
+          ? `Runs the worker bundled in this app (${status.version}), so an app update updates it.`
+          : "Installed from npm."}
+      </p>
+      {status.roots.length > 0 ? (
+        <p className="text-muted-foreground">Folders: {status.roots.join(", ")}</p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {!status.bundled ? (
+          <Button
+            type="button"
+            size="sm"
+            data-testid="this-computer__switch"
+            disabled={busy}
+            onClick={() => void run("worker_switch_bundled")}
           >
-            {error}
-          </p>
+            Switch to the worker in this app
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="this-computer__remove"
+          disabled={busy}
+          onClick={() => void run("worker_remove")}
+        >
+          {busy ? "Working…" : "Remove this computer"}
+        </Button>
+        {error ? (
+          <ErrorPopover
+            label="This computer action failed"
+            testId="this-computer__error"
+            message={error}
+          />
         ) : null}
       </div>
-    </SettingsRow>
+    </div>
   );
 }

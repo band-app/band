@@ -1,6 +1,6 @@
 ---
 paths:
-  - "**/ProvisionHostRow.tsx"
+  - "**/ProvisionHostForm.tsx"
   - "**/start-server.ts"
   - "apps/hub/src/server/api/provisioning/handler.ts"
   - "apps/hub/src/server/infra/db/queries/provisions.ts"
@@ -13,7 +13,7 @@ paths:
 
 # Architecture: worker provisioning
 
-An admin gets a one-line command for a blank Linux or macOS machine (guide: `docs/provisioning.md`): `curl -fsSL <hub>/api/provision/<code>/script | sh`. Settings > Workers > Add a worker (`ProvisionHostRow.tsx`) shows it with the expiry, a "Copy as cloud-init" variant, the live status and the log. Manual install stays below it.
+An admin gets a one-line command for a blank Linux or macOS machine (guide: `docs/provisioning.md`): `curl -fsSL <hub>/api/provision/<code>/script | sh`. Settings > Workers > Add worker (`AddWorkerDialog.tsx`, `ProvisionHostForm.tsx`) shows it with the expiry, a "Copy as cloud-init" variant, the live status and the log. Manual install is the dialog's other tab.
 
 - State: `services/provisioning-service.ts` and the `host_provisions` table (`infra/db/queries/provisions.ts`). The code (`bpc_`) and the run token (`bpr_`) are stored as SHA-256 hashes. A row holds the pinned commit, the worker id the exchange created, the state (`pending`, `running`, `failed`, `done`), the exit code and the scrubbed log (last 256 KiB). The status the UI sees is derived: `online` when the worker row is online, else `failed`, `provisioning` (spent), `expired` or `waiting`. The service is on the exempt list of the machine-access Biome override, because it runs `git` and `tar` on the hub's machine and keeps bundle files under `<BAND_HOME>/provisioning/<id>/`.
 - Endpoints (`api/provisioning/handler.ts`, answered in `start-server.ts` before the device-token check): `GET /api/provision/<code>/script` (no secret, spends nothing, rendered by `services/_utils/provision-script.ts`), `POST /api/provision/exchange` (spends the code with a guarded SQL update, calls `tokenService.issueWorkerBootstrap`, answers `key=value` lines because the script has no JSON parser), `GET /api/provision/<code>/bundle` and `POST /api/provision/<code>/log[?exit=N]` (both need the run token as a Bearer header). A refusal is one generic 401. The bootstrap token cannot authorize the bundle or log, because the worker spends it before the script finishes.

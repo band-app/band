@@ -1,6 +1,6 @@
 /**
  * Page object for the update controls in Settings > Hub and on each Settings > Workers row. Both
- * use `UpdateControls.tsx`, so the locators are the same with another scope. The test ids come
+ * use `UpdateControls.tsx`; a worker's controls are in its drawer. The test ids come
  * from `UpdateControls.tsx` (`<prefix>__latest`, `__check`, `__blocked`; the switch is found by its name) with the
  * prefix `hub-update` for the hub and `worker-update` for a worker row.
  */
@@ -62,31 +62,46 @@ export class UpdateSettingsPage {
 
   /** The row of one worker on Settings > Workers, found by its name. */
   workerRow(name: string): Locator {
-    return this.settings.dialog.getByTestId("settings__host").filter({ hasText: name });
+    return this.page.getByTestId("settings__host").filter({ hasText: name });
   }
 
-  workerLatest(name: string): Locator {
-    return this.workerRow(name).getByTestId("worker-update__latest");
+  /** The drawer of the open worker. Call `openWorker` first. */
+  workerDrawer(): Locator {
+    return this.settings.hostDrawer();
   }
 
-  workerCheck(name: string): Locator {
-    return this.workerRow(name).getByTestId("worker-update__check");
+  /** Opens the drawer of a worker by its name (closing another one first). */
+  async openWorker(name: string): Promise<Locator> {
+    await this.settings.closeHostDrawer();
+    await this.workerRow(name).getByTestId("settings__host-name").click();
+    await expect(this.workerDrawer().getByTestId("settings__host-drawer-name")).toHaveText(name);
+    return this.workerDrawer();
   }
 
   workerAuto(name: string): Locator {
-    return this.workerRow(name).getByRole("switch", { name: `Update ${name} automatically` });
+    return this.workerDrawer().getByRole("switch", { name: `Update ${name} automatically` });
   }
 
-  workerBlocked(name: string): Locator {
-    return this.workerRow(name).getByTestId("worker-update__blocked");
+  workerAutoNote(): Locator {
+    return this.workerDrawer().getByTestId("worker-update__auto-note");
   }
 
-  workerUpdateButton(name: string): Locator {
-    return this.workerRow(name).getByTestId("update-worker__button");
+  workerBlocked(): Locator {
+    return this.workerDrawer().getByTestId("worker-update__blocked");
   }
 
+  workerUpdateButton(): Locator {
+    return this.workerDrawer().getByTestId("update-worker__button");
+  }
+
+  /** The version cell of a worker row. */
   workerVersion(name: string): Locator {
     return this.workerRow(name).getByTestId("settings__host-version");
+  }
+
+  /** The page's "Check for updates" button. There is one for the whole page. */
+  checkButtons(): Locator {
+    return this.page.getByRole("button", { name: "Check for updates" });
   }
 
   async toggle(switchLocator: Locator, on: boolean): Promise<void> {

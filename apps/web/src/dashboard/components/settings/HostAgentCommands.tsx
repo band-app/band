@@ -1,22 +1,15 @@
-import {
-  Accordion,
-  AccordionContent,
-  AccordionHeader,
-  AccordionItem,
-  AccordionTriggerInline,
-  Button,
-  cn,
-  Input,
-} from "@band-app/ui";
-import { ChevronDown } from "lucide-react";
+import { Button, cn, Input } from "@band-app/ui";
+import { Pencil } from "lucide-react";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import type { HostView } from "../../hooks/use-update-status";
 import { AgentIcon } from "../agent-icons";
+import { ErrorPopover } from "./ErrorPopover";
+import { errorText } from "./worker-format";
 
 type State = HostView["agentCommandStates"][number];
 
-/** One agent on one worker: its name and command in the header, the override field when open. */
+/** One agent on one worker: a line with its name and command, and an edit control for the override. */
 function AgentCommandRow({
   host,
   state,
@@ -29,6 +22,7 @@ function AgentCommandRow({
   onChanged: () => void;
 }) {
   const [draft, setDraft] = useState(state.override ?? "");
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const save = async (command: string | null) => {
@@ -40,34 +34,32 @@ function AgentCommandRow({
         command,
       });
       if (command === null) setDraft("");
+      setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err));
     }
   };
 
   const testId = `settings__host-agent-command-${state.agentId}`;
   const missing = state.found === false;
   return (
-    <AccordionItem value={state.agentId} className="border-b-0">
-      <AccordionHeader className="flex items-center gap-3 px-3 py-2">
+    <li className="space-y-1.5 px-3 py-2">
+      <div className="flex items-center gap-2.5">
         <span
           data-testid={`${testId}-status`}
           data-state={state.found === true ? "found" : missing ? "missing" : "unknown"}
           className={cn("size-2 shrink-0 rounded-full", missing ? "bg-destructive" : "bg-success")}
         />
         <AgentIcon type={state.type} className="size-4 shrink-0" />
-        <AccordionTriggerInline
-          data-testid={`${testId}-toggle`}
-          aria-label={`Command of ${state.label} on ${host.name}`}
-          className="flex-1 rounded-md text-left text-sm font-medium text-foreground"
-        >
-          {state.label}
-        </AccordionTriggerInline>
+        <span className="shrink-0 text-sm font-medium">{state.label}</span>
         <span
           data-testid={`${testId}-effective`}
           data-effective={state.effective ?? ""}
-          className={cn("truncate text-xs", missing ? "text-destructive" : "text-muted-foreground")}
+          className={cn(
+            "min-w-0 flex-1 truncate text-xs",
+            missing ? "text-destructive" : "text-muted-foreground",
+          )}
           title={missing ? `${state.effective} not found on ${host.name}` : undefined}
         >
           {state.effective ?? ""}
@@ -77,15 +69,27 @@ function AgentCommandRow({
             {state.effective} not found on {host.name}
           </span>
         ) : null}
-        <AccordionTriggerInline
-          aria-label={`Toggle command settings for ${state.label}`}
-          className="-mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-180"
+        {error ? (
+          <ErrorPopover
+            label={`Could not save the ${state.label} command`}
+            testId={`${testId}-error`}
+            message={error}
+          />
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-testid={`${testId}-toggle`}
+          aria-label={`Command of ${state.label} on ${host.name}`}
+          aria-expanded={editing}
+          onClick={() => setEditing((open) => !open)}
         >
-          <ChevronDown className="size-4 shrink-0 transition-transform duration-200" />
-        </AccordionTriggerInline>
-      </AccordionHeader>
-      <AccordionContent className="space-y-1 px-3 pb-2 pl-11">
-        <div className="flex items-center gap-2">
+          <Pencil className="size-3.5" />
+        </Button>
+      </div>
+      {editing ? (
+        <div className="flex items-center gap-2 pl-6">
           <Input
             aria-label={`${state.label} command on ${host.name}`}
             data-testid={`${testId}-input`}
@@ -121,17 +125,12 @@ function AgentCommandRow({
             </>
           ) : null}
         </div>
-        {error ? (
-          <div role="alert" className="text-xs text-destructive" data-testid={`${testId}-error`}>
-            {error}
-          </div>
-        ) : null}
-      </AccordionContent>
-    </AccordionItem>
+      ) : null}
+    </li>
   );
 }
 
-/** A worker's coding agents, one collapsed row each. Open a row to set its command. */
+/** A worker's coding agents, one line each. The pencil opens the command override field. */
 export function HostAgentCommands({
   host,
   isAdmin,
@@ -141,11 +140,12 @@ export function HostAgentCommands({
   isAdmin: boolean;
   onChanged: () => void;
 }) {
-  if (host.agentCommandStates.length === 0) return null;
+  if (host.agentCommandStates.length === 0) {
+    return <p className="text-xs text-muted-foreground">No agents reported yet.</p>;
+  }
   return (
-    <Accordion
-      type="multiple"
-      className="mt-2 w-full rounded-md border border-border"
+    <ul
+      className="divide-y divide-border rounded-md border border-border"
       data-testid="settings__host-agents-commands"
     >
       {host.agentCommandStates.map((state) => (
@@ -157,6 +157,6 @@ export function HostAgentCommands({
           onChanged={onChanged}
         />
       ))}
-    </Accordion>
+    </ul>
   );
 }
