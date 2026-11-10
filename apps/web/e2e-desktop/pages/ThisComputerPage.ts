@@ -37,7 +37,11 @@ export class ThisComputerPage {
   /** Opens the "Add this Mac as a worker" form at the end of the Workers table. */
   async showAddForm(): Promise<void> {
     await test.step("Open the Add this Mac form", async () => {
-      if (!(await this.add.isVisible())) await this.page.getByTestId("this-computer__open").click();
+      // The row shows either the closed row (`__open`) or the form, which stays open after an
+      // add, and it needs the worker status first. Wait for one of them.
+      const open = this.page.getByTestId("this-computer__open");
+      await expect(this.add.or(open)).toBeVisible({ timeout: 60_000 });
+      if (await open.isVisible()) await open.click();
       await expect(this.add).toBeVisible();
     });
   }
@@ -63,7 +67,8 @@ export class ThisComputerPage {
         await expect(this.dialog).toBeVisible({ timeout: 1_000 });
       }).toPass({ timeout: 30_000 });
       await this.dialog.getByTestId("settings__nav-hosts").click();
-      await expect(this.settings).toBeVisible();
+      // The "this-computer" row exists only while this Mac has something to offer or show, so wait for the table.
+      await expect(this.page.getByTestId("settings__hosts-table")).toBeVisible();
     });
   }
 }
