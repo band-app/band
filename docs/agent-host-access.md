@@ -29,7 +29,7 @@ Never available to an agent, whatever the level: tokens, the credential vault, c
 
 No level reaches the hub's own machine (`local`): its chats, terminals, browsers, worktrees and cronjobs stay out of agent reach, because a shell there can read the hub's tokens and vault key. The relay token does not become a hub credential. A call from a worktree must itself be on the caller's worker.
 
-Cross-worker calls an admin worker makes, and its admin-only calls (`settings.update`, repo writes, cronjobs on other workers), go in an audit log: time, calling worker, chat, action and the target worker and worktree. Admins read it in Settings > Workers (Cross-worker activity) or with `band workers audit`.
+Cross-worker calls an admin worker makes, and its admin-only calls (`settings.update`, repo writes, cronjobs on other workers), go in an audit log: time, calling worker, chat, action and the target worker and worktree. Admins read it in Settings > Workers (the Activity tab) or with `band workers audit`.
 
 ## Starting a worktree on another worker
 

@@ -1,6 +1,6 @@
 /**
- * Page object for Settings > Hub in the desktop app: the picker that chooses
- * the local hub or a remote one.
+ * Page object for Settings > Hub in the desktop app: the Connection card and the
+ * Change… dialog that chooses the local hub or a remote one.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -20,7 +20,7 @@ export class HubPickerPage {
     this.url = page.getByTestId("settings__hub-url");
     this.token = page.getByTestId("settings__hub-token");
     this.apply = page.getByTestId("settings__hub-apply");
-    this.error = page.getByTestId("settings__hub-error");
+    this.error = page.getByTestId("settings__hub-error-icon");
     this.localService = page.getByTestId("settings__hub-local-service");
   }
 
@@ -36,6 +36,7 @@ export class HubPickerPage {
         await expect(this.dialog).toBeVisible({ timeout: 2_000 });
       }).toPass({ timeout: 30_000 });
       await this.dialog.getByTestId("settings__nav-hub").click();
+      await this.dialog.getByTestId("settings__hub-change").click();
       await expect(this.mode).toBeVisible();
     });
   }

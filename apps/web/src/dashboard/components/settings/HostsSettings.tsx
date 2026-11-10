@@ -1,195 +1,42 @@
-import {
-  Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  Input,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@band-app/ui";
+import { Button } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Info, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { Plus, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { crossOriginHub } from "../../../lib/hub-config";
+import { useThisComputerWorker } from "../../../lib/this-computer-worker";
 import { trpc } from "../../../lib/trpc-client";
 import { useAdapter } from "../../context";
+import { useUpdateStatus } from "../../hooks/use-update-status";
+import { UpdateAllWorkers } from "../UpdateAllWorkers";
+import { AddWorkerDialog } from "./AddWorkerDialog";
 import { CheckForUpdates } from "./CheckForUpdates";
 import { useIsAdmin } from "./DevicesSettings";
+import { ErrorPopover } from "./ErrorPopover";
 import { EvacuateHostDialog } from "./EvacuateHostDialog";
-import { HostAgentCommands } from "./HostAgentCommands";
-import { HostVersionLine } from "./HostVersionLine";
-import { ProvisionHostRow } from "./ProvisionHostRow";
 import { SettingsRow } from "./SettingsRow";
-import { ThisComputerSettings } from "./ThisComputerSettings";
+import { ThisComputerRow, thisComputerHostId } from "./ThisComputerSettings";
+import { WorkerDrawer } from "./WorkerDrawer";
+import { WorkersActivity } from "./WorkersActivity";
+import { WorkersTable } from "./WorkersTable";
 import {
-  WORKER_INSTALL_TABS,
-  type WorkerInstallTab,
-  workerInstallCommand,
-} from "./worker-install-commands";
+  AUDIT_KEY,
+  type AuditEntries,
+  errorText,
+  formatTime,
+  HOSTS_KEY,
+  type HostList,
+  KIND_LABEL,
+  TOKENS_KEY,
+  type TokenList,
+  type TokenView,
+} from "./worker-format";
 
-/** What a host reported per agent (installed, version, logged in), else the configured list from its hello. */
-function agentSummary(host: HostList[number]): string {
-  const report = host.report;
-  if (!report) return host.agents.length > 0 ? host.agents.join(", ") : "none found";
-  if (report.agents.length === 0) return "none found";
-  return report.agents
-    .map((a) => {
-      if (!a.installed) return `${a.type} not installed`;
-      const login =
-        a.loggedIn === false ? "not logged in" : a.loggedIn ? "logged in" : "login unknown";
-      return `${a.type}${a.version ? ` ${a.version}` : ""} ${login}`;
-    })
-    .join(", ");
-}
-
-const CAPABILITY_LABELS: Record<string, string> = {
-  desktop: "Desktop",
-  git: "Git",
-  gh: "GitHub CLI",
-  pty: "Terminals",
-  acp: "Agents",
-  lsp: "Language servers",
-  search: "Search",
-  fsWatch: "File watching",
-};
-
-/** The capabilities a host reported, as words. "Desktop" means the desktop extension runs on it. */
-function capabilitySummary(host: HostList[number]): string {
-  if (host.capabilities.length === 0) return "none reported";
-  return host.capabilities.map((c) => CAPABILITY_LABELS[c] ?? c).join(", ");
-}
-
-/** The operating system and architecture a host reported, or "unknown" before its first connect. */
-function osOf(host: HostList[number]): string {
-  const info = host.info as { os?: unknown; arch?: unknown } | null;
-  if (typeof info?.os !== "string") return "unknown";
-  return typeof info.arch === "string" ? `${info.os} ${info.arch}` : info.os;
-}
-
-/** Status pill colors by worker status. Anything not listed reads as muted. */
-const STATUS_PILL: Record<string, string> = {
-  online: "bg-success-bg text-success",
-  lost: "bg-warning-bg text-warning",
-};
-
-const TRUST_LEVELS = ["restricted", "standard", "admin"] as const;
-type TrustLevel = (typeof TRUST_LEVELS)[number];
-
-const TRUST_LABEL: Record<TrustLevel, string> = {
-  restricted: "Restricted",
-  standard: "Standard",
-  admin: "Admin",
-};
-
-const TRUST_HINT: Record<TrustLevel, string> = {
-  restricted: "Agents on this worker can only use their own worktrees.",
-  standard:
-    "Agents on this worker work on their own worker, and start worktrees elsewhere when Settings > Agents allows it.",
-  admin:
-    "Agents on this worker can work on any worker, change hub settings and manage repos and cronjobs. Tokens, the vault and trust levels stay out of reach.",
-};
-
-type HostList = Awaited<ReturnType<typeof trpc.workers.list.query>>["hosts"];
-type TokenList = Awaited<ReturnType<typeof trpc.tokens.list.query>>["tokens"];
-type TokenView = TokenList[number];
-
-type AuditEntries = Awaited<ReturnType<typeof trpc.workers.audit.query>>["entries"];
-
-const HOSTS_KEY = ["hosts.list"] as const;
-const AUDIT_KEY = ["hosts.audit"] as const;
-const TOKENS_KEY = ["tokens.list"] as const;
-
-interface IssuedWorker {
-  hostId: string;
-  token: string;
-  expiresAt: number | null;
-}
-
-const KIND_LABEL: Record<TokenView["kind"], string> = {
-  device: "Device",
-  worker_bootstrap: "Worker bootstrap",
-  worker_session: "Worker session",
-  device_pairing: "Pairing code",
-};
-
-function formatTime(at: number | null): string {
-  return at == null ? "Never" : new Date(at).toLocaleString();
-}
-
-/** The hub URL a worker dials: the one this page reaches the hub at. */
-function hubUrl(): string {
-  return crossOriginHub()?.origin ?? window.location.origin;
-}
+type Tab = "workers" | "activity" | "tokens";
 
 /**
- * The details of a worker row (id, labels, last seen, agents, roots, OS, capabilities) behind an
- * info icon, so the row itself stays short at any width.
- */
-function HostDetailsPopover({ host }: { host: HostList[number] }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Details of ${host.name}`}
-          data-testid={`settings__host-details--${host.id}`}
-          className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
-        >
-          <Info className="size-3.5" aria-hidden="true" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-80 space-y-1.5 text-xs"
-        data-testid="settings__host-details"
-      >
-        <div>
-          <span className="text-muted-foreground">ID </span>
-          <span data-testid="settings__host-id" className="break-all">
-            {host.id}
-          </span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Labels </span>
-          {host.labels.length > 0 ? host.labels.join(", ") : "None"}
-        </div>
-        <div>
-          <span className="text-muted-foreground">Last seen </span>
-          {formatTime(host.lastSeenAt)}
-        </div>
-        {host.usable ? (
-          <>
-            <div data-testid="settings__host-agents">
-              <span className="text-muted-foreground">Agents </span>
-              {agentSummary(host)}
-            </div>
-            <div data-testid="settings__host-roots" className="break-all">
-              <span className="text-muted-foreground">Roots </span>
-              {host.roots.length > 0 ? host.roots.join(", ") : "any path"}
-            </div>
-            <div data-testid="settings__host-os">
-              <span className="text-muted-foreground">OS </span>
-              {osOf(host)}
-            </div>
-            <div data-testid="settings__host-capabilities">
-              <span className="text-muted-foreground">Capabilities </span>
-              {capabilitySummary(host)}
-            </div>
-          </>
-        ) : null}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/**
- * Rows for the Settings dialog's Hosts section: the machines Band can run
- * worktrees on, "Add worker" (a one-time bootstrap token and the command
- * that uses it) and the hub's tokens with a Revoke button. Changes apply
- * immediately; they are not part of the dialog's Save. A new token is shown
- * once, because the hub keeps only its hash.
+ * Settings > Workers: the computers Band can run worktrees on as one table (this Mac included),
+ * one "Check for updates", a banner when a worker is behind the hub, and a drawer per worker.
+ * Activity and worker tokens are tabs. Changes apply at once; they are not part of the dialog's
+ * Save. A new token is shown once, because the hub keeps only its hash.
  */
 export function HostsSettings() {
   const queryClient = useQueryClient();
@@ -220,419 +67,224 @@ export function HostsSettings() {
     queryKey: HOSTS_KEY,
     queryFn: async () => (await trpc.workers.list.query()).hosts,
   });
-  // Device tokens are managed in Settings > Devices; Hosts keeps the workers' tokens.
+  // Device tokens are managed in Settings > Devices; Workers keeps the workers' tokens.
   const tokens = useQuery<TokenList>({
     queryKey: TOKENS_KEY,
     queryFn: async () => (await trpc.tokens.list.query()).tokens,
     select: (all) => all.filter((t) => t.kind !== "device"),
   });
-
-  const admin = useIsAdmin();
   const audit = useQuery<AuditEntries>({
     queryKey: AUDIT_KEY,
-    queryFn: async () => (await trpc.workers.audit.query({ limit: 50 })).entries,
-    enabled: admin,
+    queryFn: async () => (await trpc.workers.audit.query({ limit: 200 })).entries,
+    enabled: isAdmin,
   });
+  const updateStatus = useUpdateStatus();
+  const thisComputer = useThisComputerWorker();
+
+  const [tab, setTab] = useState<Tab>("workers");
+  const [openId, setOpenId] = useState<string | null>(null);
   const [evacuating, setEvacuating] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [hostName, setHostName] = useState("");
-  const [labels, setLabels] = useState("");
-  const [issued, setIssued] = useState<IssuedWorker | null>(null);
-  const [installTab, setInstallTab] = useState<WorkerInstallTab>("service");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [revokeError, setRevokeError] = useState<{ id: string; message: string } | null>(null);
 
   const refresh = () =>
     Promise.all([refetchFresh(HOSTS_KEY), refetchFresh(TOKENS_KEY), refetchFresh(AUDIT_KEY)]);
 
-  const issue = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await trpc.tokens.issueWorkerBootstrap.mutate({
-        hostName: hostName.trim(),
-        labels: labels
-          .split(",")
-          .map((l) => l.trim())
-          .filter(Boolean),
-      });
-      setIssued({
-        hostId: result.hostId,
-        token: result.token,
-        expiresAt: result.view.expiresAt,
-      });
-      setHostName("");
-      setLabels("");
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const revoke = async (token: TokenView) => {
-    setError(null);
+    setRevokeError(null);
     try {
       await trpc.tokens.revoke.mutate({ tokenId: token.id });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setRevokeError({ id: token.id, message: errorText(err) });
     }
     await refresh();
   };
 
-  const setTrust = async (host: HostList[number], trust: TrustLevel) => {
-    setError(null);
-    try {
-      await trpc.workers.setTrust.mutate({ hostId: host.id, trust });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-    await refresh();
-  };
+  const list = hosts.data ?? [];
+  const thisId = thisComputerHostId(thisComputer.status);
+  const behind = list.filter(
+    (h) => h.usable && h.versionState === "behind" && h.status !== "disposed",
+  );
+  const hubVersion = updateStatus.data?.hubVersion ?? null;
+  const open = list.find((h) => h.id === openId) ?? null;
+  const sessionToken =
+    (tokens.data ?? []).find(
+      (t) => t.kind === "worker_session" && t.hostId === openId && t.state === "active",
+    ) ?? null;
 
-  const removeHost = async (host: HostList[number]) => {
-    setError(null);
-    try {
-      await trpc.workers.remove.mutate({ hostId: host.id });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-    await refresh();
-  };
-
-  const copy = (text: string) => {
-    void navigator.clipboard?.writeText(text).catch(() => undefined);
-  };
-
-  const closeAdd = () => {
-    setAdding(false);
-    setInstallTab("service");
-    setIssued(null);
-    setError(null);
-  };
-
-  const installCommand = issued
-    ? workerInstallCommand(installTab, {
-        hubUrl: hubUrl(),
-        hostId: issued.hostId,
-        token: issued.token,
-      })
-    : "";
+  const tabs: { id: Tab; label: string; show: boolean }[] = [
+    { id: "workers", label: "Workers", show: true },
+    { id: "activity", label: "Activity", show: isAdmin },
+    { id: "tokens", label: "Tokens", show: true },
+  ];
 
   return (
     <>
-      <ThisComputerSettings />
-      <SettingsRow
-        variant="stacked"
-        label="Workers"
-        description="Computers that run worktrees. Workers connect to the hub and appear here. The hub's own machine is the built-in worker. On a hub started with BAND_LOCAL_WORKER=off it runs no worktrees and is not listed."
-      >
-        <CheckForUpdates />
-        <ul className="divide-y divide-border rounded-md border border-border">
-          {(hosts.data ?? []).map((host) => (
-            <li
-              key={host.id}
-              data-testid="settings__host"
-              data-status={host.status}
-              className="px-3 py-2 text-sm"
+      <SettingsRow variant="stacked">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CheckForUpdates />
+            {isAdmin ? (
+              <Button
+                type="button"
+                size="sm"
+                data-testid="settings__add-worker"
+                onClick={() => setAdding(true)}
+              >
+                <Plus className="size-3" />
+                Add worker
+              </Button>
+            ) : null}
+          </div>
+
+          {isAdmin && behind.length > 0 ? (
+            <div
+              className="space-y-2 rounded-md border border-warning/40 bg-warning-bg px-3 py-2.5 text-sm"
+              data-testid="settings__workers-behind"
             >
-              <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                <div className="min-w-0 flex-1 basis-24">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate" data-testid="settings__host-name">
-                      {host.name}
-                    </span>
-                    <HostDetailsPopover host={host} />
-                  </div>
-                  {host.usable ? <HostVersionLine host={host} isAdmin={isAdmin} /> : null}
-                </div>
-                <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
-                  <span
-                    data-testid="settings__host-status"
-                    className={`rounded-full px-2.5 py-0.5 text-xs ${STATUS_PILL[host.status] ?? "bg-muted text-muted-foreground"}`}
-                  >
-                    {host.status}
-                  </span>
-                  {host.id !== "local" &&
-                    (admin ? (
-                      <select
-                        aria-label={`Trust level of ${host.name}`}
-                        data-testid="settings__host-trust-select"
-                        title={TRUST_HINT[host.trust]}
-                        value={host.trust}
-                        onChange={(e) => void setTrust(host, e.target.value as TrustLevel)}
-                        className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
-                      >
-                        {TRUST_LEVELS.map((level) => (
-                          <option key={level} value={level}>
-                            {TRUST_LABEL[level]}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span
-                        data-testid="settings__host-trust"
-                        title={TRUST_HINT[host.trust]}
-                        className="rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground"
-                      >
-                        {TRUST_LABEL[host.trust]}
-                      </span>
-                    ))}
-                  {host.id !== "local" && admin && host.status !== "disposed" && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`More actions for ${host.name}`}
-                          data-testid="settings__host-menu"
-                        >
-                          <MoreHorizontal className="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          data-testid="settings__host-evacuate"
-                          onClick={() => setEvacuating(host.id)}
-                        >
-                          Move all worktrees on this worker…
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                  {host.id !== "local" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Remove worker ${host.name}`}
-                      title="Remove worker"
-                      data-testid="settings__host-remove"
-                      disabled={host.status === "online" || host.status === "lost"}
-                      onClick={() => void removeHost(host)}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  )}
-                </div>
+              <div className="flex items-start gap-2">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+                <p data-testid="settings__workers-behind-text">
+                  {behind
+                    .map(
+                      (h) =>
+                        `${h.name} is behind the hub (${h.workerVersion ?? "unknown"}${hubVersion ? `, hub runs ${hubVersion}` : ""})`,
+                    )
+                    .join(". ")}
+                  .
+                </p>
               </div>
-              {host.usable ? (
-                <HostAgentCommands host={host} isAdmin={isAdmin} onChanged={() => void refresh()} />
+              <UpdateAllWorkers behindCount={behind.length} />
+            </div>
+          ) : null}
+
+          <div role="tablist" aria-label="Workers" className="flex gap-1 border-b border-border">
+            {tabs
+              .filter((t) => t.show)
+              .map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t.id}
+                  data-testid={`settings__workers-tab-${t.id}`}
+                  onClick={() => setTab(t.id)}
+                  className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${
+                    tab === t.id
+                      ? "border-foreground font-medium"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+          </div>
+
+          {tab === "workers" ? (
+            <div>
+              <WorkersTable
+                hosts={list}
+                thisComputerId={thisId}
+                thisComputerBundled={thisComputer.status?.bundled === true}
+                onOpen={setOpenId}
+                onDismissUpdate={(hostId) =>
+                  void trpc.workers.dismissUpdate
+                    .mutate({ hostId })
+                    .catch(() => undefined)
+                    .then(() => refetchFresh(HOSTS_KEY))
+                }
+              />
+              <ThisComputerRow computer={thisComputer} />
+            </div>
+          ) : null}
+
+          {tab === "activity" && isAdmin ? (
+            <WorkersActivity entries={audit.data ?? []} hosts={list} />
+          ) : null}
+
+          {tab === "tokens" ? (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Revoking a worker token disconnects that worker. Device tokens are in Settings &gt;
+                Devices.
+              </p>
+              {tokens.isError ? (
+                <p
+                  role="alert"
+                  className="text-xs text-muted-foreground"
+                  data-testid="settings__tokens-denied"
+                >
+                  Managing worker tokens needs an admin token.
+                </p>
               ) : null}
-            </li>
-          ))}
-        </ul>
+              <ul className="divide-y divide-border rounded-md border border-border">
+                {(tokens.data ?? []).map((token) => (
+                  <li
+                    key={token.id}
+                    data-testid="settings__token"
+                    data-token-id={token.id}
+                    data-state={token.state}
+                    className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate">{token.label || KIND_LABEL[token.kind]}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {KIND_LABEL[token.kind]}
+                        {token.admin ? " (admin)" : ""} · {token.state} · Last used{" "}
+                        {formatTime(token.lastUsedAt)}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {revokeError?.id === token.id ? (
+                        <ErrorPopover
+                          label="Could not revoke the token"
+                          testId="settings__token-revoke-error"
+                          message={revokeError.message}
+                        />
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Revoke token ${token.label || token.id}`}
+                        disabled={token.state !== "active"}
+                        onClick={() => void revoke(token)}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
       </SettingsRow>
-      {(hosts.data ?? [])
+
+      <WorkerDrawer
+        host={open}
+        isAdmin={isAdmin}
+        sessionToken={sessionToken}
+        isThisComputer={open !== null && open.id === thisId}
+        thisComputer={thisComputer}
+        onClose={() => setOpenId(null)}
+        onEvacuate={setEvacuating}
+        refresh={refresh}
+      />
+      {list
         .filter((h) => h.id === evacuating)
         .map((h) => (
           <EvacuateHostDialog
             key={h.id}
             open
-            onOpenChange={(open) => {
-              if (!open) setEvacuating(null);
+            onOpenChange={(isOpen) => {
+              if (!isOpen) setEvacuating(null);
             }}
             from={h}
-            hosts={hosts.data ?? []}
+            hosts={list}
           />
         ))}
-
-      {admin ? (
-        <SettingsRow
-          variant="stacked"
-          label="Cross-worker activity"
-          description="What agents on admin workers did across workers or as an admin: the newest calls first."
-        >
-          {(audit.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground" data-testid="settings__audit-empty">
-              Nothing yet.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border">
-              {(audit.data ?? []).map((entry) => (
-                <li
-                  key={entry.id}
-                  data-testid="settings__audit-entry"
-                  data-procedure={entry.procedure}
-                  className="px-3 py-2 text-xs"
-                >
-                  <span className="font-medium">{entry.procedure}</span>
-                  {" · from "}
-                  {entry.callerHostId}
-                  {entry.targetHostId ? ` to ${entry.targetHostId}` : ""}
-                  {entry.target ? ` (${entry.target})` : ""}
-                  {entry.chatId ? ` · chat ${entry.chatId}` : ""}
-                  {" · "}
-                  {formatTime(entry.at)}
-                </li>
-              ))}
-            </ul>
-          )}
-        </SettingsRow>
-      ) : null}
-
-      <ProvisionHostRow />
-
-      <SettingsRow
-        variant="stacked"
-        label="Manual install"
-        description="Create a one-time token for a worker on another computer. It works once and expires in an hour."
-      >
-        {!adding ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="settings__add-worker"
-            onClick={() => setAdding(true)}
-          >
-            <Plus className="size-3" />
-            Add worker
-          </Button>
-        ) : issued ? (
-          <div className="space-y-2" data-testid="settings__bootstrap-result">
-            <p className="text-xs text-muted-foreground">
-              Copy this now. The hub keeps only a hash of the token and cannot show it again.
-            </p>
-            <label className="block text-xs font-medium" htmlFor="bootstrap-token">
-              Bootstrap token
-            </label>
-            <Input
-              id="bootstrap-token"
-              readOnly
-              value={issued.token}
-              data-testid="settings__bootstrap-token"
-              className="h-8 font-mono text-xs"
-            />
-            <div className="text-xs font-medium">Run on the worker</div>
-            <div role="tablist" aria-label="Install method" className="flex flex-wrap gap-1">
-              {WORKER_INSTALL_TABS.map((tab) => (
-                <Button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={installTab === tab.id}
-                  data-testid={`settings__install-tab-${tab.id}`}
-                  variant={installTab === tab.id ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => setInstallTab(tab.id)}
-                >
-                  {tab.label}
-                </Button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {WORKER_INSTALL_TABS.find((t) => t.id === installTab)?.hint}
-            </p>
-            <textarea
-              aria-label="Worker install command"
-              readOnly
-              rows={installTab === "compose" ? 14 : 4}
-              value={installCommand}
-              data-testid="settings__worker-command"
-              data-tab={installTab}
-              className="w-full rounded-md border border-border bg-transparent p-2 font-mono text-xs"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="settings__copy-worker-command"
-              onClick={() => copy(installCommand)}
-            >
-              <Copy className="size-3" />
-              Copy command
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={closeAdd}>
-              Done
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <Input
-              aria-label="Worker name"
-              placeholder="Worker name"
-              value={hostName}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHostName(e.target.value)}
-              className="h-8 text-sm"
-            />
-            <Input
-              aria-label="Labels"
-              placeholder="Labels, comma separated (optional)"
-              value={labels}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLabels(e.target.value)}
-              className="h-8 text-sm"
-            />
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy || hostName.trim() === ""}
-                onClick={() => void issue()}
-              >
-                Create token
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={closeAdd}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-        {error ? (
-          <p role="alert" className="mt-2 text-xs text-destructive">
-            {error}
-          </p>
-        ) : null}
-      </SettingsRow>
-
-      <SettingsRow
-        variant="stacked"
-        label="Worker tokens"
-        description="Revoking a worker token disconnects that worker. Device tokens are in Settings > Devices."
-      >
-        {tokens.isError ? (
-          <p
-            role="alert"
-            className="text-xs text-muted-foreground"
-            data-testid="settings__tokens-denied"
-          >
-            Managing worker tokens needs an admin token.
-          </p>
-        ) : null}
-        <ul className="divide-y divide-border rounded-md border border-border">
-          {(tokens.data ?? []).map((token) => (
-            <li
-              key={token.id}
-              data-testid="settings__token"
-              data-token-id={token.id}
-              data-state={token.state}
-              className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
-            >
-              <div className="min-w-0">
-                <div className="truncate">{token.label || KIND_LABEL[token.kind]}</div>
-                <div className="text-xs text-muted-foreground">
-                  {KIND_LABEL[token.kind]}
-                  {token.admin ? " (admin)" : ""} · {token.state} · Last used{" "}
-                  {formatTime(token.lastUsedAt)}
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                aria-label={`Revoke token ${token.label || token.id}`}
-                disabled={token.state !== "active"}
-                onClick={() => void revoke(token)}
-              >
-                Revoke
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </SettingsRow>
+      <AddWorkerDialog open={adding} onOpenChange={setAdding} onIssued={refresh} />
     </>
   );
 }

@@ -215,7 +215,7 @@ for (const width of WIDTHS) {
       await settingsPage.openDialog("hosts");
       await settingsPage.addWorker(`phone-worker-${width}-with-a-long-host-name`, "");
       await expect(settingsPage.workerCommand()).toBeVisible();
-      await expectFits(await measureDialogOverflow(settingsPage.dialog));
+      await expectFits(await measureDialogOverflow(settingsPage.addWorkerHubDialog()));
     });
 
     test("Connect details fit the screen", async ({ page }) => {

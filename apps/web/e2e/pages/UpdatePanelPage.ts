@@ -2,7 +2,7 @@
  * Page object for the "update available" badge in the sidebar footer, the update panel it opens,
  * and the Update button with its confirm dialog (on the panel and on Settings > Hosts). The
  * `data-testid`s are set in `UpdateAvailableBadge.tsx`, `UpdatePanelDialog.tsx`,
- * `WorkerUpdateButton.tsx`, `CopyCommand.tsx` and `HostVersionLine.tsx`.
+ * `WorkerUpdateButton.tsx`, `CopyCommand.tsx` and `WorkersTable.tsx`.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";

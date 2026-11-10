@@ -1,7 +1,8 @@
 /**
  * The update controls in Settings: the hub (Settings > Hub, for an admin on every client) and each
- * worker row (Settings > Workers) show the same thing: the latest release, Check for updates, the
- * update button when a newer release exists and the Update automatically switch. A worker that
+ * worker's drawer (Settings > Workers) show the update button when a newer release exists and the
+ * Update automatically switch; the hub also shows the latest release and Check for updates, and the
+ * Workers page has one Check for updates. A worker that
  * cannot update itself shows why instead.
  *
  * The hub asks an Express stub of GitHub's "latest release" endpoint. The workers are stand-ins on
@@ -119,18 +120,19 @@ test.describe("update controls in Settings", () => {
     });
   }
 
-  test("S2: a worker that is behind has the same controls and the switch persists", async ({
+  test("S2: a worker that is behind has its controls in the drawer and the switch persists", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const update = new UpdateSettingsPage(page, server.url, TOKEN);
     await update.openWorkers();
-    await expect(update.workerLatest("behind-box")).toBeVisible();
-    await update.workerCheck("behind-box").click();
-    await expect(update.workerLatest("behind-box")).toContainText("9.0.0");
+    // One Check for updates for the whole page, not one per worker.
+    await expect(update.checkButtons()).toHaveCount(1);
+    await update.openWorker("behind-box");
     await update.toggle(update.workerAuto("behind-box"), true);
     await update.reload();
     await update.settings.openDialog("hosts");
+    await update.openWorker("behind-box");
     await expect(update.workerAuto("behind-box")).toBeChecked();
     await update.toggle(update.workerAuto("behind-box"), false);
   });
@@ -139,7 +141,8 @@ test.describe("update controls in Settings", () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const update = new UpdateSettingsPage(page, server.url, TOKEN);
     await update.openWorkers();
-    await update.workerUpdateButton("behind-box").click();
+    await update.openWorker("behind-box");
+    await update.workerUpdateButton().click();
     await page.getByTestId("update-worker__confirm").click();
     await expect(update.workerVersion("behind-box")).toHaveAttribute("data-version", HUB_VERSION, {
       timeout: 30_000,
@@ -151,20 +154,18 @@ test.describe("update controls in Settings", () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const update = new UpdateSettingsPage(page, server.url, TOKEN);
     await update.openWorkers();
-    await expect(update.workerBlocked("bundled-box")).toContainText(
-      "it updates with the desktop app",
-    );
+    await update.openWorker("bundled-box");
+    await expect(update.workerBlocked()).toContainText("it updates with the desktop app");
     await expect(update.workerAuto("bundled-box")).toHaveCount(0);
-    await expect(update.workerUpdateButton("bundled-box")).toHaveCount(0);
+    await expect(update.workerUpdateButton()).toHaveCount(0);
   });
 
   test("S4: a worker ahead of the hub says it is not updated", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const update = new UpdateSettingsPage(page, server.url, TOKEN);
     await update.openWorkers();
-    await expect(
-      update.workerRow("ahead-box").getByTestId("worker-update__auto-note"),
-    ).toContainText("Newer than the hub");
+    await update.openWorker("ahead-box");
+    await expect(update.workerAutoNote()).toContainText("Newer than the hub");
     await expect(update.workerAuto("ahead-box")).toBeDisabled();
   });
 
@@ -182,7 +183,8 @@ test.describe("update controls in Settings", () => {
     await update.openWorkers();
     await expect(update.settings.dialog.getByTestId("settings__nav-hub")).toHaveCount(0);
     await expect(update.workerRow("behind-box")).toBeVisible();
+    await update.openWorker("behind-box");
     await expect(update.workerAuto("behind-box")).toHaveCount(0);
-    await expect(update.workerCheck("behind-box")).toHaveCount(0);
+    await expect(update.checkButtons()).toHaveCount(0);
   });
 });

@@ -59,7 +59,7 @@ Run it as the normal user on a blank Linux or macOS machine. It installs Node if
 
 ## Manual install
 
-Settings > Workers > Manual install > Add worker creates a one-time token. Copy it right away, because the hub keeps only a hash and cannot show it again. The token works once and expires in an hour. The dialog offers the command for each method.
+Settings > Workers > Add worker > Manual install creates a one-time token. Copy it right away, because the hub keeps only a hash and cannot show it again. The token works once and expires in an hour. The dialog offers the command for each method.
 
 ### npm service
 

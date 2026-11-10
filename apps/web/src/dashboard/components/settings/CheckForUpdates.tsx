@@ -39,7 +39,7 @@ export function CheckForUpdates() {
   };
 
   return (
-    <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
       <Button
         type="button"
         variant="outline"
@@ -51,7 +51,7 @@ export function CheckForUpdates() {
         {checking ? "Checking…" : "Check for updates"}
       </Button>
       <span data-testid="settings__check-updates-last">
-        {checkedAt ? `Last checked ${new Date(checkedAt).toLocaleString()}` : "Not checked yet"}
+        {checkedAt ? `Checked ${new Date(checkedAt).toLocaleString()}` : "Not checked yet"}
       </span>
       {error ? (
         <Popover>

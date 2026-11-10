@@ -630,70 +630,97 @@ export class SettingsPage {
   /** One row per worker in the Workers section, the local one included.
    *  `data-testid` set in `HostsSettings.tsx`. */
   hostRows(): Locator {
-    return this.dialog.getByTestId("settings__host");
+    return this.page.getByTestId("settings__host");
   }
 
-  /** The row of one worker by id, matched on the id the row prints. */
+  /** The row of one worker by id (`data-host-id` on the row, set in `WorkersTable.tsx`). */
   hostRow(hostId: string): Locator {
-    return this.hostRows().filter({
-      has: this.page.getByTestId(`settings__host-details--${hostId}`),
+    return this.hostRows().and(this.page.locator(`[data-host-id="${hostId}"]`));
+  }
+
+  /** The worker drawer (a side sheet outside the Settings dialog). Set in `WorkerDrawer.tsx`. */
+  hostDrawer(): Locator {
+    return this.page.getByTestId("settings__host-drawer");
+  }
+
+  /** Opens the drawer of a worker by clicking its row. Does nothing when it is open for that worker. */
+  async openHostDrawer(hostId: string): Promise<Locator> {
+    return test.step(`Open the drawer of worker ${hostId}`, async () => {
+      const drawer = this.hostDrawer();
+      if (!(await drawer.isVisible()) || (await drawer.getAttribute("data-host-id")) !== hostId) {
+        await this.closeHostDrawer();
+        await this.hostRow(hostId).getByTestId("settings__host-name").click();
+      }
+      await expect(drawer).toHaveAttribute("data-host-id", hostId);
+      return drawer;
     });
   }
 
-  /** Opens the details popover of a worker row (id, labels, last seen, agents, roots, OS, capabilities). */
+  /** Closes the worker drawer when it is open. */
+  async closeHostDrawer(): Promise<void> {
+    const drawer = this.hostDrawer();
+    // An open popover takes the first Escape, so press until the drawer is gone.
+    await expect(async () => {
+      if (await drawer.isVisible()) await this.page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden({ timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
+  }
+
+  /** Opens the drawer of a worker and returns its Details section (id, labels, last seen, agents, roots, OS, capabilities). */
   async openHostDetails(hostId: string): Promise<Locator> {
     return test.step(`Open the details of worker ${hostId}`, async () => {
-      const popover = this.page.getByTestId("settings__host-details");
-      if (!(await popover.isVisible())) {
-        await this.hostRow(hostId).getByTestId(`settings__host-details--${hostId}`).click();
-      }
-      await expect(popover).toBeVisible();
-      return popover;
+      const drawer = await this.openHostDrawer(hostId);
+      return drawer.getByTestId("settings__host-details");
     });
   }
 
-  /** The coding agents list of a worker row. Set in `HostAgentCommands.tsx`. */
-  hostAgentsList(hostId: string): Locator {
-    return this.hostRow(hostId).getByTestId("settings__host-agents-commands");
+  /** The coding agents list in the drawer. Open the drawer first. Set in `HostAgentCommands.tsx`. */
+  hostAgentsList(_hostId: string): Locator {
+    return this.hostDrawer().getByTestId("settings__host-agents-commands");
   }
 
-  /** The status pill of a worker row, the first of its actions. Set in `HostsSettings.tsx`. */
+  /** The status pill of a worker row. Set in `WorkersTable.tsx`. */
   hostStatusPill(hostId: string): Locator {
     return this.hostRow(hostId).getByTestId("settings__host-status");
   }
 
-  /** The trust level selector of a worker row (admin tokens). Set in `HostsSettings.tsx`. */
-  hostTrustSelect(hostId: string): Locator {
-    return this.hostRow(hostId).getByTestId("settings__host-trust-select");
+  /** The trust level segmented control in the drawer (admin tokens). Open the drawer first. */
+  hostTrustControl(_hostId: string): Locator {
+    return this.hostDrawer().getByRole("radiogroup");
   }
 
-  /** The command field of a coding agent in a worker's Agent commands section (admin tokens). */
-  hostAgentCommandInput(hostId: string, agentId: string): Locator {
-    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-input`);
+  /** One level of the trust control. */
+  hostTrustOption(hostId: string, level: "restricted" | "standard" | "admin"): Locator {
+    const label = { restricted: "Restricted", standard: "Standard", admin: "Admin" }[level];
+    return this.hostTrustControl(hostId).getByRole("radio", { name: label });
   }
 
-  /** What an agent runs on a worker, as the row prints it. */
-  hostAgentCommandEffective(hostId: string, agentId: string): Locator {
-    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-effective`);
+  /** The command field of a coding agent in the drawer's Agents section (admin tokens). */
+  hostAgentCommandInput(_hostId: string, agentId: string): Locator {
+    return this.hostDrawer().getByTestId(`settings__host-agent-command-${agentId}-input`);
+  }
+
+  /** What an agent runs on a worker, as the drawer prints it. */
+  hostAgentCommandEffective(_hostId: string, agentId: string): Locator {
+    return this.hostDrawer().getByTestId(`settings__host-agent-command-${agentId}-effective`);
   }
 
   /** The not found warning for an agent's overridden command on a worker. */
-  hostAgentCommandNotFound(hostId: string, agentId: string): Locator {
-    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-not-found`);
+  hostAgentCommandNotFound(_hostId: string, agentId: string): Locator {
+    return this.hostDrawer().getByTestId(`settings__host-agent-command-${agentId}-not-found`);
   }
 
   /** The status dot of an agent on a worker: `data-state` is found, missing or unknown. */
-  hostAgentCommandStatus(hostId: string, agentId: string): Locator {
-    return this.hostRow(hostId).getByTestId(`settings__host-agent-command-${agentId}-status`);
+  hostAgentCommandStatus(_hostId: string, agentId: string): Locator {
+    return this.hostDrawer().getByTestId(`settings__host-agent-command-${agentId}-status`);
   }
 
-  /** Opens an agent's row on a worker so its command field shows. */
+  /** Opens an agent's command field in the worker's drawer. */
   async openHostAgentCommand(hostId: string, agentId: string): Promise<void> {
+    await this.openHostDrawer(hostId);
     const input = this.hostAgentCommandInput(hostId, agentId);
     if (await input.isVisible()) return;
-    await this.hostRow(hostId)
-      .getByTestId(`settings__host-agent-command-${agentId}-toggle`)
-      .click();
+    await this.hostDrawer().getByTestId(`settings__host-agent-command-${agentId}-toggle`).click();
     await expect(input).toBeVisible();
   }
 
@@ -702,9 +729,7 @@ export class SettingsPage {
     await test.step(`Set ${agentId} on ${hostId} to ${command}`, async () => {
       await this.openHostAgentCommand(hostId, agentId);
       await this.hostAgentCommandInput(hostId, agentId).fill(command);
-      await this.hostRow(hostId)
-        .getByTestId(`settings__host-agent-command-${agentId}-save`)
-        .click();
+      await this.hostDrawer().getByTestId(`settings__host-agent-command-${agentId}-save`).click();
     });
   }
 
@@ -712,10 +737,13 @@ export class SettingsPage {
   async clearHostAgentCommand(hostId: string, agentId: string): Promise<void> {
     await test.step(`Clear ${agentId} on ${hostId}`, async () => {
       await this.openHostAgentCommand(hostId, agentId);
-      await this.hostRow(hostId)
-        .getByTestId(`settings__host-agent-command-${agentId}-clear`)
-        .click();
+      await this.hostDrawer().getByTestId(`settings__host-agent-command-${agentId}-clear`).click();
     });
+  }
+
+  /** The "Update to <version>" pill of a worker row that is behind the hub. */
+  hostUpdatePill(hostId: string): Locator {
+    return this.hostRow(hostId).getByTestId("settings__host-update-pill");
   }
 
   /** The trust level badge of a worker row (tokens without the admin flag). */
@@ -723,10 +751,11 @@ export class SettingsPage {
     return this.hostRow(hostId).getByTestId("settings__host-trust");
   }
 
-  /** Picks a trust level for a worker in its row. */
+  /** Picks a trust level for a worker in its drawer. */
   async chooseHostTrust(hostId: string, level: "restricted" | "standard" | "admin"): Promise<void> {
     await test.step(`Set ${hostId} to ${level}`, async () => {
-      await this.hostTrustSelect(hostId).selectOption(level);
+      await this.openHostDrawer(hostId);
+      await this.hostTrustOption(hostId, level).click();
     });
   }
 
@@ -1130,7 +1159,7 @@ export class SettingsPage {
     });
   }
 
-  /** The "Check for updates" button and its "Last checked" text on Settings > Workers. */
+  /** The "Check for updates" button and its "Checked" text on Settings > Workers. */
   checkUpdatesButton(): Locator {
     return this.page.getByTestId("settings__check-updates");
   }
@@ -1152,13 +1181,29 @@ export class SettingsPage {
   /** Clicks Remove on a worker row. */
   async removeHost(hostId: string): Promise<void> {
     await test.step(`Remove worker ${hostId}`, async () => {
-      await this.hostRow(hostId).getByTestId("settings__host-remove").click();
+      await this.openHostDrawer(hostId);
+      await this.hostDrawer().getByTestId("settings__host-remove").click();
+      await this.page.getByTestId("settings__host-remove-confirm").click();
     });
   }
 
-  /** The Remove button of a worker row. */
-  hostRemoveButton(hostId: string): Locator {
-    return this.hostRow(hostId).getByTestId("settings__host-remove");
+  /** The Remove worker button in a worker's drawer, which it opens. */
+  async hostRemoveButton(hostId: string): Promise<Locator> {
+    await this.openHostDrawer(hostId);
+    return this.hostDrawer().getByTestId("settings__host-remove");
+  }
+
+  /** The confirm dialog shown by Remove worker. */
+  hostRemoveDialog(): Locator {
+    return this.page.getByTestId("settings__host-remove-dialog");
+  }
+
+  /** Opens a tab of the Workers page: the workers table, Activity or Tokens. */
+  async openWorkersTab(tab: "workers" | "activity" | "tokens"): Promise<void> {
+    await test.step(`Open the ${tab} tab of Settings > Workers`, async () => {
+      await this.closeHostDrawer();
+      await this.dialog.getByTestId(`settings__workers-tab-${tab}`).click();
+    });
   }
 
   /** One row per token in the Workers section's Tokens list. */
@@ -1604,33 +1649,34 @@ export class SettingsPage {
     });
   }
 
-  /** Clicks "Get provisioning command" in the Workers section's "Add a worker" row. */
+  /** Clicks "Get provisioning command" in the Add worker dialog. */
   async getProvisioningCommand(): Promise<void> {
     await test.step("Get the provisioning command", async () => {
-      await this.dialog.getByTestId("settings__provision-create").click();
+      await this.addWorkerButton().click();
+      await this.addWorkerHubDialog().getByTestId("settings__provision-create").click();
     });
   }
 
   /** The `curl ... | sh` line shown after "Get provisioning command". */
   provisionCommand(): Locator {
-    return this.dialog.getByTestId("settings__provision-command");
+    return this.addWorkerHubDialog().getByTestId("settings__provision-command");
   }
 
   provisionExpiry(): Locator {
-    return this.dialog.getByTestId("settings__provision-expiry");
+    return this.addWorkerHubDialog().getByTestId("settings__provision-expiry");
   }
 
   /** The status line of the newest provisioning command; `data-status` holds the state. */
   provisionStatus(): Locator {
-    return this.dialog.getByTestId("settings__provision-status");
+    return this.addWorkerHubDialog().getByTestId("settings__provision-status");
   }
 
   provisionLog(): Locator {
-    return this.dialog.getByTestId("settings__provision-log");
+    return this.addWorkerHubDialog().getByTestId("settings__provision-log");
   }
 
   provisionCopyCloudInitButton(): Locator {
-    return this.dialog.getByTestId("settings__provision-copy-cloud-init");
+    return this.addWorkerHubDialog().getByTestId("settings__provision-copy-cloud-init");
   }
 
   /** The "Add worker" button in the Workers section, before the form opens. */
@@ -1638,25 +1684,32 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__add-worker");
   }
 
-  /** Fills the add-worker form and creates the bootstrap token. */
+  /** The Add worker dialog of Settings > Workers. */
+  addWorkerHubDialog(): Locator {
+    return this.page.getByTestId("settings__add-worker-dialog");
+  }
+
+  /** Opens the Add worker dialog, picks Manual install, fills the form and creates the bootstrap token. */
   async addWorker(hostName: string, labels: string): Promise<void> {
     await test.step(`Add worker "${hostName}"`, async () => {
       await this.expectRowVisible(this.addWorkerButton());
       await this.addWorkerButton().click();
-      await this.dialog.getByRole("textbox", { name: "Worker name" }).fill(hostName);
-      await this.dialog.getByRole("textbox", { name: "Labels" }).fill(labels);
-      await this.dialog.getByRole("button", { name: "Create token" }).click();
+      const dialog = this.addWorkerHubDialog();
+      await dialog.getByRole("radio", { name: "Manual install" }).click();
+      await dialog.getByRole("textbox", { name: "Worker name" }).fill(hostName);
+      await dialog.getByRole("textbox", { name: "Labels" }).fill(labels);
+      await dialog.getByRole("button", { name: "Create token" }).click();
     });
   }
 
   /** The one-time token shown after "Create token". */
   bootstrapToken(): Locator {
-    return this.dialog.getByTestId("settings__bootstrap-token");
+    return this.addWorkerHubDialog().getByTestId("settings__bootstrap-token");
   }
 
   /** The `band-worker` command line shown after "Create token". */
   workerCommand(): Locator {
-    return this.dialog.getByTestId("settings__worker-command");
+    return this.addWorkerHubDialog().getByTestId("settings__worker-command");
   }
 
   /** The bootstrap token's text. */
@@ -1672,7 +1725,7 @@ export class SettingsPage {
   /** Selects an install tab in the add-worker result and returns the command or file it shows. */
   async readInstallCommand(tab: "service" | "foreground" | "docker" | "compose"): Promise<string> {
     return test.step(`Read the "${tab}" install command`, async () => {
-      await this.dialog.getByTestId(`settings__install-tab-${tab}`).click();
+      await this.addWorkerHubDialog().getByTestId(`settings__install-tab-${tab}`).click();
       await expect(this.workerCommand()).toHaveAttribute("data-tab", tab);
       return this.workerCommand().inputValue();
     });
@@ -1682,14 +1735,15 @@ export class SettingsPage {
   async copyWorkerCommand(): Promise<string> {
     return test.step("Copy the install command", async () => {
       await this.page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-      await this.dialog.getByTestId("settings__copy-worker-command").click();
+      await this.addWorkerHubDialog().getByTestId("settings__copy-worker-command").click();
       return this.page.evaluate(() => navigator.clipboard.readText());
     });
   }
 
-  /** Closes the add-worker result panel. */
+  /** Closes the Add worker dialog, which drops the token from the page. */
   async finishAddWorker(): Promise<void> {
-    await this.dialog.getByRole("button", { name: "Done" }).click();
+    await this.page.keyboard.press("Escape");
+    await expect(this.addWorkerHubDialog()).toBeHidden();
   }
 
   /** One row per device in the Devices section. */
@@ -1825,6 +1879,7 @@ export class SettingsPage {
   /** Clicks Revoke on the token row with this label. */
   async revokeToken(label: string): Promise<void> {
     await test.step(`Revoke token "${label}"`, async () => {
+      await this.openWorkersTab("tokens");
       await this.revokeTokenButton(label).click();
     });
   }

@@ -1,6 +1,6 @@
 /**
- * Page object for "this computer as a worker" in the desktop app: the first-run prompt and the
- * "This computer" section of Settings > Workers.
+ * Page object for "this computer as a worker" in the desktop app: the first-run prompt, the
+ * "Add this Mac" row and the "This computer" row and drawer of Settings > Workers.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -32,6 +32,25 @@ export class ThisComputerPage {
     this.switchToBundled = page.getByTestId("this-computer__switch");
     this.localHubNote = page.getByTestId("this-computer__local-hub");
     this.dialog = page.getByRole("dialog", { name: "Settings" });
+  }
+
+  /** Opens the "Add this Mac as a worker" form at the end of the Workers table. */
+  async showAddForm(): Promise<void> {
+    await test.step("Open the Add this Mac form", async () => {
+      if (!(await this.add.isVisible())) await this.page.getByTestId("this-computer__open").click();
+      await expect(this.add).toBeVisible();
+    });
+  }
+
+  /** Opens the drawer of this Mac's worker, which holds Remove and Switch to the bundled worker. */
+  async openDrawer(): Promise<void> {
+    await test.step("Open the drawer of this computer", async () => {
+      await expect(this.state).toBeVisible({ timeout: 60_000 });
+      if (!(await this.page.getByTestId("this-computer-section").isVisible())) {
+        await this.state.click();
+      }
+      await expect(this.page.getByTestId("this-computer-section")).toBeVisible();
+    });
   }
 
   async openHostsSettings(): Promise<void> {

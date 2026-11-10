@@ -160,7 +160,7 @@ test("the Hosts screen shows what the worker offers and removes it once offline"
   await expect(await settingsPage.hostRoots(hostId)).toContainText(root);
 
   // An online host cannot be removed.
-  await expect(settingsPage.hostRemoveButton(hostId)).toBeDisabled();
+  await expect(await settingsPage.hostRemoveButton(hostId)).toBeDisabled();
 
   await worker.kill();
   await expect(settingsPage.hostRow(hostId)).toHaveAttribute("data-status", "offline", {

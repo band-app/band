@@ -1,8 +1,19 @@
-import { Button, Input } from "@band-app/ui";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+} from "@band-app/ui";
 import { useEffect, useState } from "react";
 import { invoke } from "../../../lib/desktop-ipc";
+import { crossOriginHub } from "../../../lib/hub-config";
 import { isDesktop } from "../../../lib/is-desktop";
-import { HubUpdateControls } from "../HubUpdateControls";
+import { ErrorPopover } from "./ErrorPopover";
+import { HubUpdateCard } from "./HubUpdateCard";
 import { SettingsRow } from "./SettingsRow";
 
 interface HubChoiceView {
@@ -16,43 +27,48 @@ interface HubChoiceView {
 type SetResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Rows for the Settings dialog's Hub section. The update controls show for an admin on every
- * client. The hub picker is desktop only: the hub this window talks to. Local runs the hub
- * bundled with the app. Remote connects to a hub at another URL with its token and starts nothing locally. Applying a
- * change reloads the window, so it is not part of the dialog's Save.
+ * Settings > Hub. A Connection card (read-only in the desktop app, with Change… opening the hub
+ * picker in a dialog; in a browser it names the hub the page talks to) and an Updates card for an
+ * admin. Applying a connection change reloads the window, so it is not part of the dialog's Save.
  */
-export function HubSettings() {
+export function HubSettings({ onOpenWorkers }: { onOpenWorkers?: () => void }) {
   return (
     <>
-      {isDesktop ? <HubChoiceRows /> : null}
+      {isDesktop ? <HubConnectionDesktop /> : <HubConnectionBrowser />}
       <SettingsRow
         variant="stacked"
         label="Updates"
-        description="The hub's version, the latest release and how the hub updates. A worker installs the hub's version once the hub runs it. Workers have the same controls in Settings > Workers."
+        description="How the hub updates. A worker installs the hub's version once the hub runs it."
       >
-        <HubUpdateControls inSettings />
+        <HubUpdateCard onOpenWorkers={onOpenWorkers} />
       </SettingsRow>
     </>
   );
 }
 
-function HubChoiceRows() {
-  const [mode, setMode] = useState<"local" | "remote">("local");
-  const [url, setUrl] = useState("");
-  const [token, setToken] = useState("");
+function HubConnectionBrowser() {
+  const url = crossOriginHub()?.origin ?? window.location.origin;
+  return (
+    <SettingsRow variant="stacked" label="Connection" description="The hub this page talks to.">
+      <div className="text-sm" data-testid="settings__hub-connection">
+        <span className="text-muted-foreground">Hub </span>
+        <span className="break-all font-mono text-xs" data-testid="settings__hub-connection-url">
+          {url}
+        </span>
+      </div>
+    </SettingsRow>
+  );
+}
+
+function HubConnectionDesktop() {
   const [saved, setSaved] = useState<HubChoiceView | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [stopLocal, setStopLocal] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     invoke<HubChoiceView>("hub_get_choice")
       .then((choice) => {
-        if (cancelled) return;
-        setSaved(choice);
-        setMode(choice.mode);
-        setUrl(choice.url);
+        if (!cancelled) setSaved(choice);
       })
       .catch(() => {});
     return () => {
@@ -61,6 +77,65 @@ function HubChoiceRows() {
   }, []);
 
   if (!saved) return null;
+  return (
+    <SettingsRow variant="stacked" label="Connection" description="The hub this app talks to.">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-0.5 text-sm" data-testid="settings__hub-connection">
+          <div data-testid="settings__hub-connection-mode" data-mode={saved.mode}>
+            {saved.mode === "local" ? "This Mac" : "Remote hub"}
+          </div>
+          {saved.mode === "remote" ? (
+            <div
+              className="break-all font-mono text-xs text-muted-foreground"
+              data-testid="settings__hub-connection-url"
+            >
+              {saved.url}
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              {saved.localService ? "Runs as a background service." : "Runs with this app."}
+            </div>
+          )}
+          {saved.mode === "remote" ? (
+            <div
+              className="text-xs text-muted-foreground"
+              data-testid="settings__hub-connection-token"
+            >
+              {saved.hasToken ? "Token saved" : "No token saved"}
+            </div>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="settings__hub-change"
+          onClick={() => setOpen(true)}
+        >
+          Change…
+        </Button>
+      </div>
+      <HubChoiceDialog saved={saved} open={open} onOpenChange={setOpen} />
+    </SettingsRow>
+  );
+}
+
+/** The hub picker form: mode, URL, token and Apply and reload. */
+function HubChoiceDialog({
+  saved,
+  open,
+  onOpenChange,
+}: {
+  saved: HubChoiceView;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [mode, setMode] = useState<"local" | "remote">(saved.mode);
+  const [url, setUrl] = useState(saved.url);
+  const [token, setToken] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [stopLocal, setStopLocal] = useState(false);
 
   // A token is "saved" only while the form still points at the saved remote hub.
   const hasToken = saved.hasToken && mode === saved.mode && url.trim() === saved.url;
@@ -88,85 +163,93 @@ function HubChoiceRows() {
   };
 
   return (
-    <>
-      <SettingsRow
-        htmlFor="hub-mode"
-        label="Hub"
-        description="Local runs the hub bundled with this app as a background service, so it keeps running when the app quits. Remote connects to a hub on another machine and starts nothing here."
-      >
-        <select
-          id="hub-mode"
-          data-testid="settings__hub-mode"
-          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as "local" | "remote")}
-        >
-          <option value="local">Local</option>
-          <option value="remote">Remote</option>
-        </select>
-      </SettingsRow>
-      {mode === "remote" ? (
-        <SettingsRow
-          variant="stacked"
-          label="Remote hub"
-          description="The hub's URL and its token. Use https:// unless the hub is on this machine."
-        >
-          <div className="space-y-2">
-            <Input
-              data-testid="settings__hub-url"
-              aria-label="Hub URL"
-              placeholder="https://hub.example.com"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            <Input
-              data-testid="settings__hub-token"
-              aria-label="Hub token"
-              type="password"
-              autoComplete="off"
-              placeholder={hasToken ? "Token (saved, type to replace)" : "Token"}
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-            />
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-[480px]" data-testid="settings__hub-dialog">
+        <DialogHeader>
+          <DialogTitle>Change hub</DialogTitle>
+          <DialogDescription>
+            Local runs the hub bundled with this app as a background service. Remote connects to a
+            hub on another machine and starts nothing here.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs font-medium" htmlFor="hub-mode">
+              Hub
+            </label>
+            <select
+              id="hub-mode"
+              data-testid="settings__hub-mode"
+              className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as "local" | "remote")}
+            >
+              <option value="local">Local</option>
+              <option value="remote">Remote</option>
+            </select>
           </div>
-        </SettingsRow>
-      ) : null}
-      {mode === "remote" && saved.localService ? (
-        <SettingsRow
-          htmlFor="hub-local-service"
-          label="Hub on this Mac"
-          description="The local hub keeps running in the background unless you stop it. Switching back to Local starts it again."
-        >
-          <select
-            id="hub-local-service"
-            data-testid="settings__hub-local-service"
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm"
-            value={stopLocal ? "stop" : "keep"}
-            onChange={(e) => setStopLocal(e.target.value === "stop")}
-          >
-            <option value="keep">Keep running</option>
-            <option value="stop">Stop it</option>
-          </select>
-        </SettingsRow>
-      ) : null}
-      <SettingsRow variant="stacked">
-        <div className="flex items-center gap-3">
+          {mode === "remote" ? (
+            <div className="space-y-2">
+              <Input
+                data-testid="settings__hub-url"
+                aria-label="Hub URL"
+                placeholder="https://hub.example.com"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              <Input
+                data-testid="settings__hub-token"
+                aria-label="Hub token"
+                type="password"
+                autoComplete="off"
+                placeholder={hasToken ? "Token (saved, type to replace)" : "Token"}
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Use https:// unless the hub is on this machine.
+              </p>
+            </div>
+          ) : null}
+          {mode === "remote" && saved.localService ? (
+            <div className="space-y-1">
+              <label className="text-xs font-medium" htmlFor="hub-local-service">
+                Hub on this Mac
+              </label>
+              <select
+                id="hub-local-service"
+                data-testid="settings__hub-local-service"
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
+                value={stopLocal ? "stop" : "keep"}
+                onChange={(e) => setStopLocal(e.target.value === "stop")}
+              >
+                <option value="keep">Keep running</option>
+                <option value="stop">Stop it</option>
+              </select>
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter className="items-center">
+          {error ? (
+            <ErrorPopover
+              label="Could not connect to the hub"
+              testId="settings__hub-error"
+              message={error}
+            />
+          ) : null}
+          <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
           <Button
             type="button"
-            size="sm"
             data-testid="settings__hub-apply"
             disabled={busy || unchanged}
             onClick={() => void apply()}
           >
             {busy ? "Connecting…" : "Apply and reload"}
           </Button>
-          {error ? (
-            <p role="alert" data-testid="settings__hub-error" className="text-xs text-destructive">
-              {error}
-            </p>
-          ) : null}
-        </div>
-      </SettingsRow>
-    </>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

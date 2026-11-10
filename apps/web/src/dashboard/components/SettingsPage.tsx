@@ -865,7 +865,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                   {/* ── Hub (admins; the hub picker inside is desktop only) ── */}
                   {isAdmin && active === "hub" ? (
                     <SettingsSection title="Hub">
-                      <HubSettings />
+                      <HubSettings onOpenWorkers={() => setActive("hosts")} />
                     </SettingsSection>
                   ) : null}
 
