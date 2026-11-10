@@ -5,6 +5,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { useAdapter } from "../../dashboard/context";
 import { useIsDesktop } from "../../hooks/useIsDesktop";
 import { getClientId } from "../../lib/activity-reporter";
+import { fetchDirectFile, putDirectFile } from "../../lib/direct-worker";
 import { fileName, setExtensionDirty } from "../../lib/extensions";
 import { hubFetch, hubUrl } from "../../lib/hub-config";
 import { isDesktop } from "../../lib/is-desktop";
@@ -206,7 +207,8 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
   const [dirty, setDirty] = useState(false);
 
   const fetchBytes = useCallback(async (): Promise<Uint8Array> => {
-    const res = await hubFetch(fileRoute(worktreeId, filePath));
+    const route = fileRoute(worktreeId, filePath);
+    const res = (await fetchDirectFile(route)) ?? (await hubFetch(route));
     if (!res.ok) throw new Error(`Could not read the file (${res.status})`);
     return new Uint8Array(await res.arrayBuffer());
   }, [worktreeId, filePath]);
@@ -241,11 +243,15 @@ export const ExtensionEditor = forwardRef<ExtensionEditorHandle, Props>(function
       knownRef.current = bytes.slice();
       setSaveError(null);
       try {
-        const res = await hubFetch(fileRoute(worktreeId, filePath), {
-          method: "PUT",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: bytes.slice().buffer,
-        });
+        const route = fileRoute(worktreeId, filePath);
+        const payload = bytes.slice();
+        const res =
+          (await putDirectFile(route, payload)) ??
+          (await hubFetch(route, {
+            method: "PUT",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: payload.buffer,
+          }));
         if (!res.ok) throw new Error(`Save failed (${res.status})`);
         markDirty(false);
         setConflict(null);

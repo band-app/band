@@ -28,6 +28,49 @@ interface AttachedPty {
   attachment: TerminalAttachment;
 }
 
+export interface SpawnTerminalParams {
+  worktreeId: string;
+  terminalId: string;
+  /** The worktree's canonical root, already checked against the path policy and the lease. */
+  worktreeRoot: string;
+  options?: SpawnOptions;
+  cleanupOnExit?: boolean;
+}
+
+/**
+ * Starts a PTY on this worker: the `pty.spawn` method of the hub's link, and the direct listener's
+ * `terminal.create`. Adds the worker's own environment (its `band` CLI, a GitHub token, extension
+ * variables) and checks that `cwd` passes the path policy.
+ */
+export async function spawnTerminal(ctx: WorkerContext, params: SpawnTerminalParams) {
+  const { host, policy } = ctx;
+  const { worktreeRoot } = params;
+  let options = params.options;
+  // The worker's `band` CLI goes first. A PATH in `options.env` would replace the pool's
+  // login-shell PATH, so this starts from that PATH unless the hub set one.
+  const cliDir = await ctx.cli?.dir();
+  if (cliDir) {
+    const base = options?.env?.PATH ?? (await shellPath());
+    options = { ...options, env: { ...options?.env, PATH: [cliDir, base].join(delimiter) } };
+  }
+  const ghEnv = await ghTokenEnv(ctx);
+  if (ghEnv.GH_TOKEN) options = { ...options, env: { ...options?.env, ...ghEnv } };
+  // Variables an extension service gives this worktree's terminals (the DISPLAY of its desktop).
+  const extensionEnv = (await ctx.extensions?.worktreeEnv(params.worktreeId, worktreeRoot)) ?? {};
+  if (Object.keys(extensionEnv).length > 0) {
+    options = { ...options, env: { ...options?.env, ...extensionEnv } };
+  }
+  // The pool resolves `cwd` inside the worktree root, so check where that lands.
+  if (options?.cwd !== undefined) await policy.resolve(resolve(worktreeRoot, options.cwd));
+  return host.pty.spawn({
+    worktreeId: params.worktreeId,
+    terminalId: params.terminalId,
+    worktreeRoot,
+    options,
+    cleanupOnExit: params.cleanupOnExit,
+  });
+}
+
 /**
  * The methods that open channels: file streams, search, language servers,
  * PTYs and agent stdio. The worker opens each channel and names its id in the
@@ -255,34 +298,16 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
     const worktreeRoot = await path(a, "worktreeRoot");
     ctx.lease.assertMayRun(worktreeRoot);
     const o = optObj(a, "options");
-    let options: SpawnOptions | undefined = o && {
-      command: optStr(o, "command"),
-      cwd: optStr(o, "cwd"),
-      env: o.env === undefined ? undefined : strRecord(o, "env"),
-      unsetEnv: o.unsetEnv === undefined ? undefined : strArray(o, "unsetEnv"),
-    };
-    // The worker's `band` CLI goes first. A PATH in `options.env` would replace the pool's
-    // login-shell PATH, so this starts from that PATH unless the hub set one.
-    const cliDir = await ctx.cli?.dir();
-    if (cliDir) {
-      const base = options?.env?.PATH ?? (await shellPath());
-      options = { ...options, env: { ...options?.env, PATH: [cliDir, base].join(delimiter) } };
-    }
-    const ghEnv = await ghTokenEnv(ctx);
-    if (ghEnv.GH_TOKEN) options = { ...options, env: { ...options?.env, ...ghEnv } };
-    // Variables an extension service gives this worktree's terminals (the DISPLAY of its desktop).
-    const extensionEnv =
-      (await ctx.extensions?.worktreeEnv(str(a, "worktreeId"), worktreeRoot)) ?? {};
-    if (Object.keys(extensionEnv).length > 0) {
-      options = { ...options, env: { ...options?.env, ...extensionEnv } };
-    }
-    // The pool resolves `cwd` inside the worktree root, so check where that lands.
-    if (options?.cwd !== undefined) await policy.resolve(resolve(worktreeRoot, options.cwd));
-    return pty.spawn({
+    return spawnTerminal(ctx, {
       worktreeId: str(a, "worktreeId"),
       terminalId: str(a, "terminalId"),
       worktreeRoot,
-      options,
+      options: o && {
+        command: optStr(o, "command"),
+        cwd: optStr(o, "cwd"),
+        env: o.env === undefined ? undefined : strRecord(o, "env"),
+        unsetEnv: o.unsetEnv === undefined ? undefined : strArray(o, "unsetEnv"),
+      },
       cleanupOnExit: optBool(a, "cleanupOnExit"),
     });
   });

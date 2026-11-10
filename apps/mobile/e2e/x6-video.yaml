@@ -1,6 +1,7 @@
-# S: a video opens in the system player. A tap shows the controls (Pause while it plays), the
-# fullscreen button opens the full-screen player, Done returns, and a swipe back from the edge
-# leaves the file screen.
+# S: a video opens with the app's own controls (play, time, scrubber, duration, skip, full screen).
+# Play advances the time, a tap brings the controls back after they hide, Pause stops, skip moves
+# the time, Full screen opens the system player and Done returns, and a back swipe leaves the
+# screen and stops playback.
 appId: app.getband.mobile
 name: X6 the video viewer
 ---
@@ -22,50 +23,63 @@ name: X6 the video viewer
     visible:
       id: file__video
     timeout: 15000
-- takeScreenshot: x6-video-opened
-# The system controls are drawn by AVKit outside the app's accessibility tree (the hierarchy shows
-# only "Video"), so they are driven by position and judged from the screenshots.
-# S1: a tap shows the controls; the centre button plays, then pauses.
+# S1: the controls show on open.
+- extendedWaitUntil:
+    visible:
+      id: file__video-play
+    timeout: 10000
+- assertVisible:
+    id: file__video-time
+    text: "0:00"
+- assertVisible:
+    id: file__video-duration
+- assertVisible:
+    id: file__video-scrubber
+- takeScreenshot: x6-controls-on-open
 - tapOn:
-    id: file__video
-- takeScreenshot: x6-controls
+    id: file__video-play
+- extendedWaitUntil:
+    notVisible:
+      id: file__video-time
+      text: "0:00"
+    timeout: 10000
+- takeScreenshot: x6-playing
+# S4: the controls hide after 3 s of playback and a tap brings them back.
+- extendedWaitUntil:
+    notVisible:
+      id: file__video-play
+    timeout: 8000
+- takeScreenshot: x6-controls-hidden
+# S2: a tap on the video shows them again.
 - tapOn:
-    point: 50%, 52%
-- takeScreenshot: x6-toggled-1
+    id: file__video-surface
+- assertVisible:
+    id: file__video-play
 - tapOn:
-    point: 50%, 52%
-- takeScreenshot: x6-toggled-2
-# S2: the top-left button opens fullscreen. The file header is covered, landscape fills the
-# screen, and closing it brings the file screen back.
-# A tap on the video toggles the controls and one of them may already be showing, so each attempt
-# taps the video and then the button; the two taps cover both states within two attempts.
-- repeat:
-    times: 4
-    commands:
-      - runFlow:
-          when:
-            visible:
-              id: file__back
-          commands:
-            - tapOn:
-                point: 50%, 30%
-            - tapOn:
-                point: 7%, 16%
-            - extendedWaitUntil:
-                notVisible:
-                  id: file__back
-                timeout: 4000
-                optional: true
+    id: file__video-play
+- takeScreenshot: x6-paused
+# Skip forward moves the time on, skip back moves it back.
+- tapOn:
+    id: file__video-forward
+- takeScreenshot: x6-skip-forward
+- tapOn:
+    id: file__video-back
+- takeScreenshot: x6-skip-back
+# Dragging the scrubber seeks.
+- swipe:
+    from:
+      id: file__video-scrubber
+    direction: RIGHT
+    duration: 400
+- takeScreenshot: x6-scrubbed
+# S3: Full screen opens the system player; Done returns to the file screen.
+- tapOn:
+    id: file__video-fullscreen
 - extendedWaitUntil:
     notVisible:
       id: file__back
     timeout: 8000
-- takeScreenshot: x6-fullscreen-portrait
-- setOrientation: LANDSCAPE_LEFT
-- waitForAnimationToEnd
-- takeScreenshot: x6-fullscreen-landscape
-- setOrientation: PORTRAIT
-- waitForAnimationToEnd
+- takeScreenshot: x6-fullscreen
 - tapOn:
     point: 50%, 50%
 - tapOn:
@@ -75,7 +89,7 @@ name: X6 the video viewer
       id: file__back
     timeout: 5000
 - takeScreenshot: x6-after-done
-# S3: the system back swipe returns to the explorer.
+# S5: the system back swipe returns to the explorer and stops playback.
 - swipe:
     start: 1%, 50%
     end: 80%, 50%

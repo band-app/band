@@ -7,6 +7,7 @@ import { stopAllAgentProcesses } from "@band-app/host-local/agents/agent-spawn";
 import {
   CAPABILITY_CHAT_OWNERSHIP,
   CAPABILITY_DIRECT,
+  CAPABILITY_DIRECT_TERMINAL,
   type Channel,
   type LeaseRenewParams,
   type LifecycleIdleReply,
@@ -250,6 +251,7 @@ export class Worker {
             .map(([name]) => name),
           // The loopback listener for the desktop app on this machine (`direct.ts`).
           CAPABILITY_DIRECT,
+          CAPABILITY_DIRECT_TERMINAL,
           ...(config.ownChats ? [CAPABILITY_CHAT_OWNERSHIP] : []),
           ...runningPlugins.capabilities(),
         ],

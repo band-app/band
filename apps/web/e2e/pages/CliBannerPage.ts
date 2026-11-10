@@ -1,6 +1,6 @@
 /**
- * Page object for the "Install band CLI" banner in the dashboard shell. The `data-testid`s are
- * set in `DashboardShell.tsx`.
+ * Page object for the "Install band CLI" notification in the toast stack. The `data-testid`s are
+ * set in `DashboardShell.tsx` and `Notification.tsx`.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
@@ -16,7 +16,7 @@ export class CliBannerPage {
     private readonly token: string,
   ) {
     this.banner = page.getByTestId("cli-banner");
-    this.message = page.getByTestId("cli-banner__message");
+    this.message = page.getByTestId("cli-banner__details");
     this.installButton = page.getByTestId("cli-banner__install");
   }
 

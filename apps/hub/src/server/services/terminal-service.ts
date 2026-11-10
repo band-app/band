@@ -10,10 +10,17 @@ import type {
   TerminalListEntry,
 } from "@band-app/host-local/terminals/terminal-backend";
 import { TitlePoller } from "@band-app/host-local/terminals/title-poller";
+import {
+  CAPABILITY_DIRECT_TERMINAL,
+  METHOD_TERMINAL_CREATED,
+  type ServerSession,
+  type TerminalCreatedParams,
+} from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import type { WorktreeTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
 import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
+import { resumeCommandFor } from "./_utils/agent-resume-command";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
@@ -274,16 +281,20 @@ export class TerminalService {
         })
       : null;
     const spawnEnv = { ...options?.env, ...login?.env, ...grant?.env };
+    // A saved terminal whose PTY was lost resumes the agent it ran, by the
+    // provider session id the agent's hooks reported.
+    const resumeCommand = options?.command ? undefined : resumeCommandFor(terminalId);
     const request = {
       worktreeId,
       terminalId,
       worktreeRoot: root,
       options:
-        grant || login
+        grant || login || resumeCommand !== undefined
           ? {
               ...options,
               env: spawnEnv,
               ...(login?.unsetEnv.length ? { unsetEnv: login.unsetEnv } : {}),
+              ...(resumeCommand !== undefined ? { resumeCommand } : {}),
             }
           : options,
       cleanupOnExit: opts?.cleanupOnExit,
@@ -346,6 +357,49 @@ export class TerminalService {
     });
 
     return entry;
+  }
+
+  /** Workers' link sessions, so {@link supportsDirectCreate} reads the capabilities of the live one. */
+  private readonly workerSessions = new Map<string, ServerSession>();
+
+  /** Hears the terminals a worker opened for the desktop app on its direct listener. */
+  attachWorker(session: ServerSession): void {
+    this.workerSessions.set(session.workerId, session);
+    session.onNotification(METHOD_TERMINAL_CREATED, (params) => {
+      this.onDirectCreated(session.workerId, params as TerminalCreatedParams);
+    });
+  }
+
+  /** Whether the worker is online with a build that creates terminals on its direct listener. */
+  supportsDirectCreate(hostId: string): boolean {
+    const session = this.workerSessions.get(hostId);
+    return (
+      session?.attached === true && session.hello.capabilities.includes(CAPABILITY_DIRECT_TERMINAL)
+    );
+  }
+
+  /**
+   * A worker spawned a terminal itself. Records it and announces it as the `terminal.create`
+   * mutation does for its own. The worker is told nothing back: the shell already runs.
+   */
+  private onDirectCreated(workerId: string, params: TerminalCreatedParams): void {
+    const { worktreeId, terminalId } = params;
+    if (typeof worktreeId !== "string" || typeof terminalId !== "string") return;
+    const resolved = worktreeService.resolve(worktreeId);
+    // A worker may only announce terminals of its own worktrees.
+    if (!resolved) return;
+    const host = this.hostOfWorktree(worktreeId);
+    if (host.id !== workerId) {
+      log.warn(`worker ${workerId} announced a terminal of ${worktreeId}, which is on ${host.id}`);
+      return;
+    }
+    this.ptyOf(host);
+    this.terminalHosts.set(terminalId, host);
+    addTerminalToLayout(worktreeId, terminalId, {
+      command: typeof params.command === "string" ? params.command : undefined,
+      cwd: typeof params.cwd === "string" ? params.cwd : undefined,
+    });
+    emit({ kind: "terminal-created", worktreeId, terminalId });
   }
 
   /** The id of the host a terminal runs on, or null when this service does not know the terminal. */

@@ -131,8 +131,13 @@ describe("send and stream on the direct path (S1)", () => {
     const events = await directTurn("hello on loopback", 0);
     expect(agentText(events)).toContain("hello on loopback");
     expect(events.find((e) => e.type === "prompt")).toMatchObject({ text: "hello on loopback" });
-    // The agent ran on the worker, which logged the turn itself.
-    expect(workerLog().some((r) => r.kind === "turn-ended")).toBe(true);
+    // The agent ran on the worker, which logged the turn itself. The worker sends an event on the
+    // stream while the batch holding its row is still open, so the row shows in the file (read
+    // through a second connection) only once the batch commits.
+    await waitFor(() => (workerLog().some((r) => r.kind === "turn-ended") ? true : undefined), {
+      label: "the worker's turn-ended row",
+      timeoutMs: 10_000,
+    });
   }, 90_000);
 
   it("leaves the hub with the same log, which a second client reads", async () => {
@@ -182,6 +187,11 @@ describe("send and stream on the direct path (S1)", () => {
       text: "",
       files: [{ filename: "shot.png" }],
     });
+    // The stream shows the turn's last row before its batch commits (see the first test).
+    await waitFor(
+      () => (workerLog().some((r) => r.id > after && r.kind === "turn-ended") ? true : undefined),
+      { label: "the worker's turn-ended row for the image turn", timeoutMs: 10_000 },
+    );
   }, 90_000);
 
   it("refuses the chat routes without a token and with a token for another worktree", async () => {

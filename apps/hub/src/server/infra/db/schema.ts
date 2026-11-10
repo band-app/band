@@ -1,4 +1,5 @@
 import type { PullRequestSummary } from "@band-app/host-local/git/git-client";
+import type { AgentSessionEndReason } from "@band-app/shared/agent-sessions";
 import {
   index,
   integer,
@@ -683,6 +684,14 @@ export const agentSessions = sqliteTable(
     chatId: text("chat_id"),
     terminalId: text("terminal_id"),
     state: text("state", { enum: ["starting", "running", "ended"] }).notNull(),
+    /** SHA-256 of the launch token in the agent's PTY env; the token itself is never stored. */
+    launchTokenHash: text("launch_token_hash"),
+    /** Why the session ended: `killed`, `session-end`, `replaced`, `lost`, `removed`. */
+    endReason: text("end_reason").$type<AgentSessionEndReason>(),
+    /** What the agent is doing: question, failed, working, monitoring, done or idle. */
+    status: text("status").notNull().default("idle"),
+    /** When `status` last changed; a terminal agent stuck on `working` stops counting after a while. */
+    statusUpdatedAt: integer("status_updated_at").notNull().default(0),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

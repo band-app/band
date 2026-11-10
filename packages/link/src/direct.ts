@@ -33,3 +33,21 @@ export interface DirectRegisterReply {
   /** Epoch ms on the worker's clock after which it refuses the token. */
   expiresAt: number;
 }
+
+/** The capability a worker that creates terminals on its direct listener names in its hello. */
+export const CAPABILITY_DIRECT_TERMINAL = "directTerminal";
+
+/**
+ * Worker to hub, a notification: a terminal the worker spawned for the desktop app on its direct
+ * listener (`POST /direct/terminal.create`). The hub records it and announces it as it does its own
+ * creates. A hub that does not know the method ignores it, and finds the terminal through
+ * `backend.info` the first time something asks for it.
+ */
+export const METHOD_TERMINAL_CREATED = "terminal.created";
+
+export interface TerminalCreatedParams {
+  worktreeId: string;
+  terminalId: string;
+  command?: string;
+  cwd?: string;
+}

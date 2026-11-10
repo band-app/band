@@ -1,7 +1,7 @@
 /**
  * Page object for the bottom-right toast stack (`ToastHost`), which holds the
  * app update toast, the Home Screen notice and the dashboard's notices. The
- * `data-testid`s are set in `ToastHost.tsx` and `ToastCard.tsx`.
+ * `data-testid`s are set in `ToastHost.tsx` and `Notification.tsx`.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
@@ -23,22 +23,51 @@ export class ToastHostPage {
   readonly notices: Locator;
   readonly infoNotices: Locator;
   readonly errorNotices: Locator;
-  /** The dialog an error notice's "Details" button opens. */
+  readonly warningNotices: Locator;
+  /** The "Install band CLI" and "Install Claude Code hooks" notifications. */
+  readonly cliNotice: Locator;
+  readonly hooksNotice: Locator;
+  /** Everything the dashboard renders outside the stack under the old banner ids. */
+  readonly sidebarBanners: Locator;
+  /** The dialog a long notice's "More" button opens. */
   readonly detailsDialog: Locator;
 
   constructor(private readonly page: Page) {
     this.host = page.getByTestId("toast-host");
-    this.notices = this.host.getByTestId(/^toast-host__notice--/);
+    this.notices = this.host.getByTestId(/^toast-host__notice--(info|warning|error)$/);
     this.infoNotices = this.host.getByTestId("toast-host__notice--info");
     this.errorNotices = this.host.getByTestId("toast-host__notice--error");
+    this.warningNotices = this.host.getByTestId("toast-host__notice--warning");
+    this.cliNotice = this.host.getByTestId("cli-banner");
+    this.hooksNotice = this.host.getByTestId("hooks-banner");
+    this.sidebarBanners = page.locator(
+      '[data-testid="cli-banner"]:not([data-testid="toast-host"] *), [data-testid="hooks-banner"]:not([data-testid="toast-host"] *)',
+    );
     this.detailsDialog = page.getByRole("dialog");
   }
 
   /** Open the details dialog of the first error notice. */
   async openErrorDetails(): Promise<void> {
     await test.step("Open the error notice's details", async () => {
-      await this.errorNotices.first().getByRole("button", { name: "Details" }).click();
+      await this.errorNotices.first().getByRole("button", { name: "More" }).click();
     });
+  }
+
+  /**
+   * Closes the CLI and hooks setup notifications whenever one appears, so it cannot cover the
+   * right-hand panel a spec clicks in. A spec about the notifications themselves does not call this.
+   */
+  async closeSetupNoticesWhenShown(): Promise<void> {
+    for (const notice of [this.cliNotice, this.hooksNotice]) {
+      await this.page.addLocatorHandler(notice, async () => {
+        await this.closeButton(notice).click();
+      });
+    }
+  }
+
+  /** The close button of `toast`. */
+  closeButton(toast: Locator): Locator {
+    return toast.getByRole("button", { name: "Close" });
   }
 
   /** Where `toast` sits on screen. */

@@ -525,10 +525,13 @@ enum BrowsersCmd {
 
 #[derive(Subcommand)]
 enum AgentsCmd {
-    /// List the running agent sessions of a worktree
+    /// List the running agent sessions of a worktree, or of every worktree with --all
     List {
         /// Worktree ID (auto-detected from cwd if omitted)
         worktree_id: Option<String>,
+        /// List the open sessions of every worktree
+        #[arg(long, conflicts_with = "worktree_id")]
+        all: bool,
     },
     /// Start a coding agent, as a chat (gui) or as its CLI in a terminal (tui)
     Launch {
@@ -1217,7 +1220,7 @@ fn main() {
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
-            AgentsCmd::List { worktree_id } => cmd_agents_list(worktree_id.as_deref()),
+            AgentsCmd::List { worktree_id, all } => cmd_agents_list(worktree_id.as_deref(), all),
             AgentsCmd::Launch {
                 worktree_id,
                 agent,
@@ -3193,13 +3196,15 @@ fn parse_agent_mode(mode: &str) -> Result<&'static str, String> {
     }
 }
 
-fn cmd_agents_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
+fn cmd_agents_list(worktree_id: Option<&str>, all: bool) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let worktree_id = resolve_worktree_id(&client, worktree_id)?;
-    let data = client.trpc_query(
-        "agentSessions.list",
-        &serde_json::json!({"worktreeId": worktree_id}),
-    )?;
+    let input = if all {
+        serde_json::json!({})
+    } else {
+        let worktree_id = resolve_worktree_id(&client, worktree_id)?;
+        serde_json::json!({"worktreeId": worktree_id})
+    };
+    let data = client.trpc_query("agentSessions.list", &input)?;
     let sessions = data
         .get("agentSessions")
         .and_then(|v| v.as_array())
@@ -3212,7 +3217,7 @@ fn cmd_agents_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
             .unwrap_or("")
             .to_string()
     };
-    let rows: Vec<[String; 6]> = sessions
+    let rows: Vec<[String; 7]> = sessions
         .iter()
         .map(|s| {
             // A gui session lives in a chat, a tui session in a terminal.
@@ -3224,6 +3229,7 @@ fn cmd_agents_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
                 .to_string();
             [
                 field(s, "id"),
+                field(s, "worktreeId"),
                 field(s, "agentDefinitionId"),
                 field(s, "mode"),
                 field(s, "state"),
@@ -3233,17 +3239,45 @@ fn cmd_agents_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
         })
         .collect();
 
-    let text = format_table(
-        &[
-            "SESSION ID",
-            "AGENT",
-            "MODE",
-            "STATE",
-            "PANE",
-            "PROVIDER SESSION",
-        ],
-        &rows,
-    );
+    let text = if all {
+        format_table(
+            &[
+                "SESSION ID",
+                "WORKTREE",
+                "AGENT",
+                "MODE",
+                "STATE",
+                "PANE",
+                "PROVIDER SESSION",
+            ],
+            &rows,
+        )
+    } else {
+        let rows: Vec<[String; 6]> = rows
+            .iter()
+            .map(|r| {
+                [
+                    r[0].clone(),
+                    r[2].clone(),
+                    r[3].clone(),
+                    r[4].clone(),
+                    r[5].clone(),
+                    r[6].clone(),
+                ]
+            })
+            .collect();
+        format_table(
+            &[
+                "SESSION ID",
+                "AGENT",
+                "MODE",
+                "STATE",
+                "PANE",
+                "PROVIDER SESSION",
+            ],
+            &rows,
+        )
+    };
     Ok(CommandResult {
         text,
         json: serde_json::json!({"agentSessions": sessions}),
@@ -6136,6 +6170,9 @@ fn notify_forward(agent: Option<&str>) {
     for (env_vars, field) in [
         (&["BAND_DISPATCH"][..], "dispatch"),
         (&["BAND_TERMINAL_ID"][..], "terminalId"),
+        // Set only in a terminal started by `band agents launch --mode tui`.
+        // It ties this agent's hooks to the session row the launch created.
+        (&["BAND_AGENT_LAUNCH_TOKEN"][..], "launchToken"),
         // The new name wins when both are set.
         (&["BAND_WORKER_ID", "BAND_HOST_ID"][..], "hostId"),
     ] {
@@ -6848,11 +6885,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "agents list",
-            "description": "List the running agent sessions of a worktree",
+            "description": "List the running agent sessions of a worktree, or of every worktree with --all",
             "parameters": [
                 {"name": "worktree_id", "type": "string", "required": false, "positional": true, "description": "Worktree ID (auto-detected from cwd if omitted)"},
+                {"name": "--all", "type": "boolean", "required": false, "description": "List the open sessions of every worktree"},
             ],
-            "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"worktreeId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`"
+            "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. A tui session exists for every agent that reports through hooks in a Band terminal, launched by Band or typed by hand. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table); with `--all` a `WORKTREE` column follows the session id. PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"worktreeId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`"
         }),
         serde_json::json!({
             "name": "agents launch",
@@ -6940,7 +6978,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "--agent", "type": "string", "required": false, "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the worktree."},
             ],
-            "notes": "Not called directly — registered as a coding-agent hook when the user installs hooks from the banner or Settings (`band notify --agent claude-code`). Always exits 0 and prints nothing, within about a second, whatever happens. Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
+            "notes": "Not called directly — registered as a coding-agent hook when the user installs hooks from the banner or Settings (`band notify --agent claude-code`). Always exits 0 and prints nothing, within about a second, whatever happens. Forwards the raw payload, plus `BAND_DISPATCH`, `BAND_TERMINAL_ID` and `BAND_AGENT_LAUNCH_TOKEN` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
         }),
         serde_json::json!({
             "name": "schema",

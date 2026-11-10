@@ -36,6 +36,13 @@ export class DesktopDashboardPage {
     return urls;
   }
 
+  /** The method and URL of the requests the window makes from now on, in order. */
+  watchRequestLog(): { method: string; url: string }[] {
+    const log: { method: string; url: string }[] = [];
+    this.page.on("request", (req) => log.push({ method: req.method(), url: req.url() }));
+    return log;
+  }
+
   /** The tab of a file inside the open worktree, by its worktree-relative path. */
   fileTab(path: string): Locator {
     return this.page.getByTestId(`center-file-tab--${path}`);

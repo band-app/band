@@ -1,0 +1,86 @@
+{
+  "agent": "gemini-cli",
+  "cliVersion": "Gemini CLI 0.61.0",
+  "source": "SessionStart and SessionEnd were recorded from `gemini -p` in a temp HOME. This account's free tier is closed ('no longer supported for Gemini Code Assist for individuals'), so no model turn ran: BeforeAgent, AfterAgent, BeforeTool, AfterTool and Notification follow the CLI's hook reference and were not recorded.",
+  "payloads": [
+    {
+      "recorded": true,
+      "expect": "working",
+      "payload": {
+        "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
+        "transcript_path": "/tmp/gemini/chats/session.json",
+        "cwd": "/tmp/w",
+        "hook_event_name": "SessionStart",
+        "timestamp": "2026-11-09T19:23:31.789Z",
+        "source": "startup"
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "working",
+      "payload": {
+        "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
+        "cwd": "/tmp/w",
+        "hook_event_name": "BeforeAgent",
+        "prompt": "run the shell command: echo hi"
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "working",
+      "payload": {
+        "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
+        "cwd": "/tmp/w",
+        "hook_event_name": "BeforeTool",
+        "tool_name": "run_shell_command",
+        "tool_input": { "command": "echo hi" }
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "working",
+      "payload": {
+        "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
+        "cwd": "/tmp/w",
+        "hook_event_name": "AfterTool",
+        "tool_name": "run_shell_command",
+        "tool_input": { "command": "echo hi" },
+        "tool_response": { "llmContent": "hi" }
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "question",
+      "payload": {
+        "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
+        "cwd": "/tmp/w",
+        "hook_event_name": "Notification",
+        "notification_type": "ToolPermission",
+        "message": "Please approve run_shell_command",
+        "details": {}
+      }
+    },
+    {
+      "recorded": false,
+      "expect": "done",
+      "payload": {
+        "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
+        "cwd": "/tmp/w",
+        "hook_event_name": "AfterAgent",
+        "prompt": "run the shell command: echo hi",
+        "prompt_response": "hi",
+        "stop_hook_active": false
+      }
+    }
+  ],
+  "sessionEnd": {
+    "recorded": true,
+    "payload": {
+      "session_id": "7f22ee78-7121-4185-a334-b122cda25cea",
+      "cwd": "/tmp/w",
+      "hook_event_name": "SessionEnd",
+      "timestamp": "2026-11-09T19:23:32.225Z",
+      "reason": "exit"
+    }
+  }
+}

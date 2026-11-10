@@ -4,9 +4,8 @@ import {
   acknowledgeWorktreeAttention,
   applyHookNotification,
   getWorktreeStatus,
-  MANUAL_STATUS_SOURCE,
   resolveWorktreeIdByCwd,
-  setWorktreeSourceStatus,
+  setManualStatus,
 } from "../../services/state";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
 import { worktreeService } from "../../services/worktree-service";
@@ -49,7 +48,7 @@ export const statusesRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      const status = setWorktreeSourceStatus(input.worktreeId, MANUAL_STATUS_SOURCE, input.agent);
+      const status = setManualStatus(input.worktreeId, input.agent);
 
       // Emit update directly to SSE listeners
       emit({ kind: "update", status });
@@ -113,6 +112,7 @@ export const statusesRouter = t.router({
         dispatch: z.string().max(64).optional(),
         terminalId: z.string().max(256).optional(),
         hostId: z.string().max(256).optional(),
+        launchToken: z.string().max(256).optional(),
       }),
     )
     .mutation(async ({ input }) => {
