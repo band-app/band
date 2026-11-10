@@ -71,6 +71,20 @@ afterEach(async () => {
   home = undefined;
 });
 
+/**
+ * Waits for the record the command writes. The shell creates the file when it opens the
+ * redirect, before printf writes into it, so the file existing does not mean it has content.
+ */
+async function recorded(record: string): Promise<string> {
+  return waitFor(
+    () => {
+      const text = existsSync(record) ? readFileSync(record, "utf8") : "";
+      return text === "" ? undefined : text;
+    },
+    { label: "the command" },
+  );
+}
+
 const RECORD_ENV = 'printf "%s %s" "$1" "$BAND_HUB_TARGET_VERSION" > "$1"';
 
 /** Posts a chat message the way the browser does, to the hub's own (non-loopback) worktree. */
@@ -206,8 +220,7 @@ describe("hub update", () => {
     const res = await mutate("workers.updateHub");
     expect(res.status).toBe(200);
     expect((await trpcData<{ target: string }>(res)).target).toBe("9.0.0");
-    await waitFor(() => (existsSync(record) ? true : undefined), { label: "the command" });
-    expect(readFileSync(record, "utf8")).toBe(`${record} 9.0.0`);
+    expect(await recorded(record)).toBe(`${record} 9.0.0`);
     expect(existsSync(join(home ?? "", ".band", "hub-update.log"))).toBe(true);
     // The command exited 0 but the hub still runs the old version: it is waiting for the restart.
     expect((await status()).hubUpdate).toMatchObject({ state: "updating", target: "9.0.0" });
@@ -244,12 +257,11 @@ describe("hub update", () => {
     const record = await boot(RECORD_ENV);
     const res = await mutate("workers.updateAll", { includeHub: true });
     expect(res.status).toBe(200);
-    await waitFor(() => (existsSync(record) ? true : undefined), { label: "the command" });
+    expect(await recorded(record)).toBe(`${record} 9.0.0`);
     const st = (await status()) as Status & {
       updateAll: { results: { hostId: string; state: string }[] };
     };
     expect(st.updateAll.results).toMatchObject([{ hostId: "hub", state: "updating" }]);
-    expect(readFileSync(record, "utf8")).toBe(`${record} 9.0.0`);
   });
 
   it("fails at once when the command exits non-zero", async () => {

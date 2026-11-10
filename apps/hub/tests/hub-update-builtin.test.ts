@@ -176,6 +176,22 @@ async function status(token = TOKEN): Promise<Status> {
 const mutate = (proc: string, input: unknown = {}, token = TOKEN) =>
   trpcMutate(server?.url ?? "", proc, input, token);
 
+/**
+ * Turns the auto setting off and waits for the run in flight to end. The test hub cannot restart
+ * onto 9.0.0, so with the setting on it starts a new run after every finished one, and teardown
+ * would delete the home and the fake npm under a running supervisor.
+ */
+async function quiesce(url: string, token: string): Promise<void> {
+  await trpcMutate(url, "settings.update", { hubUpdate: { auto: false } }, token);
+  await waitFor(
+    async () =>
+      trpcData<Status>(await trpcQuery(url, "workers.updateStatus", undefined, token)).then((s) =>
+        s.hubUpdate.state === "updating" ? undefined : true,
+      ),
+    { label: "the supervisor to finish", timeoutMs: 30_000 },
+  );
+}
+
 const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
 
 afterEach(async () => {
@@ -345,6 +361,7 @@ describe("built-in hub update", () => {
     );
     expect(done.hubUpdate.lastRun).toMatchObject({ result: "ok", to: "9.0.0" });
     expect(done.hubUpdate.auto).toBe(true);
+    await quiesce(server?.url ?? "", TOKEN);
   });
 
   it("is admin only to change the auto setting and to see the log", async () => {
@@ -359,7 +376,10 @@ describe("built-in hub update", () => {
 });
 
 describe("built-in hub update with a running turn", () => {
-  async function bootBusy(extra: Record<string, string>, auto = true): Promise<void> {
+  // The setting stays off until the agent is busy, so the update cannot start before the turn
+  // does. With it on from boot, the first poll after the release check raced the turn's start,
+  // and on a loaded runner the update went ahead with nothing to defer for.
+  async function bootBusy(extra: Record<string, string>): Promise<void> {
     releases = await startReleasesStub("v9.0.0");
     rig = await startRig();
     home = seedAcpHome("band-hub-builtin-busy-");
@@ -367,7 +387,7 @@ describe("built-in hub update with a running turn", () => {
       tokenSecret: TEST_TOKEN,
       codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
       defaultCodingAgent: "claude-code",
-      hubUpdate: { auto },
+      hubUpdate: { auto: false },
     });
     server = await startAcpServer({
       home,
@@ -377,24 +397,38 @@ describe("built-in hub update with a running turn", () => {
     });
   }
 
-  it("waits while a turn runs and goes ahead once the deferral passes the limit", async () => {
-    // 0.0006 hours is about 2.2 s.
-    await bootBusy({ BAND_HUB_UPDATE_MAX_DEFER_H: "0.0006" });
+  /** Starts a long turn, waits until the hub counts it as busy, then switches the auto update on. */
+  async function startTurnThenAuto(chatId: string) {
     const url = server?.url ?? "";
-    // Start the turn before the release check can trigger the update.
-    const sent = fetch(`${url}/api/chats/builtin-busy/messages`, {
+    const worktreeId = testWorktreeId("testrepo", "main", false);
+    const sent = fetch(`${url}/api/chats/${chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
-      body: JSON.stringify({
-        worktreeId: testWorktreeId("testrepo", "main", false),
-        text: "long task",
-      }),
+      body: JSON.stringify({ worktreeId, text: "long task" }),
     });
+    await waitFor(
+      async () => {
+        const res = await trpcQuery(url, "workers.hubInterruptions", undefined, TEST_TOKEN);
+        const data = await trpcData<{ agents: { busy: boolean }[] }>(res);
+        return data.agents.some((a) => a.busy) ? true : undefined;
+      },
+      { label: "the live agent" },
+    );
+    await trpcMutate(url, "settings.update", { hubUpdate: { auto: true } }, TEST_TOKEN);
+    return { url, worktreeId, sent };
+  }
+
+  const hubStatus = async (url: string) =>
+    trpcData<Status>(await trpcQuery(url, "workers.updateStatus", undefined, TEST_TOKEN));
+
+  it("waits while a turn runs and goes ahead once the deferral passes the limit", async () => {
+    // 0.002 hours is 7.2 s, enough to look at the state while the deferral is young even when
+    // the machine is slow.
+    await bootBusy({ BAND_HUB_UPDATE_MAX_DEFER_H: "0.002" });
+    const { url, sent } = await startTurnThenAuto("builtin-busy");
     const deferred = await waitFor(
       async () => {
-        const s = await trpcData<Status>(
-          await trpcQuery(url, "workers.updateStatus", undefined, TEST_TOKEN),
-        );
+        const s = await hubStatus(url);
         return s.hubUpdate.deferredSince ? s : undefined;
       },
       { label: "the deferral" },
@@ -405,56 +439,36 @@ describe("built-in hub update with a running turn", () => {
 
     await waitFor(() => (read(rig?.npmLog ?? "") !== "" ? true : undefined), {
       label: "the install after the limit",
-      timeoutMs: 20_000,
+      timeoutMs: 30_000,
     });
     expect(read(rig?.npmLog ?? "")).toContain("@band-app/server@9.0.0");
     // Let the supervisor finish before teardown removes the home and the health stub.
-    await waitFor(
-      async () => {
-        const s = await trpcData<Status>(
-          await trpcQuery(url, "workers.updateStatus", undefined, TEST_TOKEN),
-        );
-        return s.hubUpdate.lastRun ? true : undefined;
-      },
-      { label: "the supervisor to finish", timeoutMs: 20_000 },
-    );
+    await waitFor(async () => ((await hubStatus(url)).hubUpdate.lastRun ? true : undefined), {
+      label: "the supervisor to finish",
+      timeoutMs: 30_000,
+    });
+    await quiesce(url, TEST_TOKEN);
   });
   it("goes ahead as soon as the turn ends, well before the deferral limit", async () => {
     await bootBusy({});
-    const url = server?.url ?? "";
-    const worktreeId = testWorktreeId("testrepo", "main", false);
-    const sent = fetch(`${url}/api/chats/builtin-busy-2/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: `band_token=${TEST_TOKEN}` },
-      body: JSON.stringify({ worktreeId, text: "long task" }),
+    const { url, worktreeId, sent } = await startTurnThenAuto("builtin-busy-2");
+    await waitFor(async () => ((await hubStatus(url)).hubUpdate.deferredSince ? true : undefined), {
+      label: "the deferral",
     });
-    await waitFor(
-      async () => {
-        const s = await trpcData<Status>(
-          await trpcQuery(url, "workers.updateStatus", undefined, TEST_TOKEN),
-        );
-        return s.hubUpdate.deferredSince ? true : undefined;
-      },
-      { label: "the deferral" },
-    );
     expect(read(rig?.npmLog ?? "")).toBe("");
     await trpcMutate(url, "tasks.abort", { worktreeId, chatId: "builtin-busy-2" }, TEST_TOKEN);
     await sent;
-    await waitFor(
-      async () => {
-        const s = await trpcData<Status>(
-          await trpcQuery(url, "workers.updateStatus", undefined, TEST_TOKEN),
-        );
-        return s.hubUpdate.lastRun ? s : undefined;
-      },
-      { label: "the update after the turn ended", timeoutMs: 20_000 },
-    );
+    await waitFor(async () => ((await hubStatus(url)).hubUpdate.lastRun ? true : undefined), {
+      label: "the update after the turn ended",
+      timeoutMs: 30_000,
+    });
     expect(read(rig?.npmLog ?? "")).toContain("@band-app/server@9.0.0");
+    await quiesce(url, TEST_TOKEN);
   });
   it("also defers while an agent is mid-turn, even when no task counts as young", async () => {
     // A task age of 0.001 minutes makes every task "old", so only the live agent can hold it.
     // The setting stays off until the agent is busy, so the update cannot start before the turn does.
-    await bootBusy({ BAND_HUB_UPDATE_MAX_TASK_AGE_MIN: "0.001" }, false);
+    await bootBusy({ BAND_HUB_UPDATE_MAX_TASK_AGE_MIN: "0.001" });
     const url = server?.url ?? "";
     const worktreeId = testWorktreeId("testrepo", "main", false);
     const sent = fetch(`${url}/api/chats/builtin-busy-3/messages`, {
@@ -493,5 +507,6 @@ describe("built-in hub update with a running turn", () => {
       },
       { label: "the update after the agent stopped", timeoutMs: 20_000 },
     );
+    await quiesce(url, TEST_TOKEN);
   });
 });
