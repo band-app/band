@@ -207,6 +207,10 @@ async function resolveDetachedBranch(worktreePath: string): Promise<string> {
 export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
   const env = { ...process.env };
   env.PATH = prependBinDirs(env.PATH);
+  // Band runs `git status` and similar reads in the background. Without this, git takes
+  // `index.lock` to refresh the index, and a commit or reset the user runs at the same
+  // moment fails with "Unable to create index.lock". Writes still take the lock.
+  env.GIT_OPTIONAL_LOCKS = "0";
   return { command: "git", env };
 }
 
