@@ -467,7 +467,16 @@ describe("hub state follows the owner's events (S5)", () => {
     // stops held agents when it runs out; killing the process makes that certain and does not
     // depend on the daemon's watchdog). The restarted worker then finds no agent to take over.
     // With an agent that survives, the turn carries on: chat-ownership-reattach.test.ts.
-    const agentPid = (w.stubRequests(owner, "session/prompt").at(-1) as { pid?: number }).pid;
+    // The agent that holds this prompt. The stub's log covers every chat on the worker, and
+    // "working" can show before the agent logs the prompt, so the log's last prompt may be
+    // another chat's agent (run 43035119746 killed forwarded-chat's and this turn never ended).
+    const agentPid = await waitFor(
+      () =>
+        (w.stubRequests(owner, "session/prompt") as Array<{ params: unknown; pid?: number }>).find(
+          (r) => JSON.stringify(r.params).includes("hang through a restart"),
+        )?.pid,
+      { label: "the agent's prompt in the stub's log", timeoutMs: 20_000 },
+    );
     const started = await w.q<{ task: { id: string } | null }>("tasks.get", {
       worktreeId: wt,
       chatId,
