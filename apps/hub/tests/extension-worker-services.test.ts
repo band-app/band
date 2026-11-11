@@ -110,6 +110,13 @@ const alive = (pid: number) => {
     return false;
   }
 };
+// The worker removes the folder after the process has exited, in the same sync, so
+// a folder check right after the pid is gone can still find it.
+const folderGone = (path: string) =>
+  waitFor(() => (!existsSync(path) ? true : undefined), {
+    label: `${path} removed`,
+    timeoutMs: 10_000,
+  });
 
 async function startWorker(label: string, hubUrl = server.url): Promise<Worker> {
   const issued = await m<{ token: string; hostId: string }>("tokens.issueWorkerBootstrap", {
@@ -135,19 +142,25 @@ async function startWorker(label: string, hubUrl = server.url): Promise<Worker> 
   );
   child.stdout?.on("data", () => undefined);
   child.stderr?.on("data", () => undefined);
-  await waitFor(
-    async () => {
-      const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
-      return hosts.find((h) => h.id === issued.hostId)?.status === "online" ? true : undefined;
-    },
-    { label: `worker ${label} online`, timeoutMs: 30_000 },
-  );
-  await m("worktrees.create", {
-    repo: "proj",
-    branch: `seed-${label}`,
-    hostId: issued.hostId,
-    hostRepoPath: join(root, "proj"),
-  });
+  // The caller only gets the child to kill once this returns, so a failure here kills it.
+  try {
+    await waitFor(
+      async () => {
+        const { hosts } = await q<{ hosts: Array<{ id: string; status: string }> }>("hosts.list");
+        return hosts.find((h) => h.id === issued.hostId)?.status === "online" ? true : undefined;
+      },
+      { label: `worker ${label} online`, timeoutMs: 30_000 },
+    );
+    await m("worktrees.create", {
+      repo: "proj",
+      branch: `seed-${label}`,
+      hostId: issued.hostId,
+      hostRepoPath: join(root, "proj"),
+    });
+  } catch (err) {
+    child.kill("SIGKILL");
+    throw err;
+  }
   return {
     hostId: issued.hostId,
     root,
@@ -240,7 +253,7 @@ describe("extension worker services", () => {
       timeoutMs: 20_000,
     });
     expect(await servicesOf(a)).toMatchObject([{ state: "not-eligible", reason: "restricted" }]);
-    expect(existsSync(join(a.state, "extensions", "echo-service"))).toBe(false);
+    await folderGone(join(a.state, "extensions", "echo-service"));
 
     await m("hosts.setTrust", { hostId: a.hostId, trust: "standard" });
     await waitFor(async () => ((await stateOf(a)) === "running" ? true : undefined), {
@@ -248,11 +261,14 @@ describe("extension worker services", () => {
       timeoutMs: 30_000,
     });
     expect(await call(a, "echo", { n: 1 })).toEqual({ n: 1 });
-  });
+  }, 90_000);
 
   it("a sync that fails still wins: a worker lowered to restricted while its link is down stops the service when it returns", async () => {
     const proxy = await startCuttableProxy(server.url);
-    const c = await startWorker("c", proxy.url);
+    const c = await startWorker(`c-${Date.now().toString(36)}`, proxy.url).catch(async (err) => {
+      await proxy.close();
+      throw err;
+    });
     try {
       await waitFor(async () => ((await stateOf(c)) === "running" ? true : undefined), {
         label: "service running on C",
@@ -277,7 +293,7 @@ describe("extension worker services", () => {
         timeoutMs: 60_000,
       });
       expect(await servicesOf(c)).toMatchObject([{ state: "not-eligible", reason: "restricted" }]);
-      expect(existsSync(join(c.state, "extensions", "echo-service"))).toBe(false);
+      await folderGone(join(c.state, "extensions", "echo-service"));
     } finally {
       c.child.kill("SIGKILL");
       await proxy.close();
@@ -338,7 +354,7 @@ describe("extension worker services", () => {
       label: "service stopped",
       timeoutMs: 20_000,
     });
-    expect(existsSync(join(a.state, "extensions", "echo-service"))).toBe(false);
+    await folderGone(join(a.state, "extensions", "echo-service"));
     expect(await servicesOf(a)).toEqual([]);
-  });
+  }, 90_000);
 });
