@@ -96,7 +96,7 @@ describe("OpenFileQueue", () => {
     const queue = new OpenFileQueue();
     queue.push("/a/one.txt");
     queue.push("/a/two.txt");
-    assert.deepEqual(queue.take(), ["/a/one.txt", "/a/two.txt"]);
+    assert.deepEqual(queue.take(), [{ path: "/a/one.txt" }, { path: "/a/two.txt" }]);
     assert.deepEqual(queue.take(), []);
   });
 
@@ -112,7 +112,7 @@ describe("OpenFileQueue", () => {
     stop();
     queue.push("/after.txt");
     assert.equal(pushes, 1);
-    assert.deepEqual(queue.take(), ["/ok.txt", "/after.txt"]);
+    assert.deepEqual(queue.take(), [{ path: "/ok.txt" }, { path: "/after.txt" }]);
   });
 });
 

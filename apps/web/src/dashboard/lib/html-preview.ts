@@ -89,7 +89,7 @@ export function findWorktreeForPath<W extends { id: string; path: string; hostId
   for (const worktree of worktrees) {
     if ((worktree.hostId || "local") !== hostId) continue;
     const rel = pathInside(worktree.path, absPath);
-    if (!rel) continue;
+    if (rel === null) continue;
     if (!best || worktree.path.length > best.worktree.path.length) {
       best = { worktree, relPath: rel };
     }

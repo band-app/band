@@ -40,3 +40,10 @@ describe("macOS document types", () => {
     }
   });
 });
+
+describe("band:// URL scheme", () => {
+  test("electron-builder registers the band scheme in Info.plist", () => {
+    assert.match(builder, /^protocols:/m);
+    assert.match(builder, /^\s+- band\s*$/m);
+  });
+});

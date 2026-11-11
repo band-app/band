@@ -33,6 +33,13 @@ appId: app.getband.agent
 productName: Band
 copyright: Copyright © 2026 Band Contributors
 
+# `band://file/<path>[:line[:col]]` opens a path in Band (apps/desktop/src/main/services/band-url.ts).
+# electron-builder writes this as CFBundleURLTypes in Info.plist.
+protocols:
+  - name: Band
+    schemes:
+      - band
+
 directories:
   # `build/` ships the macOS icon (icon.icns) + entitlements.
   # electron-builder auto-discovers `build/icon.icns` and

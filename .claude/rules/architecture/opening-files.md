@@ -26,6 +26,8 @@ paths:
   - "apps/web/e2e/external-file-previews.spec.ts"
   - "apps/web/e2e/tab-strip-file-drop.spec.ts"
   - "docs/opening-files.md"
+  - "apps/desktop/src/main/services/band-url.ts"
+  - "apps/desktop/tests/band-url.test.ts"
 ---
 
 # Architecture: opening files
@@ -34,5 +36,6 @@ Any file opens as a tab (guide: `docs/opening-files.md`). `band open` falls back
 
 - Files from Finder are on this Mac, so the desktop main process reads and saves them (`services/local-files.ts`, IPC `read_local_file | save_local_file`, registered through `registerIpc`, so the sender guard applies; no symlink, regular files, 1 MB, no create on save). Such a tab has the path `desktop:<absolute path>` (`lib/external-source.ts`), so its tab id and dirty state never collide with a worker file at the same path.
 - `app.on("open-file")` (`index.ts`) pushes paths into `OpenFileQueue`, which holds them before any window exists. The renderer drains it with `take_open_files` at start and on the `open-files-requested` event. `LocalFileOpener` plans each file with `planLocalFileOpen` (`dashboard/lib/local-file-target.ts`): inside a worktree on this Mac's worker, switch there and open a normal tab, else an external desktop tab in the current worktree. Drops onto a tab strip or the empty center area (`use-file-drop-target.ts`) and the Cmd+O picker use the same path.
+- `app.on("open-url")` handles `band://file/<path>[:line[:col]]` (`services/band-url.ts`). The main process stats the path and queues `{path, line, column, directory}` in the same `OpenFileQueue`. For a folder `planLocalFileOpen` returns `select` (switch worktree, no tab) or `outside` (toast). An unknown `band://` route is logged and raises the window. The scheme comes from `protocols` in `electron-builder.yml`; the app never calls `setAsDefaultProtocolClient`.
 - Packaging: `mac.extendInfo.CFBundleDocumentTypes` in `electron-builder.yml`, role Editor, rank Alternate. Linux and Windows are not set up.
 - Tests: `apps/desktop/tests/local-files.test.ts`, `document-types-config.test.ts`, `apps/hub/tests/host-file.test.ts`, `external-file-remote.test.ts`, `apps/web/e2e-desktop/desktop-open-local-files.spec.ts`, `apps/web/e2e/tab-strip-file-drop.spec.ts`, `quick-open-external-file.spec.ts`, `open_uses_the_terminals_worktree_*` in `apps/cli/tests/integration.rs`. The Finder Open With menu entry on an installed build is checked by hand.
