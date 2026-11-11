@@ -11,15 +11,35 @@ inputs:
 runs:
   using: composite
   steps:
+    # In the Playwright container (ci.yml) the system packages and browsers are
+    # in the image, so nothing comes from the Ubuntu mirrors. The image sets
+    # PLAYWRIGHT_BROWSERS_PATH. The `env` context in an `if` only sees
+    # variables from the workflow file, so a shell step reads it.
+    - name: Detect the Playwright container
+      id: where
+      shell: bash
+      run: echo "container=$([ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # A no-op when the image matches @playwright/test; otherwise it downloads
+    # from Playwright's CDN, not from Ubuntu.
+    - name: Check the container's browsers
+      if: steps.where.outputs.container == 'true'
+      shell: bash
+      env:
+        BROWSERS: ${{ inputs.browsers }}
+      run: pnpm --filter @band-app/web exec playwright install $BROWSERS
+
     # Keyed on the Playwright version with no restore-keys, so a bump starts clean.
     - name: Resolve Playwright version
       id: playwright
+      if: steps.where.outputs.container != 'true'
       shell: bash
       working-directory: apps/web
       run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
     - name: Restore Playwright browsers cache
       id: cache-playwright
+      if: steps.where.outputs.container != 'true'
       uses: actions/cache/restore@v5
       with:
         path: ~/.cache/ms-playwright
@@ -30,7 +50,7 @@ runs:
     # prints, so a Playwright bump never installs stale packages.
     - name: Resolve apt package list
       id: apt
-      if: runner.os == 'Linux'
+      if: ${{ steps.where.outputs.container != 'true' && runner.os == 'Linux' }}
       shell: bash
       env:
         BROWSERS: ${{ inputs.browsers }}
@@ -38,7 +58,7 @@ runs:
 
     - name: Restore apt packages cache
       id: cache-apt
-      if: runner.os == 'Linux'
+      if: ${{ steps.where.outputs.container != 'true' && runner.os == 'Linux' }}
       uses: actions/cache/restore@v5
       with:
         path: ${{ runner.temp }}/playwright-apt-debs
@@ -47,6 +67,7 @@ runs:
     # The system packages are installed on a cache hit too. WebKit runs
     # the iPhone-profile specs (`e2e/mobile-document-scroll.spec.ts`).
     - name: Install Playwright browsers
+      if: steps.where.outputs.container != 'true'
       shell: bash
       env:
         BROWSERS: ${{ inputs.browsers }}
@@ -56,6 +77,7 @@ runs:
     # Same trust gate as the cache saves in ci.yml.
     - name: Save Playwright browsers cache
       if: |
+        steps.where.outputs.container != 'true' &&
         steps.cache-playwright.outputs.cache-hit != 'true' &&
         ((github.event_name != 'pull_request' &&
           github.event_name != 'pull_request_target') ||
@@ -70,6 +92,7 @@ runs:
     # one downloaded. Same trust gate as the saves above.
     - name: Save apt packages cache
       if: |
+        steps.where.outputs.container != 'true' &&
         !cancelled() && runner.os == 'Linux' &&
         steps.cache-apt.outputs.cache-hit != 'true' &&
         ((github.event_name != 'pull_request' &&

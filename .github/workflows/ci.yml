@@ -456,6 +456,12 @@ jobs:
   test-hub:
     name: Test (hub) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-24.04
+    # Playwright's image holds the browsers and their system packages, so these
+    # jobs need nothing from the Ubuntu mirrors (Canonical's DNS outage on
+    # 2026-11-11 failed every apt install). Keep the tag equal to @playwright/test.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --ipc=host
     timeout-minutes: 45
     needs: [changes, build]
     if: >
@@ -519,6 +525,12 @@ jobs:
   test-packages:
     name: Test (web unit & packages)
     runs-on: ubuntu-24.04
+    # Playwright's image holds the browsers and their system packages, so these
+    # jobs need nothing from the Ubuntu mirrors (Canonical's DNS outage on
+    # 2026-11-11 failed every apt install). Keep the tag equal to @playwright/test.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --ipc=host
     timeout-minutes: 45
     needs: [changes, build]
     if: >
@@ -571,6 +583,12 @@ jobs:
   test-e2e:
     name: Test e2e (web) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-24.04
+    # Playwright's image holds the browsers and their system packages, so these
+    # jobs need nothing from the Ubuntu mirrors (Canonical's DNS outage on
+    # 2026-11-11 failed every apt install). Keep the tag equal to @playwright/test.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --ipc=host
     timeout-minutes: 45
     needs: [changes, build]
     if: >
@@ -642,6 +660,12 @@ jobs:
   test-remote-loopback:
     name: Test (remote-loopback) ${{ matrix.shard }}/${{ matrix.total }}
     runs-on: ubuntu-24.04
+    # Playwright's image holds the browsers and their system packages, so these
+    # jobs need nothing from the Ubuntu mirrors (Canonical's DNS outage on
+    # 2026-11-11 failed every apt install). Keep the tag equal to @playwright/test.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --ipc=host
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -754,6 +778,12 @@ jobs:
   test-quarantine:
     name: Test (quarantine)
     runs-on: ubuntu-24.04
+    # Playwright's image holds the browsers and their system packages, so these
+    # jobs need nothing from the Ubuntu mirrors (Canonical's DNS outage on
+    # 2026-11-11 failed every apt install). Keep the tag equal to @playwright/test.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --ipc=host
     timeout-minutes: 45
     continue-on-error: true
     needs: [changes, build]
