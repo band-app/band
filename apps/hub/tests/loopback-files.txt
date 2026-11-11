@@ -5,6 +5,7 @@ agent-logins.test.ts
 agent-sessions.test.ts
 agent-status-sources.test.ts
 branch-status-git.test.ts
+branch-status-fork.test.ts
 branch-status-pr.test.ts
 branch-status-refresh.test.ts
 browser-profiles.test.ts

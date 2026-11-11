@@ -1,10 +1,12 @@
-import type { ProviderContext, RepoInfo } from "@band-app/plugin-api";
+import type { ProviderContext, RepoInfo, ReviewAction, ReviewInfo } from "@band-app/plugin-api";
 import { definePlugin } from "@band-app/plugin-api/server";
 import { ghArgsFor } from "./actions";
 import {
   buildBranchStatusQuery,
+  buildParentStatusQuery,
   type GraphQLRepoResponse,
   parseBranchStatusResponse,
+  parseParentStatusResponse,
 } from "./branch-query";
 import {
   parseBranchChecks,
@@ -50,6 +52,34 @@ export default definePlugin({
     // Hosts that refused the merge queue fields (an older GitHub Enterprise Server). They are
     // asked without them from then on, so the extra attempt happens once per host.
     const noMergeQueue = new Set<string>();
+
+    // The repo each fork was made from, or null for a repo that is not a fork. A repo's parent
+    // does not change, so it is read once, from the `parent` field of the queries that run anyway.
+    const parents = new Map<string, RepoInfo | null>();
+    // The parent repo a fork's PR lives in, by `<origin>#<number>`, for actions on that PR.
+    const prRepos = new Map<string, RepoInfo>();
+
+    function rememberParent(
+      origin: RepoInfo,
+      node: { name: string; owner: { login: string } } | null | undefined,
+    ): RepoInfo | null {
+      const parent = node ? { host: origin.host, owner: node.owner.login, repo: node.name } : null;
+      parents.set(repoArg(origin), parent);
+      return parent;
+    }
+
+    /** Tag the re-run actions of a parent-repo review, so they run against the parent. */
+    function inRepo(review: ReviewInfo, parent: RepoInfo): ReviewInfo {
+      const tag = (actions: ReviewAction[] = []) =>
+        actions.map((a) =>
+          a.id.startsWith("rerun") ? { ...a, args: { ...a.args, repo: repoArg(parent) } } : a,
+        );
+      return {
+        ...review,
+        actions: tag(review.actions),
+        checks: { ...review.checks, actions: tag(review.checks.actions) },
+      };
+    }
 
     async function withMergeQueueFallback<T>(
       repo: RepoInfo,
@@ -106,7 +136,40 @@ export default definePlugin({
           }
           return parsed.data ?? {};
         });
-        return parseBranchStatusResponse(data, branches);
+        const results = parseBranchStatusResponse(data, branches);
+
+        const first = Object.values(data).find((r) => r != null);
+        if (first && first.parent !== undefined) rememberParent(target, first.parent);
+        const parent = parents.get(repoArg(target));
+        const forkOwner = first?.owner?.login ?? target.owner;
+        // Only a fork's branches that have no PR in the fork itself are asked of the parent.
+        const open = branches.filter((b) => !b.isDefaultBranch && !results[b.branch]?.review);
+        if (parent && open.length > 0) {
+          // A parent the token cannot read must not lose the fork's own statuses.
+          const parentData = await withMergeQueueFallback(parent, async (mergeQueue) => {
+            const args = [
+              "api",
+              "graphql",
+              "-f",
+              `query=${buildParentStatusQuery(
+                parent,
+                open.map((b) => b.branch),
+                { mergeQueue },
+              )}`,
+            ];
+            if (parent.host !== "github.com") args.push("--hostname", parent.host);
+            const parsed = JSON.parse(await runGh(api, args, ctx)) as {
+              data?: Record<string, GraphQLRepoResponse | null>;
+              errors?: Array<{ message: string }>;
+            };
+            if (!parsed.data && parsed.errors?.length) {
+              throw new Error(parsed.errors.map((e) => e.message).join("; "));
+            }
+            return parsed.data ?? {};
+          }).catch(() => ({}) as Record<string, GraphQLRepoResponse | null>);
+          Object.assign(results, parseParentStatusResponse(parentData, open, forkOwner));
+        }
+        return results;
       },
     });
 
@@ -121,12 +184,31 @@ export default definePlugin({
         const target = normalize(repo);
         const data = await query(target, branch, ctx);
         const review = parseReview(data, branch, ctx.defaultBranch);
-        if (!review) handoff.set(keyOf(target, branch), { at: Date.now(), data });
-        return review;
+        if (review) return review;
+        handoff.set(keyOf(target, branch), { at: Date.now(), data });
+
+        if (data.repository && data.repository.parent !== undefined) {
+          rememberParent(target, data.repository.parent);
+        }
+        const parent = parents.get(repoArg(target));
+        if (!parent || branch === ctx.defaultBranch) return null;
+        const parentData = await query(parent, branch, ctx);
+        const parentReview = parseReview(parentData, branch, ctx.defaultBranch, target.owner);
+        if (!parentReview) return null;
+        prRepos.set(`${repoArg(target)}#${parentReview.number}`, parent);
+        return inRepo(parentReview, parent);
       },
       async runAction(repo, number, actionId, args, ctx) {
         const ghArgs = ghArgsFor(number, actionId, args);
-        await runGh(api, [...ghArgs, "--repo", repoArg(normalize(repo))], ctx);
+        const origin = normalize(repo);
+        const parent = parents.get(repoArg(origin));
+        // A fork's PR lives in the parent. Re-runs carry the repo in their args; the others find it
+        // by number from the review lookup that came just before.
+        const target =
+          parent && args.repo === repoArg(parent)
+            ? parent
+            : (prRepos.get(`${repoArg(origin)}#${number}`) ?? origin);
+        await runGh(api, [...ghArgs, "--repo", repoArg(target)], ctx);
       },
     });
 

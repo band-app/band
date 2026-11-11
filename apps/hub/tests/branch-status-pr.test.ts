@@ -309,6 +309,12 @@ describe("branch-status events carry the branch's pull request", () => {
     }
   });
 
+  it("a repo that is not a fork gets no second query for a parent repo", async () => {
+    await stream.latestCI(wsId(CASES.failing));
+    const queries = stub.requests.map((r) => r.fields.query ?? "");
+    expect(queries.filter((q) => q.includes("statusCheckRollup { state }"))).toEqual([]);
+  });
+
   it("a new subscriber gets the stored PR in its on-connect snapshot", async () => {
     await stream.latestCI(wsId(CASES.failing));
     const second = await openStatusStream(server.url);
