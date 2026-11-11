@@ -31,11 +31,20 @@ export async function thisMachineHostIds(): Promise<string[]> {
   return ids;
 }
 
+/** A path to open, with the position and kind a `band://file/` URL can carry. */
+export interface LocalOpenRequest {
+  path: string;
+  line?: number;
+  column?: number;
+  /** The main process saw a folder: select its worktree instead of opening a tab. */
+  directory?: boolean;
+}
+
 /** Paths the OS handed the app before the page could listen. Empties the queue. */
-export async function takeOsOpenFiles(): Promise<string[]> {
+export async function takeOsOpenFiles(): Promise<LocalOpenRequest[]> {
   if (!isDesktop) return [];
   try {
-    return await invoke<string[]>("take_open_files");
+    return await invoke<LocalOpenRequest[]>("take_open_files");
   } catch {
     return [];
   }

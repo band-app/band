@@ -5,6 +5,7 @@ import { type LocalWorktree, planLocalFileOpen } from "../dashboard/lib/local-fi
 import { listen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import {
+  type LocalOpenRequest,
   OPEN_LOCAL_FILES_EVENT,
   takeOsOpenFiles,
   thisMachineHostIds,
@@ -51,7 +52,7 @@ export function LocalFileOpener({ activeWorktreeId }: { activeWorktreeId: string
   useEffect(() => {
     let queue = Promise.resolve();
 
-    const openOne = async (path: string) => {
+    const openOne = async ({ path, line, column, directory }: LocalOpenRequest) => {
       // A cold start from Finder queues paths before the worktree list exists. Wait for it, or a
       // file inside a worktree would open as an external tab.
       const loadDeadline = Date.now() + LAYOUT_WAIT_MS;
@@ -71,7 +72,20 @@ export function LocalFileOpener({ activeWorktreeId }: { activeWorktreeId: string
         worktrees,
         await thisMachineHostIds(),
         cur.activeWorktreeId,
+        directory,
       );
+      if (plan.kind === "outside") {
+        cur.notify("info", plan.message);
+        return;
+      }
+      if (plan.kind === "select") {
+        if (plan.worktreeId !== cur.activeWorktreeId) {
+          const href = cur.capabilities.getWorktreeHref?.(plan.worktreeId);
+          if (href && cur.capabilities.navigate) cur.capabilities.navigate(href);
+          else cur.openWorktree(plan.worktreeId);
+        }
+        return;
+      }
       if (plan.kind === "none") {
         cur.notify("info", plan.reason);
         return;
@@ -84,28 +98,28 @@ export function LocalFileOpener({ activeWorktreeId }: { activeWorktreeId: string
         }
         const actions = await waitForLeafActions(plan.worktreeId);
         if (!actions) cur.notify("info", `Couldn't open ${path}`);
-        actions?.openFile(plan.relPath, { preview: false });
+        actions?.openFile(plan.relPath, { preview: false, line, column });
         return;
       }
       const actions = await waitForLeafActions(plan.worktreeId);
       if (!actions) cur.notify("info", `Couldn't open ${path}`);
-      actions?.openFile(path, { source: "desktop", preview: false });
+      actions?.openFile(path, { source: "desktop", preview: false, line, column });
     };
 
     // One file at a time, in arrival order: a switch of worktree finishes before the next file.
-    const enqueue = (paths: string[]) => {
-      for (const path of paths) {
+    const enqueue = (requests: LocalOpenRequest[]) => {
+      for (const request of requests) {
         queue = queue
-          .then(() => openOne(path))
+          .then(() => openOne(request))
           .catch(() => {
-            latest.current.notify("info", `Couldn't open ${path}`);
+            latest.current.notify("info", `Couldn't open ${request.path}`);
           });
       }
     };
 
     const onRequest = (e: Event) => {
       const detail = (e as CustomEvent<{ paths?: string[] }>).detail;
-      enqueue(detail?.paths ?? []);
+      enqueue((detail?.paths ?? []).map((path) => ({ path })));
     };
     window.addEventListener(OPEN_LOCAL_FILES_EVENT, onRequest);
 

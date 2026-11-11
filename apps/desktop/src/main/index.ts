@@ -13,6 +13,7 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
+import { statSync } from "node:fs";
 import {
   app,
   BrowserWindow,
@@ -40,6 +41,7 @@ import { registerHubConfigSync } from "./ipc/hub.js";
 import { registerIpc } from "./ipc/register.js";
 import { isTrustedSender } from "./ipc/sender-guard.js";
 import { installAppMenu } from "./menu.js";
+import { parseBandUrl } from "./services/band-url.js";
 import { electronSecretStore } from "./services/electron-secret-store.js";
 import {
   checkRemoteHub,
@@ -125,6 +127,36 @@ const localPreview = new LocalPreviewRegistry();
 app.on("open-file", (event, path) => {
   event.preventDefault();
   openFiles.push(path);
+});
+
+// `band://file/<path>[:line[:col]]` from another app. The scheme is registered by the packaged
+// Info.plist (`protocols` in electron-builder.yml), not by `setAsDefaultProtocolClient`, so a dev run
+// never takes it over. macOS fires this before `ready` on a cold launch. The URL only selects a
+// worktree or opens a file as a tab, so it goes through the same queue as Finder's Open With.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  const parsed = parseBandUrl(url);
+  if (parsed.kind === "unknown") {
+    log.warn({ reason: parsed.reason }, "ignored a band:// URL");
+    const win = state.mainWindow;
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+    return;
+  }
+  let directory = false;
+  try {
+    directory = statSync(parsed.path).isDirectory();
+  } catch {
+    // Missing path: handled as a file, and the editor reports it.
+  }
+  openFiles.push(parsed.path, {
+    ...(parsed.line ? { line: parsed.line } : {}),
+    ...(parsed.column ? { column: parsed.column } : {}),
+    directory,
+  });
 });
 
 /** powerMonitor listeners survive window close; wire them at most once. */

@@ -43,6 +43,17 @@ Where a file opens:
 
 The desktop app reads a file with no symlink on its last path component, only regular files, up to 1 MB, and refuses binary content. A save never creates a file.
 
+## Opening a path from another app
+
+`open "band://file/<absolute path>[:line[:col]]"` raises Band on macOS and shows the path, the way `zed://file/<path>` does in Zed. The path is percent-decoded.
+
+- A folder inside a worktree selects that worktree. No tab opens.
+- A file inside a worktree opens in that worktree's editor, at the line and column if given.
+- A file outside every worktree opens as an external tab in the current worktree.
+- A folder outside every worktree shows the toast "Not in a Band worktree: <path>".
+
+Only worktrees on this Mac's worker count, and the longest matching path wins. The handler only selects and opens tabs read-only. Any other `band://` route (the mobile app's `band://pair` is one) is logged and raises the window. The packaged `Info.plist` registers the scheme (`protocols` in `electron-builder.yml`). A dev run does not, because the app never calls `setAsDefaultProtocolClient`.
+
 ## Limits
 
 - In a browser, dropping a file on a tab strip does nothing. A browser gives a page no path to the file. Paste an absolute path into Quick Open (Cmd+P) instead, which opens it from the worktree's machine.

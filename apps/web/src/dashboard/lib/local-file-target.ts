@@ -11,6 +11,10 @@ export type LocalFilePlan =
   | { kind: "worktree"; worktreeId: string; relPath: string }
   /** The file is outside every worktree on this Mac: an external tab read by the desktop app. */
   | { kind: "external"; worktreeId: string }
+  /** A folder inside a worktree on this Mac (`band://file/<folder>`): select that worktree, open no tab. */
+  | { kind: "select"; worktreeId: string }
+  /** A folder outside every worktree on this Mac. */
+  | { kind: "outside"; message: string }
   /** There is nowhere to open it. */
   | { kind: "none"; reason: string };
 
@@ -27,12 +31,18 @@ export function planLocalFileOpen(
   worktrees: LocalWorktree[],
   thisMachineHostIds: string[],
   currentWorktreeId: string | null,
+  isDirectory = false,
 ): LocalFilePlan {
   let best: { worktree: LocalWorktree; relPath: string } | null = null;
   for (const hostId of thisMachineHostIds) {
     const found = findWorktreeForPath(absPath, hostId, worktrees);
-    if (!found || !found.relPath) continue;
+    if (!found || (!found.relPath && !isDirectory)) continue;
     if (!best || found.worktree.path.length > best.worktree.path.length) best = found;
+  }
+  if (isDirectory) {
+    return best
+      ? { kind: "select", worktreeId: best.worktree.id }
+      : { kind: "outside", message: `Not in a Band worktree: ${absPath}` };
   }
   if (best) return { kind: "worktree", worktreeId: best.worktree.id, relPath: best.relPath };
   if (currentWorktreeId) return { kind: "external", worktreeId: currentWorktreeId };

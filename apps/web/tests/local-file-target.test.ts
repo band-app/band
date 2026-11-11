@@ -50,3 +50,31 @@ describe("planLocalFileOpen", () => {
     );
   });
 });
+
+describe("planLocalFileOpen for a folder (band://file/<folder>)", () => {
+  it("selects the worktree for its root", () => {
+    expect(planLocalFileOpen("/work/alpha", worktrees, ["local"], null, true)).toEqual({
+      kind: "select",
+      worktreeId: "alpha-main",
+    });
+  });
+
+  it("selects the longest matching nested worktree", () => {
+    expect(
+      planLocalFileOpen(
+        "/work/alpha/.worktrees/feat/src",
+        worktrees,
+        ["local", "h-mac"],
+        null,
+        true,
+      ),
+    ).toEqual({ kind: "select", worktreeId: "alpha-feat@h-mac" });
+  });
+
+  it("reports a folder outside every worktree", () => {
+    expect(planLocalFileOpen("/etc", worktrees, ["local"], "alpha-main", true)).toEqual({
+      kind: "outside",
+      message: "Not in a Band worktree: /etc",
+    });
+  });
+});
