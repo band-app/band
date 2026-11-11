@@ -66,12 +66,26 @@ runs:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ inputs.browsers }}
 
+    # An empty entry would restore as a hit and stop every later run on this ref
+    # from saving the packages (PR 1201's runs on 2026-11-11 saved two).
+    - name: Count downloaded apt packages
+      id: apt-debs
+      if: ${{ !cancelled() && runner.os == 'Linux' }}
+      shell: bash
+      env:
+        DEB_DIR: ${{ runner.temp }}/playwright-apt-debs
+      run: |
+        n=0
+        for f in "$DEB_DIR"/*.deb; do [ -e "$f" ] && n=$((n + 1)); done
+        echo "count=$n" >> "$GITHUB_OUTPUT"
+
     # Saved even when the install failed, so the next run starts with what this
     # one downloaded. Same trust gate as the saves above.
     - name: Save apt packages cache
       if: |
         !cancelled() && runner.os == 'Linux' &&
         steps.cache-apt.outputs.cache-hit != 'true' &&
+        steps.apt-debs.outputs.count != '0' &&
         ((github.event_name != 'pull_request' &&
           github.event_name != 'pull_request_target') ||
          github.event.pull_request.head.repo.full_name == github.repository)
