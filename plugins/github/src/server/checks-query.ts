@@ -55,6 +55,7 @@ export const reviewQuery = (
   options: { mergeQueue?: boolean } = {},
 ): string => `query($owner: String!, $name: String!, $branch: String!, $ref: String!) {
   repository(owner: $owner, name: $name) {
+    parent { name owner { login } }
     pullRequests(headRefName: $branch, first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {
         number
@@ -63,6 +64,7 @@ export const reviewQuery = (
         state
         isDraft
         isCrossRepository
+        headRepositoryOwner { login }
         updatedAt
         mergeStateStatus
         reviewDecision
@@ -203,6 +205,7 @@ interface PullRequestNode extends MergeQueueNode {
   state: "OPEN" | "MERGED" | "CLOSED";
   isDraft: boolean;
   isCrossRepository: boolean;
+  headRepositoryOwner?: { login: string } | null;
   updatedAt: string;
   mergeStateStatus: string | null;
   reviewDecision: string | null;
@@ -235,6 +238,8 @@ interface PullRequestNode extends MergeQueueNode {
 
 export interface ReviewQueryResponse {
   repository: {
+    /** The repo this one was forked from, or null. */
+    parent?: { name: string; owner: { login: string } } | null;
     pullRequests: { nodes: PullRequestNode[] };
     ref: {
       target: {
@@ -260,9 +265,16 @@ export function parseReview(
   data: ReviewQueryResponse,
   branch: string,
   defaultBranch: string,
+  forkOwner?: string,
 ): ReviewInfo | null {
   if (branch === defaultBranch) return null;
-  const nodes = (data.repository?.pullRequests.nodes ?? []).filter((pr) => !pr.isCrossRepository);
+  // In a fork's parent repo the PR is cross-repository by nature, so it counts when its head is
+  // in the fork. Same-name PRs from anyone else do not.
+  const nodes = (data.repository?.pullRequests.nodes ?? []).filter((pr) =>
+    forkOwner === undefined
+      ? !pr.isCrossRepository
+      : pr.headRepositoryOwner?.login.toLowerCase() === forkOwner.toLowerCase(),
+  );
   const pr = nodes.find((node) => node.state === "OPEN") ?? nodes[0];
   if (!pr) return null;
 

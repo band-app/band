@@ -30,10 +30,22 @@ interface PullRequestNode extends MergeQueueNode {
   isDraft: boolean;
   /** Null when the fork the PR came from has been deleted. */
   headRepositoryOwner: { login: string } | null;
+  /** Only asked of a fork's parent repo: the head commit's combined check state. */
+  commits?: {
+    nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }>;
+  };
+}
+
+/** The repository a fork was made from, as GitHub's GraphQL reports it. */
+export interface ParentNode {
+  name: string;
+  owner: { login: string };
 }
 
 export interface GraphQLRepoResponse {
   owner?: { login: string };
+  /** Null for a repo that is not a fork. Absent in older stored responses. */
+  parent?: ParentNode | null;
   pullRequests: {
     nodes: PullRequestNode[];
   };
@@ -68,6 +80,7 @@ export function buildBranchStatusQuery(
 
     return `${branchAlias(index)}: repository(owner: "${owner}", name: "${repo}") {
     owner { login }
+    parent { name owner { login } }
     pullRequests(headRefName: "${branch}", first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes { number title state url isDraft headRepositoryOwner { login }${queueFields} }
     }
@@ -103,11 +116,11 @@ export function buildBranchStatusQuery(
  * an open PR counts: a merged or closed PR whose head is `main` came from a
  * merge of main into another branch.
  */
-function pickPullRequest(
+function pickNode(
   allNodes: PullRequestNode[],
   repoOwner: string | undefined,
   isDefaultBranch: boolean,
-): BranchReview | null {
+): PullRequestNode | null {
   const nodes = allNodes.filter(
     (n) =>
       repoOwner !== undefined &&
@@ -119,7 +132,10 @@ function pickPullRequest(
     (isDefaultBranch
       ? undefined
       : (nodes.find((n) => n.state === "MERGED") ?? nodes.find((n) => n.state === "CLOSED")));
-  if (!node) return null;
+  return node ?? null;
+}
+
+function toReview(node: PullRequestNode): BranchReview {
   const open = node.state === "OPEN";
   const mergeQueue = open ? parseMergeQueue(node) : null;
   const autoMerge = open ? parseAutoMerge(node) : null;
@@ -132,6 +148,86 @@ function pickPullRequest(
     ...(mergeQueue && { mergeQueue }),
     ...(autoMerge && { autoMerge }),
   };
+}
+
+function pickPullRequest(
+  allNodes: PullRequestNode[],
+  repoOwner: string | undefined,
+  isDefaultBranch: boolean,
+): BranchReview | null {
+  const node = pickNode(allNodes, repoOwner, isDefaultBranch);
+  return node ? toReview(node) : null;
+}
+
+/**
+ * The query for a fork's parent repo: for each branch, the PRs with that head
+ * name and the combined check state of their head commit. A fork PR's workflows
+ * run in the parent, so its CI is read there.
+ */
+export function buildParentStatusQuery(
+  parent: RepoInfo,
+  branches: string[],
+  options: { mergeQueue?: boolean } = {},
+): string {
+  const queueFields = options.mergeQueue === false ? "" : ` ${MERGE_QUEUE_FIELDS}`;
+  const owner = escapeGraphQL(parent.owner);
+  const repo = escapeGraphQL(parent.repo);
+  const fragments = branches.map((name, index) => {
+    const branch = escapeGraphQL(name);
+    return `${branchAlias(index)}: repository(owner: "${owner}", name: "${repo}") {
+    pullRequests(headRefName: "${branch}", first: 20, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes { number title state url isDraft headRepositoryOwner { login }${queueFields} commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
+    }
+  }`;
+  });
+  return `query { ${fragments.join("\n  ")} }`;
+}
+
+function rollupState(state: string | undefined): BranchStatus["state"] {
+  switch (state) {
+    case "SUCCESS":
+      return "success";
+    case "FAILURE":
+    case "ERROR":
+      return "failure";
+    case "PENDING":
+    case "EXPECTED":
+      return "pending";
+    default:
+      return "none";
+  }
+}
+
+/**
+ * Statuses for the branches a fork has a PR for in its parent repo, keyed by
+ * branch. Only PRs whose head is in the fork (`forkOwner`) count. A branch with
+ * no such PR is left out.
+ */
+export function parseParentStatusResponse(
+  data: Record<string, GraphQLRepoResponse | null>,
+  branches: BranchStatusRequest[],
+  forkOwner: string,
+): Record<string, BranchStatus> {
+  const results: Record<string, BranchStatus> = {};
+  for (const [index, { branch, isDefaultBranch }] of branches.entries()) {
+    const node = pickNode(
+      data[branchAlias(index)]?.pullRequests?.nodes ?? [],
+      forkOwner,
+      isDefaultBranch,
+    );
+    if (!node) continue;
+    const review = toReview(node);
+    if (review.state === "merged") {
+      results[branch] = { state: "merged", url: review.url, review };
+      continue;
+    }
+    const state =
+      review.state === "open"
+        ? rollupState(node.commits?.nodes[0]?.commit.statusCheckRollup?.state)
+        : "none";
+    results[branch] = { state, url: review.state === "open" ? review.url : null, review };
+  }
+  return results;
 }
 
 function isWebUrl(url: string): boolean {
