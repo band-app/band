@@ -43,6 +43,7 @@ const KEEP_BUNDLES_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROVISION_TIMEOUT_MS = 30 * 60 * 1000;
 const LIST_LIMIT = 20;
 const TIMEOUT_EXIT_CODE = 124;
+const SSH_EXIT_CODE = 255;
 
 /** `BAND_PROVISION_TIMEOUT_MS` replaces the 30 minutes a run may take to say hello, read on every check. */
 function provisionTimeoutMs(): number {
@@ -319,6 +320,24 @@ export class ProvisioningService {
     }
     this.queries.finish(row.id, exit === 0 ? "done" : "failed", exit, next, at);
     if (exit !== 0) log.info(`provisioning ${row.id} failed with exit code ${exit}`);
+  }
+
+  /**
+   * Closes a run whose `ssh` command ended before the script finished. A failed `ssh` (or one
+   * that exited 0 without the script ever reaching the hub) marks the run failed with the note
+   * as the log. A run the script already closed, or one that reached the hub and is still
+   * running, is left to the script.
+   */
+  sshEnded(id: string, failure: string | null): void {
+    const row = this.queries.findById(id);
+    if (!row || row.state === "done" || row.state === "failed") return;
+    if (failure === null && row.spentAt != null) return;
+    const note = failure ?? "ssh finished, but the install script never contacted the hub.";
+    const secrets = [] as string[];
+    const clean = scrub(note.slice(-MAX_CHUNK_BYTES), secrets);
+    const next = `${row.log}${row.log && !row.log.endsWith("\n") ? "\n" : ""}${clean}\n`;
+    this.queries.finish(row.id, "failed", SSH_EXIT_CODE, next.slice(-MAX_LOG_BYTES), this.now());
+    log.info(`provisioning ${row.id} failed over ssh`);
   }
 
   status(id: string): ProvisionView | null {

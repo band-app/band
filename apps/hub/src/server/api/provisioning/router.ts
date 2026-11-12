@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { provisioningService } from "../../services/provisioning-service";
+import { sshInstallService } from "../../services/ssh-install-service";
 import { adminProcedure, t } from "../trpc";
 
 const settingsInput = z.object({
@@ -43,6 +44,29 @@ export const provisioningRouter = t.router({
   updateSettings: adminProcedure
     .input(settingsInput)
     .mutation(({ input }) => provisioningService.updateSettings(input)),
+
+  /** The hosts in a worker's `~/.ssh/config`. */
+  sshHosts: adminProcedure
+    .input(z.object({ workerId: z.string().min(1).max(100) }))
+    .query(({ input }) => sshInstallService.listHosts(input.workerId)),
+
+  /** Whether a target's host key is known, new (with its fingerprints) or changed. */
+  sshInspect: adminProcedure
+    .input(z.object({ workerId: z.string().min(1).max(100), target: z.string().max(300) }))
+    .mutation(({ input }) => sshInstallService.inspect(input.workerId, input.target)),
+
+  /** Runs a provisioning command on the target over ssh from the chosen worker. */
+  sshInstall: adminProcedure
+    .input(
+      z.object({
+        workerId: z.string().min(1).max(100),
+        target: z.string().max(300),
+        hubUrl: z.string().min(1).max(500),
+        hostName: z.string().max(100).optional(),
+        trustFingerprints: z.array(z.string().max(200)).max(10).optional(),
+      }),
+    )
+    .mutation(({ input }) => sshInstallService.install(input)),
 });
 
 export type ProvisioningRouter = typeof provisioningRouter;
