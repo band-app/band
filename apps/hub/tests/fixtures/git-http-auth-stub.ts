@@ -85,6 +85,10 @@ export async function startGitHttpAuthStub(
         res.writeHead(status, headers);
         res.end(all.subarray(split + 4));
       });
+      // git http-backend can exit before it reads the body; the reply still comes from
+      // stdout and `close`. Without a listener the EPIPE is an uncaught error, and vitest
+      // fails the whole shard for it (run 43111872018, every test passed).
+      child.stdin.on("error", () => undefined);
       child.stdin.end(body);
     });
   });
