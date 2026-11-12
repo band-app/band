@@ -437,6 +437,35 @@ export class FileViewerPage {
     });
   }
 
+  /** Wait until every rendered mermaid block has drawn its diagram, so the
+   *  document height no longer changes under a click. */
+  async waitForMermaidDrawn(): Promise<void> {
+    await test.step("Wait for the mermaid diagrams to be drawn", async () => {
+      const blocks = this.previewRenderedBlock("mermaid");
+      for (const block of await blocks.all()) {
+        await expect(block.locator("svg").first()).toBeVisible({ timeout: 20_000 });
+      }
+    });
+  }
+
+  /** Click the middle of the preview line whose text contains `text`, the way
+   *  a user would aim at it. The line is found by its rendered text. */
+  async clickPreviewLine(text: string): Promise<void> {
+    await test.step(`Click the middle of the preview line "${text}"`, async () => {
+      const line = this.markdownPreview.locator(".cm-line").filter({ hasText: text }).first();
+      // CodeMirror renders only the lines near the viewport: scroll down in
+      // steps until the line exists.
+      await expect(async () => {
+        if ((await line.count()) === 0) {
+          await this.previewScroller.evaluate((el) => el.scrollBy(0, el.clientHeight / 2));
+        }
+        await expect(line).toBeAttached({ timeout: 250 });
+      }).toPass({ timeout: 15_000 });
+      await line.scrollIntoViewIfNeeded();
+      await line.click();
+    });
+  }
+
   /** Type into the focused preview. Each `\n` in `text` is an Enter press, so
    *  the markdown keymap (list continuation) runs the way it does for a user. */
   async typeInPreview(text: string): Promise<void> {
