@@ -11,7 +11,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { toWorktreeId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
@@ -78,6 +78,12 @@ test.beforeAll(async () => {
     "# Find\n\nOne needle here.\n\n| col |\n| --- |\n| needle cell |\n\n",
   );
   writeFileSync(join(repo, "DIAGRAM.md"), `# Diagram\n\n\`\`\`mermaid\n${MERMAID}\n\`\`\`\n`);
+  writeFileSync(join(repo, "fmt-bold-add.md"), "hello world\n");
+  writeFileSync(join(repo, "fmt-bold-remove.md"), "**hello** world\n");
+  writeFileSync(join(repo, "fmt-none.md"), "hello world\n");
+  writeFileSync(join(repo, "fmt-italic.md"), "hello world\n");
+  writeFileSync(join(repo, "fmt-underscore.md"), "_hello_ world\n");
+  writeFileSync(join(repo, "history-check.md"), "hello world\n");
   mkdirSync(join(repo, "assets"));
   mkdirSync(join(repo, "docs"));
   writeFileSync(join(repo, "assets", "logo.png"), PNG_1X1);
@@ -152,6 +158,114 @@ test("typing markdown in the preview formats it and saves it back without touchi
   await expect
     .poll(() => readFileSync(join(repo, "EDIT.md"), "utf8"), { timeout: 10_000 })
     .toBe(expected);
+});
+
+/** Open `file` in the preview and select its first `chars` characters. */
+async function openAndSelect(
+  page: Page,
+  file: string,
+  chars: number,
+): Promise<{ worktreePage: WorktreePage; viewer: FileViewerPage }> {
+  const worktreePage = new WorktreePage(page, server.url, TOKEN);
+  const viewer = new FileViewerPage(page);
+  await worktreePage.goto(WORKTREE);
+  await worktreePage.waitForReady();
+  await worktreePage.openFileLeaf(file);
+  await expect(viewer.markdownPreview).toBeVisible({ timeout: 20_000 });
+  await viewer.focusPreviewStart();
+  if (chars > 0) await viewer.selectPreviewForward(chars);
+  return { worktreePage, viewer };
+}
+
+function diskText(file: string): string {
+  return readFileSync(join(repo, file), "utf8");
+}
+
+test("Mod+B bolds the selection without toggling the sidebar, and again unbolds it", async ({
+  page,
+}) => {
+  const { worktreePage, viewer } = await openAndSelect(page, "fmt-bold-add.md", 5);
+  await expect(worktreePage.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+
+  await viewer.pressFormatShortcut("b");
+  await expect(viewer.previewFormatted("strong", "hello")).toBeVisible();
+  await expect(worktreePage.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+  await viewer.saveWithShortcut();
+  await expect.poll(() => diskText("fmt-bold-add.md")).toBe("**hello** world\n");
+
+  // The selection still covers the word, so the same key removes the markers.
+  await viewer.pressFormatShortcut("b");
+  await viewer.saveWithShortcut();
+  await expect.poll(() => diskText("fmt-bold-add.md")).toBe("hello world\n");
+  await expect(worktreePage.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Mod+B removes existing bold markers around the selection", async ({ page }) => {
+  const { viewer } = await openAndSelect(page, "fmt-bold-remove.md", 0);
+  // Select the inner word: skip the hidden `**`, then 5 characters.
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await viewer.selectPreviewForward(5);
+  await viewer.pressFormatShortcut("b");
+  await viewer.saveWithShortcut();
+  await expect.poll(() => diskText("fmt-bold-remove.md")).toBe("hello world\n");
+});
+
+test("Mod+B with nothing selected leaves the text alone and toggles the sidebar", async ({
+  page,
+}) => {
+  const { worktreePage, viewer } = await openAndSelect(page, "fmt-none.md", 0);
+  await expect(worktreePage.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+  await viewer.pressFormatShortcut("b");
+  await expect(worktreePage.sidebarToggle).toHaveAttribute("aria-pressed", "false");
+  await viewer.saveWithShortcut();
+  await expect(viewer.previewFormatted("strong", "hello")).toHaveCount(0);
+  expect(diskText("fmt-none.md")).toBe("hello world\n");
+});
+
+test("Mod+I italicises and unitalicises the selection", async ({ page }) => {
+  const { viewer } = await openAndSelect(page, "fmt-italic.md", 5);
+  await viewer.pressFormatShortcut("i");
+  await viewer.saveWithShortcut();
+  await expect.poll(() => diskText("fmt-italic.md")).toBe("*hello* world\n");
+
+  await viewer.pressFormatShortcut("i");
+  await viewer.saveWithShortcut();
+  await expect.poll(() => diskText("fmt-italic.md")).toBe("hello world\n");
+});
+
+test("Mod+I with nothing selected leaves the text alone", async ({ page }) => {
+  const { viewer } = await openAndSelect(page, "fmt-none.md", 0);
+  await viewer.pressFormatShortcut("i");
+  await viewer.saveWithShortcut();
+  await expect(viewer.previewFormatted("strong", "hello")).toHaveCount(0);
+  expect(diskText("fmt-none.md")).toBe("hello world\n");
+});
+
+test("Mod+I removes underscore italics", async ({ page }) => {
+  const { viewer } = await openAndSelect(page, "fmt-underscore.md", 0);
+  await page.keyboard.press("ArrowRight");
+  await viewer.selectPreviewForward(5);
+  await viewer.pressFormatShortcut("i");
+  await viewer.saveWithShortcut();
+  await expect.poll(() => diskText("fmt-underscore.md")).toBe("hello world\n");
+});
+
+test("one undo reverts a Mod+B bold", async ({ page }) => {
+  const { viewer } = await openAndSelect(page, "history-check.md", 5);
+  await viewer.pressFormatShortcut("b");
+  await expect(viewer.previewFormatted("strong", "hello")).toBeVisible();
+  await viewer.undoWithShortcut();
+  await expect(viewer.previewFormatted("strong", "hello")).toHaveCount(0);
+  await viewer.saveWithShortcut();
+  expect(diskText("history-check.md")).toBe("hello world\n");
+});
+
+test("Mod+B toggles the sidebar when focus is outside the editor", async ({ page }) => {
+  const { worktreePage } = await openAndSelect(page, "fmt-none.md", 0);
+  await worktreePage.selectRightSidepanelTab("explorer");
+  await worktreePage.toggleSidebarViaShortcut();
+  await expect(worktreePage.sidebarToggle).toHaveAttribute("aria-pressed", "false");
 });
 
 test("find in the preview counts and steps through matches, including text typed in it", async ({

@@ -30,6 +30,7 @@ import {
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { LanguageDescription, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import {
+  EditorSelection,
   EditorState,
   type Extension,
   type Range,
@@ -48,6 +49,7 @@ import {
 } from "@codemirror/view";
 import { loadLanguage } from "./codemirror-setup";
 import { bandCodeHighlightStyle, codeFontSize } from "./codemirror-theme";
+import { isMacPlatform } from "./command-registry";
 import type { MarkdownPreviewWidth } from "./markdown-preview-width";
 import { frontmatterWidget, type SyntaxNode, tableWidget } from "./markdown-table-widget";
 import { quietFocus } from "./quiet-focus";
@@ -964,6 +966,105 @@ export function markdownPreviewWidthTheme(width: MarkdownPreviewWidth): Extensio
   });
 }
 
+const FORMAT_ATTR = "data-md-format-shortcuts";
+
+/** Length of the run of `ch` starting at `pos` and going `dir` (1 forward, -1 back). */
+function markerRun(doc: Text, pos: number, dir: 1 | -1, ch: string): number {
+  let n = 0;
+  if (dir === 1) {
+    while (pos + n < doc.length && doc.sliceString(pos + n, pos + n + 1) === ch) n++;
+  } else {
+    while (pos - n > 0 && doc.sliceString(pos - n - 1, pos - n) === ch) n++;
+  }
+  return n;
+}
+
+type FormatMark = { marker: string; ch: string; accept: (run: number) => boolean };
+
+const BOLD_MARK: FormatMark = { marker: "**", ch: "*", accept: (run) => run >= 2 };
+// A run of 1 or 3 stars is italic; 2 is bold. `_` follows the same rule.
+const ITALIC_MARKS: FormatMark[] = [
+  { marker: "*", ch: "*", accept: (run) => run % 2 === 1 },
+  { marker: "_", ch: "_", accept: (run) => run % 2 === 1 },
+];
+
+/** Toggle one marker around every non-empty selection range. */
+function toggleFormat(view: EditorView, marks: FormatMark[]): boolean {
+  const { state } = view;
+  if (state.selection.ranges.every((r) => r.empty)) return false;
+  const doc = state.doc;
+  view.dispatch(
+    state.changeByRange((range) => {
+      if (range.empty) return { range };
+      const { from, to } = range;
+      for (const { marker, ch, accept } of marks) {
+        const m = marker.length;
+        // Markers just outside the selection.
+        const before = markerRun(doc, from, -1, ch);
+        const after = markerRun(doc, to, 1, ch);
+        if (before >= m && after >= m && accept(before) && accept(after)) {
+          return {
+            changes: [
+              { from: from - m, to: from },
+              { from: to, to: to + m },
+            ],
+            range: EditorSelection.range(from - m, to - m),
+          };
+        }
+        // Markers inside the selection.
+        const text = doc.sliceString(from, to);
+        const lead = markerRun(doc, from, 1, ch);
+        const trail = markerRun(doc, to, -1, ch);
+        if (text.length > 2 * m && lead >= m && trail >= m && accept(lead) && accept(trail)) {
+          return {
+            changes: [
+              { from, to: from + m },
+              { from: to - m, to },
+            ],
+            range: EditorSelection.range(from, to - 2 * m),
+          };
+        }
+      }
+      const { marker } = marks[0];
+      return {
+        changes: [
+          { from, insert: marker },
+          { from: to, insert: marker },
+        ],
+        range: EditorSelection.range(from + marker.length, to + marker.length),
+      };
+    }),
+    { scrollIntoView: true, userEvent: "input.format" },
+  );
+  return true;
+}
+
+/** Bold the selection with `**`, or remove the markers. Needs a non-empty selection. */
+export const toggleBold = (view: EditorView): boolean => toggleFormat(view, [BOLD_MARK]);
+
+/** Italicise the selection with `*`, or remove `*` / `_` markers. Needs a non-empty selection. */
+export const toggleItalic = (view: EditorView): boolean => toggleFormat(view, ITALIC_MARKS);
+
+/**
+ * Whether a ⌘B / ⌘I keydown aimed at `target` belongs to the markdown preview:
+ * the editor is the target and has a selection to format. The window-level
+ * shortcut handler runs first (capture phase), so it asks this before it
+ * toggles the sidebar.
+ */
+export function markdownPreviewOwnsFormatKey(event: KeyboardEvent): boolean {
+  const key = event.key.toLowerCase();
+  if ((key !== "b" && key !== "i") || event.shiftKey || event.altKey) return false;
+  // CodeMirror's Mod is Cmd on macOS and Ctrl elsewhere; the other modifier is not ours.
+  if (isMacPlatform() ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey)
+    return false;
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const dom = target.closest<HTMLElement>(`.cm-editor`);
+  if (!dom?.querySelector(`[${FORMAT_ATTR}]`)) return false;
+  const view = EditorView.findFromDOM(dom);
+  return !!view && view.state.selection.ranges.some((r) => !r.empty);
+}
+
 /**
  * All extensions for the editable markdown preview. Used instead of
  * `baseEditorExtensions`: no gutters, wrapped lines, prose styling.
@@ -986,6 +1087,7 @@ export function markdownLivePreviewExtensions(opts: MarkdownLivePreviewOptions):
       ? [renderedBlocks({ render: opts.renderBlock, onSave: opts.onSave })]
       : []),
     livePreviewTheme(opts.isDark),
+    EditorView.contentAttributes.of({ [FORMAT_ATTR]: "true" }),
     keymap.of([
       ...(opts.onSave
         ? [
@@ -998,6 +1100,8 @@ export function markdownLivePreviewExtensions(opts: MarkdownLivePreviewOptions):
             },
           ]
         : []),
+      { key: "Mod-b", run: toggleBold, preventDefault: true },
+      { key: "Mod-i", run: toggleItalic, preventDefault: true },
       { key: "Tab", run: indentMore },
       { key: "Shift-Tab", run: indentLess },
       ...defaultKeymap,
@@ -1012,7 +1116,11 @@ export function markdownLivePreviewExtensions(opts: MarkdownLivePreviewOptions):
       keydown(event) {
         const mod = event.metaKey || event.ctrlKey;
         const key = event.key.toLowerCase();
-        if (event.key === "Tab" || (mod && (key === "z" || key === "y"))) {
+        if (
+          event.key === "Tab" ||
+          (mod && (key === "z" || key === "y")) ||
+          markdownPreviewOwnsFormatKey(event)
+        ) {
           event.stopPropagation();
         }
         return false;

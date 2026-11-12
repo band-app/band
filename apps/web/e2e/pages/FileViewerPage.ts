@@ -449,6 +449,37 @@ export class FileViewerPage {
     });
   }
 
+  /** Put the cursor at the start of the markdown preview's document. */
+  async focusPreviewStart(): Promise<void> {
+    await test.step("Put the cursor at the start of the markdown preview", async () => {
+      await this.markdownPreview.getByRole("textbox").first().click();
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+      );
+    });
+  }
+
+  /** Select `count` characters forward from the cursor with Shift+ArrowRight. */
+  async selectPreviewForward(count: number): Promise<void> {
+    await test.step(`Select ${count} characters forward in the preview`, async () => {
+      for (let i = 0; i < count; i++) await this.page.keyboard.press("Shift+ArrowRight");
+    });
+  }
+
+  /** Press Mod+B (bold) or Mod+I (italic) in the focused preview. */
+  async pressFormatShortcut(key: "b" | "i"): Promise<void> {
+    await test.step(`Press Cmd/Ctrl+${key.toUpperCase()}`, async () => {
+      await this.page.keyboard.press(`ControlOrMeta+${key}`);
+    });
+  }
+
+  /** Undo in the focused editor with Cmd/Ctrl+Z. */
+  async undoWithShortcut(): Promise<void> {
+    await test.step("Undo with Cmd/Ctrl+Z", async () => {
+      await this.page.keyboard.press("ControlOrMeta+z");
+    });
+  }
+
   /** Save the focused editor with Cmd/Ctrl+S. */
   async saveWithShortcut(): Promise<void> {
     await test.step("Save with Cmd/Ctrl+S", async () => {
