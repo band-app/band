@@ -78,13 +78,24 @@ export class GitCredentialService {
     return { found: true, token };
   }
 
-  /** Allows `url` for the worker's credential requests before it has a checkout of the repository. */
-  expectRemote(workerId: string, url: string, repo: string | null): void {
+  /**
+   * Allows `url` for the worker's credential requests before it has a checkout of the repository.
+   * Returns a function that withdraws only this announcement, leaving the worker's others alone.
+   */
+  expectRemote(workerId: string, url: string, repo: string | null): () => void {
     const key = isHttpUrl(url) ? parseRemoteUrl(url) : null;
-    if (!key) return;
+    if (!key) return () => {};
+    const entry: PlacedRemote = { ...key, repo };
     const list = this.expected.get(workerId) ?? [];
-    list.push({ ...key, repo });
+    list.push(entry);
     this.expected.set(workerId, list);
+    return () => {
+      const current = this.expected.get(workerId);
+      if (!current) return;
+      const rest = current.filter((e) => e !== entry);
+      if (rest.length === 0) this.expected.delete(workerId);
+      else this.expected.set(workerId, rest);
+    };
   }
 
   forget(workerId: string): void {
