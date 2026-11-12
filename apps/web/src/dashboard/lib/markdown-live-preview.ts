@@ -762,10 +762,11 @@ function livePreviewTheme(isDark: boolean): Extension {
       ".cm-md-image": { maxWidth: "100%" },
       ".cm-md-block": { padding: "0.4em 0", cursor: "text" },
 
-      ".cm-md-grid": {
+      // Spacing is padding on the widget, not margin: CodeMirror's height map
+      // ignores margins, which would put every click below a grid off.
+      ".cm-md-grid": { padding: "0.5em 0" },
+      ".cm-md-grid-box": {
         position: "relative",
-        margin: "0.5em 0",
-        padding: "0",
         border: `1px solid ${border}`,
         borderRadius: "8px",
       },

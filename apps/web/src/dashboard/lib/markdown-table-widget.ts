@@ -557,7 +557,13 @@ class TableEditor {
     const scroll = document.createElement("div");
     scroll.className = "cm-md-table-scroll";
     scroll.appendChild(frame);
-    this.dom.replaceChildren(this.createToolbar(), scroll);
+    // The bordered box sits inside `dom`, which spaces it with padding. A
+    // margin on a block widget is invisible to CodeMirror's height map and
+    // shifts every click below the widget by the margin.
+    const box = document.createElement("div");
+    box.className = "cm-md-grid-box";
+    box.replaceChildren(this.createToolbar(), scroll);
+    this.dom.replaceChildren(box);
   }
 
   private createToolbar(): HTMLElement {
