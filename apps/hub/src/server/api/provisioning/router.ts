@@ -26,6 +26,7 @@ export const provisioningRouter = t.router({
           .array(z.string().regex(/^[A-Za-z0-9_.-]+=[A-Za-z0-9_.-]+$/))
           .max(20)
           .optional(),
+        profile: z.string().min(1).max(100).optional(),
       }),
     )
     .mutation(({ input }) => provisioningService.create(input)),

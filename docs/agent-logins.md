@@ -71,6 +71,8 @@ An agent on a worker cannot read a login or switch its own chat to another accou
 A worker that owns its chats (`--own-chats`) keeps the login out of its local cache. If the hub is unreachable when such a chat starts its agent, the worker falls back to the cached launch, which has no login, and the agent runs on the machine's own login.
 
 
+A [worker profile](worker-profiles.md) can limit the logins agents on a worker may use. A login the profile does not list is skipped at every step of the chain above. Without a profile, or with a profile that has no `credentials` object, every login applies.
+
 ## Where logins apply
 
 - Chats on the hub's machine and on a worker. The hub sends the variables to the worker with the launch, and the worker removes the listed variables before it starts the agent.

@@ -2803,6 +2803,65 @@ fn hosts_trust_sets_the_level_and_audit_lists_the_log() {
 }
 
 #[test]
+fn workers_profiles_provision_and_set_profile() {
+    let env = TestEnv::new();
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    settings["workerProfiles"] = serde_json::json!([
+        {"name": "locked", "trust": "restricted", "labels": ["gui=1"]},
+        {"name": "broken", "trust": "root"}
+    ]);
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+
+    let listed = json_of(&env.band(&["workers", "profiles", "--output", "json"]));
+    assert_eq!(
+        listed["profiles"][0]["name"], "locked",
+        "profiles: {listed}"
+    );
+    assert_eq!(listed["invalid"][0]["name"], "broken", "profiles: {listed}");
+    let text = stdout(&env.band(&["workers", "profiles"]));
+    assert!(text.contains("locked"), "text: {text}");
+    assert!(text.contains("invalid #1"), "text: {text}");
+
+    let provision = json_of(&env.band(&[
+        "workers",
+        "provision",
+        "--profile",
+        "locked",
+        "--name",
+        "cli-box",
+        "--output",
+        "json",
+    ]));
+    assert!(
+        provision["command"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("curl -fsSL ") && c.ends_with("| sh")),
+        "provision: {provision}"
+    );
+    let missing = env.band(&["workers", "provision", "--profile", "nope"]);
+    assert!(!missing.status.success());
+    assert!(
+        stderr(&missing).contains("nope"),
+        "stderr: {}",
+        stderr(&missing)
+    );
+
+    let set = env.band(&["workers", "set-profile", "Local", "locked"]);
+    assert!(set.status.success(), "stderr: {}", stderr(&set));
+    let hosts = json_of(&env.band(&["workers", "list", "--output", "json"]));
+    assert_eq!(hosts["hosts"][0]["profile"], "locked", "hosts: {hosts}");
+    assert_eq!(hosts["hosts"][0]["trust"], "restricted", "hosts: {hosts}");
+
+    let cleared = env.band(&["workers", "set-profile", "Local", "none"]);
+    assert!(cleared.status.success(), "stderr: {}", stderr(&cleared));
+    let hosts = json_of(&env.band(&["workers", "list", "--output", "json"]));
+    assert!(hosts["hosts"][0]["profile"].is_null(), "hosts: {hosts}");
+}
+
+#[test]
 fn hosts_set_agent_command_sets_and_clears_the_override() {
     let env = TestEnv::new();
     let settings_path = env.band_dir.join("settings.json");

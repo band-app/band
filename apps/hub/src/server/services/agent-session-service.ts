@@ -385,6 +385,7 @@ onCredentialChange((change) => {
         agentType: def.type,
         repo: worktreeService.resolve(rt.worktreeId)?.repo.name,
         chatLoginId: chat.loginId ?? undefined,
+        hostId: hostRegistry.hostFor(rt.worktreeId).id,
       }) !== rt.loginId
     );
   }, "agent login changed");
@@ -863,13 +864,15 @@ function chatLocation(chat: ChatSession): { cwd: string; host: Host } | undefine
 async function withAgentLogin(
   launch: AcpLaunch,
   agentType: string,
-  scope: { worktreeId?: string; chatLoginId?: string } = {},
+  scope: { worktreeId?: string; chatLoginId?: string; hostId?: string } = {},
 ): Promise<{ launch: AcpLaunch; loginId: string | null }> {
   const repo = scope.worktreeId ? worktreeService.resolve(scope.worktreeId)?.repo.name : undefined;
   const login = await agentLoginService.resolve({
     agentType,
     repo,
     chatLoginId: scope.chatLoginId,
+    hostId:
+      scope.hostId ?? (scope.worktreeId ? hostRegistry.hostFor(scope.worktreeId).id : undefined),
   });
   if (!login) return { launch, loginId: null };
   return {
@@ -1319,6 +1322,7 @@ export class AgentSessionService {
       agentType: def.type,
       repo: worktree.repo.name,
       chatLoginId: chat.loginId,
+      hostId: worktree.host.id,
     });
     return {
       chat: ownedChatInfo(chat),
@@ -2024,7 +2028,7 @@ export class AgentSessionService {
   ): Promise<CatalogEntry> {
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const { launch } = await withAgentLogin(resolved, def.type);
+    const { launch } = await withAgentLogin(resolved, def.type, { hostId: host.id });
     let commands: acp.AvailableCommand[] = [];
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {
       onUpdate: (n) => {
@@ -2093,7 +2097,7 @@ export class AgentSessionService {
   ): Promise<string> {
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const { launch } = await withAgentLogin(resolved, def.type);
+    const { launch } = await withAgentLogin(resolved, def.type, { hostId: host.id });
     let sessionId: string | null = null;
     let text = "";
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {

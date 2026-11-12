@@ -26,9 +26,13 @@ export const settingsRouter = t.router({
       provisioning,
       hubUpdate,
       workerUpdate,
+      workerProfiles,
       ...settings
     } = settingsService.get();
-    return ctx.admin ? { ...settings, voice, provisioning, hubUpdate, workerUpdate } : settings;
+    // Profiles name vault items and logins a worker may receive, so only an admin reads them.
+    return ctx.admin
+      ? { ...settings, voice, provisioning, hubUpdate, workerUpdate, workerProfiles }
+      : settings;
   }),
 
   update: publicProcedure.input(settingsUpdateInput).mutation(({ input, ctx }) => {
@@ -69,6 +73,12 @@ export const settingsRouter = t.router({
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "Changing runners needs an admin token.",
+      });
+    }
+    if (input.workerProfiles !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing workerProfiles needs an admin token.",
       });
     }
     if (input.tokenSecret !== undefined && !ctx.admin) {

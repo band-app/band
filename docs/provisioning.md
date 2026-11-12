@@ -93,6 +93,10 @@ mise install --yes
 
 Keep credentials out of the repo. Agent logins come from Band's vault.
 
+## Worker profiles
+
+Pick a [worker profile](worker-profiles.md) next to the worker name, or run `band workers provision --profile <name>`. The profile's provisioning repo, if it has one, replaces the repo above for that command. The worker joins with the profile's trust and labels, the service gets the profile's `BAND_WORKER_*` env through `install-service --env`, and the start command gets the same variables exported. With no profile, the hub-wide repo applies.
+
 ## Progress and logs
 
 Settings > Workers shows the command's state under the line: waiting for the command to run, provisioning, online (the worker said hello), failed (with the exit code) or expired. The log is readable after the run. A run whose worker has not said hello 30 minutes after the exchange is marked failed, whether the script is still running or exited 0, and its log gets a last line saying why. 

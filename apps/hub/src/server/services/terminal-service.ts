@@ -278,6 +278,7 @@ export class TerminalService {
       ? await agentLoginService.resolve({
           agentType: opts.agentType,
           repo: worktree.repo.name,
+          hostId: host.id,
         })
       : null;
     const spawnEnv = { ...options?.env, ...login?.env, ...grant?.env };

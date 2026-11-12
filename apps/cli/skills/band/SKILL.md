@@ -322,6 +322,17 @@ band workers set-agent-command <worker> <agentId> --clear
 
 Replaces the agent's global command on one worker, for chats, terminal sessions, cronjobs and usage readers. `<command>` is a binary name or an absolute path with no arguments (put arguments in a wrapper script). `--clear` goes back to the global command. `band workers list --output json` returns `agentCommands` and, per agent, `agentCommandStates` with `effective` and `found` (false when the worker has no such binary on its PATH). Needs a person's admin token, never an agent's.
 
+### Provision a worker and manage worker profiles
+
+```sh
+band workers provision [--name <name>] [--labels k=v,k=v] [--profile <profile>] [--hub-url <url>]
+band workers provision --wait <id>
+band workers profiles
+band workers set-profile <worker> <profile|none>
+```
+
+`provision` prints the one-line `curl ... | sh` command for a blank machine and the id to follow it with. `--profile` applies a worker profile (Settings > Workers > Profiles): its trust, labels, worker settings, provisioning repo and credential policy. `--wait <id>` follows the command until the worker is online and exits non-zero when it fails or expires. `profiles` lists the profiles and any entry the hub refused. `set-profile` attaches a profile to an existing worker and applies its trust and credential policy from the next call. Its env and provisioning repo apply only at the next provisioning. `none` removes the profile. All three need a person's admin token, never an agent's.
+
 ### Show what admin workers did
 
 ```sh

@@ -35,6 +35,30 @@ export interface ServiceOptions {
   hubGitCredentialsOnly?: boolean;
   /** Skip the guard against driving the real service manager from a HOME that is not the real home. */
   allowOtherHome?: boolean;
+  /** Extra `BAND_WORKER_*` variables for the service (`--env KEY=VALUE`, repeatable). */
+  env?: Record<string, string>;
+}
+
+/** The variables `--env` may set: the worker's own settings, nothing else. */
+const SERVICE_ENV_NAME = /^BAND_WORKER_[A-Z0-9_]+$/;
+
+/** Parses the `--env KEY=VALUE` arguments. Refuses a name outside `BAND_WORKER_*`, naming it. */
+export function parseServiceEnv(pairs: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    const name = eq === -1 ? pair : pair.slice(0, eq);
+    if (!SERVICE_ENV_NAME.test(name)) {
+      throw new ConfigError(`--env ${name}: only BAND_WORKER_* variables can be set`);
+    }
+    if (eq === -1) throw new ConfigError(`--env ${name}: expected ${name}=VALUE`);
+    const value = pair.slice(eq + 1);
+    if (/[\0\r\n]/.test(value)) {
+      throw new ConfigError(`--env ${name}: the value must be one line`);
+    }
+    out[name] = value;
+  }
+  return out;
 }
 
 export type Runner = (cmd: string, args: string[]) => string;
@@ -111,6 +135,7 @@ const USAGE = `Usage: band-worker install-service --hub <url> --token <bootstrap
   --hub-git-credentials-only  Ignore this machine's git credential helpers; git asks only the hub.
   --allow-other-home Let install-service and uninstall-service drive the real launchd or systemd
                      user service although HOME is not the user's home directory.
+  --env KEY=VALUE    Another worker setting for the service. Only BAND_WORKER_* names. Repeatable.
 `;
 
 export function serviceUsage(): string {
@@ -143,6 +168,7 @@ export function parseServiceOptions(
     ownChats: values["own-chats"] === true,
     hubGitCredentialsOnly: values["hub-git-credentials-only"] === true,
     allowOtherHome: values["allow-other-home"] === true,
+    env: parseServiceEnv(values.env ?? []),
   };
 }
 
@@ -174,6 +200,7 @@ function parse(argv: string[]) {
       "own-chats": { type: "boolean" },
       "hub-git-credentials-only": { type: "boolean" },
       "allow-other-home": { type: "boolean" },
+      env: { type: "string", multiple: true },
     },
     strict: true,
   });
@@ -182,6 +209,7 @@ function parse(argv: string[]) {
 /** The variables the service gives the worker, in the names `parseConfig` reads. */
 export function serviceVariables(opts: ServiceOptions): Record<string, string> {
   const vars: Record<string, string> = {
+    ...opts.env,
     BAND_HUB_URL: opts.hub,
     BAND_WORKER_TOKEN: opts.token,
   };

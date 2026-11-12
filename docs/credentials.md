@@ -55,6 +55,8 @@ When a runner starts a worker for a repo that has a matching git credential, the
 
 The `gh` command on a worker gets a `GH_TOKEN` from the broadest git credential for `github.com`. The hub passes it to each agent and terminal when it starts, and keeps it out of files and logs. Workers started by a runner get it automatically. For other workers, set `BAND_WORKER_GH_TOKEN=hub` in the worker's environment. The hub's own `gh` calls use the same credential when the hub's machine has no `gh` login.
 
+A [worker profile](worker-profiles.md) with a `credentials` object replaces these rules for its workers: git gets only the listed vault items, and `gh` gets the token of the profile's `gh` item with no opt-in, or none when the profile names no `gh` item.
+
 See [Runner hooks](runner-hooks.md#git-and-github-auth) for the runner side.
 
 ## Command line
