@@ -299,13 +299,15 @@ export class Worker {
     extensionHost = ctx.extensions;
     const registrar = new Registrar(ctx);
     registerExtensionMethods(registrar, ctx);
-    registrar.json(METHOD_LEASE_RENEW, (a) => {
+    registrar.json(METHOD_LEASE_RENEW, async (a) => {
       const p = a as unknown as LeaseRenewParams;
       if (typeof p.ttlMs !== "number" || !Number.isFinite(p.ttlMs) || p.ttlMs <= 0) {
         throw new Error("lease.renew needs a positive ttlMs");
       }
-      // The daemon enforces the lease too, for the time the worker itself is not running.
-      void agentHolder?.lease(p.ttlMs);
+      // The daemon enforces the lease too, for the time the worker itself is not running. The
+      // reply waits for it: a worker killed right after the hub saw the renewal must have left the
+      // daemon holding that lease, or an agent would outlive it. `lease` never rejects.
+      await agentHolder?.lease(p.ttlMs);
       return ctx.lease.renew(
         p.ttlMs,
         Array.isArray(p.blockedPaths) ? p.blockedPaths.filter((x) => typeof x === "string") : [],
