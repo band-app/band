@@ -127,6 +127,9 @@ async function gitReposAtRoots(roots: string[]): Promise<string[]> {
   return found;
 }
 
+/** The longest a lease renewal waits for the agent daemon to take the lease. */
+const DAEMON_LEASE_WAIT_MS = 2_000;
+
 export class Worker {
   /** Resolves with the process exit code once the worker has stopped. */
   readonly exited: Promise<number>;
@@ -306,8 +309,20 @@ export class Worker {
       }
       // The daemon enforces the lease too, for the time the worker itself is not running. The
       // reply waits for it: a worker killed right after the hub saw the renewal must have left the
-      // daemon holding that lease, or an agent would outlive it. `lease` never rejects.
-      await agentHolder?.lease(p.ttlMs);
+      // daemon holding that lease, or an agent would outlive it. `lease` never rejects. The wait is
+      // bounded, because the worker's own lease (below) is only extended after it: a daemon that
+      // answers slowly must not let this worker's lease run out. The send carries on either way.
+      if (agentHolder) {
+        const bound = Math.min(DAEMON_LEASE_WAIT_MS, p.ttlMs / 2);
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+          agentHolder.lease(p.ttlMs),
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, bound);
+          }),
+        ]);
+        clearTimeout(timer);
+      }
       return ctx.lease.renew(
         p.ttlMs,
         Array.isArray(p.blockedPaths) ? p.blockedPaths.filter((x) => typeof x === "string") : [],
