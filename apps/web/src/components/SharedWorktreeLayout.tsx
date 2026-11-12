@@ -16,6 +16,7 @@ import {
   useCapabilities,
   WorktreePickerDialog,
 } from "@/dashboard";
+import { markdownPreviewOwnsFormatKey } from "../dashboard/lib/markdown-live-preview";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { chatFetch } from "../lib/direct-chat";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/layout-section-actions";
@@ -433,6 +434,10 @@ export function SharedWorktreeLayout() {
       if (!mod) return;
 
       const key = e.key.toLowerCase();
+
+      // ⌘B / ⌘I with text selected in the markdown preview format it. The
+      // editor handles the key, so leave it alone here.
+      if (markdownPreviewOwnsFormatKey(e)) return;
 
       // Off macOS the modifier is Ctrl, and a focused terminal keeps Ctrl chords
       // for the shell (Ctrl+T transposes, Ctrl+B moves back). The shell has no
