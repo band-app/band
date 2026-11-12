@@ -838,7 +838,13 @@ export class ChatOwnershipService {
       );
     }
     if (held.length > 0) this.forwards.holdAll(hostId, held, now);
-    for (const row of this.events.insertRows(owned)) this.ingest(row);
+    const inserted = this.events.insertRows(owned, (row, heldRow) =>
+      log.warn(
+        { hostId, chatId: row.chatId, heldChatId: heldRow.chatId, rowId: row.id },
+        "a replicated row has the id of a different row the hub holds; the hub kept its row",
+      ),
+    );
+    for (const row of inserted) this.ingest(row);
     const ackedThrough = rows.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);
     return { ackedThrough };
   }

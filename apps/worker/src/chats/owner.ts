@@ -97,11 +97,18 @@ export class ChatOwner {
   private replicateAgain = false;
   private retryTimer: NodeJS.Timeout | null = null;
   private leasing: Promise<void> | null = null;
+  /** Whether this process leased a block since it started. The first connect always does. */
+  private leasedThisProcess = false;
 
   constructor(
     private readonly ctx: WorkerContext,
     readonly store: ChatStore,
   ) {
+    store.onStuckBatch = (ageMs) =>
+      ctx.log.error(
+        { ageMs },
+        "a chat store batch stayed open past its limit; the worker committed it",
+      );
     this.turns = new Turns({
       store,
       log: ctx.log,
@@ -400,7 +407,9 @@ export class ChatOwner {
   // ---- ids -----------------------------------------------------------------
 
   private ensureIds(): Promise<void> {
-    if (this.store.idsLeft() >= LOW_IDS) return Promise.resolve();
+    // The first connect of a process leases a fresh block, which the hub places above every id
+    // it holds, so a store that lost rows never writes an id the hub already has.
+    if (this.leasedThisProcess && this.store.idsLeft() >= LOW_IDS) return Promise.resolve();
     return this.leaseBlock();
   }
 
@@ -409,6 +418,7 @@ export class ChatOwner {
       try {
         const block = await this.ctx.session.request<ChatIdBlockReply>(METHOD_CHAT_ID_BLOCK, {});
         this.store.addBlock(block.start, block.size);
+        this.leasedThisProcess = true;
         this.ctx.log.info({ start: block.start, size: block.size }, "leased event ids");
       } finally {
         this.leasing = null;
@@ -427,7 +437,7 @@ export class ChatOwner {
       const end = block.start + block.size - 1;
       if (end <= acked) continue;
       const from = Math.max(block.start, acked + 1);
-      for (const row of this.store.events.readIdRange(from, end, limit - rows.length)) {
+      for (const row of this.store.readCommittedIdRange(from, end, limit - rows.length)) {
         rows.push(row);
       }
       if (rows.length >= limit) break;

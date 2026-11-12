@@ -4,7 +4,7 @@
 // hub's and the worker's event logs are read from their SQLite files, the rest through the hub's
 // HTTP and tRPC API.
 
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ChatEvent } from "@band-app/shared/chat-events";
@@ -610,4 +610,88 @@ describe("a worker that stops owning chats (S9)", () => {
     expect(agentText(events)).toContain("hub-run again");
     expect((await getChat(chatId))?.ownerHostId).toBeUndefined();
   }, 150_000);
+});
+
+describe("a worker whose chats.db lost rows the hub holds (#1220 S1, S2)", () => {
+  const chatId = "lost-rows-chat";
+  const dbFiles = (worker: Worker) =>
+    ["chats.db", "chats.db-wal", "chats.db-shm"].map((f) => join(worker.state, f));
+
+  it("leases a fresh block on connect and writes ids above everything the hub holds", async () => {
+    // The test before this one hands the chats back and restarts the worker without ownership.
+    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
+    owner = await w.restartWorker(owner, { ownChats: true });
+    const wt = await w.createWorktree(owner, "proj", "feat-lost-rows");
+    await w.turn(wt, chatId, "before the snapshot");
+    await waitFor(
+      () => (hubLog(chatId).length === workerLog(owner, chatId).length ? true : undefined),
+      { label: "the hub to hold the first turn", timeoutMs: 10_000 },
+    );
+
+    // A copy of chats.db as it is now: the state the worker comes back to after losing rows.
+    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
+    const copies = dbFiles(owner).map((f) => [f, `${f}.snapshot`] as const);
+    for (const [from, to] of copies) if (existsSync(from)) copyFileSync(from, to);
+
+    owner = await w.restartWorker(owner);
+    await w.turn(wt, chatId, "after the snapshot");
+    await waitFor(
+      () => (hubLog(chatId).length === workerLog(owner, chatId).length ? true : undefined),
+      { label: "the hub to hold the second turn", timeoutMs: 10_000 },
+    );
+    const hubMax = Math.max(...hubLog(chatId).map((r) => r.id));
+
+    await w.killWorker(owner, "SIGKILL", { waitForLease: false });
+    for (const [from, to] of copies) {
+      rmSync(from, { force: true });
+      if (existsSync(to)) copyFileSync(to, from);
+    }
+    // The restored copy also holds a row whose content differs from the hub's under the same id (S5).
+    const restored = new DatabaseSync(join(owner.state, "chats.db"));
+    const tampered = restored
+      .prepare(
+        "SELECT id FROM chat_events WHERE chat_id = ? AND kind = 'prompt' ORDER BY id LIMIT 1",
+      )
+      .get(chatId) as { id: number };
+    restored
+      .prepare(
+        "UPDATE chat_events SET payload = replace(payload, 'before the snapshot', 'tampered') WHERE id = ?",
+      )
+      .run(tampered.id);
+    // Forget the ack, so the worker sends its older rows again.
+    restored.exec("DELETE FROM meta WHERE key = 'acked_through'");
+    restored.close();
+    owner = await w.restartWorker(owner);
+    // Each connect of a new process leases a block before the worker takes another id.
+    await waitFor(() => (owner.output().includes("leased event ids") ? true : undefined), {
+      label: "the worker to lease event ids",
+      timeoutMs: 30_000,
+    });
+
+    // The hub keeps its row, and says it saw a different one under that id.
+    await waitFor(() => (w.server.output().includes("different row") ? true : undefined), {
+      label: "the hub to log the id conflict",
+      timeoutMs: 15_000,
+    }).catch((err: Error) => {
+      const lines = w.server
+        .output()
+        .split("\n")
+        .slice(-12)
+        .map((l) => l.slice(0, 300));
+      throw new Error(`${err.message}\n${lines.join("\n")}`);
+    });
+    const events = await w.turn(wt, chatId, "after the restore");
+    expect(agentText(events)).toContain("after the restore");
+    const rows = hubLog(chatId);
+    const fresh = rows.filter(
+      (r) => r.kind === "prompt" && r.payload.includes("after the restore"),
+    );
+    expect(fresh).toHaveLength(1);
+    expect(fresh[0].id).toBeGreaterThan(hubMax);
+    const kept = hubLog(chatId).find((r) => r.id === tampered.id);
+    expect(kept?.payload).toContain("before the snapshot");
+    expect(kept?.payload).not.toContain("tampered");
+    // Rows from the older blocks are still there.
+    expect(rows.filter((r) => r.id <= hubMax).length).toBeGreaterThan(0);
+  }, 180_000);
 });
