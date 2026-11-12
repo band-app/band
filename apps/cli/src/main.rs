@@ -848,6 +848,35 @@ enum HostsCmd {
         #[arg(long)]
         clear: bool,
     },
+    /// Make the one-line command that provisions a new worker, or follow one to its end (admin token only)
+    Provision {
+        /// Display name for the new worker
+        #[arg(long)]
+        name: Option<String>,
+        /// Placement labels as k=v,k=v
+        #[arg(long)]
+        labels: Option<String>,
+        /// Worker profile (see `band workers profiles`)
+        #[arg(long)]
+        profile: Option<String>,
+        /// Address the new machine reaches the hub at (default: `BAND_PUBLIC_URL`, else this CLI's hub)
+        #[arg(long = "hub-url", value_name = "URL")]
+        hub_url: Option<String>,
+        /// Follow the command with this id until the worker is online. Exits non-zero when it fails
+        #[arg(long, value_name = "ID", conflicts_with_all = ["name", "labels", "profile", "hub_url"])]
+        wait: Option<String>,
+    },
+    /// List the worker profiles (admin token only)
+    Profiles,
+    /// Attach a worker profile to a worker, or `none` to remove it (admin token only)
+    #[command(name = "set-profile")]
+    SetProfile {
+        /// Worker (id or name)
+        #[arg(value_name = "WORKER")]
+        host: String,
+        /// Profile name, or `none`
+        profile: String,
+    },
     /// Show what admin workers did across workers (admin token only)
     Audit {
         /// How many of the newest entries to show
@@ -1425,6 +1454,21 @@ fn main() {
                 &agent_id,
                 if clear { None } else { command.as_deref() },
             ),
+            HostsCmd::Provision {
+                name,
+                labels,
+                profile,
+                hub_url,
+                wait,
+            } => cmd_hosts_provision(
+                name.as_deref(),
+                labels.as_deref(),
+                profile.as_deref(),
+                hub_url.as_deref(),
+                wait.as_deref(),
+            ),
+            HostsCmd::Profiles => cmd_hosts_profiles(),
+            HostsCmd::SetProfile { host, profile } => cmd_hosts_set_profile(&host, &profile),
             HostsCmd::Audit { limit } => cmd_hosts_audit(limit),
             HostsCmd::Remove { id } => cmd_hosts_remove(&id),
             HostsCmd::Evacuate { host, to, add_host } => cmd_hosts_evacuate(&host, &to, add_host),
@@ -4655,6 +4699,148 @@ fn cmd_hosts_trust(host: &str, level: &str) -> Result<CommandResult, String> {
     Ok(CommandResult {
         text: format!("Worker {host_id} is now {level}\n"),
         json: serde_json::json!({"ok": true, "hostId": host_id, "trust": level}),
+    })
+}
+
+fn cmd_hosts_provision(
+    name: Option<&str>,
+    labels: Option<&str>,
+    profile: Option<&str>,
+    hub_url: Option<&str>,
+    wait: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    if let Some(id) = wait {
+        return wait_for_provision(&client, id);
+    }
+    let hub = hub_url
+        .map(str::to_string)
+        .or_else(|| std::env::var("BAND_PUBLIC_URL").ok())
+        .unwrap_or_else(|| client.base_url().to_string());
+    let mut input = serde_json::json!({"hubUrl": hub});
+    if let Some(n) = name {
+        input["hostName"] = serde_json::json!(n);
+    }
+    if let Some(l) = labels {
+        let list: Vec<&str> = l
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        input["labels"] = serde_json::json!(list);
+    }
+    if let Some(p) = profile {
+        input["profile"] = serde_json::json!(p);
+    }
+    let data = client.trpc_mutate("provisioning.createCommand", &input)?;
+    let command = data.get("command").and_then(|v| v.as_str()).unwrap_or("");
+    let id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let text = format!("{command}\nFollow it with: band workers provision --wait {id}\n");
+    Ok(CommandResult { text, json: data })
+}
+
+/// Polls `provisioning.status` until the worker is online or the run fails or expires.
+fn wait_for_provision(client: &api::ApiClient, id: &str) -> Result<CommandResult, String> {
+    let mut last_len = 0;
+    loop {
+        let data = client.trpc_query("provisioning.status", &serde_json::json!({"id": id}))?;
+        let cmd = data
+            .get("commands")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .cloned()
+            .ok_or_else(|| format!("No provisioning command {id}"))?;
+        let status = cmd.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let log = cmd.get("log").and_then(|v| v.as_str()).unwrap_or("");
+        if log.len() > last_len {
+            eprint!("{}", &log[last_len..]);
+            last_len = log.len();
+        }
+        match status {
+            "online" => {
+                let worker = cmd.get("hostId").and_then(|v| v.as_str()).unwrap_or("");
+                return Ok(CommandResult {
+                    text: format!("Worker {worker} is online\n"),
+                    json: cmd,
+                });
+            }
+            "failed" => {
+                let code = cmd.get("exitCode").and_then(serde_json::Value::as_i64);
+                return Err(format!(
+                    "Provisioning {id} failed{}",
+                    code.map(|c| format!(" with exit code {c}"))
+                        .unwrap_or_default()
+                ));
+            }
+            "expired" => return Err(format!("Provisioning {id} expired before it was used")),
+            _ => std::thread::sleep(std::time::Duration::from_secs(2)),
+        }
+    }
+}
+
+#[allow(clippy::format_push_string)]
+fn cmd_hosts_profiles() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query_no_input("workerProfiles.list")?;
+    let profiles = data
+        .get("profiles")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut text = String::new();
+    for p in &profiles {
+        let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+        let trust = p.get("trust").and_then(|v| v.as_str()).unwrap_or("default");
+        let workers = p
+            .get("workers")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let creds = if p.get("credentials").is_some() {
+            "policy"
+        } else {
+            "unrestricted"
+        };
+        text.push_str(&format!(
+            "{name}  trust={trust}  credentials={creds}  workers={workers}\n"
+        ));
+    }
+    if let Some(bad) = data.get("invalid").and_then(|v| v.as_array()) {
+        for b in bad {
+            text.push_str(&format!(
+                "invalid #{}: {}\n",
+                b.get("index")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                b.get("error").and_then(|v| v.as_str()).unwrap_or("")
+            ));
+        }
+    }
+    if text.is_empty() {
+        text.push_str("No worker profiles\n");
+    }
+    Ok(CommandResult { text, json: data })
+}
+
+fn cmd_hosts_set_profile(host: &str, profile: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let host_id = target_host_id(&client, host)?;
+    let value = if profile.eq_ignore_ascii_case("none") {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!(profile)
+    };
+    client.trpc_mutate(
+        "workerProfiles.setWorkerProfile",
+        &serde_json::json!({"hostId": host_id, "profile": value}),
+    )?;
+    let text = if value.is_null() {
+        format!("Worker {host_id} has no profile now\n")
+    } else {
+        format!("Worker {host_id} uses the profile {profile}\n")
+    };
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"ok": true, "hostId": host_id, "profile": value}),
     })
 }
 

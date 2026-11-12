@@ -113,6 +113,7 @@ case "$1" in
       --root "${root}" --state-dir "${state}" >"${home}/worker.log" 2>&1 </dev/null &
     echo $! >"${home}/worker.pid"
     echo install-service >>"${home}/wrapper-calls"
+    printf '%s\\n' "$*" >>"${home}/wrapper-args"
     ;;
   status)
     [ -f "${home}/worker.pid" ] && kill -0 "$(cat "${home}/worker.pid")" 2>/dev/null
@@ -716,5 +717,142 @@ describe("access (S7)", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     });
     expect(await mcp.text()).not.toContain("band_provisioning_");
+  });
+});
+
+describe("a worker profile (profiles S2)", () => {
+  // The tests above leave a hub-wide provisioning repo set. These start from none.
+  beforeAll(async () => {
+    await api.m("provisioning.updateSettings", { repoUrl: "", branch: "", command: "" });
+  });
+
+  it("applies the profile's trust, labels and env, and the service gets the env and own-chats", async () => {
+    await api.m("workerProfiles.create", {
+      name: "agent-user",
+      labels: ["gui=1"],
+      trust: "restricted",
+      env: { BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY: "1" },
+      ownChats: true,
+    });
+    const made = await api.m<Command>("provisioning.createCommand", {
+      hubUrl: server.url,
+      hostName: "profiled",
+      labels: ["zone=a"],
+      profile: "agent-user",
+    });
+    const machine = makeMachine();
+    const result = await run(machine, made.command);
+    expect(result.code).toBe(0);
+    const args = readFileSync(join(machine.home, "wrapper-args"), "utf8");
+    expect(args).toContain("--env BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1");
+    expect(args).toContain("--own-chats");
+    expect(args).toContain("gui=1");
+    expect(args).toContain("zone=a");
+
+    const view = await status(made.id);
+    await waitOnline(view.hostId as string);
+    const host = (
+      await api.q<{
+        hosts: Array<{ id: string; trust: string; labels: string[]; profile: string }>;
+      }>("hosts.list")
+    ).hosts.find((h) => h.id === view.hostId);
+    expect(host?.trust).toBe("restricted");
+    expect(host?.profile).toBe("agent-user");
+    expect(host?.labels).toEqual(expect.arrayContaining(["gui=1", "zone=a"]));
+  }, 90_000);
+
+  it("runs the profile's repo and command and exports its env to the start command", async () => {
+    const out = tmp("band-provision-profile-out-");
+    const repo = makeRepo(
+      base,
+      "profiled",
+      `#!/bin/sh
+OUT="${out}"
+mkdir -p "$OUT/root"
+env | grep '^BAND_WORKER_' | sort >"$OUT/worker-env"
+echo profile-repo >"$OUT/marker"
+${startWorkerLine}
+`,
+    );
+    await api.m("workerProfiles.create", {
+      name: "with-repo",
+      provisioning: {
+        repoUrl: `file://${repo.bare}`,
+        branch: "main",
+        command: "band/provision.sh",
+      },
+      env: { BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY: "1" },
+    });
+    const made = await api.m<Command>("provisioning.createCommand", {
+      hubUrl: server.url,
+      hostName: "with-repo",
+      profile: "with-repo",
+    });
+    expect(made.commitSha).toBe(git(repo.bare, "rev-parse", "main"));
+    const result = await run(makeMachine(), made.command);
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(out, "marker"), "utf8").trim()).toBe("profile-repo");
+    expect(readFileSync(join(out, "worker-env"), "utf8")).toContain(
+      "BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1",
+    );
+  }, 90_000);
+
+  it("fails the run with a clear message when the worker cannot take --env", async () => {
+    await api.m("workerProfiles.create", {
+      name: "old-worker",
+      env: { BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY: "1" },
+    });
+    const made = await api.m<Command>("provisioning.createCommand", {
+      hubUrl: server.url,
+      profile: "old-worker",
+    });
+    const machine = makeMachine();
+    // A worker that predates --env refuses it as an unknown option.
+    const old = join(machine.home, "old-worker.sh");
+    writeFileSync(old, `#!/bin/sh\necho "Unknown option '--env'" >&2\nexit 2\n`);
+    chmodSync(old, 0o755);
+    const result = await run(
+      { ...machine, env: { ...machine.env, BAND_WORKER_CMD: old } },
+      made.command,
+    );
+    expect(result.code).not.toBe(0);
+    expect(result.out).toContain("cannot take the worker profile's env");
+    expect((await status(made.id)).status).toBe("failed");
+  }, 60_000);
+
+  it("ignores a profile, trust or labels the machine sends at the exchange (profiles S8)", async () => {
+    await api.m("workerProfiles.create", { name: "from-command", trust: "restricted" });
+    await api.m("workerProfiles.create", { name: "from-machine", trust: "admin" });
+    const made = await api.m<Command>("provisioning.createCommand", {
+      hubUrl: server.url,
+      profile: "from-command",
+    });
+    const code = /\/api\/provision\/(bpc_[\w-]+)\/script/.exec(made.command)?.[1];
+    const res = await fetch(`${server.url}/api/provision/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        profile: "from-machine",
+        trust: "admin",
+        labels: ["evil=1"],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const hostId = (await status(made.id)).hostId as string;
+    const host = (
+      await api.q<{
+        hosts: Array<{ id: string; trust: string; labels: string[]; profile: string }>;
+      }>("hosts.list")
+    ).hosts.find((h) => h.id === hostId);
+    expect(host?.profile).toBe("from-command");
+    expect(host?.trust).toBe("restricted");
+    expect(host?.labels).not.toContain("evil=1");
+  });
+
+  it("refuses an unknown profile when the command is made", async () => {
+    await expect(
+      api.m("provisioning.createCommand", { hubUrl: server.url, profile: "nope" }),
+    ).rejects.toThrow(/profile/);
   });
 });

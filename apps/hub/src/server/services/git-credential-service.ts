@@ -36,6 +36,7 @@ import {
 } from "./_utils/git-token-source";
 import { loadState } from "./state";
 import { vaultService } from "./vault-service";
+import { workerProfileService } from "./worker-profile-service";
 
 const log = createLogger("git-credential");
 
@@ -65,6 +66,19 @@ export class GitCredentialService {
    * a machine row) or one that opted in gets it. An attached worker keeps its own `gh auth login`.
    */
   private handleGhToken(workerId: string, params: unknown): GhTokenReply {
+    // A worker with a profile that has a credential policy gets exactly the profile's `gh` item,
+    // with no opt-in needed and none honoured beyond it.
+    const policy = workerProfileService.policyFor(workerId);
+    if (policy) {
+      if (!policy.gh) return { found: false, reason: "the worker's profile gives no gh token" };
+      const token = vaultService.findGitTokenByName(policy.gh);
+      if (!token) {
+        log.warn(`the profile gh item "${policy.gh}" of worker ${workerId} has no readable secret`);
+        return { found: false, reason: "the profile's gh item is missing from the vault" };
+      }
+      log.info(`handed out the profile gh token to worker ${workerId}`);
+      return { found: true, token };
+    }
     const optIn = (params as { optIn?: unknown } | null)?.optIn === true;
     if (!optIn && !this.machines.latestLiveForWorker(workerId)) {
       return { found: false, reason: "not a runner-started worker" };
@@ -113,7 +127,12 @@ export class GitCredentialService {
       );
       throw new RpcError(RPC_FORBIDDEN, "that repository is not placed on this worker");
     }
-    const credential = await this.source.lookup({ ...key, repo: placed.repo });
+    const policy = workerProfileService.policyFor(workerId);
+    const credential = await this.source.lookup({
+      ...key,
+      repo: placed.repo,
+      ...(policy ? { onlyItems: policy.git } : {}),
+    });
     if (!credential) {
       log.info(`no credential for ${where} (${protocol}) for worker ${workerId}`);
       return { found: false };

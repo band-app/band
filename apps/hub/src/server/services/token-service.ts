@@ -97,6 +97,8 @@ export interface HostView {
   trust: HostTrust;
   /** Per-agent command overrides (`{ agentId: binary }`) that replace the agent definition's command on this host. */
   agentCommands: Record<string, string>;
+  /** The name of the worker profile an admin attached, or null. */
+  profile: string | null;
 }
 
 /** Why `removeHost` refused. */
@@ -381,6 +383,7 @@ export class TokenService {
     ttlMs: number = DEFAULT_BOOTSTRAP_TTL_MS,
     fixedHostId?: string,
     trust: HostTrust | null = null,
+    profile: string | null = null,
   ): { token: string; hostId: string; view: TokenView } {
     const ttl = Math.min(Math.max(ttlMs, 1000), MAX_BOOTSTRAP_TTL_MS);
     if (fixedHostId && this.queries.findHost(fixedHostId)) {
@@ -401,6 +404,7 @@ export class TokenService {
       version: null,
       trust,
       agentCommands: null,
+      profile,
       createdAt: at,
     });
     const token = newToken("worker_bootstrap");
@@ -574,6 +578,7 @@ export class TokenService {
         h.trust ??
         defaultHostTrust({ ephemeral: h.mode === "ephemeral" || h.info?.mode === "ephemeral" }),
       agentCommands: h.agentCommands ?? {},
+      profile: h.profile ?? null,
     }));
   }
 

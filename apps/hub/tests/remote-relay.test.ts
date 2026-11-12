@@ -347,6 +347,13 @@ beforeAll(async () => {
             `/trpc/resources.storage?input=${encodeURIComponent(JSON.stringify({ hostId: "local" }))}`,
           ),
           probe("agent-logins-list", "/trpc/agentLogins.list"),
+          // A worker profile decides what a worker may receive. No worker picks its own.
+          probe("worker-profiles-list", "/trpc/workerProfiles.list"),
+          post("worker-profiles-attach", "/trpc/workerProfiles.setWorkerProfile", {
+            hostId: "local",
+            profile: null,
+          }),
+          post("worker-profiles-create", "/trpc/workerProfiles.create", { name: "mine" }),
           // Editor tabs and the person's selection belong to the windows, not to an agent.
           probe(
             "editors-selection",
@@ -684,6 +691,9 @@ describe("the worker relay (S2)", () => {
     }
     expect(by("resources-storage")?.status).toBe(403);
     expect(by("agent-logins-list")?.status).toBe(403);
+    expect(by("worker-profiles-list")?.status).toBe(403);
+    expect(by("worker-profiles-attach")?.status).toBe(403);
+    expect(by("worker-profiles-create")?.status).toBe(403);
     expect(by("chat-login-pick")?.status).toBe(403);
     expect(by("chat-login-pick")?.body).toContain("may not change a chat's login");
     expect(by("vault-oauth")?.status).toBe(403);

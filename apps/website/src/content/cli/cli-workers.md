@@ -30,6 +30,10 @@ See [Agent access to other workers](agent-host-access.md) for what each level al
 
 `set-agent-command` changes the binary an agent runs as on one worker. Pass an agent id from Settings > Coding Agents, such as `claude-code`, and a binary name or absolute path with no arguments. `--clear` goes back to the agent's global command.
 
+`provision` creates a provisioning code and prints the `curl` line to run on the new machine. `--profile` applies a [worker profile](worker-profiles.md), and `--name` and `--labels` set the worker's name and labels. `--output json` prints the code details. `--wait <id>` follows the code until provisioning finishes and exits with an error if it fails or expires.
+
+`profiles` lists the worker profiles, with the trust and the number of workers for each, and the entries the hub refused. `set-profile <worker> <profile>` attaches a profile to an existing worker and applies the profile's trust. `set-profile <worker> none` detaches it. Both need an admin token.
+
 `evacuate` moves every worktree off a worker, one after the other, using their [checkpoints](checkpoints.md). It prints one `ok` or `failed` line per worktree and a total, and exits with an error if any move failed. `--add-worker` adds the target to the allowed workers of repos that lack it.
 
 ## Examples
@@ -39,6 +43,8 @@ band workers list
 band workers trust my-laptop restricted
 band workers set-agent-command build-box claude-code /opt/claude/bin/claude
 band workers audit --limit 20
+band workers provision --profile agent-user --name build-box
+band workers set-profile build-box agent-user
 band workers evacuate old-box --to new-box --add-worker
 band workers remove <id>
 ```

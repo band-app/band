@@ -216,6 +216,22 @@ export class TokenQueries {
     return Number(result.changes ?? 0) > 0;
   }
 
+  /** Attaches a worker profile to a host (null removes it). Returns false when there is no such host. */
+  setHostProfile(id: string, profile: string | null): boolean {
+    const result = this.db().update(hosts).set({ profile }).where(eq(hosts.id, id)).run();
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /** Ids of the hosts that use the profile. */
+  hostIdsWithProfile(profile: string): string[] {
+    return this.db()
+      .select({ id: hosts.id })
+      .from(hosts)
+      .where(eq(hosts.profile, profile))
+      .all()
+      .map((r) => r.id);
+  }
+
   /** Stores a host's per-agent command overrides (null for none). Returns false when there is no such host. */
   setHostAgentCommands(id: string, commands: Record<string, string> | null): boolean {
     const result = this.db()

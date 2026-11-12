@@ -52,6 +52,11 @@ impl ApiClient {
         }
     }
 
+    /// The hub address this client talks to.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     pub fn trpc_query(
         &self,
         procedure: &str,

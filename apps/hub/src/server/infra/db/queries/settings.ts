@@ -3,6 +3,17 @@ import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+/** A worker profile as stored in `settings.json`. The shape `workerProfileSchema` validates. */
+export interface WorkerProfileSettings {
+  name: string;
+  provisioning?: { repoUrl?: string; branch?: string; command?: string };
+  labels?: string[];
+  trust?: "restricted" | "standard" | "admin";
+  env?: Record<string, string>;
+  ownChats?: boolean;
+  credentials?: { git?: string[]; gh?: string; agentLogins?: string[] };
+}
+
 /** A runner hook as stored in `settings.json`. The shape `runnerSchema` validates. */
 export interface RunnerSettings {
   id: string;
@@ -223,6 +234,12 @@ export interface Settings {
    * entry.
    */
   runners?: RunnerSettings[];
+  /**
+   * Worker profiles (`services/worker-profile-service.ts`). Stored as written and checked on read:
+   * an invalid entry is reported and not applied. Admin only; never returned to a non-admin token.
+   */
+  /** Validated on read by `WorkerProfileService`; entries that fail are reported, not applied. */
+  workerProfiles?: WorkerProfileSettings[];
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }
