@@ -11,6 +11,7 @@ import {
   defaultServiceEnv,
   installService,
   parseServiceOptions,
+  parseUninstallOptions,
   SERVICE_SUBCOMMANDS,
   serviceStatus,
   serviceUsage,
@@ -49,7 +50,8 @@ if (subcommand && !argv.includes("--help")) {
   try {
     const env = defaultServiceEnv();
     if (subcommand === "install-service") installService(parseServiceOptions(argv.slice(1)), env);
-    else if (subcommand === "uninstall-service") uninstallService(env);
+    else if (subcommand === "uninstall-service")
+      uninstallService(env, parseUninstallOptions(argv.slice(1)));
     else process.exit(serviceStatus(env));
     process.exit(0);
   } catch (err) {

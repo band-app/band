@@ -5,11 +5,17 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import {
+  assertServiceHome,
+  installService,
+  isSystemServiceManager,
   LAUNCHD_LABEL,
+  parseServiceOptions,
   renderEnvFile,
   renderLaunchdPlist,
   renderSystemdUnit,
+  type ServiceEnv,
   SYSTEMD_UNIT,
+  uninstallService,
 } from "../src/service.ts";
 import { cleanup, tmpDir, WORKER_BIN } from "./helpers.ts";
 
@@ -288,5 +294,154 @@ describe("install-service", () => {
     const noHub = run(home, bin, ["install-service", "--token", TOKEN]);
     assert.equal(noHub.status, 2);
     assert.ok(!noHub.stderr.includes(TOKEN));
+  });
+});
+
+describe("home guard", () => {
+  const dirs: string[] = [];
+  after(() => cleanup(...dirs));
+
+  const supported = platform() === "linux" || platform() === "darwin";
+  const managerName = platform() === "darwin" ? "launchctl" : "systemctl";
+
+  /** A service env whose manager counts as the system binary. `run` records and never executes anything. */
+  function fakeEnv(home: string, realHome: string, system: boolean) {
+    const calls: string[] = [];
+    const env: ServiceEnv = {
+      platform: platform(),
+      home,
+      realHome,
+      uid: 501,
+      node: process.execPath,
+      script: WORKER_BIN,
+      run: (cmd, args) => {
+        calls.push(`${cmd} ${args.join(" ")}`);
+        return "";
+      },
+      log: () => {},
+      managerIsSystem: () => system,
+    };
+    return { env, calls };
+  }
+
+  const opts = () => parseServiceOptions(["--hub", "https://hub.example.com", "--token", "x"]);
+
+  it("refuses install from another home before writing files", { skip: !supported }, () => {
+    const home = tmpDir("band-guard-install-");
+    dirs.push(home);
+    const { env, calls } = fakeEnv(home, "/home/someone-else", true);
+    assert.throws(
+      () => installService(opts(), env),
+      (err: Error) =>
+        err.message.includes(home) &&
+        err.message.includes("/home/someone-else") &&
+        err.message.includes("--allow-other-home"),
+    );
+    assert.deepEqual(calls, []);
+    assert.ok(!existsSync(join(home, ".band")));
+    assert.ok(!existsSync(join(home, "Library")));
+    assert.ok(!existsSync(join(home, ".config")));
+  });
+
+  it("refuses uninstall from another home and deletes nothing", { skip: !supported }, () => {
+    const home = tmpDir("band-guard-uninstall-");
+    dirs.push(home);
+    const { env, calls } = fakeEnv(home, "/home/someone-else", false);
+    // Install through a stub-like env first, so there is something to keep.
+    installService(opts(), env);
+    calls.length = 0;
+    const system = fakeEnv(home, "/home/someone-else", true);
+    assert.throws(() => uninstallService(system.env), /--allow-other-home/);
+    assert.deepEqual(system.calls, []);
+    assert.ok(existsSync(join(home, ".band", "worker-service")));
+  });
+
+  it("lets a stub manager through from another home", { skip: !supported }, () => {
+    const home = tmpDir("band-guard-stub-");
+    dirs.push(home);
+    const { env, calls } = fakeEnv(home, "/home/someone-else", false);
+    installService(opts(), env);
+    assert.ok(calls.length > 0);
+  });
+
+  it("lets --allow-other-home skip the guard", { skip: !supported }, () => {
+    const home = tmpDir("band-guard-allow-");
+    dirs.push(home);
+    const { env, calls } = fakeEnv(home, "/home/someone-else", true);
+    installService(
+      parseServiceOptions([
+        "--hub",
+        "https://hub.example.com",
+        "--token",
+        "x",
+        "--allow-other-home",
+      ]),
+      env,
+    );
+    assert.ok(calls.length > 0);
+    calls.length = 0;
+    uninstallService(env, { allowOtherHome: true });
+    assert.ok(calls.length > 0);
+  });
+
+  it("does not refuse when HOME is the real home", { skip: !supported }, () => {
+    const home = tmpDir("band-guard-real-");
+    dirs.push(home);
+    const { env, calls } = fakeEnv(home, home, true);
+    assert.doesNotThrow(() => assertServiceHome(env, false));
+    installService(opts(), env);
+    assert.ok(calls.length > 0);
+  });
+
+  it("skips the guard with the flag in the real binary, using override stubs", {
+    skip: !supported,
+  }, () => {
+    const home = tmpDir("band-guard-bin-");
+    dirs.push(home);
+    const { bin, calls } = stubBin(home);
+    const r = spawnSync(
+      process.execPath,
+      [
+        WORKER_BIN,
+        "install-service",
+        "--hub",
+        "https://hub.example.com",
+        "--token",
+        "x",
+        "--allow-other-home",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: home,
+          // loginctl is not overridable, so the stub dir must come first for it.
+          PATH: `${bin}:${process.env.PATH}`,
+          BAND_LAUNCHCTL_BIN: join(bin, "launchctl"),
+          BAND_SYSTEMCTL_BIN: join(bin, "systemctl"),
+          BAND_WORKER_TOKEN: "",
+        },
+      },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(calls().some((c) => c.startsWith(managerName)));
+  });
+
+  it("calls a manager a system binary only from a system directory without an override", () => {
+    const home = tmpDir("band-guard-resolve-");
+    dirs.push(home);
+    const { bin } = stubBin(home);
+    const vars = { PATH: bin };
+    assert.equal(isSystemServiceManager("launchctl", vars, [bin]), true);
+    assert.equal(isSystemServiceManager("launchctl", vars, ["/usr/bin"]), false);
+    assert.equal(
+      isSystemServiceManager("launchctl", { ...vars, BAND_LAUNCHCTL_BIN: "/x/launchctl" }, [bin]),
+      false,
+    );
+    assert.equal(
+      isSystemServiceManager("systemctl", { ...vars, BAND_SYSTEMCTL_BIN: "/x/systemctl" }, [bin]),
+      false,
+    );
+    assert.equal(isSystemServiceManager("systemctl", { PATH: "/nonexistent" }, [bin]), false);
   });
 });

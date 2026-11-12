@@ -85,6 +85,8 @@ band-worker status             # exit code 0 running, 3 installed but stopped, 4
 band-worker uninstall-service  # removes the unit or plist, ends the terminals, keeps the worker's state
 ```
 
+`install-service` and `uninstall-service` exit with code 2 when HOME is not the user's home directory from the passwd entry, because launchd labels and systemd user units belong to the user and not to a HOME, so a temp-HOME run would stop the real worker. A `launchctl` or `systemctl` set through `BAND_LAUNCHCTL_BIN` or `BAND_SYSTEMCTL_BIN`, or found on PATH outside `/bin`, `/sbin`, `/usr/bin` and `/usr/sbin`, counts as a stub and is not refused. Pass `--allow-other-home` when a machine's HOME differs from its passwd entry on purpose.
+
 ### npm foreground
 
 To run the worker in the terminal until you stop it, install the package and run:
