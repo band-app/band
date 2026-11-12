@@ -62,6 +62,7 @@ import { cronjobService } from "./cronjob-service";
 // FRAGILE: ESM cycle leg — `./ephemeral-lifecycle-service` imports this file. Keep every
 // `ephemeralLifecycleService` reference inside a function body.
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
+import { gitCredentialService } from "./git-credential-service";
 import { LocalHostDisabledError, resolveWorktreeHostId } from "./local-host-policy";
 import { panelFocusService } from "./panel-focus-service";
 // FRAGILE: ESM cycle leg — `./placement-service` imports `worktreeService` from
@@ -549,10 +550,18 @@ export class WorktreeService {
     // The hub's own machine never gets a clone when it is turned off.
     if (host.id === hostRegistry.local.id && !isLocalHostEnabled())
       throw new LocalHostDisabledError();
-    const { path } = await host.repos.ensure({
-      remoteUrl: repo.remoteUrl,
-      defaultBranch: repo.defaultBranch,
-    });
+    // The worker has no placed repo yet, so git there needs the hub to vouch for this clone. The
+    // remote comes from the hub's repo record, and the announcement ends with the clone.
+    const withdraw = gitCredentialService.expectRemote(host.id, repo.remoteUrl, repo.name);
+    let path: string;
+    try {
+      ({ path } = await host.repos.ensure({
+        remoteUrl: repo.remoteUrl,
+        defaultBranch: repo.defaultBranch,
+      }));
+    } finally {
+      withdraw();
+    }
     hostRegistry.setRepoPathOn(repo.name, host.id, path);
     // The first host to clone a repo that was added by URL becomes the one that lists its default branch.
     if (!repo.primaryHostId) this.repoQueries.setHostPolicy(repo.name, { primaryHostId: host.id });
