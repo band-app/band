@@ -28,6 +28,12 @@
 # /etc/apt/apt-mirrors.txt (the deb822 source points at it with `mirror+file:`),
 # so the mirror switch edits that file as well as sources.list and *.sources.
 #
+# Run 43035119746 showed that giving up after one attempt with no progress
+# never reaches the mirror switch: the runners could not resolve
+# azure.archive.ubuntu.com for hours, every attempt 1 downloaded nothing, and
+# every job failed. An attempt with no progress now gets one retry on
+# archive.ubuntu.com before the script gives up.
+#
 # The downloaded .debs are cached between runs. APT_DEB_CACHE_DIR names a
 # runner-owned directory that actions/cache restores and saves, because
 # /var/cache/apt/archives belongs to root. Before the download the script copies
@@ -132,6 +138,8 @@ restore_debs() {
 # Copies the archive to the runner-owned directory that actions/cache saves.
 save_debs() {
   [ -n "$deb_cache" ] || return 0
+  # An empty folder would be saved as a cache hit and stop later runs from saving.
+  [ "$(deb_count)" -gt 0 ] || return 0
   mkdir -p "$deb_cache"
   local f
   for f in "$archives"/*.deb; do
@@ -153,8 +161,9 @@ hash_text() {
 }
 
 # Downloads with retries while attempts make progress (more .debs in the archive).
+# An attempt with no progress gets one retry on the other mirror before giving up.
 download_packages() {
-  local start=$SECONDS attempt=0 before after status
+  local start=$SECONDS attempt=0 before after status switched=0
   while :; do
     attempt=$((attempt + 1))
     before=$(deb_count)
@@ -173,6 +182,13 @@ download_packages() {
     after=$(deb_count)
     save_debs
     if [ "$after" -le "$before" ]; then
+      if [ "$switched" = 0 ]; then
+        echo "::warning::Playwright apt download made no progress in attempt $attempt (exit code $status, $after .debs present); retrying on archive.ubuntu.com"
+        switched=1
+        retry_download
+        sleep "$backoff"
+        continue
+      fi
       echo "::error::Playwright apt download made no progress in attempt $attempt (exit code $status, $after .debs present); giving up"
       return 1
     fi
@@ -181,6 +197,7 @@ download_packages() {
       return 1
     fi
     echo "::warning::Playwright apt download attempt $attempt stopped (exit code $status) after adding $((after - before)) .debs; retrying"
+    switched=1
     retry_download
     sleep "$backoff"
   done

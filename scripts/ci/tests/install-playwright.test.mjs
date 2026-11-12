@@ -152,7 +152,7 @@ exit 0`,
     assert.match(result.stdout, /still progressing .* time budget/);
   });
 
-  it("gives up after an attempt with no progress (S3)", () => {
+  it("gives up after no progress on both mirrors (S3)", () => {
     const a = setup({
       aptBody: () => `case "$*" in *--download-only*) sleep 5 ;; esac\nexit 0`,
     });
@@ -161,8 +161,47 @@ exit 0`,
       APT_DOWNLOAD_BUDGET_SECONDS: "600",
     });
     assert.equal(result.status, 1);
-    assert.match(result.stdout, /made no progress/);
-    assert.doesNotMatch(result.stdout, /download attempt 2/);
+    assert.match(result.stdout, /attempt 1 .*retrying on archive\.ubuntu\.com/);
+    assert.match(result.stdout, /made no progress in attempt 2 .*giving up/);
+    assert.doesNotMatch(result.stdout, /download attempt 3/);
+  });
+
+  it("switches mirror after an attempt with no progress, as when azure does not resolve", () => {
+    // Downloads only once the sources no longer name azure (run 43035119746).
+    const a = setup({
+      aptBody: (archives, root) => `
+case "$*" in
+  *--download-only*)
+    grep -q azure "${root}/apt-mirrors.txt" && { sleep 5; exit 100; }
+    touch "${archives}/pkg1.deb"
+    ;;
+esac
+exit 0`,
+    });
+    const mirrors = path.join(a.root, "apt-mirrors.txt");
+    writeFileSync(mirrors, "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n");
+    const result = a.run(["chromium"], {
+      APT_DOWNLOAD_TIMEOUT_SECONDS: "1",
+      APT_DOWNLOAD_BUDGET_SECONDS: "600",
+      APT_SOURCES_FILES: mirrors,
+      APT_DEB_CACHE_DIR: a.debCache,
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /download attempt 2 /);
+    assert.deepEqual(readdirSync(a.debCache), ["pkg1.deb"]);
+  });
+
+  it("leaves no cache dir when nothing was downloaded", () => {
+    const a = setup({
+      aptBody: () => `case "$*" in *--download-only*) sleep 5 ;; esac\nexit 0`,
+    });
+    const result = a.run(["chromium"], {
+      APT_DOWNLOAD_TIMEOUT_SECONDS: "1",
+      APT_DOWNLOAD_BUDGET_SECONDS: "600",
+      APT_DEB_CACHE_DIR: a.debCache,
+    });
+    assert.equal(result.status, 1);
+    assert.ok(!existsSync(a.debCache));
   });
 
   it("switches azure to archive.ubuntu.com in every source format on retry (S4)", () => {
