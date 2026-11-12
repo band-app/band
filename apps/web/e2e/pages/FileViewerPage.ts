@@ -462,6 +462,20 @@ export class FileViewerPage {
         await expect(line).toBeAttached({ timeout: 250 });
       }).toPass({ timeout: 15_000 });
       await line.scrollIntoViewIfNeeded();
+      // Scrolling makes CodeMirror measure the lines it newly drew, which can
+      // move the line. Click once its position has held still.
+      let previous = Number.NaN;
+      await expect
+        .poll(
+          async () => {
+            const top = await line.evaluate((el) => Math.round(el.getBoundingClientRect().top));
+            const settled = top === previous;
+            previous = top;
+            return settled;
+          },
+          { intervals: [200], timeout: 10_000 },
+        )
+        .toBe(true);
       await line.click();
     });
   }
