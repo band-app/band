@@ -176,8 +176,18 @@ worker_service_running() {
     return 1
   fi
   # shellcheck disable=SC2086
-  $CHECK status >/dev/null 2>&1 || return 1
-  WORKER="$CHECK"
+  if $CHECK status >/dev/null 2>&1; then
+    WORKER="$CHECK"
+    return 0
+  fi
+  # A macOS user with no GUI session has a written LaunchAgent that cannot run yet. launchd loads
+  # it at the first login, so the install is complete.
+  if [ "$OS" = macos ] && ! launchctl print "gui/$(id -u)" >/dev/null 2>&1; then
+    WORKER="$CHECK"
+    NO_GUI_SESSION=1
+    return 0
+  fi
+  return 1
 }
 
 custom_install() {
@@ -194,7 +204,11 @@ custom_install() {
   say "Running $START_COMMAND"
   ( cd "$DEST/repo" && "./$START_COMMAND" )
   if worker_service_running; then
-    say "The worker service for $WORKER_ID is already installed and running: skipping Band's worker install and service steps."
+    if [ "\${NO_GUI_SESSION:-}" = 1 ]; then
+      say "The worker service for $WORKER_ID is installed. $(id -un) has no GUI session yet, so it starts at the next login. Skipping Band's worker install and service steps."
+    else
+      say "The worker service for $WORKER_ID is already installed and running: skipping Band's worker install and service steps."
+    fi
     root_steps
     return 0
   fi

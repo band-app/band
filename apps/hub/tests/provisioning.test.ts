@@ -451,6 +451,64 @@ esac
   }, 90_000);
 });
 
+describe("a macOS user with no GUI session", () => {
+  async function noSession(withRepo: boolean) {
+    const made = withRepo
+      ? await (async () => {
+          const repo = makeRepo(
+            base,
+            "nosession",
+            `#!/bin/sh
+mkdir -p "$HOME/Library/LaunchAgents"
+echo "<string>$BAND_WORKER_ID</string>" >"$HOME/Library/LaunchAgents/app.band.worker.plist"
+`,
+          );
+          await api.m("provisioning.updateSettings", {
+            repoUrl: `file://${repo.bare}`,
+            branch: "main",
+            command: "band/provision.sh",
+          });
+          return create("nosession");
+        })()
+      : await (async () => {
+          await api.m("provisioning.updateSettings", { repoUrl: "", branch: "main", command: "" });
+          return create("nosession-default");
+        })();
+    const machine = makeMachine();
+    const bin = join(machine.home, "fake-bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "uname"),
+      '#!/bin/sh\n[ "$1" = -s ] && echo Darwin || /usr/bin/uname "$@"\n',
+    );
+    // No gui/<uid> domain: print fails.
+    writeFileSync(join(bin, "launchctl"), "#!/bin/sh\nexit 113\n");
+    chmodSync(join(bin, "uname"), 0o755);
+    chmodSync(join(bin, "launchctl"), 0o755);
+    machine.env.PATH = `${bin}:${machine.env.PATH}`;
+    // The worker never runs: status fails, and install-service is recorded.
+    writeFileSync(
+      machine.env.BAND_WORKER_CMD,
+      `#!/bin/sh\ncase "$1" in status) exit 3 ;; *) echo "$*" >>"${machine.home}/wrapper-calls" ;; esac\n`,
+    );
+    const result = await run(machine, made.command);
+    return { result, machine };
+  }
+
+  it("installs once and exits 0 when a provisioning repo wrote the plist (S3)", async () => {
+    const { result, machine } = await noSession(true);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("starts at the next login");
+    expect(existsSync(join(machine.home, "wrapper-calls"))).toBe(false);
+  }, 90_000);
+
+  it("exits 0 on the default path when install-service succeeds (S4)", async () => {
+    const { result, machine } = await noSession(false);
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(machine.home, "wrapper-calls"), "utf8")).toContain("install-service");
+  }, 90_000);
+});
+
 describe("root steps after a skipped install", () => {
   it("still enables lingering when the repo installed the service itself", async () => {
     const out = tmp("band-provision-linger-out-");
