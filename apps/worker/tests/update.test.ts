@@ -60,6 +60,39 @@ describe("service manager detection", () => {
     assert.equal(detectServiceManager({}, "linux"), null);
     assert.equal(detectServiceManager({ INVOCATION_ID: "abc" }, "darwin"), null);
   });
+
+  it("is null when HOME is not the real home, unless the restart binary is overridden", () => {
+    const tmp = "/tmp/band-other-home";
+    const real = "/home/real";
+    const launchd = { XPC_SERVICE_NAME: "app.band.worker" };
+    assert.equal(detectServiceManager(launchd, "darwin", 501, tmp, real), null);
+    assert.equal(detectServiceManager(launchd, "darwin", 501, real, real), "launchd");
+    assert.equal(detectServiceManager({ INVOCATION_ID: "abc" }, "linux", 1000, tmp, real), null);
+    assert.equal(
+      detectServiceManager({ INVOCATION_ID: "abc" }, "linux", 1000, real, real),
+      "systemd",
+    );
+    assert.equal(
+      detectServiceManager(
+        { ...launchd, BAND_LAUNCHCTL_BIN: "/x/launchctl" },
+        "darwin",
+        501,
+        tmp,
+        real,
+      ),
+      "launchd",
+    );
+    assert.equal(
+      detectServiceManager(
+        { INVOCATION_ID: "a", BAND_SYSTEMCTL_BIN: "/x/s" },
+        "linux",
+        1000,
+        tmp,
+        real,
+      ),
+      "systemd",
+    );
+  });
 });
 
 describe("updateWorker", () => {

@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, platform as osPlatform } from "node:os";
+import { homedir, platform as osPlatform, userInfo } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { stopAgentDaemons } from "./agents.ts";
@@ -33,6 +33,8 @@ export interface ServiceOptions {
   ownChats?: boolean;
   /** Git asks only the hub for credentials (`--hub-git-credentials-only`). */
   hubGitCredentialsOnly?: boolean;
+  /** Skip the guard against driving the real service manager from a HOME that is not the real home. */
+  allowOtherHome?: boolean;
 }
 
 export type Runner = (cmd: string, args: string[]) => string;
@@ -46,6 +48,29 @@ export interface ServiceEnv {
   script: string;
   run: Runner;
   log: (line: string) => void;
+  /** The user's home from the passwd entry, which a changed HOME does not move. */
+  realHome: string;
+  /** True when the service manager command is the system binary, not an override or a stub earlier on PATH. */
+  managerIsSystem: (cmd: "launchctl" | "systemctl") => boolean;
+}
+
+const SYSTEM_DIRS = ["/bin", "/sbin", "/usr/bin", "/usr/sbin"];
+
+/**
+ * Whether `cmd` resolves to a system binary. A `BAND_LAUNCHCTL_BIN` / `BAND_SYSTEMCTL_BIN` override
+ * or a command found outside the system directories counts as a stub.
+ */
+export function isSystemServiceManager(
+  cmd: "launchctl" | "systemctl",
+  vars: NodeJS.ProcessEnv = process.env,
+  systemDirs: string[] = SYSTEM_DIRS,
+): boolean {
+  if (vars[cmd === "launchctl" ? "BAND_LAUNCHCTL_BIN" : "BAND_SYSTEMCTL_BIN"]) return false;
+  for (const dir of (vars.PATH ?? "").split(delimiter)) {
+    if (!dir || !existsSync(join(dir, cmd))) continue;
+    return systemDirs.includes(resolve(dir));
+  }
+  return false;
 }
 
 export function defaultServiceEnv(): ServiceEnv {
@@ -56,16 +81,23 @@ export function defaultServiceEnv(): ServiceEnv {
     node: process.execPath,
     script: realpathSync(process.argv[1] ?? ""),
     run: (cmd, args) =>
-      execFileSync(cmd === "launchctl" ? (process.env.BAND_LAUNCHCTL_BIN ?? cmd) : cmd, args, {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }),
+      execFileSync(
+        cmd === "launchctl"
+          ? (process.env.BAND_LAUNCHCTL_BIN ?? cmd)
+          : cmd === "systemctl"
+            ? (process.env.BAND_SYSTEMCTL_BIN ?? cmd)
+            : cmd,
+        args,
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ),
     log: (line) => process.stdout.write(`${line}\n`),
+    realHome: userInfo().homedir,
+    managerIsSystem: (cmd) => isSystemServiceManager(cmd),
   };
 }
 
 const USAGE = `Usage: band-worker install-service --hub <url> --token <bootstrap token> [options]
-       band-worker uninstall-service
+       band-worker uninstall-service [--allow-other-home]
        band-worker status
 
   --hub <url>        Hub URL. Plain http is accepted only for loopback.
@@ -77,6 +109,8 @@ const USAGE = `Usage: band-worker install-service --hub <url> --token <bootstrap
   --state-dir <dir>  Where the worker keeps its id and session token.
   --own-chats        Run the chats of this worker's worktrees here and copy them to the hub.
   --hub-git-credentials-only  Ignore this machine's git credential helpers; git asks only the hub.
+  --allow-other-home Let install-service and uninstall-service drive the real launchd or systemd
+                     user service although HOME is not the user's home directory.
 `;
 
 export function serviceUsage(): string {
@@ -108,7 +142,22 @@ export function parseServiceOptions(
     workerId: values["worker-id"],
     ownChats: values["own-chats"] === true,
     hubGitCredentialsOnly: values["hub-git-credentials-only"] === true,
+    allowOtherHome: values["allow-other-home"] === true,
   };
+}
+
+/** Options of `uninstall-service`: only `--allow-other-home`. */
+export function parseUninstallOptions(argv: string[]): { allowOtherHome: boolean } {
+  try {
+    const { values } = parseArgs({
+      args: argv,
+      options: { "allow-other-home": { type: "boolean" } },
+      strict: true,
+    });
+    return { allowOtherHome: values["allow-other-home"] === true };
+  } catch (err) {
+    throw new ConfigError(err instanceof Error ? err.message : String(err));
+  }
 }
 
 function parse(argv: string[]) {
@@ -124,6 +173,7 @@ function parse(argv: string[]) {
       "worker-id": { type: "string" },
       "own-chats": { type: "boolean" },
       "hub-git-credentials-only": { type: "boolean" },
+      "allow-other-home": { type: "boolean" },
     },
     strict: true,
   });
@@ -260,7 +310,24 @@ function unsupported(platform: NodeJS.Platform): never {
   );
 }
 
+/**
+ * launchd labels and systemd user units belong to the user, not to a HOME. A run with a temp HOME
+ * would still bootout or disable the user's real worker, so it refuses unless the manager is a stub.
+ */
+export function assertServiceHome(env: ServiceEnv, allowOtherHome: boolean | undefined): void {
+  if (allowOtherHome || resolve(env.home) === resolve(env.realHome)) return;
+  const cmd =
+    env.platform === "darwin" ? "launchctl" : env.platform === "linux" ? "systemctl" : null;
+  if (!cmd || !env.managerIsSystem(cmd)) return;
+  throw new ConfigError(
+    `refusing to drive the real ${cmd} service from HOME=${env.home}, which is not the real home ${env.realHome}. ` +
+      "The service label belongs to the user, so this would stop or replace the real worker. " +
+      `Run with the real HOME, put a stub ${cmd} first on PATH, or pass --allow-other-home.`,
+  );
+}
+
 export function installService(opts: ServiceOptions, env: ServiceEnv): void {
+  assertServiceHome(env, opts.allowOtherHome);
   const paths = servicePaths(env);
   const vars = serviceVariables(opts);
   // Inside the desktop app `node` is the Band executable, which only runs a script with this set.
@@ -320,7 +387,8 @@ function installedStateDir(env: ServiceEnv, envFile: string): string {
   return join(process.env.BAND_HOME ?? join(env.home, ".band"), "worker");
 }
 
-export function uninstallService(env: ServiceEnv): void {
+export function uninstallService(env: ServiceEnv, opts: { allowOtherHome?: boolean } = {}): void {
+  assertServiceHome(env, opts.allowOtherHome);
   const paths = servicePaths(env);
   const stateDir = installedStateDir(env, paths.envFile);
   if (env.platform === "linux") {

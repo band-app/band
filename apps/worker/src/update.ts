@@ -7,7 +7,8 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { delimiter, dirname, join, sep } from "node:path";
+import { userInfo } from "node:os";
+import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcError } from "@band-app/link";
 import { isStrictSemver } from "@band-app/shared/versions";
@@ -25,7 +26,18 @@ export function detectServiceManager(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
   uid: number | undefined = process.getuid?.(),
+  home: string | undefined = env.HOME,
+  realHome: string = userInfo().homedir,
 ): ServiceManager | null {
+  // An agent shell inside the real service inherits its marker. A worker started from there with
+  // another HOME must not restart the real service, unless the restart binary is a stub.
+  if (
+    home !== undefined &&
+    resolve(home) !== resolve(realHome) &&
+    !env.BAND_LAUNCHCTL_BIN &&
+    !env.BAND_SYSTEMCTL_BIN
+  )
+    return null;
   if (platform === "darwin" && env.XPC_SERVICE_NAME === LAUNCHD_LABEL) return "launchd";
   // `INVOCATION_ID` is set for system units too (a root-run unit, a runner's VM). Only a user unit
   // can be restarted with `systemctl --user`, and that never runs as root.
