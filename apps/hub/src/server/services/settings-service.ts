@@ -9,6 +9,7 @@ import {
   SettingsQueries,
 } from "../infra/db/queries/settings";
 import { runnersSchema } from "./_utils/runner-config";
+import { workerProfileSchema } from "./_utils/worker-profile";
 
 /**
  * Zod schema for an in-flight settings update.
@@ -178,6 +179,8 @@ export const settingsUpdateInput = z
     // Runner hooks (plan step 3.4). A bad entry fails the whole update, so the
     // file never holds one `RunnerService` would skip.
     runners: runnersSchema.optional(),
+    // Worker profiles. Admin only. A bad entry fails the whole update.
+    workerProfiles: z.array(workerProfileSchema).max(50).optional(),
   })
   .passthrough();
 

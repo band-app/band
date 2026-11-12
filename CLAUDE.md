@@ -208,6 +208,7 @@ Each feature area's architecture note lives in `.claude/rules/architecture/<name
 - `remote-workers`: remote workers
 - `local-direct-path`: local direct path
 - `worker-provisioning`: worker provisioning
+- `worker-profiles`: worker profiles
 - `version-updates`: version updates
 - `desktop-workers`: desktop workers
 - `agent-environments`: agent environments

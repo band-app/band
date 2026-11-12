@@ -28,10 +28,12 @@ import { bandHome } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { parseRemoteUrl } from "./_utils/git-token-source";
 import { HUB_VERSION, HUB_VERSION_UNRELEASED } from "./_utils/hub-version";
+import { checkRepoUrl, checkStartCommand } from "./_utils/provision-checks";
 import { renderProvisionScript } from "./_utils/provision-script";
 import { settingsService } from "./settings-service";
 import { tokenService } from "./token-service";
 import { vaultService } from "./vault-service";
+import { workerProfileService } from "./worker-profile-service";
 
 const log = createLogger("provisioning");
 
@@ -107,6 +109,11 @@ export interface CreatedCommand {
   commitSha: string | null;
 }
 
+/** The profile's labels, then the ones given for this command, without repeats. */
+function mergeLabels(a: string[] | undefined, b: string[] | undefined): string[] {
+  return [...new Set([...(a ?? []), ...(b ?? [])])];
+}
+
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -140,22 +147,6 @@ export function checkHubUrl(input: string): string {
     });
   }
   return url.origin;
-}
-
-/** A start command is a relative path inside the repo. */
-export function checkStartCommand(command: string): string {
-  const ok =
-    /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/.test(command) &&
-    !command.split("/").some((part) => part === ".." || part === "") &&
-    command.length <= 200;
-  if (!ok) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "The start command must be a relative path inside the repo, such as band/provision.sh.",
-    });
-  }
-  return command;
 }
 
 export class ProvisioningService {
@@ -195,9 +186,26 @@ export class ProvisioningService {
     hubUrl: string;
     hostName?: string;
     labels?: string[];
+    /** The name of a worker profile (`settings.workerProfiles`). */
+    profile?: string;
   }): Promise<CreatedCommand> {
     const hubUrl = checkHubUrl(input.hubUrl);
-    const settings = this.settings();
+    const profile = input.profile ? workerProfileService.get(input.profile) : null;
+    if (input.profile && !profile) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `profile: no valid worker profile named "${input.profile}"`,
+      });
+    }
+    // A profile with its own provisioning repo replaces the hub-wide one.
+    const own = profile?.provisioning?.repoUrl ? profile.provisioning : null;
+    const settings: ProvisionSettings = own
+      ? {
+          repoUrl: own.repoUrl ?? "",
+          branch: own.branch ?? "",
+          command: own.command ?? DEFAULT_START_COMMAND,
+        }
+      : this.settings();
     if (settings.command) checkStartCommand(settings.command);
     if (settings.repoUrl) checkRepoUrl(settings.repoUrl);
     const id = randomUUID();
@@ -215,7 +223,8 @@ export class ProvisioningService {
       runHash: null,
       hubUrl,
       hostName,
-      labels: input.labels ?? [],
+      labels: mergeLabels(profile?.labels, input.labels),
+      profile: profile?.name ?? null,
       repoUrl: settings.repoUrl ? stripCredentials(settings.repoUrl) : null,
       branch: settings.repoUrl ? settings.branch || null : null,
       command: settings.repoUrl ? settings.command || DEFAULT_START_COMMAND : null,
@@ -266,7 +275,19 @@ export class ProvisioningService {
     if (row.spentAt != null) throw new ProvisionExchangeError("used");
     if (row.expiresAt <= at) throw new ProvisionExchangeError("expired");
     const runToken = newSecret("bpr_");
-    const boot = tokenService.issueWorkerBootstrap(row.hostName, row.labels);
+    // The profile is read now, so an edit between the command and the exchange applies. One that
+    // has gone since refuses the exchange rather than make an unrestricted worker.
+    const profile = row.profile ? workerProfileService.get(row.profile) : null;
+    if (row.profile && !profile) throw new ProvisionExchangeError("invalid");
+    const labels = mergeLabels(profile?.labels, row.labels);
+    const boot = tokenService.issueWorkerBootstrap(
+      row.hostName,
+      labels,
+      undefined,
+      undefined,
+      profile?.trust ?? null,
+      profile?.name ?? null,
+    );
     if (!this.queries.spend(row.id, at, boot.hostId, sha256(runToken))) {
       tokenService.removeHost(boot.hostId);
       throw new ProvisionExchangeError("used");
@@ -279,8 +300,12 @@ export class ProvisioningService {
       `bundle=${row.repoUrl ? 1 : 0}`,
       `command=${safeValue(row.command ?? "")}`,
       `name=${safeValue(row.hostName)}`,
-      `labels=${safeValue(row.labels.join(","))}`,
+      `labels=${safeValue(labels.join(","))}`,
     ];
+    if (profile?.ownChats) lines.push("ownChats=1");
+    for (const [name, value] of Object.entries(profile?.env ?? {})) {
+      lines.push(`env=${name}=${safeValue(value)}`);
+    }
     return `${lines.join("\n")}\n`;
   }
 
@@ -442,30 +467,6 @@ export class ProvisioningService {
         message: `Could not fetch the provisioning repo: ${scrub((err as Error).message, secrets).slice(0, 400)}`,
       });
     }
-  }
-}
-
-/** Refuses a repo URL that would put a secret on a command line or send one in cleartext. */
-function checkRepoUrl(url: string): void {
-  if (/\s/.test(url)) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "The repo URL must not contain spaces." });
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return; // An scp-like remote or a path.
-  }
-  if (parsed.username || parsed.password) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "The repo URL must not hold a username or password. Add a git credential to the vault.",
-    });
-  }
-  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
-  if (parsed.protocol === "http:" && !loopback) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "The repo URL must use https." });
   }
 }
 

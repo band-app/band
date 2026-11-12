@@ -225,6 +225,28 @@ describe("install-service", () => {
     }
   });
 
+  it("writes --env values into the service and refuses other names", { skip: !supported }, () => {
+    const home = tmpDir("band-service-env-");
+    dirs.push(home);
+    const { bin } = stubBin(home);
+    const base = ["install-service", "--hub", "https://hub.example.com", "--token", TOKEN];
+    const refused = run(home, bin, [...base, "--env", "FOO=1"]);
+    assert.equal(refused.status, 2);
+    assert.match(refused.stderr, /FOO/);
+    const ok = run(home, bin, [...base, "--env", "BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1"]);
+    assert.equal(ok.status, 0, ok.stderr);
+    const file =
+      platform() === "linux"
+        ? join(home, ".band", "worker-service", "worker.env")
+        : join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+    assert.match(
+      readFileSync(file, "utf8"),
+      platform() === "linux"
+        ? /BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY="1"/
+        : /<key>BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY<\/key>\s*<string>1<\/string>/,
+    );
+  });
+
   it("refuses to install without a hub or token", () => {
     const home = tmpDir("band-service-");
     dirs.push(home);

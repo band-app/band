@@ -35,6 +35,9 @@ export const hosts = sqliteTable(
     // Per-agent binary name or path (`{ "<agentId>": "claude-auto" }`) that replaces the agent
     // definition's `command` on this host. Null means no overrides.
     agentCommands: text("agent_commands", { mode: "json" }).$type<Record<string, string>>(),
+    // The worker profile an admin attached (`settings.workerProfiles[].name`). Null means none.
+    // Only the hub writes it; a worker cannot choose or change it.
+    profile: text("profile"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("hosts_created_at_idx").on(t.createdAt)],
@@ -838,6 +841,8 @@ export const hostProvisions = sqliteTable(
     hubUrl: text("hub_url").notNull(),
     hostName: text("host_name").notNull(),
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default([]),
+    // The worker profile chosen when the code was made. Null means none.
+    profile: text("profile"),
     repoUrl: text("repo_url"),
     branch: text("branch"),
     command: text("command"),
