@@ -6,3 +6,4 @@
 #
 # The id is the text after "flaky: " in the issue title. The fix PR removes the line.
 # Rules: docs in .claude/testing-criteria.md (section 8) and CLAUDE.md (Testing Strategy).
+apps/hub/tests/chat-ownership.test.ts › hub state follows the owner's events (S5) › ends a turn the worker was running when it stopped  # 1207
