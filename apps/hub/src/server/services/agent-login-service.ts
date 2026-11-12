@@ -25,6 +25,7 @@ import {
 import { VaultQueries } from "../infra/db/queries/vault";
 import { credentialChanged } from "./_utils/credential-events";
 import { vaultService } from "./vault-service";
+import { workerProfileService } from "./worker-profile-service";
 
 const log = createLogger("agent-login-service");
 
@@ -68,6 +69,8 @@ export interface ResolveInput {
   repo?: string;
   /** The login the chat picked. */
   chatLoginId?: string;
+  /** The worker the agent starts on. Its profile may limit which logins apply. */
+  hostId?: string;
 }
 
 export class AgentLoginService {
@@ -231,9 +234,11 @@ export class AgentLoginService {
       input.repo ? this.queries.choice(input.agentType, input.repo) : undefined,
       this.queries.choice(input.agentType, DEFAULT_CHOICE_REPO),
     ];
+    const allowed = this.allowedFor(input.hostId);
     for (const id of ids) {
       if (!id) continue;
       const row = this.queries.find(id);
+      if (row && allowed && !allowed(row)) continue;
       if (row && row.agentType === input.agentType && findLoginKind(row.agentType, row.kind)) {
         return id;
       }
@@ -252,9 +257,11 @@ export class AgentLoginService {
       input.repo ? this.queries.choice(input.agentType, input.repo) : undefined,
       this.queries.choice(input.agentType, DEFAULT_CHOICE_REPO),
     ];
+    const allowed = this.allowedFor(input.hostId);
     for (const id of ids) {
       if (!id) continue;
       const row = this.queries.find(id);
+      if (row && allowed && !allowed(row)) continue;
       if (!row || row.agentType !== input.agentType) continue;
       const kind = findLoginKind(row.agentType, row.kind);
       if (!kind) continue;
@@ -266,6 +273,14 @@ export class AgentLoginService {
       }
     }
     return null;
+  }
+
+  /** The test a worker profile puts on logins, or null when the worker has no login policy. */
+  private allowedFor(hostId: string | undefined): ((row: AgentLoginRow) => boolean) | null {
+    if (!hostId) return null;
+    const policy = workerProfileService.policyFor(hostId);
+    if (!policy) return null;
+    return (row) => policy.agentLogins.includes(row.id) || policy.agentLogins.includes(row.label);
   }
 
   // ---- helpers --------------------------------------------------------------------

@@ -22,6 +22,7 @@ import { trpc } from "../../../lib/trpc-client";
 import { ErrorPopover } from "./ErrorPopover";
 import { HostAgentCommands } from "./HostAgentCommands";
 import { type ThisComputer, ThisComputerDrawerSection } from "./ThisComputerSettings";
+import { useWorkerProfiles } from "./WorkerProfilesSettings";
 import { WorkerUpdatesSection } from "./WorkerUpdatesSection";
 import {
   type AgentLine,
@@ -93,6 +94,8 @@ export function WorkerDrawer({
   refresh,
 }: Props) {
   const [trustError, setTrustError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const profiles = useWorkerProfiles(isAdmin);
   const [revokeError, setRevokeError] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -101,6 +104,7 @@ export function WorkerDrawer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the per-worker state when another worker opens
   useEffect(() => {
     setTrustError(null);
+    setProfileError(null);
     setRevokeError(null);
     setRemoveError(null);
     setConfirmRemove(false);
@@ -112,6 +116,19 @@ export function WorkerDrawer({
       await trpc.workers.setTrust.mutate({ hostId: hostItem.id, trust });
     } catch (err) {
       setTrustError(errorText(err));
+    }
+    await refresh();
+  };
+
+  const setProfile = async (hostItem: HostItem, profile: string) => {
+    setProfileError(null);
+    try {
+      await trpc.workerProfiles.setWorkerProfile.mutate({
+        hostId: hostItem.id,
+        profile: profile || null,
+      });
+    } catch (err) {
+      setProfileError(errorText(err));
     }
     await refresh();
   };
@@ -227,6 +244,46 @@ export function WorkerDrawer({
                 >
                   {TRUST_HINT[host.trust]}
                 </p>
+                {isAdmin || host.profile ? (
+                  <div className="space-y-1" data-testid="settings__host-profile-section">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="font-medium">Profile</span>
+                      {isAdmin ? (
+                        <select
+                          aria-label={`Profile of ${host.name}`}
+                          data-testid="settings__host-profile"
+                          value={host.profile ?? ""}
+                          onChange={(e) => void setProfile(host, e.target.value)}
+                          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                        >
+                          <option value="">None</option>
+                          {host.profile &&
+                          !(profiles.data?.profiles ?? []).some((p) => p.name === host.profile) ? (
+                            <option value={host.profile}>{host.profile} (not valid)</option>
+                          ) : null}
+                          {(profiles.data?.profiles ?? []).map((p) => (
+                            <option key={p.name} value={p.name}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span data-testid="settings__host-drawer-profile">{host.profile}</span>
+                      )}
+                      {profileError ? (
+                        <ErrorPopover
+                          label="Could not change the profile"
+                          testId="settings__host-profile-error"
+                          message={profileError}
+                        />
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Its trust and credential policy apply from the worker's next call. Its env and
+                      provisioning repo apply only at the next provisioning.
+                    </p>
+                  </div>
+                ) : null}
                 {isAdmin ? (
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <div className="min-w-0">

@@ -15,6 +15,7 @@ import { EvacuateHostDialog } from "./EvacuateHostDialog";
 import { SettingsRow } from "./SettingsRow";
 import { ThisComputerRow, thisComputerHostId } from "./ThisComputerSettings";
 import { WorkerDrawer } from "./WorkerDrawer";
+import { WorkerProfilesSettings } from "./WorkerProfilesSettings";
 import { WorkersActivity } from "./WorkersActivity";
 import { WorkersTable } from "./WorkersTable";
 import {
@@ -30,7 +31,7 @@ import {
   type TokenView,
 } from "./worker-format";
 
-type Tab = "workers" | "activity" | "tokens";
+type Tab = "workers" | "profiles" | "activity" | "tokens";
 
 /**
  * Settings > Workers: the computers Band can run worktrees on as one table (this Mac included),
@@ -114,6 +115,7 @@ export function HostsSettings() {
 
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: "workers", label: "Workers", show: true },
+    { id: "profiles", label: "Profiles", show: isAdmin },
     { id: "activity", label: "Activity", show: isAdmin },
     { id: "tokens", label: "Tokens", show: true },
   ];
@@ -197,6 +199,8 @@ export function HostsSettings() {
               <ThisComputerRow computer={thisComputer} />
             </div>
           ) : null}
+
+          {tab === "profiles" && isAdmin ? <WorkerProfilesSettings /> : null}
 
           {tab === "activity" && isAdmin ? (
             <WorkersActivity entries={audit.data ?? []} hosts={list} />

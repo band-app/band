@@ -6,6 +6,7 @@ import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
 import { useIsAdmin } from "./DevicesSettings";
 import { ErrorPopover } from "./ErrorPopover";
+import { useWorkerProfiles } from "./WorkerProfilesSettings";
 
 type Created = Awaited<ReturnType<typeof trpc.provisioning.createCommand.mutate>>;
 type View = Awaited<ReturnType<typeof trpc.provisioning.status.query>>["commands"][number];
@@ -43,6 +44,8 @@ export function ProvisionHostForm() {
   const [branch, setBranch] = useState("");
   const [startCommand, setStartCommand] = useState("");
   const [hostName, setHostName] = useState("");
+  const [profile, setProfile] = useState("");
+  const profiles = useWorkerProfiles(isAdmin);
   const [created, setCreated] = useState<Created | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +118,7 @@ export function ProvisionHostForm() {
         await trpc.provisioning.createCommand.mutate({
           hubUrl: hubUrl(),
           hostName: hostName.trim() || undefined,
+          profile: profile || undefined,
         }),
       );
       setHostName("");
@@ -232,6 +236,22 @@ export function ProvisionHostForm() {
         </div>
       ) : (
         <div className="flex gap-2">
+          {(profiles.data?.profiles ?? []).length > 0 ? (
+            <select
+              aria-label="Worker profile"
+              data-testid="settings__provision-profile"
+              value={profile}
+              onChange={(e) => setProfile(e.target.value)}
+              className="h-8 shrink-0 rounded-md border border-input bg-transparent px-2 text-sm"
+            >
+              <option value="">No profile</option>
+              {(profiles.data?.profiles ?? []).map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <Input
             aria-label="Name for the new worker"
             placeholder="Worker name (optional)"

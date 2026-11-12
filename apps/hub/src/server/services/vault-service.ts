@@ -66,6 +66,8 @@ export interface GitCredentialMatch {
   repo: string | null;
   /** Looks without recording a use. */
   peek?: boolean;
+  /** Only items with these names apply (a worker profile's `credentials.git`). Unset means any. */
+  onlyItems?: string[];
 }
 
 /** `*` matches within one path segment, `**` across segments. The whole path must match. */
@@ -316,6 +318,7 @@ export class VaultService {
       .list()
       .filter((row) => row.kind === "git")
       .filter((row) => row.metadata.host === host)
+      .filter((row) => !match.onlyItems || match.onlyItems.includes(row.name))
       .filter(
         (row) =>
           row.scope === "global" || (match.repo !== null && row.scope === `repo:${match.repo}`),
@@ -350,6 +353,20 @@ export class VaultService {
       (row.scope === "global" ? 0 : 1_000_000) -
       String(row.metadata.pathPattern ?? "").replace(/\*/g, "").length;
     const best = candidates.sort((a, b) => breadth(b) - breadth(a))[0];
+    if (!best) return undefined;
+    this.queries.update(best.id, { lastUsedAt: Date.now() });
+    return decrypt(this.getKey(), best.id, best.encrypted);
+  }
+
+  /**
+   * The secret of the `git` item called `name`, for the `gh` token of a worker profile. A global
+   * item beats a repo-scoped one. For hub services, never an API.
+   */
+  findGitTokenByName(name: string): string | undefined {
+    const best = this.queries
+      .list()
+      .filter((row) => row.kind === "git" && row.name === name)
+      .sort((a, b) => Number(b.scope === "global") - Number(a.scope === "global"))[0];
     if (!best) return undefined;
     this.queries.update(best.id, { lastUsedAt: Date.now() });
     return decrypt(this.getKey(), best.id, best.encrypted);

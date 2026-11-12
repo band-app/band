@@ -73,6 +73,8 @@ BUNDLE=0
 START_COMMAND=""
 HOST_NAME=""
 LABELS=""
+OWN_CHATS=0
+PROFILE_ENV=""
 while IFS='=' read -r key value; do
   case "$key" in
     token) TOKEN="$value" ;;
@@ -82,6 +84,9 @@ while IFS='=' read -r key value; do
     command) START_COMMAND="$value" ;;
     name) HOST_NAME="$value" ;;
     labels) LABELS="$value" ;;
+    ownChats) OWN_CHATS="$value" ;;
+    env) PROFILE_ENV="\${PROFILE_ENV:+$PROFILE_ENV
+}$value" ;;
   esac
 done <"$EXCHANGE"
 rm -f "$EXCHANGE"
@@ -148,8 +153,27 @@ root_steps() {
 install_and_start_worker() {
   install_worker
   export BAND_HUB_URL="$HUB_URL" BAND_WORKER_TOKEN="$TOKEN"
+  set -- --worker-id "$WORKER_ID"
+  if [ -n "$HOST_NAME" ]; then set -- "$@" --name "$HOST_NAME"; fi
+  if [ -n "$LABELS" ]; then set -- "$@" --labels "$LABELS"; fi
+  if [ "$OWN_CHATS" = 1 ]; then set -- "$@" --own-chats; fi
+  if [ -n "$PROFILE_ENV" ]; then
+    old_ifs="$IFS"
+    IFS='
+'
+    for pair in $PROFILE_ENV; do set -- "$@" --env "$pair"; done
+    IFS="$old_ifs"
+  fi
+  INSTALL_OUT="$WORK/install.out"
   # shellcheck disable=SC2086
-  $WORKER install-service --worker-id "$WORKER_ID" \${HOST_NAME:+--name "$HOST_NAME"} \${LABELS:+--labels "$LABELS"}
+  if ! $WORKER install-service "$@" >"$INSTALL_OUT" 2>&1; then
+    cat "$INSTALL_OUT"
+    if [ -n "$PROFILE_ENV" ] && grep -qi 'unknown option' "$INSTALL_OUT"; then
+      fail "this band-worker cannot take the worker profile's env (install-service has no --env). Install a newer @band-app/worker and run the command again."
+    fi
+    fail "band-worker install-service failed"
+  fi
+  cat "$INSTALL_OUT"
   root_steps
 }
 
@@ -176,8 +200,18 @@ worker_service_running() {
     return 1
   fi
   # shellcheck disable=SC2086
-  $CHECK status >/dev/null 2>&1 || return 1
-  WORKER="$CHECK"
+  if $CHECK status >/dev/null 2>&1; then
+    WORKER="$CHECK"
+    return 0
+  fi
+  # A macOS user with no GUI session has a written LaunchAgent that cannot run yet. launchd loads
+  # it at the first login, so the install is complete.
+  if [ "$OS" = macos ] && ! launchctl print "gui/$(id -u)" >/dev/null 2>&1; then
+    WORKER="$CHECK"
+    NO_GUI_SESSION=1
+    return 0
+  fi
+  return 1
 }
 
 custom_install() {
@@ -190,11 +224,23 @@ custom_install() {
   [ -f "$DEST/repo/$START_COMMAND" ] || fail "the provisioning repo has no $START_COMMAND"
   chmod u+x "$DEST/repo/$START_COMMAND"
   export BAND_HUB_URL="$HUB_URL" BAND_BOOTSTRAP_TOKEN="$TOKEN" BAND_WORKER_ID="$WORKER_ID"
+  if [ -n "$PROFILE_ENV" ]; then
+    old_ifs="$IFS"
+    IFS='
+'
+    # shellcheck disable=SC2163
+    for pair in $PROFILE_ENV; do export "$pair"; done
+    IFS="$old_ifs"
+  fi
   export BAND_WORKER_LABELS="$LABELS" BAND_HOST_LABELS="$LABELS" BAND_PROVISION_DIR="$DEST/repo" BAND_WORKER_VERSION="$WORKER_VERSION"
   say "Running $START_COMMAND"
   ( cd "$DEST/repo" && "./$START_COMMAND" )
   if worker_service_running; then
-    say "The worker service for $WORKER_ID is already installed and running: skipping Band's worker install and service steps."
+    if [ "\${NO_GUI_SESSION:-}" = 1 ]; then
+      say "The worker service for $WORKER_ID is installed. $(id -un) has no GUI session yet, so it starts at the next login. Skipping Band's worker install and service steps."
+    else
+      say "The worker service for $WORKER_ID is already installed and running: skipping Band's worker install and service steps."
+    fi
     root_steps
     return 0
   fi

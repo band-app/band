@@ -13,6 +13,7 @@ import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { ErrorPopover } from "./ErrorPopover";
 import { ProvisionHostForm } from "./ProvisionHostForm";
+import { SshInstallForm } from "./SshInstallForm";
 import { errorText, hubUrl } from "./worker-format";
 import {
   WORKER_INSTALL_TABS,
@@ -25,7 +26,7 @@ interface IssuedWorker {
   token: string;
 }
 
-type Method = "provision" | "manual";
+type Method = "provision" | "ssh" | "manual";
 
 function ManualInstall({ onIssued }: { onIssued: () => Promise<unknown> }) {
   const [hostName, setHostName] = useState("");
@@ -194,11 +195,14 @@ export function AddWorkerDialog({
           onChange={setMethod}
           options={[
             { value: "provision", label: "One command" },
+            { value: "ssh", label: "Over ssh" },
             { value: "manual", label: "Manual install" },
           ]}
           className="w-fit bg-muted"
         />
-        {method === "provision" ? <ProvisionHostForm /> : <ManualInstall onIssued={onIssued} />}
+        {method === "provision" ? <ProvisionHostForm /> : null}
+        {method === "ssh" ? <SshInstallForm /> : null}
+        {method === "manual" ? <ManualInstall onIssued={onIssued} /> : null}
       </DialogContent>
     </Dialog>
   );

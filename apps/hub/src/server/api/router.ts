@@ -90,6 +90,7 @@ import { t } from "./trpc";
 import { tunnelRouter } from "./tunnel/router";
 import { vaultRouter } from "./vault/router";
 import { voiceRouter } from "./voice/router";
+import { workerProfilesRouter } from "./worker-profiles/router";
 import { worktreeRouter } from "./worktree/router";
 import { worktreesRouter } from "./worktrees/router";
 
@@ -128,6 +129,7 @@ export const appRouter = t.router({
   tokens: tokensRouter,
   vault: vaultRouter,
   provisioning: provisioningRouter,
+  workerProfiles: workerProfilesRouter,
   agentLogins: agentLoginsRouter,
   voice: voiceRouter,
   editors: editorsRouter,

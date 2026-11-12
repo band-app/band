@@ -57,6 +57,8 @@ curl -fsSL https://hub.example.com/api/provision/<code>/script | sh
 
 Run it as the normal user on a blank Linux or macOS machine. It installs Node if needed, installs the worker and starts it as a service. The line works once and expires after an hour. See [Provision a worker](provisioning.md) for what the script does, the optional provisioning repo and cloud-init.
 
+To apply a [worker profile](worker-profiles.md) (provisioning repo, labels, trust, worker settings and a credential policy), pick it in the same dialog or run `band workers provision --profile <name>`.
+
 ## Manual install
 
 Settings > Workers > Add worker > Manual install creates a one-time token. Copy it right away, because the hub keeps only a hash and cannot show it again. The token works once and expires in an hour. The dialog offers the command for each method.
@@ -82,6 +84,8 @@ Options: `--root <dir>` (repeatable, a directory the worker may serve), `--name`
 band-worker status             # exit code 0 running, 3 installed but stopped, 4 not installed
 band-worker uninstall-service  # removes the unit or plist, ends the terminals, keeps the worker's state
 ```
+
+`install-service` and `uninstall-service` exit with code 2 when HOME is not the user's home directory from the passwd entry, because launchd labels and systemd user units belong to the user and not to a HOME, so a temp-HOME run would stop the real worker. A `launchctl` or `systemctl` set through `BAND_LAUNCHCTL_BIN` or `BAND_SYSTEMCTL_BIN`, or found on PATH outside `/bin`, `/sbin`, `/usr/bin` and `/usr/sbin`, counts as a stub and is not refused. Pass `--allow-other-home` when a machine's HOME differs from its passwd entry on purpose.
 
 ### npm foreground
 
