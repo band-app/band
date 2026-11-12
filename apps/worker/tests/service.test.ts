@@ -142,6 +142,37 @@ describe("install-service", () => {
     assert.ok(readFileSync(file, "utf8").includes(logPath));
   });
 
+  describe("launchctl bootstrap failing", { skip: platform() !== "darwin" }, () => {
+    const failingLaunchctl = (bin: string, code: number, message: string) => {
+      writeFileSync(
+        join(bin, "launchctl"),
+        `#!/bin/sh\n[ "$1" = bootstrap ] && { echo "${message}" >&2; exit ${code}; }\nexit 0\n`,
+      );
+      chmodSync(join(bin, "launchctl"), 0o755);
+    };
+    const args = ["install-service", "--hub", "https://hub.example.com", "--token", TOKEN];
+
+    it("exits 0 and says the worker starts at next login when there is no GUI session", () => {
+      const home = tmpDir("band-service-nosession-");
+      dirs.push(home);
+      const { bin } = stubBin(home);
+      failingLaunchctl(bin, 125, "Bootstrap failed: 125: Domain does not support specified action");
+      const install = run(home, bin, args);
+      assert.equal(install.status, 0, install.stderr);
+      assert.match(install.stdout, /starts at the next login/);
+      assert.ok(existsSync(join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`)));
+    });
+
+    it("still fails for another launchctl error", () => {
+      const home = tmpDir("band-service-badplist-");
+      dirs.push(home);
+      const { bin } = stubBin(home);
+      failingLaunchctl(bin, 5, "Bootstrap failed: 5: Input/output error");
+      const install = run(home, bin, args);
+      assert.notEqual(install.status, 0);
+    });
+  });
+
   it("installs, reports status and uninstalls", { skip: !supported }, () => {
     const home = tmpDir("band-service-");
     dirs.push(home);

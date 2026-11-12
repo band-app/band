@@ -328,11 +328,28 @@ export function installService(opts: ServiceOptions, env: ServiceEnv): void {
     } catch {
       // Not loaded yet.
     }
-    env.run("launchctl", ["bootstrap", domain, paths.plistFile]);
+    try {
+      env.run("launchctl", ["bootstrap", domain, paths.plistFile]);
+    } catch (err) {
+      if (!isNoGuiSession(err)) throw err;
+      // A fresh account has no GUI session yet, so launchd has no gui/<uid> domain. The plist is
+      // written, and launchd loads it when the user logs in.
+      env.log(
+        `Installed ${LAUNCHD_LABEL}. ${domain} does not exist yet because the user has no GUI session, so the worker starts at the next login.`,
+      );
+      return;
+    }
     env.log(`Installed ${LAUNCHD_LABEL}. Check it with: band-worker status`);
     return;
   }
   unsupported(env.platform);
+}
+
+/** True when `launchctl bootstrap gui/<uid>` failed because the user has no GUI session. */
+function isNoGuiSession(err: unknown): boolean {
+  const e = err as { status?: unknown; stderr?: unknown; message?: unknown };
+  const text = `${String(e.stderr ?? "")} ${String(e.message ?? "")}`;
+  return e.status === 125 || /Domain does not support specified action/i.test(text);
 }
 
 /** The state dir the installed service uses: the one in its env file, else the default under BAND_HOME. */
