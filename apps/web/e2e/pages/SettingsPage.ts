@@ -1679,6 +1679,81 @@ export class SettingsPage {
     return this.addWorkerHubDialog().getByTestId("settings__provision-copy-cloud-init");
   }
 
+  /** Opens the Add worker dialog on its "Over ssh" tab. */
+  async openSshInstall(): Promise<void> {
+    await test.step("Open the Over ssh tab", async () => {
+      await this.addWorkerButton().click();
+      await this.addWorkerHubDialog().getByRole("radio", { name: "Over ssh" }).click();
+    });
+  }
+
+  /** The worker picker of the ssh tab, shown when this computer has no worker. */
+  sshWorkerPicker(): Locator {
+    return this.addWorkerHubDialog().getByTestId("settings__ssh-worker");
+  }
+
+  /** The rows of the ssh config hosts. */
+  sshHostRows(): Locator {
+    return this.addWorkerHubDialog().getByTestId("settings__ssh-host");
+  }
+
+  sshHostRow(name: string): Locator {
+    return this.sshHostRows().and(this.page.locator(`[data-host="${name}"]`));
+  }
+
+  /** Clicks Install on a config host row. */
+  async installOnSshHost(name: string): Promise<void> {
+    await test.step(`Install over ssh on ${name}`, async () => {
+      await this.sshHostRow(name).getByTestId("settings__ssh-host-install").click();
+    });
+  }
+
+  /** Types a target and clicks its Install button. */
+  async installOnTypedTarget(target: string): Promise<void> {
+    await test.step(`Install over ssh on the typed target ${target}`, async () => {
+      const dialog = this.addWorkerHubDialog();
+      await dialog.getByRole("textbox", { name: "ssh target" }).fill(target);
+      await dialog.getByTestId("settings__ssh-target-install").click();
+    });
+  }
+
+  sshFingerprints(): Locator {
+    return this.addWorkerHubDialog().getByTestId("settings__ssh-fingerprint");
+  }
+
+  async confirmSshHostKey(): Promise<void> {
+    await this.addWorkerHubDialog().getByTestId("settings__ssh-confirm").click();
+  }
+
+  async cancelSshHostKey(): Promise<void> {
+    await this.addWorkerHubDialog().getByTestId("settings__ssh-cancel").click();
+  }
+
+  sshConfirmPanel(): Locator {
+    return this.addWorkerHubDialog().getByTestId("settings__ssh-confirm-panel");
+  }
+
+  /** The icon of the error shown for a refused target. */
+  sshErrorIcon(): Locator {
+    return this.addWorkerHubDialog().getByTestId("settings__ssh-error-icon");
+  }
+
+  sshErrorMessage(): Locator {
+    return this.page.getByTestId("settings__ssh-error");
+  }
+
+  sshStatus(): Locator {
+    return this.addWorkerHubDialog().getByTestId("settings__ssh-status");
+  }
+
+  sshRunErrorIcon(): Locator {
+    return this.addWorkerHubDialog().getByTestId("settings__ssh-run-error-icon");
+  }
+
+  sshRunErrorMessage(): Locator {
+    return this.page.getByTestId("settings__ssh-run-error");
+  }
+
   /** The "Add worker" button in the Workers section, before the form opens. */
   addWorkerButton(): Locator {
     return this.dialog.getByTestId("settings__add-worker");

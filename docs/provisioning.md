@@ -97,17 +97,28 @@ Keep credentials out of the repo. Agent logins come from Band's vault.
 
 Settings > Workers shows the command's state under the line: waiting for the command to run, provisioning, online (the worker said hello), failed (with the exit code) or expired. The log is readable after the run. A run whose worker has not said hello 30 minutes after the exchange is marked failed, whether the script is still running or exited 0, and its log gets a last line saying why. 
 
+## Over ssh
+
+The "Over ssh" tab of Add worker installs a worker on a machine you can ssh into. Band runs `ssh` on a worker, not on the hub. In the desktop app that is the worker of the computer you are on, so it uses your `~/.ssh/config`, keys and ssh-agent. In a browser, or when this computer has no worker, the tab shows a picker of online workers.
+
+- The tab lists the hosts of that worker's `~/.ssh/config` (no wildcard entries, `Include` files followed), with `user@hostname` where the config gives them. You can also type a target such as `user@host`. A target that starts with `-` or holds spaces or shell characters is refused before anything runs.
+- ssh runs with `BatchMode=yes`, so it never asks for input. If it needs a passphrase or a password, the install fails and the error icon shows ssh's message with a hint: load the key into ssh-agent, set up key login, or use the one-line command. The sudo steps need passwordless sudo, as in the one-line command.
+- A host that is not in known_hosts shows its key fingerprint first. Nothing runs until you click "Trust and install", which adds the key to that worker's known_hosts. A host whose key differs from known_hosts is refused.
+- After that the install is the one-line command run over ssh: the same status, log, expiry and new worker row. The hub must be reachable from the target at the address the page uses.
+
+Environment variables `BAND_SSH_BIN`, `BAND_SSH_KEYSCAN_BIN` and `BAND_SSH_KEYGEN_BIN` on the hub replace `ssh`, `ssh-keyscan` and `ssh-keygen`.
+
 ## Copy as cloud-init
 
 "Copy as cloud-init" wraps the same line in a `#cloud-config` `runcmd`, for pasting as user data when you create a VM. cloud-init runs it as root, so use `runcmd` with `su` or `sudo -u <user>` in your own config when you want the worker to run as a normal user.
 
 ## Access
 
-Creating a command and changing the provisioning settings need an admin device token. Agents cannot reach them.
+Creating a command, installing over ssh and changing the provisioning settings need an admin device token. Agents cannot reach them.
 
 ## Limits
 
-Not supported yet: Windows, a Re-provision button for workers that already joined, SSH push from the hub, creating the VM, provisioning on ephemeral runners, passing vault secrets to the start command, and the mobile app.
+Not supported yet: Windows, a Re-provision button for workers that already joined, creating the VM, provisioning on ephemeral runners, passing vault secrets to the start command, and the mobile app.
 
 ## Details
 
