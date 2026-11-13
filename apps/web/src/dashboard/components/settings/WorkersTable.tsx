@@ -119,13 +119,13 @@ export function WorkersTable({
               if (e.currentTarget.contains(e.target as Node)) onOpen(host.id);
             }}
           >
-            <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
-              <div className="flex items-center gap-1.5">
+            <div className="min-w-0 basis-full sm:basis-auto sm:min-w-28 sm:flex-1">
+              <div className="flex flex-wrap items-center gap-x-1.5">
                 <button
                   type="button"
                   data-testid="settings__host-name"
                   aria-label={`Open ${host.name}`}
-                  className="min-w-0 truncate rounded-sm text-left font-medium"
+                  className="min-w-0 max-w-full truncate rounded-sm text-left font-medium"
                   onClick={(e) => {
                     e.stopPropagation();
                     onOpen(host.id);
@@ -159,7 +159,7 @@ export function WorkersTable({
             >
               {host.status}
             </span>
-            <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:w-52">
+            <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:w-40">
               <span
                 data-testid="settings__host-version"
                 data-version={host.workerVersion ?? "unknown"}
@@ -191,7 +191,7 @@ export function WorkersTable({
             {/* A fixed-width cell, empty for the built-in worker, keeps the columns aligned. */}
             <div
               className={cn(
-                "shrink-0 sm:flex sm:w-24 sm:justify-end",
+                "shrink-0 sm:flex sm:w-20 sm:justify-end",
                 host.id === "local" && "hidden",
               )}
             >

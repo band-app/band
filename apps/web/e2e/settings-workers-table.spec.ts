@@ -190,4 +190,58 @@ test.describe("Settings > Workers table", () => {
     await workers.openDrawer("contabo");
     await expect(workers.section("updates")).toBeVisible();
   });
+
+  for (const width of [390, 640, 800, 1000, 1280]) {
+    for (const longName of [false, true]) {
+      test(`S1-S3: the This computer badge overlaps nothing at ${width}px${longName ? " with a long name" : ""}`, async ({
+        page,
+      }, testInfo) => {
+        const name = longName
+          ? `a-very-long-worker-name-for-the-build-farm-in-berlin-${width}`
+          : `studio-mac-${width}`;
+        const stand = await connectStandInWorker({
+          hubUrl: server.url,
+          adminToken: TOKEN,
+          name,
+          version: HUB_VERSION,
+          serviceManager: "systemd",
+        });
+        try {
+          await page.setViewportSize({ width, height: 844 });
+          const workers = new WorkersSettingsPage(page, server.url, TOKEN);
+          await workers.actAsThisComputer(stand.hostId);
+          await workers.open();
+          await expect(workers.thisComputerBadge()).toBeVisible();
+          const box = async (l: ReturnType<typeof workers.thisComputerBadge>) => {
+            const b = await l.boundingBox();
+            if (!b) throw new Error("no box");
+            return b;
+          };
+          const badge = await box(workers.thisComputerBadge());
+          const pill = await box(workers.statusPill(name));
+          const nameBox = await box(workers.nameButton(name));
+          const hits = (a: typeof badge, b: typeof badge) =>
+            a.x < b.x + b.width &&
+            b.x < a.x + a.width &&
+            a.y < b.y + b.height &&
+            b.y < a.y + a.height;
+          expect(hits(badge, pill)).toBe(false);
+          expect(hits(badge, nameBox)).toBe(false);
+          expect(nameBox.width).toBeGreaterThan(40);
+          const row = await box(workers.row(name));
+          expect(badge.x + badge.width).toBeLessThanOrEqual(row.x + row.width);
+          const rowOverflow = await workers
+            .row(name)
+            .evaluate((el) => el.scrollWidth - el.clientWidth);
+          expect(rowOverflow).toBeLessThanOrEqual(0);
+          await workers.row(name).scrollIntoViewIfNeeded();
+          await workers.row(name).screenshot({
+            path: testInfo.outputPath(`workers-${width}${longName ? "-long" : ""}.png`),
+          });
+        } finally {
+          await stand.close();
+        }
+      });
+    }
+  }
 });
