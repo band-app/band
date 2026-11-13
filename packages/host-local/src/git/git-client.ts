@@ -62,6 +62,8 @@ export interface PullRequestSummary {
   url: string;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  /** The branch the PR merges into. Absent in rows stored before it was read. */
+  baseBranch?: string;
   /** Absent in rows stored before the merge queue was read. */
   mergeQueue?: {
     state: "queued" | "awaiting_checks" | "mergeable" | "locked" | "unmergeable";

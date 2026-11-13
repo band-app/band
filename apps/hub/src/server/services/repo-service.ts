@@ -160,6 +160,8 @@ export class RepoService {
         // null` — `NonNullable` isn't needed because the source type is
         // already non-undefined, but `| null` matches the null fallback.
         agent: WorktreeAgentInfo | null;
+        /** The branch the worktree was created from, when it was given one. */
+        baseBranch?: string;
         /** The group the worktree is in, or null for Ungrouped. */
         groupId: string | null;
         /** Marked unread by a person; shown as a dot until the worktree is opened or marked read. */
@@ -260,6 +262,7 @@ export class RepoService {
                 path: wt.path,
                 head: wt.head,
                 pinned: tracked?.pinned ?? false,
+                ...(tracked?.baseBranch ? { baseBranch: tracked.baseBranch } : {}),
                 ...(tracked?.groupId ? { groupId: tracked.groupId } : {}),
                 ...(tracked?.unread ? { unread: true } : {}),
                 ...(tracked?.title ? { title: tracked.title } : {}),

@@ -76,7 +76,15 @@ interface SeedRepo {
   // create-time invariant). Pass it explicitly to simulate a worktree
   // whose git branch was switched after creation. `groupId` is one of the
   // seeded `groups`; `origin` is the id of the worktree this one was started from.
-  worktrees: { name?: string; branch: string; path: string; groupId?: string; origin?: string }[];
+  worktrees: {
+    name?: string;
+    branch: string;
+    path: string;
+    groupId?: string;
+    origin?: string;
+    /** The branch the worktree was created from (`worktrees.base_branch`). */
+    baseBranch?: string;
+  }[];
 }
 
 interface SeedGroup {
@@ -120,8 +128,8 @@ export function seedState(
     for (const wt of repo.worktrees) {
       sqlite
         .prepare(
-          `INSERT INTO worktrees (repo_name, name, branch, path, group_id, origin_worktree_id)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO worktrees (repo_name, name, branch, path, group_id, origin_worktree_id, base_branch)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           repo.name,
@@ -130,6 +138,7 @@ export function seedState(
           wt.path,
           wt.groupId ?? null,
           wt.origin ?? null,
+          wt.baseBranch ?? null,
         );
     }
   }

@@ -127,6 +127,11 @@ export interface WorktreeState {
    */
   origin?: WorktreeOrigin;
   /**
+   * The branch the worktree was created from. Read-only here like `origin`: `saveAll` keeps what
+   * the database holds, and `RepoQueries.setBaseBranch` writes it.
+   */
+  baseBranch?: string;
+  /**
    * The group the worktree is in (`worktree_groups.id`). Read-only here like `origin`: `saveAll`
    * keeps what the database holds, and `RepoQueries.setGroup` writes it.
    */
@@ -261,6 +266,7 @@ export class RepoQueries {
         head: row.head ?? undefined,
         pinned: row.pinned,
         hostId: row.hostId,
+        ...(row.baseBranch ? { baseBranch: row.baseBranch } : {}),
         ...(row.sortIndex === null ? {} : { sortIndex: row.sortIndex }),
         ...(row.pinSortIndex === null ? {} : { pinSortIndex: row.pinSortIndex }),
         ...(row.originWorktreeId
@@ -348,6 +354,7 @@ export class RepoQueries {
             originWorktreeId: worktreesTable.originWorktreeId,
             originChatId: worktreesTable.originChatId,
             originTerminalId: worktreesTable.originTerminalId,
+            baseBranch: worktreesTable.baseBranch,
             groupId: worktreesTable.groupId,
             unread: worktreesTable.unread,
             title: worktreesTable.title,
@@ -413,6 +420,7 @@ export class RepoQueries {
               originWorktreeId: origin?.originWorktreeId ?? null,
               originChatId: origin?.originChatId ?? null,
               originTerminalId: origin?.originTerminalId ?? null,
+              baseBranch: origin?.baseBranch ?? null,
               groupId: origin?.groupId ?? null,
               unread: origin?.unread ?? false,
               title: origin?.title ?? null,
@@ -809,6 +817,21 @@ export class RepoQueries {
         originChatId: origin?.chatId ?? null,
         originTerminalId: origin?.terminalId ?? null,
       })
+      .where(
+        and(
+          eq(worktreesTable.repoName, repoName),
+          eq(worktreesTable.name, name),
+          ...(hostId === undefined ? [] : [eq(worktreesTable.hostId, hostId)]),
+        ),
+      )
+      .run();
+  }
+
+  /** Records the branch a worktree was created from. Focused UPDATE, because `saveAll` keeps the stored value. */
+  setBaseBranch(repoName: string, name: string, baseBranch: string | null, hostId?: string): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ baseBranch })
       .where(
         and(
           eq(worktreesTable.repoName, repoName),

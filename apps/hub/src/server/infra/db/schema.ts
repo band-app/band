@@ -218,6 +218,9 @@ export const worktrees = sqliteTable("worktrees", {
   sortIndex: integer("sort_index"),
   pinSortIndex: integer("pin_sort_index"),
   hostId: hostId(),
+  // The branch the worktree was created from (`--base`), or null when none was given or the row
+  // predates the column. The Changes view compares against it when no PR base is known.
+  baseBranch: text("base_branch"),
   // Where the worktree was started from: the worktree (id as `toWorktreeId` makes it) and the
   // chat or terminal in it. Plain ids with no foreign key, because the origin may live on any
   // repo and host, and a removed parent leaves the id behind so the API can say it was removed.

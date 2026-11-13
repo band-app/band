@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { toWorktreeId } from "@band-app/shared/worktree-id";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { clientStorage } from "../../lib/client-state";
+import { useDashboardStore } from "../stores/index";
+import { useRepos } from "./use-repos";
 
 // Worktree-scoped so the Changes sidepanel, the diff leaves and the
 // Changes-tab badge always read the same target — see issue #396 ("Changes
@@ -55,9 +58,16 @@ function dispatchChange(detail: DiffTargetChangeDetail) {
 }
 
 export interface UseDiffTargetReturn {
-  /** The branch the "Committed on branch" section compares against; null
-   *  means the repo's default branch. */
+  /** The branch the "Committed on branch" section compares against: the
+   *  user's pick, else the worktree's base (see `baseBranch`); null means the
+   *  repo's default branch. */
   compareBranch: string | null;
+  /** The branch the user picked by hand, or null when they have not. */
+  pickedBranch: string | null;
+  /** The worktree's real base: the open PR's base, else the branch the
+   *  worktree was created from; null when it has neither. It may equal the
+   *  default branch. */
+  baseBranch: string | null;
   setCompareBranch: (branch: string | null) => void;
 }
 
@@ -69,7 +79,7 @@ export interface UseDiffTargetReturn {
  * and diff leaves in sync with the sidepanel's branch picker.
  */
 export function useDiffTarget(worktreeId: string): UseDiffTargetReturn {
-  const [compareBranch, setCompareBranchState] = useState<string | null>(() =>
+  const [pickedBranch, setCompareBranchState] = useState<string | null>(() =>
     readStoredCompareBranch(worktreeId),
   );
 
@@ -119,5 +129,27 @@ export function useDiffTarget(worktreeId: string): UseDiffTargetReturn {
     [worktreeId, instanceId],
   );
 
-  return { compareBranch, setCompareBranch };
+  const { repos } = useRepos();
+  const prBase = useDashboardStore((s) => {
+    const pr = s.branchStatuses.get(worktreeId)?.ci.pr;
+    return pr?.state === "open" ? (pr.baseBranch ?? null) : null;
+  });
+  const storedBase = useMemo(() => {
+    for (const repo of repos) {
+      for (const wt of repo.worktrees) {
+        if (toWorktreeId(repo.name, wt.name, wt.hostId) === worktreeId) {
+          return wt.baseBranch ?? null;
+        }
+      }
+    }
+    return null;
+  }, [repos, worktreeId]);
+  const baseBranch = prBase ?? storedBase;
+
+  return {
+    compareBranch: pickedBranch ?? baseBranch,
+    pickedBranch,
+    baseBranch,
+    setCompareBranch,
+  };
 }

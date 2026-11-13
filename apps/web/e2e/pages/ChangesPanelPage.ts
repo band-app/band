@@ -48,6 +48,10 @@ export class ChangesPanelPage {
   readonly diffTargetSearch: Locator;
   /** The picker's "Default branch" button. */
   readonly defaultBranchButton: Locator;
+  /** Shown in place of the branch section when the compare branch does not exist. */
+  readonly branchUnavailable: Locator;
+  /** The picker's "Base branch" button, shown while a hand-picked branch hides the base. */
+  readonly baseBranchButton: Locator;
   /** Branch options in the open picker. */
   readonly branchOptions: Locator;
   /** Shown when no branch matches the search. */
@@ -87,6 +91,8 @@ export class ChangesPanelPage {
     this.diffTargetPicker = page.getByTestId("right-sidepanel__diff-target-picker");
     this.diffTargetSearch = page.getByTestId("right-sidepanel__diff-target-search");
     this.defaultBranchButton = page.getByTestId("right-sidepanel__diff-target-default");
+    this.branchUnavailable = page.getByTestId("changes-sections__branch-unavailable");
+    this.baseBranchButton = page.getByTestId("right-sidepanel__diff-target-base");
     this.branchOptions = page.getByTestId(BRANCH_OPTION_TESTID);
     this.noBranchesMatch = page.getByTestId("right-sidepanel__diff-target-empty");
     this.truncatedNotice = page.getByTestId("right-sidepanel__diff-target-truncated");
