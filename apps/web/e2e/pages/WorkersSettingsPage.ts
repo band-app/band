@@ -42,6 +42,45 @@ export class WorkersSettingsPage {
     return this.page.getByTestId("this-computer__state");
   }
 
+  /** Makes the app think it runs in the desktop shell, with `hostId` as this computer's worker. */
+  async actAsThisComputer(hostId: string): Promise<void> {
+    await this.page.addInitScript((id) => {
+      const status = {
+        supported: true,
+        remoteHub: false,
+        installed: true,
+        bundled: false,
+        running: true,
+        forThisHub: true,
+        hostId: id,
+        name: null,
+        roots: [],
+        hostStatus: "online",
+        version: "0.0.0",
+        defaultName: "",
+        promptPending: false,
+      };
+      (window as unknown as Record<string, unknown>).__BAND_DESKTOP__ = {
+        version: 1,
+        invoke: async (channel: string) =>
+          channel === "worker_status"
+            ? status
+            : channel === "updater_status"
+              ? { state: "idle" }
+              : null,
+        on: () => () => {},
+      };
+    }, hostId);
+  }
+
+  statusPill(name: string): Locator {
+    return this.row(name).getByTestId("settings__host-status");
+  }
+
+  nameButton(name: string): Locator {
+    return this.row(name).getByTestId("settings__host-name");
+  }
+
   updatePill(name: string): Locator {
     return this.row(name).getByTestId("settings__host-update-pill");
   }
