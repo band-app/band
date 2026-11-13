@@ -33,7 +33,7 @@ export function checkRepoUrl(url: string): void {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message:
-        "The repo URL must not hold a username or password. Add a git credential to the vault.",
+        "The repo URL must not hold a username or password. Put the token in the vault and name it as the clone token.",
     });
   }
   const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);

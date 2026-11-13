@@ -6,12 +6,12 @@ import { dirname, join } from "node:path";
 /** A worker profile as stored in `settings.json`. The shape `workerProfileSchema` validates. */
 export interface WorkerProfileSettings {
   name: string;
-  provisioning?: { repoUrl?: string; branch?: string; command?: string };
+  provisioning?: { repoUrl?: string; branch?: string; command?: string; tokenItem?: string };
   labels?: string[];
   trust?: "restricted" | "standard" | "admin";
   env?: Record<string, string>;
   ownChats?: boolean;
-  credentials?: { git?: string[]; gh?: string; agentLogins?: string[] };
+  secrets?: ({ item: string; env: string } | { item: string; file: string; mode?: string })[];
 }
 
 /** A runner hook as stored in `settings.json`. The shape `runnerSchema` validates. */
@@ -21,6 +21,8 @@ export interface RunnerSettings {
   spawn: string;
   destroy?: string;
   status?: string;
+  /** The worker profile the workers it starts get. */
+  profile?: string;
   labels: Record<string, string>;
   provides?: Record<string, string>;
   isolation: "process" | "worktree" | "container" | "vm";
@@ -240,6 +242,8 @@ export interface Settings {
    */
   /** Validated on read by `WorkerProfileService`; entries that fail are reported, not applied. */
   workerProfiles?: WorkerProfileSettings[];
+  /** Name of the vault item the hub's own `gh` and GitHub API calls use when the machine has no login. */
+  hubGithubToken?: string;
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

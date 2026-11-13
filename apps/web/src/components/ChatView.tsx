@@ -71,7 +71,6 @@ import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions
 import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { AgentFailureCard } from "./chat/AgentFailureCard";
-import { ChatLoginMenu } from "./chat/ChatLoginMenu";
 import { EditorSelectionChip, SentSelectionChip } from "./chat/EditorSelectionChip";
 import { HeldEventsNotice } from "./chat/HeldEventsNotice";
 import { ListeningPill } from "./chat/ListeningPill";
@@ -847,7 +846,6 @@ export function ChatView({
                 )}
               </div>
               <div className="flex min-w-0 items-center gap-0.5">
-                <ChatLoginMenu chatId={chatId} codingAgentId={codingAgentId} />
                 {(pickers.models.length > 0 ||
                   pickers.effort ||
                   pickers.fast ||

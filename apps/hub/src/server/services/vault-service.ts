@@ -52,38 +52,6 @@ const MAX_FLOWS = 50;
 const DEFAULT_REFRESH_POLL_MS = 30_000;
 const DEFAULT_REFRESH_SKEW_MS = 120_000;
 export const MAX_SECRET_LENGTH = 16 * 1024;
-const GIT_HOST = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:\d{1,5})?$/;
-const GIT_PATH_PATTERN = /^[A-Za-z0-9._~/*-]{1,200}$/;
-const GIT_USERNAME = /^[^\s:]{1,100}$/;
-export const DEFAULT_GIT_USERNAME = "x-access-token";
-
-/** Where a `git` item applies: a host and a pattern over the repository path (`owner/*`). */
-export interface GitCredentialMatch {
-  host: string;
-  /** Repository path without a leading slash or a `.git` suffix, such as `owner/repo`. */
-  path: string;
-  /** The repo the repository belongs to. An item scoped to another repo does not apply. */
-  repo: string | null;
-  /** Looks without recording a use. */
-  peek?: boolean;
-  /** Only items with these names apply (a worker profile's `credentials.git`). Unset means any. */
-  onlyItems?: string[];
-}
-
-/** `*` matches within one path segment, `**` across segments. The whole path must match. */
-export function pathPatternMatches(pattern: string, path: string): boolean {
-  const source = pattern
-    .replace(/\*{2,}/g, "**")
-    .split(/(\*\*|\*)/)
-    .map((part) => {
-      if (part === "**") return ".*";
-      if (part === "*") return "[^/]*";
-      return part.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-    })
-    .join("");
-  return new RegExp(`^${source}$`, "i").test(path);
-}
-
 /** An item as the API shows it: never the secret. */
 export interface VaultItemView {
   id: string;
@@ -173,23 +141,13 @@ export class VaultService {
   /** Stores an API key or environment value, replacing the one with the same name and scope. */
   put(input: {
     name: string;
-    kind: "api_key" | "env" | "git";
+    kind: "api_key" | "env";
     scope: string;
     value: string;
     description?: string;
-    /** For a `git` item: the remote's host, a pattern over its repository path and the username. */
-    host?: string;
-    pathPattern?: string;
-    username?: string;
   }): VaultItemView {
     const name = input.name.trim();
-    // A git secret goes out on git's line-based credential protocol, so a trailing newline from
-    // `echo $TOKEN | band vault put` is dropped and any other control character is refused.
-    if (input.kind === "git") input = { ...input, value: input.value.replace(/\r?\n$/, "") };
     if (!NAME.test(name)) throw new VaultInputError("The name has characters the vault refuses.");
-    if (input.kind === "git" && /[\0\r\n]/.test(input.value)) {
-      throw new VaultInputError("A git credential's value must be a single line.");
-    }
     if (input.kind === "env" && !ENV_NAME.test(name)) {
       throw new VaultInputError("An env item's name must be a valid environment variable name.");
     }
@@ -200,26 +158,6 @@ export class VaultService {
     const metadata: Record<string, unknown> = input.description
       ? { description: input.description.slice(0, 200) }
       : {};
-    if (input.kind === "git") {
-      const host = (input.host ?? "").trim().toLowerCase();
-      const pathPattern = (input.pathPattern ?? "").trim().replace(/^\/+/, "");
-      const username = (input.username ?? DEFAULT_GIT_USERNAME).trim();
-      if (!GIT_HOST.test(host)) {
-        throw new VaultInputError("A git credential needs a host such as github.com.");
-      }
-      if (!GIT_PATH_PATTERN.test(pathPattern)) {
-        throw new VaultInputError(
-          'A git credential needs a path pattern such as "owner/*" ("**" matches every repository).',
-        );
-      }
-      if ((pathPattern.match(/\*+/g) ?? []).length > 6) {
-        throw new VaultInputError("The path pattern has too many wildcards.");
-      }
-      if (!GIT_USERNAME.test(username)) {
-        throw new VaultInputError("The username has characters the vault refuses.");
-      }
-      Object.assign(metadata, { host, pathPattern, username });
-    }
     const now = Date.now();
     const existing = this.queries.findByName(scope, name);
     if (existing) {
@@ -233,10 +171,7 @@ export class VaultService {
         updatedAt: now,
       });
       log.info({ id: existing.id, name, scope }, "vault item updated");
-      // An agent started with a token from the old value still holds it.
-      if (existing.kind === "git" || input.kind === "git")
-        credentialChanged({ kind: "git-credential" });
-      credentialChanged({ kind: "vault-item", itemId: existing.id });
+      credentialChanged({ kind: "vault-item", itemId: existing.id, name });
       return view(this.queries.find(existing.id) as VaultRow);
     }
     const id = `v-${randomUUID().slice(0, 12)}`;
@@ -264,8 +199,7 @@ export class VaultService {
     if (row.kind === "oauth") revoked = await this.revoke(row);
     this.queries.remove(id);
     log.info({ id, name: row.name, scope: row.scope, revoked }, "vault item deleted");
-    if (row.kind === "git") credentialChanged({ kind: "git-credential" });
-    credentialChanged({ kind: "vault-item", itemId: id });
+    credentialChanged({ kind: "vault-item", itemId: id, name: row.name });
     return { removed: true, revoked };
   }
 
@@ -307,69 +241,17 @@ export class VaultService {
   }
 
   /**
-   * The `git` item that applies to a remote, or undefined. An item matches when its host is the
-   * remote's, its path pattern matches the repository path and its scope is `global` or the
-   * remote's repo. A repo-scoped item beats a global one, then the pattern with the most
-   * literal characters wins. For hub services, never an API.
+   * The plaintext of the global `api_key` or `env` item called `name`, for a worker profile's
+   * secrets and the hub's own GitHub token. An OAuth item has no single value, so it is refused.
+   * For hub services, never an API.
    */
-  findGitCredential(match: GitCredentialMatch): { username: string; password: string } | undefined {
-    const host = match.host.toLowerCase();
-    const candidates = this.queries
-      .list()
-      .filter((row) => row.kind === "git")
-      .filter((row) => row.metadata.host === host)
-      .filter((row) => !match.onlyItems || match.onlyItems.includes(row.name))
-      .filter(
-        (row) =>
-          row.scope === "global" || (match.repo !== null && row.scope === `repo:${match.repo}`),
-      )
-      .filter(
-        (row) =>
-          typeof row.metadata.pathPattern === "string" &&
-          pathPatternMatches(row.metadata.pathPattern, match.path),
-      );
-    const specificity = (row: VaultRow) =>
-      (row.scope === "global" ? 0 : 1_000_000) +
-      String(row.metadata.pathPattern).replace(/\*/g, "").length;
-    const best = candidates.sort((a, b) => specificity(b) - specificity(a))[0];
-    if (!best) return undefined;
-    if (!match.peek) this.queries.update(best.id, { lastUsedAt: Date.now() });
-    const username =
-      typeof best.metadata.username === "string" ? best.metadata.username : DEFAULT_GIT_USERNAME;
-    return { username, password: decrypt(this.getKey(), best.id, best.encrypted) };
+  getGlobalSecret(name: string): string | undefined {
+    return this.getSecret("global", name);
   }
 
-  /**
-   * The token `gh` runs with: the secret of a `git` item for github.com. `gh` is not tied to one
-   * repository, so the item with the broadest path pattern wins, and a repo-scoped item beats a
-   * global one only when `repo` is given. For hub services, never an API.
-   */
-  findGitHubToken(repo: string | null = null): string | undefined {
-    const candidates = this.queries
-      .list()
-      .filter((row) => row.kind === "git" && row.metadata.host === "github.com")
-      .filter((row) => row.scope === "global" || (repo !== null && row.scope === `repo:${repo}`));
-    const breadth = (row: VaultRow) =>
-      (row.scope === "global" ? 0 : 1_000_000) -
-      String(row.metadata.pathPattern ?? "").replace(/\*/g, "").length;
-    const best = candidates.sort((a, b) => breadth(b) - breadth(a))[0];
-    if (!best) return undefined;
-    this.queries.update(best.id, { lastUsedAt: Date.now() });
-    return decrypt(this.getKey(), best.id, best.encrypted);
-  }
-
-  /**
-   * The secret of the `git` item called `name`, for the `gh` token of a worker profile. A global
-   * item beats a repo-scoped one. For hub services, never an API.
-   */
-  findGitTokenByName(name: string): string | undefined {
-    const best = this.queries
-      .list()
-      .filter((row) => row.kind === "git" && row.name === name)
-      .sort((a, b) => Number(b.scope === "global") - Number(a.scope === "global"))[0];
-    if (!best) return undefined;
-    this.queries.update(best.id, { lastUsedAt: Date.now() });
-    return decrypt(this.getKey(), best.id, best.encrypted);
+  /** What a profile may map: the kind of the global item called `name`, or undefined. */
+  globalKindOf(name: string): VaultKind | undefined {
+    return this.queries.findByName("global", name)?.kind;
   }
 
   /** The kind of an item, or undefined when it doesn't exist. Metadata only. */

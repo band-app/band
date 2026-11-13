@@ -103,8 +103,8 @@ if [ -z "$restore" ] && [ -n "${BAND_REPO_URLS:-}" ]; then
   case "$repo_name" in "" | . | ..) repo_name=repo ;; esac
   echo "BAND_WORKER_REPO_PATH=/work/$repo_name"
 fi
-# With BAND_CLONE_BY_HUB the hub clones through the worker once it is up, because the worker can ask
-# the hub for the repository's git credential and this script cannot.
+# With BAND_CLONE_BY_HUB the hub clones through the worker once it is up. The worker's git sees the
+# runner profile's variables (GH_TOKEN), which the image's git credential helper turns into a login.
 clone_url="$repo"
 if [ -n "${BAND_CLONE_BY_HUB:-}" ]; then clone_url=""; fi
 

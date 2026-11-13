@@ -1450,8 +1450,8 @@ describe("a direct create and a hub create of one id (S4)", () => {
 
 describe("other terminal creates keep the hub path (S7)", () => {
   it("still creates a terminal through the hub's own procedure", async () => {
-    // The agent launch path (`agentType`, with its login env) is `agent-launch-service` and is
-    // covered by `agent-logins-worker.test.ts`; script and cronjob terminals call the service.
+    // The agent launch path (`agentType`, with its profile env) is `agent-launch-service`;
+    // script and cronjob terminals call the service.
     const id = crypto.randomUUID();
     const viaHub = await m<DirectCreated>("terminal.create", { worktreeId: WT_A, id });
     expect(viaHub.terminalId).toBe(id);

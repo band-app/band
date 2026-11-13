@@ -6,10 +6,7 @@ const band = "/Applications/Band.app/Contents/MacOS/Band";
 const script = "/Applications/Band.app/Contents/Resources/worker/band-worker.mjs";
 
 test("refuses a packaged launch whose first argument is a script", () => {
-  assert.match(
-    scriptLaunchRefusal([band, script, "git-credential", "get"], true, {}) ?? "",
-    /refusing/,
-  );
+  assert.match(scriptLaunchRefusal([band, script, "status", "--json"], true, {}) ?? "", /refusing/);
 });
 
 test("allows normal launches", () => {

@@ -4,7 +4,7 @@
 // hub's and the worker's event logs are read from their SQLite files, the rest through the hub's
 // HTTP and tRPC API.
 
-import { copyFileSync, existsSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ChatEvent } from "@band-app/shared/chat-events";
@@ -140,7 +140,7 @@ beforeAll(async () => {
   writeFileSync(scenario, JSON.stringify(SCENARIO));
   owner = await w.addWorker("owner", ["proj"], {
     ownChats: true,
-    env: { BAND_TEST_ACP_SCENARIO: scenario },
+    env: { BAND_TEST_ACP_SCENARIO: scenario, BAND_TEST_ACP_LOG_ENV: "PROFILE_SECRET" },
   });
   plain = await w.addWorker("plain", ["proj"]);
 }, 120_000);
@@ -694,4 +694,42 @@ describe("a worker whose chats.db lost rows the hub holds (#1220 S1, S2)", () =>
     // Rows from the older blocks are still there.
     expect(rows.filter((r) => r.id <= hubMax).length).toBeGreaterThan(0);
   }, 180_000);
+});
+
+describe("profile secrets in a chat the worker owns (S2)", () => {
+  const sessionsEnv = () =>
+    existsSync(owner.stubLog)
+      ? readFileSync(owner.stubLog, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map(
+            (l) =>
+              JSON.parse(l) as { method: string; env?: { NAMED?: Record<string, string | null> } },
+          )
+          .filter((r) => r.method === "session/new")
+          .map((r) => r.env?.NAMED?.PROFILE_SECRET ?? null)
+      : [];
+
+  it("starts the owned chat's agent with the profile's env", async () => {
+    await w.m("vault.put", { name: "owned-secret", kind: "api_key", value: "owned-value" });
+    await w.m("workerProfiles.create", {
+      name: "owner-profile",
+      secrets: [{ item: "owned-secret", env: "PROFILE_SECRET" }],
+    });
+    await w.m("workerProfiles.setWorkerProfile", {
+      hostId: owner.hostId,
+      profile: "owner-profile",
+    });
+    try {
+      const wt = await w.createWorktree(owner, "proj", "feat-owned-secret");
+      const before = sessionsEnv().length;
+      const events = await w.turn(wt, "owned-secret-chat", "hello with a secret");
+      expect(agentText(events)).toContain("hello with a secret");
+      expect((await getChat("owned-secret-chat"))?.ownerHostId).toBe(owner.hostId);
+      const started = sessionsEnv().slice(before);
+      expect(started).toContain("owned-value");
+    } finally {
+      await w.m("workerProfiles.setWorkerProfile", { hostId: owner.hostId, profile: null });
+    }
+  }, 120_000);
 });

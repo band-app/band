@@ -221,9 +221,13 @@ export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
  * hundreds of kilobytes of output and the default 1 MB ceiling truncates
  * silently.
  */
-export function execGit(args: string[], cwd: string): Promise<string> {
+export function execGit(
+  args: string[],
+  cwd: string,
+  extraEnv?: Record<string, string>,
+): Promise<string> {
   const { command, env } = gitCmd();
-  return execOffThread(command, args, { cwd, env, maxBuffer: MAX_BUFFER });
+  return execOffThread(command, args, { cwd, env: { ...env, ...extraEnv }, maxBuffer: MAX_BUFFER });
 }
 
 /**

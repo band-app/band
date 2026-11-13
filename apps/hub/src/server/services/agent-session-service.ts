@@ -47,7 +47,6 @@ import { rowsToEvents } from "@band-app/chat-runtime/replay";
 import { loggedSessionCost, sessionStateFromLog } from "@band-app/chat-runtime/session-state";
 import {
   type AcpAgentDefinition,
-  type AcpLaunch,
   type ClaudeCliArgs,
   type ClaudeDefaults,
   type Host,
@@ -73,10 +72,8 @@ import {
 } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
 import { commandFor, launchFailure } from "./_utils/agent-command";
-import { onCredentialChange } from "./_utils/credential-events";
 import { agentExtraDirs, openSharedDir } from "./_utils/shared-dir";
 // FRAGILE: ESM cycle leg — `chat-ownership-service` imports this file back. Used only in method bodies.
-import { agentLoginService } from "./agent-login-service";
 import { chatOwnershipService } from "./chat-ownership-service";
 import { type ChatSession, chatService } from "./chat-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
@@ -160,7 +157,6 @@ interface Runtime {
   /** `BAND_SERVER_URL` and `BAND_TOKEN` of the host's relay, for an agent on a worker. */
   relayEnv: Record<string, string> | null;
   /** The Band login the process was started with, or null for the machine's own. */
-  loginId: string | null;
   /**
    * A held agent was reattached after its worker restarted. Before the next turn the launch is
    * resolved again, and a process started with a different one is restarted (never mid-turn).
@@ -325,7 +321,6 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       taskNames: new Map(),
       claudeCli: null,
       relayEnv: null,
-      loginId: null,
       checkLaunch: false,
     };
     runtimes.set(chat.id, rt);
@@ -343,53 +338,6 @@ function stopRuntime(rt: Runtime): void {
   backgroundObserver?.(rt.chatId, rt.worktreeId, { kind: "gone" });
   mcpProxyService.revokeSession(rt.chatId);
 }
-
-/**
- * Stops the process of a runtime and forgets the runtime, at once. For a credential the process
- * holds that is no longer valid. The chat keeps its session, so the next message starts a process
- * and loads it.
- */
-function stopRuntimesWhere(matches: (rt: Runtime) => boolean, reason: string): void {
-  for (const rt of [...runtimes.values()]) {
-    if (!rt.process && !rt.starting) continue;
-    if (!matches(rt)) continue;
-    log.warn({ chatId: rt.chatId, reason }, "stopping the agent");
-    stopRuntime(rt);
-  }
-}
-
-onCredentialChange((change) => {
-  if (change.kind === "git-credential") {
-    stopRuntimesWhere((rt) => rt.process?.holdsGhToken === true, "git credential changed");
-    return;
-  }
-  if (change.kind === "vault-item") {
-    const ids = new Set(agentLoginService.loginIdsUsingItem(change.itemId));
-    if (ids.size > 0) {
-      stopRuntimesWhere((rt) => rt.loginId !== null && ids.has(rt.loginId), "login secret changed");
-    }
-    return;
-  }
-  stopRuntimesWhere((rt) => {
-    if (change.chatId && rt.chatId !== change.chatId) return false;
-    // Removed, or its secret replaced.
-    if (change.loginId && rt.loginId === change.loginId) return true;
-    // Re-chosen: stop when a launch now would use another login than the process holds.
-    const chat = chatService.get(rt.chatId);
-    if (!chat) return false;
-    const def = definitionFor(chat);
-    if (change.agentType && def.type !== change.agentType) return false;
-    if (!change.agentType && !change.chatId) return false;
-    return (
-      agentLoginService.pickedId({
-        agentType: def.type,
-        repo: worktreeService.resolve(rt.worktreeId)?.repo.name,
-        chatLoginId: chat.loginId ?? undefined,
-        hostId: hostRegistry.hostFor(rt.worktreeId).id,
-      }) !== rt.loginId
-    );
-  }, "agent login changed");
-});
 
 /**
  * Before a turn: a held agent that came back after its worker restarted is compared with what a
@@ -411,11 +359,7 @@ async function restartIfLaunchChanged(
   const host = hostRegistry.hostFor(rt.worktreeId);
   const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
   if (typeof resolved === "string") return;
-  const { launch } = await withAgentLogin(resolved, def.type, {
-    worktreeId: rt.worktreeId,
-    chatLoginId: chat.loginId ?? undefined,
-  });
-  if (launchSpecHash(launch) === wanted) return;
+  if (launchSpecHash(resolved) === wanted) return;
   // A turn could have started while the launch was resolved.
   if (rt.inTurn || rt.pending.size > 0 || runtimes.get(chat.id) !== rt) return;
   log.info({ chatId: chat.id }, "the agent was started with another launch; restarting it");
@@ -857,30 +801,6 @@ function chatLocation(chat: ChatSession): { cwd: string; host: Host } | undefine
 // Process and session attach
 // ---------------------------------------------------------------------------
 
-/**
- * Adds the Band login that applies to `agentType` to a launch: its variables, and the inherited
- * ones that would compete with it removed. A launch with no login applying comes back unchanged.
- */
-async function withAgentLogin(
-  launch: AcpLaunch,
-  agentType: string,
-  scope: { worktreeId?: string; chatLoginId?: string; hostId?: string } = {},
-): Promise<{ launch: AcpLaunch; loginId: string | null }> {
-  const repo = scope.worktreeId ? worktreeService.resolve(scope.worktreeId)?.repo.name : undefined;
-  const login = await agentLoginService.resolve({
-    agentType,
-    repo,
-    chatLoginId: scope.chatLoginId,
-    hostId:
-      scope.hostId ?? (scope.worktreeId ? hostRegistry.hostFor(scope.worktreeId).id : undefined),
-  });
-  if (!login) return { launch, loginId: null };
-  return {
-    launch: { ...launch, env: { ...launch.env, ...login.env }, unsetEnv: login.unsetEnv },
-    loginId: login.loginId,
-  };
-}
-
 async function ensureProcess(
   rt: Runtime,
   def: CodingAgentDefinition,
@@ -893,12 +813,8 @@ async function ensureProcess(
     const host = hostRegistry.hostFor(rt.worktreeId);
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const { launch: loginLaunch, loginId } = await withAgentLogin(resolved, def.type, {
-      worktreeId: rt.worktreeId,
-      chatLoginId: chatService.get(rt.chatId)?.loginId,
-    });
     // What a later launch is compared with. The relay grant and chat ids below differ per launch.
-    const launch = { ...loginLaunch, specHash: launchSpecHash(loginLaunch) };
+    const launch = { ...resolved, specHash: launchSpecHash(resolved) };
     // An agent on a remote host reaches the hub through the worker's relay,
     // with a token that works for this chat's host only.
     const grant = await host.relay?.issue({ worktreeId: rt.worktreeId, chatId: rt.chatId });
@@ -931,7 +847,6 @@ async function ensureProcess(
       throw err;
     }
     rt.relayEnv = grant?.env ?? null;
-    rt.loginId = loginId;
     rt.checkLaunch = false;
     // A held agent that came back after its worker restarted may be running code the update replaced.
     proc.onReattached(() => {
@@ -1318,12 +1233,6 @@ export class AgentSessionService {
     const grant = await worktree.host.relay?.issue({ worktreeId: chat.worktreeId, chatId });
     if (grant) ownerGrants.set(chatId, grant);
     const shared = await openSharedDir(chat.worktreeId, chatId).catch(() => null);
-    const login = await agentLoginService.resolve({
-      agentType: def.type,
-      repo: worktree.repo.name,
-      chatLoginId: chat.loginId,
-      hostId: worktree.host.id,
-    });
     return {
       chat: ownedChatInfo(chat),
       agent: {
@@ -1339,9 +1248,6 @@ export class AgentSessionService {
         BAND_CHAT_ID: chatId,
         BAND_WORKTREE_ID: chat.worktreeId,
       },
-      // Kept apart from `env` because the worker caches `env` on disk and must not cache a secret.
-      ...(login ? { loginEnv: login.env } : {}),
-      ...(login?.unsetEnv.length ? { unsetEnv: login.unsetEnv } : {}),
       mcpServers: mcpServerEntries(chatId, chat.worktreeId, grant?.env ?? null),
       additionalDirectories: await agentExtraDirs(chat.worktreeId),
       sharedDir: shared?.path ?? null,
@@ -2028,7 +1934,7 @@ export class AgentSessionService {
   ): Promise<CatalogEntry> {
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const { launch } = await withAgentLogin(resolved, def.type, { hostId: host.id });
+    const launch = resolved;
     let commands: acp.AvailableCommand[] = [];
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {
       onUpdate: (n) => {
@@ -2097,7 +2003,7 @@ export class AgentSessionService {
   ): Promise<string> {
     const resolved = await host.acp.resolveLaunch(launchDefinition(def, host.id));
     if (typeof resolved === "string") throw new Error(launchFailure(host.id, resolved));
-    const { launch } = await withAgentLogin(resolved, def.type, { hostId: host.id });
+    const launch = resolved;
     let sessionId: string | null = null;
     let text = "";
     const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {

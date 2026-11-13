@@ -1,11 +1,6 @@
 import { formatReport, probeCapabilities } from "@band-app/host-local/process/capabilities";
 import { createLogger } from "@band-app/logger";
 import { ConfigError, parseConfig, usage } from "./config.ts";
-import {
-  GIT_CREDENTIAL_SUBCOMMAND,
-  helperCommand,
-  runGitCredentialHelper,
-} from "./git-credentials.ts";
 import { formatHostWarnings, hostWarnings, readLinuxHostSettings } from "./host-checks.ts";
 import {
   defaultServiceEnv,
@@ -23,11 +18,6 @@ const log = createLogger("band-worker");
 // The logger has opened the file. Terminals and agents inherit this environment and must not rotate it too.
 delete process.env.BAND_LOG_FILE;
 const argv = process.argv.slice(2);
-
-// Git runs this as its credential helper (see git-credentials.ts), so it must not start a worker.
-if (argv[0] === GIT_CREDENTIAL_SUBCOMMAND) {
-  process.exit(await runGitCredentialHelper(argv[1]));
-}
 
 // `band-worker doctor` prints what this machine can offer: each coding agent installed or not,
 // its version and whether it is logged in, then git and gh, with a command that fixes each gap.
@@ -80,11 +70,16 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 try {
   const config = parseConfig(argv);
+  if (config.ignoredLegacy.length > 0) {
+    log.warn(
+      { ignored: config.ignoredLegacy },
+      "these flags and variables were removed and are ignored: map secrets with a worker profile instead",
+    );
+  }
   // Agents and terminals inherit this process's environment, so the worker's token must not stay in it.
   delete process.env.BAND_WORKER_TOKEN;
   delete process.env.BAND_BOOTSTRAP_TOKEN;
   worker = await Worker.start(config, {
-    gitCredentialHelper: helperCommand(process.execPath, process.argv[1] ?? ""),
     persistentTerminals: true,
     persistentAgents: !config.ephemeral,
   });

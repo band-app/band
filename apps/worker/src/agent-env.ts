@@ -1,11 +1,10 @@
 import { delimiter } from "node:path";
 import type { WorkerContext } from "./context.ts";
-import { ghTokenEnv } from "./gh-token.ts";
 
 /**
  * The environment of an agent this worker starts, for the hub (`acp.spawn`) or
  * for a chat it owns: the worker's `band` CLI first on PATH, so an agent's shell
- * tool finds it, and a GitHub token for `gh`.
+ * tool finds it, and the secrets of the worker's profile.
  */
 export async function agentSpawnEnv(
   ctx: WorkerContext,
@@ -15,7 +14,7 @@ export async function agentSpawnEnv(
   const out = { ...env };
   const cliDir = await ctx.cli?.dir();
   if (cliDir) out.PATH = [cliDir, out.PATH ?? process.env.PATH].filter(Boolean).join(delimiter);
-  Object.assign(out, await ghTokenEnv(ctx));
+  Object.assign(out, await ctx.secrets?.env());
   // Variables an extension service gives this worktree's agents (the DISPLAY of its desktop).
   const worktreeId = env.BAND_WORKTREE_ID;
   if (worktreeId && ctx.extensions) {

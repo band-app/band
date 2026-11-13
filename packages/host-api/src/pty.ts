@@ -20,8 +20,6 @@ export interface SpawnOptions {
   cwd?: string;
   /** Extra environment variables merged into the base env. */
   env?: Record<string, string>;
-  /** Variables removed from the inherited environment, before `env` is merged. */
-  unsetEnv?: string[];
 }
 
 /**

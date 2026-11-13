@@ -505,7 +505,6 @@ export class RemoteHost implements Host {
       stdio: number;
       stderr: number;
       held?: boolean;
-      ghToken?: boolean;
     }>("acp.spawn", { ...launch, cwd });
     const stdio = this.rpc.channel(reply.stdio);
     const stderr = this.rpc.channel(reply.stderr);
@@ -516,7 +515,7 @@ export class RemoteHost implements Host {
         reply.pid ?? undefined,
         stdio,
         stderr,
-        { specHash: launch.specHash ?? null, ghToken: reply.ghToken === true },
+        { specHash: launch.specHash ?? null },
         (agentId) => {
           this.heldAgents.delete(agentId);
           this.agents.delete(agentId);
@@ -538,7 +537,6 @@ export class RemoteHost implements Host {
     );
     return {
       pid: reply.pid ?? undefined,
-      ghToken: reply.ghToken === true,
       stdin: {
         write: (chunk) => {
           if (closed) return;

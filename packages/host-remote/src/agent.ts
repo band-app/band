@@ -59,7 +59,6 @@ export class RemoteAgent implements AgentStdio {
   readonly stderr: AgentStdio["stderr"];
   readonly exit: Promise<AgentExit>;
   readonly held: NonNullable<AgentStdio["held"]>;
-  readonly ghToken: boolean;
   private resolveExit!: (exit: AgentExit) => void;
   private readonly out = new Lane();
   private readonly err = new Lane();
@@ -84,11 +83,10 @@ export class RemoteAgent implements AgentStdio {
     readonly pid: number | undefined,
     stdio: Channel,
     stderr: Channel,
-    info: { specHash: string | null; ghToken: boolean },
+    info: { specHash: string | null },
     private readonly onEnded: (agentId: string) => void,
   ) {
     this.held = { agentId, specHash: info.specHash };
-    this.ghToken = info.ghToken;
     this.channel = stdio;
     this.out.swap(stdio);
     this.err.swap(stderr);

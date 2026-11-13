@@ -346,7 +346,6 @@ beforeAll(async () => {
             "resources-storage",
             `/trpc/resources.storage?input=${encodeURIComponent(JSON.stringify({ hostId: "local" }))}`,
           ),
-          probe("agent-logins-list", "/trpc/agentLogins.list"),
           // A worker profile decides what a worker may receive. No worker picks its own.
           probe("worker-profiles-list", "/trpc/workerProfiles.list"),
           post("worker-profiles-attach", "/trpc/workerProfiles.setWorkerProfile", {
@@ -371,8 +370,6 @@ beforeAll(async () => {
             callId: "x",
             message: {},
           }),
-          // An agent may not switch its own chat's account.
-          post("chat-login-pick", "/trpc/chats.update", { chatId: "any-chat", loginId: "al-x" }),
           // A direct-path token would let the agent call the worker's loopback listener.
           post("direct-access", "/trpc/worktree.directAccess", {
             worktreeId: WT_A,
@@ -690,12 +687,9 @@ describe("the worker relay (S2)", () => {
       expect(by(name)?.status, name).toBe(403);
     }
     expect(by("resources-storage")?.status).toBe(403);
-    expect(by("agent-logins-list")?.status).toBe(403);
     expect(by("worker-profiles-list")?.status).toBe(403);
     expect(by("worker-profiles-attach")?.status).toBe(403);
     expect(by("worker-profiles-create")?.status).toBe(403);
-    expect(by("chat-login-pick")?.status).toBe(403);
-    expect(by("chat-login-pick")?.body).toContain("may not change a chat's login");
     expect(by("vault-oauth")?.status).toBe(403);
     expect(by("hub-update")?.status).toBe(403);
     expect(by("update-all")?.status).toBe(403);

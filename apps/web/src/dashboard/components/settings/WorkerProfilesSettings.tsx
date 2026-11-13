@@ -31,11 +31,18 @@ interface Draft {
   trust: "" | Trust;
   env: string;
   ownChats: boolean;
-  /** False means the profile has no `credentials` key: today's rules apply. */
-  restrict: boolean;
-  git: string[];
-  gh: string;
-  agentLogins: string[];
+  tokenItem: string;
+  secrets: SecretRow[];
+}
+
+/** One mapping of a vault item to an env variable or a file under ~/. */
+interface SecretRow {
+  item: string;
+  target: "env" | "file";
+  /** The variable name, or the `~/` path. */
+  value: string;
+  /** Octal file mode. Empty means the hub default. */
+  mode: string;
 }
 
 const EMPTY: Draft = {
@@ -47,10 +54,8 @@ const EMPTY: Draft = {
   trust: "",
   env: "",
   ownChats: false,
-  restrict: false,
-  git: [],
-  gh: "",
-  agentLogins: [],
+  tokenItem: "",
+  secrets: [],
 };
 
 function toDraft(p: ProfileItem): Draft {
@@ -65,10 +70,12 @@ function toDraft(p: ProfileItem): Draft {
       .map(([k, v]) => `${k}=${v}`)
       .join("\n"),
     ownChats: p.ownChats ?? false,
-    restrict: p.credentials !== undefined,
-    git: p.credentials?.git ?? [],
-    gh: p.credentials?.gh ?? "",
-    agentLogins: p.credentials?.agentLogins ?? [],
+    tokenItem: p.provisioning?.tokenItem ?? "",
+    secrets: (p.secrets ?? []).map((m) =>
+      "env" in m
+        ? { item: m.item, target: "env" as const, value: m.env, mode: "" }
+        : { item: m.item, target: "file" as const, value: m.file, mode: m.mode ?? "" },
+    ),
   };
 }
 
@@ -89,7 +96,17 @@ function toProfile(d: Draft) {
     ...(d.repoUrl.trim() ? { repoUrl: d.repoUrl.trim() } : {}),
     ...(d.branch.trim() ? { branch: d.branch.trim() } : {}),
     ...(d.command.trim() ? { command: d.command.trim() } : {}),
+    ...(d.tokenItem ? { tokenItem: d.tokenItem } : {}),
   };
+  const secrets = d.secrets.map((r) =>
+    r.target === "env"
+      ? { item: r.item, env: r.value.trim() }
+      : {
+          item: r.item,
+          file: r.value.trim(),
+          ...(r.mode.trim() ? { mode: r.mode.trim() } : {}),
+        },
+  );
   return {
     name: d.name.trim(),
     ...(Object.keys(provisioning).length > 0 ? { provisioning } : {}),
@@ -97,25 +114,13 @@ function toProfile(d: Draft) {
     ...(d.trust ? { trust: d.trust } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     ...(d.ownChats ? { ownChats: true } : {}),
-    ...(d.restrict
-      ? {
-          credentials: {
-            git: d.git,
-            ...(d.gh ? { gh: d.gh } : {}),
-            agentLogins: d.agentLogins,
-          },
-        }
-      : {}),
+    ...(secrets.length > 0 ? { secrets } : {}),
   };
-}
-
-function toggle(list: string[], value: string): string[] {
-  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
 /**
  * Settings > Workers > Profiles: named worker profiles with a credential policy. Admin only.
- * A profile names vault items and logins, never secrets. Changes save at once.
+ * A profile names vault items, never secrets. Changes save at once.
  */
 export function WorkerProfilesSettings() {
   const queryClient = useQueryClient();
@@ -124,17 +129,19 @@ export function WorkerProfilesSettings() {
     queryKey: ["vault.list"],
     queryFn: async () => (await trpc.vault.list.query()).items,
   });
-  const logins = useQuery({
-    queryKey: ["agentLogins.list"],
-    queryFn: async () => (await trpc.agentLogins.list.query()).logins,
-  });
   // `null` is the closed editor; `editing` is the name being edited, or null for a new profile.
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ name: string; message: string } | null>(null);
 
-  const gitItems = (vault.data ?? []).filter((i) => i.kind === "git").map((i) => i.name);
+  const secretItems = (vault.data ?? [])
+    .filter((i) => i.kind === "api_key" || i.kind === "env")
+    .map((i) => i.name);
+  const setRow = (index: number, patch: Partial<SecretRow>) =>
+    setDraft((d) =>
+      d ? { ...d, secrets: d.secrets.map((r, i) => (i === index ? { ...r, ...patch } : r)) } : d,
+    );
   const refresh = () => queryClient.invalidateQueries({ queryKey: PROFILES_KEY });
 
   const save = async () => {
@@ -168,8 +175,9 @@ export function WorkerProfilesSettings() {
   return (
     <div className="space-y-3" data-testid="settings__profiles">
       <p className="text-xs text-muted-foreground">
-        A profile fixes how a worker is provisioned and which vault credentials it may receive. It
-        names vault items and logins, never their secrets. A worker cannot choose its own.
+        A profile fixes how a worker is provisioned and which vault items it receives as env
+        variables or files. It names vault items, never their secrets. A worker cannot choose its
+        own.
       </p>
       {(profiles.data?.invalid ?? []).map((bad) => (
         <p
@@ -189,15 +197,14 @@ export function WorkerProfilesSettings() {
             data-testid="settings__profile"
             data-profile-name={p.name}
             data-trust={p.trust ?? "default"}
-            data-credential-policy={p.credentials ? "restricted" : "unrestricted"}
             data-workers={p.workers}
             className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
           >
             <div className="min-w-0">
               <div className="truncate font-medium">{p.name}</div>
               <div className="text-xs text-muted-foreground">
-                Trust {p.trust ?? "default"} ·{" "}
-                {p.credentials ? "credential policy" : "credentials as before"} · {p.workers}{" "}
+                Trust {p.trust ?? "default"} · {p.secrets?.length ?? 0}{" "}
+                {p.secrets?.length === 1 ? "secret" : "secrets"} · {p.workers}{" "}
                 {p.workers === 1 ? "worker" : "workers"}
               </div>
             </div>
@@ -306,9 +313,7 @@ export function WorkerProfilesSettings() {
           </div>
           <textarea
             aria-label="Profile worker env"
-            placeholder={
-              "BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1\nOne BAND_WORKER_* setting per line"
-            }
+            placeholder={"BAND_WORKER_IDLE_EXIT=30m\nOne BAND_WORKER_* setting per line"}
             rows={2}
             value={draft.env}
             onChange={(e) => set({ env: e.target.value })}
@@ -323,76 +328,106 @@ export function WorkerProfilesSettings() {
             The worker runs the chats of its own worktrees
           </label>
 
-          <div className="space-y-2 rounded-md border border-border p-2">
-            <label className="flex items-center gap-2 text-xs font-medium">
-              <input
-                type="checkbox"
-                aria-label="Restrict credentials"
-                checked={draft.restrict}
-                onChange={(e) => set({ restrict: e.target.checked })}
-              />
-              Restrict credentials
-            </label>
+          <label className="flex items-center gap-2 text-xs">
+            Item whose token clones the provisioning repo
+            <select
+              aria-label="Profile provisioning token item"
+              value={draft.tokenItem}
+              onChange={(e) => set({ tokenItem: e.target.value })}
+              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+            >
+              <option value="">None</option>
+              {secretItems.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div
+            className="space-y-2 rounded-md border border-border p-2"
+            data-testid="settings__profile-secrets"
+          >
+            <div className="text-xs font-medium">Secrets</div>
             <p className="text-xs text-muted-foreground">
-              Off keeps today's rules. On, a worker gets only what is ticked here: nothing ticked
-              means nothing of that kind.
+              Each row gives the worker one vault item, as an environment variable or as a file
+              under ~/. With no rows the worker gets none.
             </p>
-            {draft.restrict ? (
-              <>
-                <div className="space-y-1">
-                  <div className="text-xs font-medium">Git credentials the worker may receive</div>
-                  {gitItems.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No git items in the vault.</p>
-                  ) : null}
-                  {gitItems.map((name) => (
-                    <label key={name} className="flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        aria-label={`Git credential ${name}`}
-                        checked={draft.git.includes(name)}
-                        onChange={() => set({ git: toggle(draft.git, name) })}
-                      />
+            {draft.secrets.map((row, i) => (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: rows have no id and are edited in place
+                key={i}
+                className="flex items-center gap-2"
+                data-testid="settings__profile-secret"
+              >
+                <select
+                  aria-label={`Secret ${i + 1} vault item`}
+                  value={row.item}
+                  onChange={(e) => setRow(i, { item: e.target.value })}
+                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                  <option value="">Vault item</option>
+                  {secretItems.map((name) => (
+                    <option key={name} value={name}>
                       {name}
-                    </label>
+                    </option>
                   ))}
-                </div>
-                <label className="flex items-center gap-2 text-xs">
-                  Item whose token gh gets
-                  <select
-                    aria-label="gh token item"
-                    value={draft.gh}
-                    onChange={(e) => set({ gh: e.target.value })}
-                    className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-                  >
-                    <option value="">None</option>
-                    {gitItems.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="space-y-1">
-                  <div className="text-xs font-medium">
-                    Agent logins agents on the worker may use
-                  </div>
-                  {(logins.data ?? []).length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No agent logins.</p>
-                  ) : null}
-                  {(logins.data ?? []).map((l) => (
-                    <label key={l.id} className="flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        aria-label={`Agent login ${l.label}`}
-                        checked={draft.agentLogins.includes(l.label)}
-                        onChange={() => set({ agentLogins: toggle(draft.agentLogins, l.label) })}
-                      />
-                      {l.label} ({l.agentType})
-                    </label>
-                  ))}
-                </div>
-              </>
-            ) : null}
+                </select>
+                <select
+                  aria-label={`Secret ${i + 1} target`}
+                  value={row.target}
+                  onChange={(e) => setRow(i, { target: e.target.value as SecretRow["target"] })}
+                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                  <option value="env">Env variable</option>
+                  <option value="file">File</option>
+                </select>
+                <Input
+                  aria-label={`Secret ${i + 1} ${row.target === "env" ? "variable name" : "file path"}`}
+                  placeholder={row.target === "env" ? "ANTHROPIC_API_KEY" : "~/.config/tool/token"}
+                  value={row.value}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setRow(i, { value: e.target.value })
+                  }
+                  className={field}
+                />
+                {row.target === "file" ? (
+                  <Input
+                    aria-label={`Secret ${i + 1} file mode`}
+                    placeholder="0600"
+                    value={row.mode}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setRow(i, { mode: e.target.value })
+                    }
+                    className={`${field} w-20`}
+                  />
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Remove secret ${i + 1}`}
+                  onClick={() => set({ secrets: draft.secrets.filter((_, j) => j !== i) })}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="settings__profile-secret-add"
+              onClick={() =>
+                set({
+                  secrets: [...draft.secrets, { item: "", target: "env", value: "", mode: "" }],
+                })
+              }
+            >
+              <Plus className="size-3" />
+              Add secret
+            </Button>
           </div>
 
           <div className="flex items-center gap-2">

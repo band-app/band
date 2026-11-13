@@ -350,29 +350,6 @@ describe("an agent is stopped at once when correctness needs it (S5)", () => {
     });
   }, 90_000);
 
-  it("kills a held agent when the login it holds is removed", async () => {
-    const worker = await w.addWorker("w-login", ["proj"], {
-      env: { BAND_TEST_ACP_SCENARIO: scenarioFile() },
-    });
-    const wt = await w.createWorktree(worker, "proj", "feat-login");
-    const { login } = await w.m<{ login: { id: string } }>("agentLogins.create", {
-      agentType: "claude-code",
-      kind: "setup-token",
-      label: "Held token",
-      secret: "sk-ant-oat01-HELD-TOKEN-aaaaaaaaaaaaaaaa",
-    });
-    await w.m("agentLogins.setDefault", { agentType: "claude-code", loginId: login.id });
-    await (await startTurn(wt, "login-chat", "first words")).events;
-    const [pid] = agentPids(worker);
-    expect(alive(pid as number)).toBe(true);
-
-    await w.m("agentLogins.remove", { id: login.id });
-    await waitFor(() => (alive(pid as number) ? undefined : true), {
-      label: "the agent to stop",
-      timeoutMs: 5_000,
-    });
-  }, 90_000);
-
   it("kills a held agent when the worker is revoked", async () => {
     const worker = await w.addWorker("w-revoke", ["proj"], {
       env: { BAND_TEST_ACP_SCENARIO: scenarioFile() },

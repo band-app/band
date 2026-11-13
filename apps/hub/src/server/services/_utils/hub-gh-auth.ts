@@ -2,18 +2,20 @@
  * Credentials for the `gh` calls the hub makes itself (the GitHub poll and webhook services).
  *
  * A hub on a developer machine uses the machine's own `gh auth login`. A hub in a container has
- * none, so `gh` runs with `GH_TOKEN` taken from the vault (a `git` item for github.com). The token
- * lives only in the child process's environment.
+ * none, so `gh` runs with `GH_TOKEN` taken from the vault item that the "Hub GitHub token" setting
+ * (`settings.hubGithubToken`) names. The machine's login and a `GH_TOKEN` in the hub's environment
+ * win over it. The token lives only in the child process's environment.
  */
 
 import { tmpdir } from "node:os";
 import { execGh } from "@band-app/host-local/git/git-client";
+import { settingsService } from "../settings-service";
 import { vaultService } from "../vault-service";
 
 const LOGIN_CHECK_TTL_MS = 60_000;
 
 export const MISSING_GH_CREDENTIAL =
-  "No GitHub credential for gh on this hub: run gh auth login, or store one with band vault put --kind git --host github.com";
+  "No GitHub credential for gh on this hub: run gh auth login, or set Hub GitHub token in Settings > Credentials";
 
 /** What gh prints when it has no usable login (`gh auth login`, `GH_TOKEN`, a 401). */
 const UNAUTHENTICATED =
@@ -37,16 +39,27 @@ async function machineHasLogin(): Promise<boolean> {
   return loggedIn;
 }
 
+/** The token of the vault item named by the "Hub GitHub token" setting, if it is set and exists. */
+export function hubGithubTokenFromVault(): string | undefined {
+  const name = settingsService.get().hubGithubToken?.trim();
+  return name ? vaultService.getGlobalSecret(name) : undefined;
+}
+
 /** The extra environment for a hub `gh` call: `GH_TOKEN` from the vault when the machine has no login. */
 export async function hubGhEnv(): Promise<Record<string, string>> {
   if (await machineHasLogin()) return {};
-  const token = vaultService.findGitHubToken();
+  const token = hubGithubTokenFromVault();
   return token ? { GH_TOKEN: token } : {};
 }
 
 /** True when a `gh` call would run with no login and no vault token. */
 export async function hubGhHasNoCredential(): Promise<boolean> {
-  return !(await machineHasLogin()) && vaultService.findGitHubToken() === undefined;
+  return !(await machineHasLogin()) && hubGithubTokenFromVault() === undefined;
+}
+
+/** The token for GitHub API calls the hub makes itself: the environment, then the vault item. */
+export function hubGithubApiToken(): string | undefined {
+  return process.env.GH_TOKEN || process.env.GITHUB_TOKEN || hubGithubTokenFromVault();
 }
 
 /** Forgets the cached login check. For tests that change the machine's login. */

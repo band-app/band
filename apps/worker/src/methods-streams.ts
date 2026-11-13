@@ -4,7 +4,6 @@ import type { McpStdio, SpawnOptions, TerminalAttachment } from "@band-app/host-
 import { shellPath } from "@band-app/host-local/process/path";
 import { type Channel, decodeFrames, encodeFrame } from "@band-app/link";
 import { browserProfileDir, type Registrar, type WorkerContext } from "./context.ts";
-import { ghTokenEnv } from "./gh-token.ts";
 import {
   encodeJson,
   num,
@@ -39,7 +38,7 @@ export interface SpawnTerminalParams {
 
 /**
  * Starts a PTY on this worker: the `pty.spawn` method of the hub's link, and the direct listener's
- * `terminal.create`. Adds the worker's own environment (its `band` CLI, a GitHub token, extension
+ * `terminal.create`. Adds the worker's own environment (its `band` CLI, the profile's secrets, extension
  * variables) and checks that `cwd` passes the path policy.
  */
 export async function spawnTerminal(ctx: WorkerContext, params: SpawnTerminalParams) {
@@ -53,8 +52,10 @@ export async function spawnTerminal(ctx: WorkerContext, params: SpawnTerminalPar
     const base = options?.env?.PATH ?? (await shellPath());
     options = { ...options, env: { ...options?.env, PATH: [cliDir, base].join(delimiter) } };
   }
-  const ghEnv = await ghTokenEnv(ctx);
-  if (ghEnv.GH_TOKEN) options = { ...options, env: { ...options?.env, ...ghEnv } };
+  const secretEnv = (await ctx.secrets?.env()) ?? {};
+  if (Object.keys(secretEnv).length > 0) {
+    options = { ...options, env: { ...secretEnv, ...options?.env } };
+  }
   // Variables an extension service gives this worktree's terminals (the DISPLAY of its desktop).
   const extensionEnv = (await ctx.extensions?.worktreeEnv(params.worktreeId, worktreeRoot)) ?? {};
   if (Object.keys(extensionEnv).length > 0) {
@@ -306,7 +307,6 @@ export function registerStreamMethods(r: Registrar, ctx: WorkerContext): () => P
         command: optStr(o, "command"),
         cwd: optStr(o, "cwd"),
         env: o.env === undefined ? undefined : strRecord(o, "env"),
-        unsetEnv: o.unsetEnv === undefined ? undefined : strArray(o, "unsetEnv"),
       },
       cleanupOnExit: optBool(a, "cleanupOnExit"),
     });

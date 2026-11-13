@@ -539,9 +539,7 @@ export class ChatOwner {
         const launch = await this.ctx.session.request<ChatLaunchReply>(METHOD_CHAT_LAUNCH, params, {
           timeoutMs: 30_000,
         });
-        // The cache outlives the login, so it keeps neither the secret nor the variables it clears.
-        const { loginEnv: _loginEnv, unsetEnv: _unsetEnv, ...cacheable } = launch;
-        this.store.saveLaunch(chatId, cacheable);
+        this.store.saveLaunch(chatId, launch);
         return launch;
       } catch (err) {
         // The hub answered and said no (the chat is no longer this worker's): never run it.

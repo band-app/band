@@ -141,9 +141,14 @@ export const settingsUpdateInput = z
         repoUrl: z.string().max(500).optional(),
         branch: z.string().max(200).optional(),
         command: z.string().max(200).optional(),
+        // Name of the vault item whose token the hub clones the repo with, over HTTPS.
+        tokenItem: z.string().max(200).optional(),
       })
       .passthrough()
       .optional(),
+    // Name of the vault item the hub's own `gh` and GitHub API calls use when the hub's machine
+    // has no login and no `GH_TOKEN`. Admin only.
+    hubGithubToken: z.string().max(200).optional(),
     // The command the "Update hub" button runs on the hub's machine (`services/hub-update-service.ts`).
     // Admin only: the hub runs it with `sh -c`.
     hubUpdate: z
