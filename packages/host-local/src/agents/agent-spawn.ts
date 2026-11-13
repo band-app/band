@@ -20,7 +20,6 @@ const STOP_TIMEOUT_MS = 3_000;
 
 export async function spawnAgentProcess(launch: AcpLaunch, cwd: string): Promise<AgentStdio> {
   const env = { ...process.env };
-  for (const name of launch.unsetEnv ?? []) delete env[name];
   const child = spawn(launch.command, launch.args, {
     cwd,
     env: { ...env, ...launch.env },

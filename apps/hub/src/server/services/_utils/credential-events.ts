@@ -1,15 +1,12 @@
 /**
- * Credential changes that must reach agents already running with the old credential. The login
- * and vault services say what changed and know nothing about agents, and the agent session
- * service, which imports both, listens. A direct import the other way would be a cycle.
+ * Vault changes that must reach workers holding a copy: a worker profile maps vault items to
+ * files, so a replaced or deleted item has to be rewritten on those workers. The vault service
+ * says what changed and knows nothing about workers; the secrets service listens. A direct import
+ * the other way would be a cycle.
  */
 export type CredentialChange =
-  /** A login was removed, replaced or re-chosen. `loginId` is set when its secret or row changed. */
-  | { kind: "agent-login"; agentType?: string; chatId?: string; loginId?: string }
-  /** A vault git credential was replaced or deleted, so a `GH_TOKEN` taken from it is stale. */
-  | { kind: "git-credential" }
-  /** A vault item was replaced or deleted. A login that reads it may have given an agent its secret. */
-  | { kind: "vault-item"; itemId: string };
+  /** A vault item was replaced or deleted. */
+  { kind: "vault-item"; itemId: string; name: string };
 
 const listeners = new Set<(change: CredentialChange) => void>();
 

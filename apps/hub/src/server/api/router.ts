@@ -42,7 +42,6 @@
  */
 
 import { accountUsageRouter } from "./account-usage/router";
-import { agentLoginsRouter } from "./agent-logins/router";
 import { agentSessionsRouter } from "./agent-sessions/router";
 import { browserHostRouter } from "./browser-host/router";
 import { browserProfilesRouter } from "./browser-profiles/router";
@@ -130,7 +129,6 @@ export const appRouter = t.router({
   vault: vaultRouter,
   provisioning: provisioningRouter,
   workerProfiles: workerProfilesRouter,
-  agentLogins: agentLoginsRouter,
   voice: voiceRouter,
   editors: editorsRouter,
   extensions: extensionsRouter,

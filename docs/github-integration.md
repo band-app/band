@@ -36,22 +36,23 @@ Install the GitHub CLI, `gh`, on the machine where the worktree lives. Both Dock
 
 ## Authentication
 
-Band runs `gh` on the worker that owns the worktree, so it uses that worker's `gh` login. If that worker is offline, has no `gh` or is not logged in, Band falls back to the hub's `gh`. If both fail, the Checks tab shows an error that names each machine and the fix.
+Band runs `gh` on the worker that owns the worktree, so it uses that worker's `gh` login or its `GH_TOKEN`. If that worker is offline, has no `gh` or is not logged in, Band falls back to the hub's `gh`. If both fail, the Checks tab shows an error that names each machine and the fix.
 
-To log in, run `gh auth login` on the machine. For a hub or worker where you cannot log in by hand, such as a container, store a GitHub token in the credential vault as a git credential:
+To log in, run `gh auth login` on the machine. For a worker where you cannot log in by hand, such as a container, store a GitHub token in the vault as an API key and map it to `GH_TOKEN` in the worker's [profile](worker-profiles.md):
 
 ```sh
-band vault put github-band --kind git --host github.com --path 'band-app/*'
+band vault put github-band < token.txt
 ```
 
-The command reads the token from standard input. Pipe it in, or paste it and press Ctrl-D.
+```json
+{ "item": "github-band", "env": "GH_TOKEN" }
+```
 
-Then:
+The worker puts `GH_TOKEN` in the environment of every process it starts, including the `gh` calls the hub requests, so a rotated token applies to the next call.
 
-- The hub uses that token as `GH_TOKEN` for its own `gh` calls when the machine has no `gh` login. A repo-scoped item wins over a global one, and the broadest matching path is used.
-- A worker started by a runner receives `GH_TOKEN` in the environment of its agents and terminals, so `gh` works there. A worker that you started yourself keeps its own login and receives the token only when it sets `BAND_WORKER_GH_TOKEN=hub`. The token never goes to the worker's disk or logs.
+The hub's own `gh` (pull request polling, webhooks and the default-branch lookup) uses the machine's `gh` login or the `GH_TOKEN` of its environment first. When neither exists, it uses the vault item chosen as the Hub GitHub token in Settings > Credentials. With nothing, the hub reports "No GitHub credential for gh on this hub".
 
-The token needs access to the repos you use: read access to pull requests and checks, and write access to merge a PR or run a job again. See [Runner hooks](runner-hooks.md#git-and-github-auth) for the details and [Credentials](credentials.md) for the vault.
+The token needs access to the repos you use: read access to pull requests and checks, and write access to merge a PR or run a job again. See [Runner hooks](runner-hooks.md#git-and-github-auth) for runner-started workers and [Credentials](credentials.md) for the vault.
 
 ## Turn the plugin off
 

@@ -57,7 +57,7 @@ curl -fsSL https://hub.example.com/api/provision/<code>/script | sh
 
 Run it as the normal user on a blank Linux or macOS machine. It installs Node if needed, installs the worker and starts it as a service. The line works once and expires after an hour. See [Provision a worker](provisioning.md) for what the script does, the optional provisioning repo and cloud-init.
 
-To apply a [worker profile](worker-profiles.md) (provisioning repo, labels, trust, worker settings and a credential policy), pick it in the same dialog or run `band workers provision --profile <name>`.
+To apply a [worker profile](worker-profiles.md) (provisioning repo, labels, trust, worker settings and secrets), pick it in the same dialog or run `band workers provision --profile <name>`.
 
 ## Manual install
 

@@ -7,7 +7,6 @@ import { useRepos } from "../../hooks/use-repos";
 import { useHostsList } from "../../hooks/use-update-status";
 import type { RepoInfo } from "../../types";
 import { RepoAvatar } from "../RepoAvatar";
-import { RepoLoginOverrides } from "./AgentLoginsSettings";
 import { RepoBrowserProfileSelect } from "./BrowserProfilesSettings";
 import { useIsAdmin } from "./DevicesSettings";
 import { AutoContinueSwitch, CheckpointsSwitch } from "./RepoControls";
@@ -239,7 +238,7 @@ interface Props {
 }
 
 /**
- * One repo's settings, opened from the Repos overview: label, workers, agent logins, environment,
+ * One repo's settings, opened from the Repos overview: label, workers, environment,
  * continuity and browser profile, plus read-only views of the MCP servers and cronjobs that reach
  * it. Every control saves when it changes.
  */
@@ -339,14 +338,6 @@ export function RepoSettingsPage({ name, onBack, onOpenMcp, onOpenCronjobs }: Pr
         testId="settings-repo__workers"
       >
         <RepoWorkers repo={repo} />
-      </RepoSection>
-
-      <RepoSection
-        title="Agents"
-        description="Which login each coding agent uses in this repo."
-        from="from Agent logins"
-      >
-        <RepoLoginOverrides repoName={repo.name} />
       </RepoSection>
 
       <RepoSection

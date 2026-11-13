@@ -24,7 +24,6 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
-import { credentialChanged } from "./_utils/credential-events";
 import { defaultPanelIdFromLayout, LayoutManager } from "./_utils/layout-manager";
 import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
@@ -110,8 +109,6 @@ export interface UpdateChatOptions {
   agent?: string;
   model?: string | null;
   mode?: string | null;
-  /** The agent login this chat uses. `null` goes back to the repo's or the agent's default. */
-  loginId?: string | null;
   /**
    * Replace the chat's full label set (issue #520). Pass `{}` to clear.
    * Validated before persistence — see `validateLabels`. Reserved
@@ -351,7 +348,6 @@ export class ChatService {
       status: "idle",
       labels,
       ownerHostId: undefined,
-      loginId: undefined,
     };
 
     this.queries.insert({ ...session, createdAt: now, updatedAt: now });
@@ -452,21 +448,12 @@ export class ChatService {
     if (updates.agent !== undefined) patch.agent = updates.agent;
     if (updates.model !== undefined) patch.model = updates.model;
     if (updates.mode !== undefined) patch.mode = updates.mode;
-    if (updates.loginId !== undefined) patch.loginId = updates.loginId;
-    // A login belongs to one agent type, so a chat that switches agent goes back to the default.
-    else if (updates.agent !== undefined && updates.agent !== session.agent && session.loginId) {
-      patch.loginId = null;
-    }
     if (nextLabels !== undefined) patch.labels = nextLabels;
 
     const merged = this.queries.update(chatId, session, patch);
     // Refresh the in-memory copy (preserving object identity is not part
     // of the contract — callers re-read by id).
     this.chatSessions.set(chatId, merged);
-    // An agent already running with the old login must not go on holding it.
-    if (patch.loginId !== undefined && (patch.loginId ?? null) !== (session.loginId ?? null)) {
-      credentialChanged({ kind: "agent-login", chatId });
-    }
 
     // Log only which fields changed, not their values: users may use labels
     // (256-char printable strings) as ad-hoc context (env=prod, branch=...)

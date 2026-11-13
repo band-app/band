@@ -109,7 +109,7 @@ Starts the worker image in a hardened container with `docker run --detach --rm`.
 | `--label band.runner`, `band.request`, `band.worker` | The runner, the worker request and the worker id, for `docker ps --filter label=...`. |
 | `--network bridge` | The default. See below. |
 
-The repo's image is `BAND_REPO_IMAGE` when this docker daemon has it or can pull it (it has the toolchain, the installed dependencies and the worker, and needs `git` for the clone). When it cannot get the image, for example one built on another worker with no registry, the hook says so in its log and runs the base image. Nothing from the worker is mounted and the docker socket is never passed in. The token goes in with `-e BAND_BOOTSTRAP_TOKEN`, so it is not in a command line or `ps`. It is in the container's config, though, so anyone who can run `docker inspect` on that daemon can read it. That is accepted: access to a docker daemon is root-equivalent on that machine, and the token is single-use and spent when the worker exchanges it. The container clones `BAND_REPO_URLS` into `/work/<repo>` before the worker starts, so the repository needs a URL the container can reach. When the vault holds a git credential for it (`BAND_CLONE_BY_HUB`), the container skips that clone and the hub clones through the worker after hello. A repo with no origin remote has only a path on the hub's machine, which fails the clone.
+The repo's image is `BAND_REPO_IMAGE` when this docker daemon has it or can pull it (it has the toolchain, the installed dependencies and the worker, and needs `git` for the clone). When it cannot get the image, for example one built on another worker with no registry, the hook says so in its log and runs the base image. Nothing from the worker is mounted and the docker socket is never passed in. The token goes in with `-e BAND_BOOTSTRAP_TOKEN`, so it is not in a command line or `ps`. It is in the container's config, though, so anyone who can run `docker inspect` on that daemon can read it. That is accepted: access to a docker daemon is root-equivalent on that machine, and the token is single-use and spent when the worker exchanges it. The container clones `BAND_REPO_URLS` into `/work/<repo>` before the worker starts, so the repository needs a URL the container can reach. When the runner has a profile that maps secrets (`BAND_CLONE_BY_HUB`), the container skips that clone and the hub clones through the worker after hello. A repo with no origin remote has only a path on the hub's machine, which fails the clone.
 
 Settings (`env`):
 
@@ -342,41 +342,36 @@ Settings > Runners lists the workers started with their state, age and cloud han
 
 The hub keeps everything a hook prints in `BAND_HOME/runners/logs/<request id>.log`, one line per output line, tagged `spawn stdout`, `spawn stderr`, `destroy stdout` and so on. Before a line is stored the hub replaces the attempt's bootstrap token and anything shaped like a Band token  with `[redacted]`. Read a log with `band runners log <request id>` or from Settings > Runners.
 
-## Git credentials for private repositories
-
-A hook has only the bootstrap token, so it cannot clone a private repository. Workers get git credentials from the hub instead:
-
-1. Create a fine-grained personal access token on GitHub (Settings > Developer settings > Personal access tokens > Fine-grained tokens). Give it the repositories the workers need and the repository permissions Contents (read and write) and Pull requests (read and write).
-2. Store it on the hub with a pattern over the repository path. The pattern is matched against `owner/repo` (no `.git`), `*` stays inside one segment and `**` crosses segments:
-
-   ```sh
-   band vault put github-band --kind git --host github.com --path 'band-app/*' < token.txt
-   ```
-
-   Settings > Credentials has the same form (see [Credentials](credentials.md)). `--scope repo:<name>` limits an item to one repo, and a repo-scoped item wins over a global one, then the pattern with more literal characters wins. `--username` defaults to `x-access-token`, which GitHub accepts for a token.
-3. Nothing else is configured. When a worker starts, it adds a git credential helper to the environment of every git command, agent and terminal it runs (`GIT_CONFIG_*` and `GIT_TERMINAL_PROMPT=0`). The helper (`band-worker git-credential`) asks the worker over a Unix socket in a private temp directory, and the worker asks the hub with the `git.credential` call on its link. The hub answers only for a remote of a repository placed on that worker: a repo with a checkout or a worktree there, or the repository it is about to clone there. Any other repository is refused, and a remote with no matching vault item gets no credential.
-
-The git token is never written to the worker's disk, never put in an environment variable and never logged (the hub logs the worker, the git host and the path of each request, not the credential). Git's `store` and `erase` do nothing, and the helper replaces the machine's own credential helpers, so no keychain keeps it. A process on the worker that runs `git credential fill` for a placed repository can read the token. This is accepted, because an agent must be able to push. Three things limit the exposure:
-
-- Use a fine-grained PAT limited to the repositories the workers need and to the permissions above, so a leaked token reaches nothing else.
-- The hub logs every request (worker, git host and path, never the credential), so each use is traceable to a worker.
-- The git token is never on the worker's disk, in its environment or in any log, so it is gone when the process that asked for it exits. (`GH_TOKEN` for `gh` is the exception, see [Git and GitHub auth](#git-and-github-auth).)
-
 ## Git and GitHub auth
 
-The hub and workers use `git` for clones and pushes and `gh` for pull requests, checks and the GitHub subscription poller. Both images (`band-hub`, `band-worker`) contain `gh`. Each kind of machine authenticates differently.
+A hook has only the bootstrap token, so it cannot clone a private repository. Band has no git or `gh` logic. A worker gets a token the same way every worker does, through a [worker profile](worker-profiles.md) that maps a vault item to an environment variable.
+
+1. Create a fine-grained personal access token on GitHub (Settings > Developer settings > Personal access tokens > Fine-grained tokens). Give it the repositories the workers need and the repository permissions Contents (read and write) and Pull requests (read and write).
+2. Store it on the hub as an API key:
+
+   ```sh
+   band vault put github-band < token.txt
+   ```
+
+3. Create a worker profile that maps it, and set `profile` on the runner config (`settings.runners[]`):
+
+   ```json
+   { "name": "agents", "secrets": [{ "item": "github-band", "env": "GH_TOKEN" }] }
+   ```
+
+A worker the runner starts gets that profile's trust and secrets. A runner without a `profile` starts workers with no secrets.
+
+When the runner has a profile that maps secrets and the repo has an https remote, the hub sets `BAND_CLONE_BY_HUB=1`. The hook skips its own clone and prints `BAND_WORKER_REPO_PATH`. Once the worker says hello, the hub clones the repo through the worker, whose git sees the profile's environment, `GH_TOKEN` included.
+
+Git uses `GH_TOKEN` only through a credential helper. Configure `!gh auth git-credential` as the helper (`git config --global credential.helper '!gh auth git-credential'`). The bundled docker hook configures it in its image. In a hook or image of your own, set it in the provisioning repo or the image.
+
+The token is in the environment of every process the worker starts. Any process of an agent on the worker can read it, so use a fine-grained PAT limited to the repositories the workers need.
 
 | Machine | git | gh |
 | --- | --- | --- |
-| Attached worker (`band-worker --token ...` that you started) | Its own ssh keys or credential helper, tried first. The worker adds the hub's git helper after them, which answers only when the vault has a matching item. `--hub-git-credentials-only` drops the machine's helpers. | Its own `gh auth login`. The hub sends nothing, unless the worker sets `BAND_WORKER_GH_TOKEN=hub`. |
-| Runner-started worker | The vault `git` item, through the helper described above. | `GH_TOKEN` from the same vault item, in the environment of agents and terminals only. |
-| Hub | The vault `git` item, for clones the hub makes through a worker. | The machine's own `gh auth login`. With none, `GH_TOKEN` from the vault `git` item for `github.com`. |
-
-For `gh`, the hub uses the `git` item for `github.com` whose path pattern is broadest (a repo-scoped item wins over a global one). A dedicated `github` item kind does not exist yet. A worker asks with the `gh.token` call on its link every time it starts an agent or a terminal. The token goes into that child's environment only. It is not written to the worker's disk, not kept in the worker's memory between spawns, and not logged on either side. A worker whose own environment has `GH_TOKEN` or `GITHUB_TOKEN` keeps it, and the hub answers only workers it started through a runner or workers that opted in.
-
-A static worker keeps the machine's git credential helpers (the macOS keychain, `gh auth setup-git`, a `store` file) and adds the hub's helper after them, so git asks the machine first and the vault second. Because git calls `store` on every helper after a successful use, a token the hub hands out can end up in the machine's own helper. To keep the machine's helpers out entirely, start the worker with `--hub-git-credentials-only` (`BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1`, also accepted by `install-service`). An ephemeral worker (`--ephemeral`, which every runner hook sets) always resets the helper list and asks only the hub.
-
-Any process of an agent on the worker can read its own environment, so use a fine-grained PAT limited to the repositories the workers need.
+| Attached worker (`band-worker --token ...` that you started) | Its own ssh keys or credential helper, plus whatever its profile maps. | Its own `gh auth login`, or `GH_TOKEN` from its profile. |
+| Runner-started worker | The runner's profile, as above. | `GH_TOKEN` from the runner's profile. |
+| Hub | Plain git with the hub machine's own auth, or the Hub GitHub token for HTTPS clones it makes through a worker. | The machine's own `gh auth login` or `GH_TOKEN`, then the Hub GitHub token. |
 
 Token scopes for one PAT that serves git, `gh` and the hub's poller:
 
@@ -445,7 +440,7 @@ For each attempt the hub issues a one-time bootstrap token for a new worker, the
 | `BAND_BOOTSTRAP_TOKEN` | Trade for a session token once. Valid for the attempt's timeout plus a minute. |
 | `BAND_REPO_URLS` | The clone URL of the request's repository: the URL the hub stores for the repo, without credentials, so the hub needs no checkout to answer. The hub's local path when the repo has no remote; only a hook on the hub's machine can use that. |
 | `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, parsed and checked with the `.band/environment.json` parser ([Agent environments](agent-environments.md)), so it has the same shape. `{}` when there is none. A request whose environment does not parse fails at once, with the problems and their key paths, and no hook runs. |
-| `BAND_CLONE_BY_HUB` | `1` when the vault holds a git credential for the repository URL. The hook must skip its own clone and still print `BAND_WORKER_REPO_PATH`. The hub clones into that path through the worker once it says hello, so the clone can use the credential (see [Git credentials](#git-credentials-for-private-repositories)). Unset otherwise, and always unset for `restore`. The `local`, `ssh`, `docker` and `k8s` hooks honor it. The VM hooks clone in cloud-init and ignore it, so a private repository needs a hook of your own there. |
+| `BAND_CLONE_BY_HUB` | `1` when the runner has a profile that maps secrets and the repository URL is https. The hook must skip its own clone and still print `BAND_WORKER_REPO_PATH`. The hub clones into that path through the worker once it says hello, so the clone sees the profile's environment (see [Git and GitHub auth](#git-and-github-auth)). Unset otherwise, and always unset for `restore`. The `local`, `ssh`, `docker` and `k8s` hooks honor it. The VM hooks clone in cloud-init and ignore it, so a private repository needs a hook of your own there. |
 | `BAND_REPO_IMAGE` | The repo's current environment image (`band env build`, see [Agent environments](agent-environments.md)), empty before its first ready build. |
 | `BAND_DESKTOP` | `1` when the runner has `desktop: true`, else unset. |
 | `BAND_ISOLATION` | The environment's `isolation` (`worktree`, `container` or `vm`) when it sets one, else the runner's `isolation`. |

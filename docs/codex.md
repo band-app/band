@@ -20,7 +20,7 @@ Band finds `codex` on the worker's `PATH`. To use another binary, set the comman
 
 A worker counts Codex as logged in when `codex login status` succeeds, or when `OPENAI_API_KEY` is set in its environment.
 
-A machine without a Codex login can use an [agent login](agent-logins.md) with an OpenAI API key. A login or model provider already configured for Codex on the machine takes priority over that key, so the key helps mainly on a fresh worker.
+A machine without a Codex login can get an OpenAI API key from a [worker profile](worker-profiles.md): store the key in the [vault](credentials.md) and map it to `OPENAI_API_KEY`. You can also run `codex login` on the machine. A login or model provider already configured for Codex on the machine takes priority over that key, so the key helps mainly on a fresh worker.
 
 ## Models
 

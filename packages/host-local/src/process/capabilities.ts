@@ -92,13 +92,13 @@ interface Ran {
   out: string;
 }
 
-function run(bin: string, args: string[]): Promise<Ran> {
+function run(bin: string, args: string[], extraEnv: Record<string, string> = {}): Promise<Ran> {
   return new Promise((resolve) => {
     execFile(
       bin,
       args,
       {
-        env: { ...process.env, PATH: searchPath() },
+        env: { ...process.env, ...extraEnv, PATH: searchPath() },
         timeout: PROBE_TIMEOUT_MS,
       },
       (err, stdout, stderr) => {
@@ -109,8 +109,11 @@ function run(bin: string, args: string[]): Promise<Ran> {
   });
 }
 
-async function probeAgent(probe: AgentProbe): Promise<AgentCapability> {
-  const version = await run(probe.bin, ["--version"]);
+async function probeAgent(
+  probe: AgentProbe,
+  extraEnv: Record<string, string>,
+): Promise<AgentCapability> {
+  const version = await run(probe.bin, ["--version"], extraEnv);
   if (!version.found) {
     return {
       type: probe.type,
@@ -121,8 +124,8 @@ async function probeAgent(probe: AgentProbe): Promise<AgentCapability> {
     };
   }
   let loggedIn: boolean | null = null;
-  if (probe.envKeys.some((k) => Boolean(process.env[k]))) loggedIn = true;
-  else if (probe.login) loggedIn = (await run(probe.bin, probe.login)).ok;
+  if (probe.envKeys.some((k) => Boolean(extraEnv[k] ?? process.env[k]))) loggedIn = true;
+  else if (probe.login) loggedIn = (await run(probe.bin, probe.login, extraEnv)).ok;
   return {
     type: probe.type,
     installed: true,
@@ -168,12 +171,19 @@ async function probeGit(): Promise<ToolCapability> {
 }
 
 /** Runs each probe on this machine, in parallel. Never throws: a probe that fails reports not installed. */
-export async function probeCapabilities(agentTypes?: readonly string[]): Promise<CapabilityReport> {
+/**
+ * `extraEnv` is added to the environment of the probes, so a variable a worker profile maps (an API
+ * key) counts as a login.
+ */
+export async function probeCapabilities(
+  agentTypes?: readonly string[],
+  extraEnv: Record<string, string> = {},
+): Promise<CapabilityReport> {
   const probes = agentTypes
     ? AGENT_PROBES.filter((p) => agentTypes.includes(p.type))
     : AGENT_PROBES;
   const [agents, gh, git] = await Promise.all([
-    Promise.all(probes.map(probeAgent)),
+    Promise.all(probes.map((p) => probeAgent(p, extraEnv))),
     probeGh(),
     probeGit(),
   ]);

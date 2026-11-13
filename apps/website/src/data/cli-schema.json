@@ -971,7 +971,7 @@
           "type": "string"
         },
         {
-          "description": "api_key (default), env or git",
+          "description": "api_key (default) or env",
           "name": "kind",
           "required": false,
           "type": "string"
@@ -985,24 +985,6 @@
         {
           "description": "Short note shown in the list",
           "name": "description",
-          "required": false,
-          "type": "string"
-        },
-        {
-          "description": "For --kind git: the remote's host, such as github.com",
-          "name": "host",
-          "required": false,
-          "type": "string"
-        },
-        {
-          "description": "For --kind git: a pattern over the repository path, such as 'owner/*'",
-          "name": "path",
-          "required": false,
-          "type": "string"
-        },
-        {
-          "description": "For --kind git: the username git sends with the token (default x-access-token)",
-          "name": "username",
           "required": false,
           "type": "string"
         },

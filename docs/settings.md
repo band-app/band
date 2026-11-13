@@ -34,8 +34,7 @@ Settings are kept in `~/.band/settings.json` on the hub's machine. `band setting
 - **MCP.** MCP servers the hub proxies to agents, with their tools, scope and audit log. See [MCP servers](mcp-servers.md).
 - **Voice.** Dictation into the chat composer through a speech-to-text endpoint. Admin only. See [Voice dictation](voice-dictation.md).
 - **Agent hooks.** Install or remove the Claude Code hooks that report what an agent in a terminal is doing, per worker. See [Agent status and notifications](agent-status.md).
-- **Agent logins.** Credentials Band gives an agent when it starts one. See [Agent logins](agent-logins.md).
-- **Credentials.** Keys and OAuth connections that the hub stores encrypted. See [Credentials](credentials.md).
+- **Credentials.** Keys and OAuth connections that the hub stores encrypted, and the Hub GitHub token. See [Credentials](credentials.md).
 
 ## Infrastructure
 
@@ -47,7 +46,7 @@ Settings are kept in `~/.band/settings.json` on the hub's machine. `band setting
 
 - **Groups.** Create, rename, color and reorder the groups that sort worktrees in the sidebar. See [Groups](groups.md).
 - **Usage report.** Whether Band scans your agents' session files in the background to fill the Usage dialog, and how many days it keeps the history (default 365, at most 3650).
-- **Repos.** An overview of every repo on the hub, and one page per repo with its remote, default branch, workers, agent logins, environment, checkpoints, default browser profile and more. Add a repo from the Repos panel in the sidebar. See [Repos](repos.md).
+- **Repos.** An overview of every repo on the hub, and one page per repo with its remote, default branch, workers, environment, checkpoints, default browser profile and more. Add a repo from the Repos panel in the sidebar. See [Repos](repos.md).
 
 ## Who sees what
 

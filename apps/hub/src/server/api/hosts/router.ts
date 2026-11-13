@@ -11,7 +11,6 @@ import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
 import { describeHostVersion } from "../../services/_utils/host-version";
 import { HUB_VERSION, hubInstallMethod } from "../../services/_utils/hub-version";
-import { agentLoginService } from "../../services/agent-login-service";
 import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
 import { extensionWorkerService } from "../../services/extension-worker-service";
 import {
@@ -30,6 +29,7 @@ import {
   tokenService,
 } from "../../services/token-service";
 import { emit } from "../../services/watcher-service";
+import { workerSecretsService } from "../../services/worker-secrets-service";
 import { WorkerUpdateError, workerUpdateService } from "../../services/worker-update-service";
 import { repoErrorToTrpc } from "../repos/errors";
 import { adminProcedure, publicProcedure, t } from "../trpc";
@@ -81,11 +81,7 @@ export const hostsRouter = t.router({
           local.report = info.report ?? null;
           local.agents = info.report
             ? info.report.agents
-                .filter(
-                  (a) =>
-                    a.installed &&
-                    (a.loggedIn !== false || agentLoginService.hasUsableLogin(a.type)),
-                )
+                .filter((a) => a.installed && a.loggedIn !== false)
                 .map((a) => a.type)
             : await agentTypesOn(hostRegistry.local);
           local.tools = info.tools;
@@ -104,6 +100,8 @@ export const hostsRouter = t.router({
               ...h,
               capabilities: [...new Set([...h.capabilities, ...running])],
               sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+              // The files the worker's profile maps: written, and refused with the reason. Admin detail.
+              secretFiles: ctx.admin ? workerSecretsService.reportFor(h.id) : null,
               languageServers: extensionWorkerService
                 .languageServersFor(h.id, h.status === "online")
                 .map((v) => (ctx.admin || v.state === "ready" ? v : { ...v, reason: undefined })),
@@ -150,11 +148,7 @@ export const hostsRouter = t.router({
             .map(([name]) => name);
           view.agents = info.report
             ? info.report.agents
-                .filter(
-                  (a) =>
-                    a.installed &&
-                    (a.loggedIn !== false || agentLoginService.hasUsableLogin(a.type)),
-                )
+                .filter((a) => a.installed && a.loggedIn !== false)
                 .map((a) => a.type)
             : view.agents;
         }

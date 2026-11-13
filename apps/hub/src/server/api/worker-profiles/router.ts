@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { emit } from "../../services/watcher-service";
 import { workerProfileService } from "../../services/worker-profile-service";
+import { workerSecretsService } from "../../services/worker-secrets-service";
 import { adminProcedure, t } from "../trpc";
 
 export const workerProfilesRouter = t.router({
@@ -19,7 +20,11 @@ export const workerProfilesRouter = t.router({
 
   update: adminProcedure
     .input(z.object({ name: z.string().min(1).max(100), profile: z.unknown() }))
-    .mutation(({ input }) => workerProfileService.update(input.name, input.profile)),
+    .mutation(({ input }) => {
+      const profile = workerProfileService.update(input.name, input.profile);
+      workerSecretsService.profileChanged(input.name);
+      return profile;
+    }),
 
   delete: adminProcedure
     .input(z.object({ name: z.string().min(1).max(100) }))
@@ -33,6 +38,7 @@ export const workerProfilesRouter = t.router({
     .input(z.object({ hostId: z.string().min(1), profile: z.string().min(1).max(100).nullable() }))
     .mutation(({ input }) => {
       const result = workerProfileService.setHostProfile(input.hostId, input.profile);
+      workerSecretsService.profileChanged(null, input.hostId);
       emit({ kind: "host-status-changed", hostId: input.hostId });
       return result;
     }),

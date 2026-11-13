@@ -53,6 +53,14 @@ export function RunnersSettings() {
     queryFn: () => trpc.runners.list.query(),
     refetchInterval: 5000,
   });
+  const configured = useQuery({
+    queryKey: ["settings.get"],
+    queryFn: () => trpc.settings.get.query(),
+  });
+  const profileOf = (id: string): string | undefined =>
+    (configured.data?.runners as { id: string; profile?: string }[] | undefined)?.find(
+      (r) => r.id === id,
+    )?.profile;
   const machines = useQuery<MachineList>({
     queryKey: MACHINES_KEY,
     queryFn: async () => (await trpc.runners.machines.query()).machines,
@@ -113,7 +121,12 @@ export function RunnersSettings() {
                     {" · "}
                     {runner.isolation}
                     {" · "}
-                    Timeout {runner.timeoutSec}s
+                    Timeout {runner.timeoutSec}s{" · "}
+                    <span data-testid="settings__runner-profile">
+                      {profileOf(runner.id)
+                        ? `Profile ${profileOf(runner.id)}`
+                        : "No profile, no secrets"}
+                    </span>
                   </div>
                 </div>
                 <span

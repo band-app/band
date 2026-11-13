@@ -75,7 +75,7 @@ A GitHub subscription needs the hub to hear from GitHub. There are two ways, and
 - **Webhook.** The first subscription for a repo registers a webhook on that repo with `gh`. This needs a public URL for the hub, either `BAND_PUBLIC_URL` or a running tunnel. The hub checks the `X-Hub-Signature-256` signature of every delivery against a secret. The secret comes from `BAND_GITHUB_WEBHOOK_SECRET`, or the hub generates one at `~/.band/github-webhook-secret`.
 - **Polling fallback.** Without a public URL, or when registering fails, the hub polls instead. Polling runs with the branch status checks, so it needs the [GitHub plugin](github-integration.md) enabled. It is slower than a webhook and makes at most 6 `gh` calls per poll.
 
-Both ways need a working `gh` login on the hub, or a GitHub credential in the vault. See [GitHub integration](github-integration.md#authentication).
+Both ways need a working `gh` login on the hub, or a Hub GitHub token in the vault. See [GitHub integration](github-integration.md#authentication).
 
 For CI, a commit's verdict arrives once every check has finished. A failure names the failed checks. With no failure, a cancelled run is reported as its own outcome.
 

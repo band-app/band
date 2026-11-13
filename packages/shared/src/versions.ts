@@ -56,6 +56,13 @@ export function relationToHub(worker: string | null | undefined, hub: string): V
 }
 
 /**
+ * The oldest worker a hub of this version or newer accepts. 0.67.0 replaced the git and GitHub
+ * credential requests with `secrets.fetch`, so an older worker would lose its git and `gh` credentials
+ * without a word. Raise it when a link change breaks older workers.
+ */
+export const MIN_WORKER_VERSION = "0.67.0";
+
+/**
  * The link refusal for a worker too far from the hub, or null when they may connect.
  * Version 0.x: "minor" is the middle number. Within one minor either way is allowed,
  * and a different major is always refused. An unknown version is never refused.
@@ -67,9 +74,12 @@ export function compatibilityProblem(
   const w = parseSemver(worker);
   const h = parseSemver(hub);
   if (!w || !h) return null;
-  if (w.major === h.major && Math.abs(w.minor - h.minor) <= 1) return null;
   const hubV = `${h.major}.${h.minor}.${h.patch}`;
   const workerV = `${w.major}.${w.minor}.${w.patch}`;
+  const belowMinimum =
+    (compareVersions(workerV, MIN_WORKER_VERSION) as number) < 0 &&
+    (compareVersions(hubV, MIN_WORKER_VERSION) as number) >= 0;
+  if (!belowMinimum && w.major === h.major && Math.abs(w.minor - h.minor) <= 1) return null;
   const older = (compareVersions(workerV, hubV) as number) < 0;
   return older
     ? `worker ${workerV} is too old for hub ${hubV}, update it to ${hubV}`

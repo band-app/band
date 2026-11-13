@@ -26,7 +26,6 @@ import {
   deleteTerminalLayout,
   removeTerminalFromLayout,
 } from "./_utils/terminal-layout-manager";
-import { agentLoginService } from "./agent-login-service";
 import { clientActivityService } from "./client-activity-service";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { emit } from "./watcher-service";
@@ -273,15 +272,7 @@ export class TerminalService {
     // A shell on a remote host calls the hub through the worker's relay. The
     // token goes only into this spawn's env, never into the saved layout.
     const grant = await host.relay?.issue({ worktreeId, terminalId });
-    // A Band login for the agent goes into this spawn's environment only, like the relay token.
-    const login = opts?.agentType
-      ? await agentLoginService.resolve({
-          agentType: opts.agentType,
-          repo: worktree.repo.name,
-          hostId: host.id,
-        })
-      : null;
-    const spawnEnv = { ...options?.env, ...login?.env, ...grant?.env };
+    const spawnEnv = { ...options?.env, ...grant?.env };
     // A saved terminal whose PTY was lost resumes the agent it ran, by the
     // provider session id the agent's hooks reported.
     const resumeCommand = options?.command ? undefined : resumeCommandFor(terminalId);
@@ -290,11 +281,10 @@ export class TerminalService {
       terminalId,
       worktreeRoot: root,
       options:
-        grant || login || resumeCommand !== undefined
+        grant || resumeCommand !== undefined
           ? {
               ...options,
               env: spawnEnv,
-              ...(login?.unsetEnv.length ? { unsetEnv: login.unsetEnv } : {}),
               ...(resumeCommand !== undefined ? { resumeCommand } : {}),
             }
           : options,

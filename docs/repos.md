@@ -63,7 +63,6 @@ Settings > Repos lists every repo with its remote and a filter. Open a repo to s
 
 - General: the remote and the default branch.
 - Workers: which workers the repo may run on, the primary worker and where each worker keeps its clone. See [Repo workers](repo-hosts.md).
-- Agents: which [agent login](agent-logins.md) each coding agent uses in this repo.
 - Environment: the repo's environment file and image. See [Agent environments](agent-environments.md).
 - Continuity: [checkpoints](checkpoints.md) and automatic continuation when a worker goes offline.
 - Browser: the cookie profile new browser tabs open with.

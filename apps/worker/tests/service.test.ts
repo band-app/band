@@ -237,6 +237,39 @@ describe("install-service", () => {
     assert.equal(run(home, bin, ["status"]).status, 4);
   });
 
+  it("deletes the profile secret files it wrote on uninstall, and no other file", {
+    skip: !supported,
+  }, () => {
+    const home = tmpDir("band-service-secrets-");
+    dirs.push(home);
+    const { bin } = stubBin(home);
+    const stateDir = join(home, "state");
+    const install = run(home, bin, [
+      "install-service",
+      "--hub",
+      "https://hub.example.com",
+      "--token",
+      TOKEN,
+      "--state-dir",
+      stateDir,
+    ]);
+    assert.equal(install.status, 0, install.stderr);
+    // What a running worker leaves after a sync: its files and the list of them in the state dir.
+    const written = join(home, ".netrc");
+    const foreign = join(home, ".gitconfig");
+    writeFileSync(written, "machine example.com\n", { mode: 0o600 });
+    writeFileSync(foreign, "[user]\n");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "secret-files.json"), JSON.stringify({ files: [written] }));
+
+    const removed = run(home, bin, ["uninstall-service"]);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.ok(!existsSync(written));
+    assert.ok(existsSync(foreign));
+    assert.ok(!existsSync(join(stateDir, "secret-files.json")));
+    assert.match(removed.stdout + removed.stderr, /Removed 1 secret file\./);
+  });
+
   it("rewrites the unit of an existing install with OOMPolicy=continue", {
     skip: platform() !== "linux",
   }, () => {
@@ -270,7 +303,7 @@ describe("install-service", () => {
     const refused = run(home, bin, [...base, "--env", "FOO=1"]);
     assert.equal(refused.status, 2);
     assert.match(refused.stderr, /FOO/);
-    const ok = run(home, bin, [...base, "--env", "BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1"]);
+    const ok = run(home, bin, [...base, "--env", "BAND_WORKER_LINK_LOG_MS=1"]);
     assert.equal(ok.status, 0, ok.stderr);
     const file =
       platform() === "linux"
@@ -279,8 +312,8 @@ describe("install-service", () => {
     assert.match(
       readFileSync(file, "utf8"),
       platform() === "linux"
-        ? /BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY="1"/
-        : /<key>BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY<\/key>\s*<string>1<\/string>/,
+        ? /BAND_WORKER_LINK_LOG_MS="1"/
+        : /<key>BAND_WORKER_LINK_LOG_MS<\/key>\s*<string>1<\/string>/,
     );
   });
 

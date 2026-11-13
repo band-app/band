@@ -47,12 +47,14 @@ test.beforeAll(async () => {
   chmodSync(ghostDestroy, 0o755);
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
+    workerProfiles: [{ name: "e2e-profile" }],
     runners: [
       {
         id: "moon-runner",
         kind: "hook",
         spawn: hook,
         labels: { zone: "moon" },
+        profile: "e2e-profile",
         isolation: "process",
         maxConcurrent: 2,
         timeoutSec: 10,
@@ -105,6 +107,7 @@ test("lists the runner and shows the log of a run that failed", async ({ page })
   const runner = settingsPage.runnerRow("moon-runner");
   await settingsPage.expectRowVisible(runner);
   await expect(runner).toContainText("zone=moon");
+  await expect(settingsPage.runnerProfile(runner)).toContainText("Profile e2e-profile");
   await expect(settingsPage.runnerRunning(runner)).toHaveAttribute("data-max", "2");
 
   const run = settingsPage.runnerRun(`${REPO}-needs-moon`);

@@ -26,7 +26,6 @@ import { TRPCError } from "@trpc/server";
 import { ProvisionQueries, type ProvisionRow } from "../infra/db/queries/provisions";
 import { bandHome } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
-import { parseRemoteUrl } from "./_utils/git-token-source";
 import { HUB_VERSION, HUB_VERSION_UNRELEASED } from "./_utils/hub-version";
 import { checkRepoUrl, checkStartCommand } from "./_utils/provision-checks";
 import { renderProvisionScript } from "./_utils/provision-script";
@@ -92,10 +91,15 @@ export interface ProvisionView {
   log: string;
 }
 
+/** The username the clone sends with the token. GitHub and GitLab accept it for a PAT. */
+export const PROVISION_CLONE_USERNAME = "x-access-token";
+
 export interface ProvisionSettings {
   repoUrl: string;
   branch: string;
   command: string;
+  /** Name of the vault item whose token clones the repo over HTTPS. Empty: the machine's own git auth. */
+  tokenItem: string;
 }
 
 export interface CreatedCommand {
@@ -161,12 +165,13 @@ export class ProvisioningService {
   }
 
   settings(): ProvisionSettings {
-    const s: { repoUrl?: string; branch?: string; command?: string } =
+    const s: { repoUrl?: string; branch?: string; command?: string; tokenItem?: string } =
       settingsService.get().provisioning ?? {};
     return {
       repoUrl: s.repoUrl ?? "",
       branch: s.branch ?? "",
       command: s.command ?? DEFAULT_START_COMMAND,
+      tokenItem: s.tokenItem ?? "",
     };
   }
 
@@ -204,6 +209,7 @@ export class ProvisioningService {
           repoUrl: own.repoUrl ?? "",
           branch: own.branch ?? "",
           command: own.command ?? DEFAULT_START_COMMAND,
+          tokenItem: own.tokenItem ?? "",
         }
       : this.settings();
     if (settings.command) checkStartCommand(settings.command);
@@ -426,23 +432,27 @@ export class ProvisioningService {
 
   /** Clones the provisioning repo at its branch, pins the commit and packs the files. */
   private async buildBundle(id: string, settings: ProvisionSettings): Promise<string> {
+    // Without a token item the clone is plain `git clone` with this machine's own credentials.
+    const token = settings.tokenItem ? vaultService.getGlobalSecret(settings.tokenItem) : undefined;
+    if (settings.tokenItem && token === undefined) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `The provisioning clone token "${settings.tokenItem}" is not a vault item.`,
+      });
+    }
     const dir = this.dir(id);
     mkdirSync(dir, { recursive: true });
     const src = join(dir, "src");
     const host = hostRegistry.local;
     const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" };
-    const key = parseRemoteUrl(settings.repoUrl);
-    if (key) {
-      const cred = vaultService.findGitCredential({ host: key.host, path: key.path, repo: null });
-      if (cred) {
-        const basic = Buffer.from(`${cred.username}:${cred.password}`).toString("base64");
-        env.GIT_CONFIG_COUNT = "2";
-        env.GIT_CONFIG_KEY_0 = "http.extraHeader";
-        env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${basic}`;
-        // The credential is for the host the admin named, so a redirect must not carry it away.
-        env.GIT_CONFIG_KEY_1 = "http.followRedirects";
-        env.GIT_CONFIG_VALUE_1 = "false";
-      }
+    if (token !== undefined) {
+      const basic = Buffer.from(`${PROVISION_CLONE_USERNAME}:${token}`).toString("base64");
+      env.GIT_CONFIG_COUNT = "2";
+      env.GIT_CONFIG_KEY_0 = "http.extraHeader";
+      env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${basic}`;
+      // The credential is for the host the admin named, so a redirect must not carry it away.
+      env.GIT_CONFIG_KEY_1 = "http.followRedirects";
+      env.GIT_CONFIG_VALUE_1 = "false";
     }
     try {
       const args = ["clone", "--quiet", "--depth", "1"];
@@ -461,7 +471,7 @@ export class ProvisioningService {
       return sha;
     } catch (err) {
       rmSync(dir, { recursive: true, force: true });
-      const secrets = env.GIT_CONFIG_VALUE_0 ? [env.GIT_CONFIG_VALUE_0] : [];
+      const secrets = env.GIT_CONFIG_VALUE_0 ? [env.GIT_CONFIG_VALUE_0, token ?? ""] : [];
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: `Could not fetch the provisioning repo: ${scrub((err as Error).message, secrets).slice(0, 400)}`,

@@ -79,7 +79,6 @@ At once, for correctness or security:
 - The worker's lease runs out and it fences (#905): the worker kills held agents, and `acp.spawn` is refused until the next renewal. The worker also sends each lease renewal to the daemon (`lease {ttlMs}`), and the daemon kills every agent when the lease runs out with no renewal, so a worker that died cannot leave agents running past it.
 - A worktree folder goes on `blockedPaths`: the worker kills held agents whose cwd is inside it.
 - The worker is revoked or removed (the hub rejects its hello): the worker kills held agents before it exits. Uninstalling the service ends the agent daemon, which kills its agents.
-- An agent login is removed, switched or its secret replaced, or a vault git credential the agent holds as `GH_TOKEN` is rotated: the hub stops the runtimes that hold it.
 - A person stops the chat, removes it or removes the worktree.
 
 At the next clean point (no turn, nothing pending), not mid-turn:

@@ -96,7 +96,6 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
       command: str(a, "command"),
       args: strArray(a, "args"),
       env,
-      unsetEnv: a.unsetEnv === undefined ? undefined : strArray(a, "unsetEnv"),
       specHash: optStr(a, "specHash"),
       adapterVersion: optStr(a, "adapterVersion"),
     };
@@ -122,7 +121,6 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
       agentId,
       pid: stdio.pid ?? null,
       ...channels,
-      ghToken: Boolean(env.GH_TOKEN),
       ...(held ? { held: true } : {}),
     };
   });
@@ -152,7 +150,6 @@ export function registerAgentMethods(r: Registrar, ctx: WorkerContext): AgentCon
       pid: held.pid ?? null,
       ...channels,
       held: true,
-      ghToken: held.record.ghToken,
       specHash: held.record.specHash,
       stdin: held.record.stdinWritten,
     };

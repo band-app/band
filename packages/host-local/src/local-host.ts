@@ -141,6 +141,8 @@ export interface LocalHostOptions {
    * passes its state dir; the default is `<BAND_HOME>` for a worker.
    */
   resources?: { selfKind?: "hub" | "worker"; stateDir?: () => string };
+  /** Extra environment for the agent login probes: the variables a worker profile maps. */
+  probeEnv?: () => Promise<Record<string, string>> | Record<string, string>;
 }
 
 /**
@@ -151,8 +153,8 @@ export interface LocalHostOptions {
 export class LocalHost implements Host {
   readonly id = LOCAL_HOST_ID;
   readonly git: HostGit = {
-    exec: async (args, cwd) => ({ stdout: await execGit(args, cwd), stderr: "" }),
-    gh: async (args, cwd) => ({ stdout: await execGh(args, cwd), stderr: "" }),
+    exec: async (args, cwd, env) => ({ stdout: await execGit(args, cwd, env), stderr: "" }),
+    gh: async (args, cwd, env) => ({ stdout: await execGh(args, cwd, env), stderr: "" }),
   };
   readonly worktree: HostWorktree = {
     create: (spec) => createWorktree(spec),
@@ -270,7 +272,7 @@ export class LocalHost implements Host {
     try {
       const env: Record<string, string> = {};
       for (const [name, value] of Object.entries(process.env)) {
-        if (value !== undefined && !launch.unsetEnv?.includes(name)) env[name] = value;
+        if (value !== undefined) env[name] = value;
       }
       Object.assign(env, launch.env);
       const record = await holder.spawn({
@@ -280,7 +282,6 @@ export class LocalHost implements Host {
         args: launch.args,
         specHash: launch.specHash ?? null,
         adapterVersion: launch.adapterVersion ?? null,
-        ghToken: Boolean(launch.env.GH_TOKEN),
         ...(owned ? { owned: true } : {}),
       });
       agentId = record.agentId;
@@ -366,7 +367,8 @@ export class LocalHost implements Host {
   private refreshReport(): Promise<void> {
     if (this.reportProbe) return this.reportProbe;
     if (this.reportValue && Date.now() - this.reportAt <= REPORT_TTL_MS) return Promise.resolve();
-    this.reportProbe = probeCapabilities()
+    this.reportProbe = Promise.resolve(this.options.probeEnv?.())
+      .then((extra) => probeCapabilities(undefined, extra ?? {}))
       .then((value) => {
         this.reportValue = value;
         this.reportAt = Date.now();

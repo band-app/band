@@ -21,6 +21,7 @@ import type { WorktreeAgentInfo } from "../infra/events/status-event-bus";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import { forgetCheckpoints } from "./_utils/checkpoint-store";
+import { hubGithubApiToken } from "./_utils/hub-gh-auth";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
 import {
@@ -39,7 +40,6 @@ import {
 import { type SettingsService, settingsService } from "./settings-service";
 import { pruneMissing } from "./sync-service";
 import { tokenService } from "./token-service";
-import { vaultService } from "./vault-service";
 import { type WorktreeGroup, worktreeGroupService } from "./worktree-group-service";
 
 const log = createLogger("repo-service");
@@ -1032,24 +1032,19 @@ export class RepoService {
  */
 export const repoService = new RepoService();
 
-/** The default branch from the GitHub API, using a vault git credential for the host when there is one. */
+/** The default branch from the GitHub API, using the hub's GitHub token when there is one. */
 async function githubDefaultBranch(
   host: string,
   owner: string,
   name: string,
 ): Promise<string | null> {
   if (host !== "github.com") return null;
-  const credential = vaultService.findGitCredential({
-    host,
-    path: `${owner}/${name}`,
-    repo: null,
-    peek: true,
-  });
-  if (!credential) return null;
+  const token = hubGithubApiToken();
+  if (!token) return null;
   const base = (process.env.BAND_GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, "");
   const res = await fetch(`${base}/repos/${owner}/${name}`, {
     headers: {
-      Authorization: `Bearer ${credential.password}`,
+      Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
       "User-Agent": "band-hub",
     },

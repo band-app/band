@@ -45,6 +45,12 @@ export function ProvisionHostForm() {
   const [startCommand, setStartCommand] = useState("");
   const [hostName, setHostName] = useState("");
   const [profile, setProfile] = useState("");
+  const [tokenItem, setTokenItem] = useState("");
+  const vault = useQuery({
+    queryKey: ["vault.list"],
+    queryFn: async () => (await trpc.vault.list.query()).items,
+    enabled: isAdmin,
+  });
   const profiles = useWorkerProfiles(isAdmin);
   const [created, setCreated] = useState<Created | null>(null);
   const [view, setView] = useState<View | null>(null);
@@ -59,6 +65,7 @@ export function ProvisionHostForm() {
     setRepoUrl(settings.data.repoUrl);
     setBranch(settings.data.branch);
     setStartCommand(settings.data.command);
+    setTokenItem(settings.data.tokenItem ?? "");
   }, [settings.data]);
 
   const id = created?.id;
@@ -100,6 +107,7 @@ export function ProvisionHostForm() {
         repoUrl: repoUrl.trim(),
         branch: branch.trim(),
         command: startCommand.trim() || undefined,
+        tokenItem,
       });
       setNotice("Saved. New commands use this repo.");
       await settings.refetch();
@@ -140,8 +148,9 @@ export function ProvisionHostForm() {
         <summary className="cursor-pointer text-xs font-medium">Provisioning repo</summary>
         <div className="mt-2 space-y-2">
           <p className="text-xs text-muted-foreground">
-            Optional. The hub fetches this repo with its git credential and the computer runs the
-            start command from it before the worker starts. Leave it empty for the built-in install.
+            Optional. The hub fetches this repo with the vault item chosen below and the computer
+            runs the start command from it before the worker starts. Leave it empty for the built-in
+            install.
           </p>
           <Input
             aria-label="Provisioning repo URL"
@@ -166,6 +175,21 @@ export function ProvisionHostForm() {
               className="h-8 text-sm"
             />
           </div>
+          <select
+            aria-label="Provisioning token item"
+            value={tokenItem}
+            onChange={(e) => setTokenItem(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option value="">No token item</option>
+            {(vault.data ?? [])
+              .filter((i) => i.kind === "api_key" || i.kind === "env")
+              .map((i) => (
+                <option key={i.id} value={i.name}>
+                  {i.name}
+                </option>
+              ))}
+          </select>
           <Button
             type="button"
             variant="outline"

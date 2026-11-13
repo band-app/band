@@ -109,10 +109,6 @@ export class HeldAgentProcess implements AgentStdio {
     };
   }
 
-  get ghToken(): boolean {
-    return this.record.ghToken;
-  }
-
   readonly stdin: AgentStdio["stdin"] = {
     write: (chunk) => {
       void this.holder

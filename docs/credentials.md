@@ -1,11 +1,11 @@
 ---
 title: Credentials
-description: Store API keys, environment values, OAuth connections and git tokens encrypted on the hub, and see where Band uses them.
+description: Store API keys, environment values and OAuth connections encrypted on the hub, and see where Band uses them.
 section: access
 order: 30
 ---
 
-The hub keeps your secrets in an encrypted store. Other parts of Band refer to a credential by name. Git on a worker, MCP servers, agent logins and voice dictation all read from it, so a secret never sits in a repo, a settings file or an agent's environment.
+The hub keeps your secrets in an encrypted store. Other parts of Band refer to a credential by name. Worker profiles, MCP servers, the Hub GitHub token and voice dictation read from it, so a secret never sits in a repo or a settings file.
 
 You manage credentials in Settings > Credentials. It needs an admin token (see [Devices and pairing](devices.md)).
 
@@ -13,10 +13,11 @@ You manage credentials in Settings > Credentials. It needs an admin token (see [
 
 | Kind | What it holds | Used by |
 | --- | --- | --- |
-| API key | One secret string. | [MCP servers](mcp-servers.md), [agent logins](agent-logins.md), [voice dictation](voice-dictation.md). |
-| Environment variable | A value. The credential's name is the variable name. | MCP servers that run as a process on a worker. |
-| OAuth | An access and refresh token for one account. | MCP servers that use OAuth. |
-| Git credential | An access token for a git host. | Git on workers, and `gh` on workers. |
+| API key | One secret string. | [Worker profiles](worker-profiles.md), [MCP servers](mcp-servers.md), [voice dictation](voice-dictation.md), the [Hub GitHub token](#hub-github-token) and the provisioning token. |
+| Environment variable | A value. The credential's name is the variable name. | Worker profiles and MCP servers that run as a process on a worker. |
+| OAuth | An access and refresh token for one account. | MCP servers that use OAuth. A worker profile cannot map it. |
+
+There is no git kind. A token for git or `gh` is an API key that a worker profile maps to `GH_TOKEN`. An item of the old git kind became an API key on upgrade and kept its value.
 
 Each credential has a scope. `global` applies everywhere. `repo:<name>` ties it to one repo. A name is unique within its scope. Settings > Credentials creates global credentials. Use `band vault put --scope` for a repo scope.
 
@@ -26,49 +27,35 @@ In Settings > Credentials, fill in Add a key:
 
 1. Enter a name. For an environment variable, enter the variable name.
 2. Choose the kind.
-3. For a git credential, enter the Host, such as `github.com`, and the Repositories pattern.
-4. Paste the value and click Add credential.
+3. Paste the value and click Add credential.
 
 Band sends the value once. After that, nothing can read it back. You can replace it or delete it. The list shows each credential's kind, scope and last use.
 
 OAuth credentials come from the MCP page. Choose Connect with OAuth while adding a server, approve the connection in the window that opens, and the credential appears in the list. The hub refreshes the token before it expires. Deleting an OAuth credential also revokes the token at the provider, when the provider supports that.
 
-## Git credentials for workers
+## Give a credential to a worker
 
-A git credential lets a worker clone, fetch and push private repositories without a key on the worker's disk.
+A worker receives a vault item only when its [worker profile](worker-profiles.md) maps the item to an environment variable or a file. The worker fetches the value over its authenticated link and keeps it in memory. A worker with no profile gets nothing from the hub and uses its machine's own logins. Band does not know what the value is for: `GH_TOKEN` works for `gh` and for git over HTTPS because those tools read it, not because Band handles them.
 
-- The Host is the git server, for example `github.com`.
-- The Repositories pattern matches `owner/repo`. `*` matches within one segment and `**` matches across segments. `owner/*` covers every repo of one owner.
-- The username defaults to `x-access-token`, which GitHub accepts for a personal access token. Change it for hosts that need another name.
+See [Runner hooks](runner-hooks.md#git-and-github-auth) for workers that a runner starts.
 
-```sh
-band vault put github-work --kind git --host github.com --path 'owner/*'
-```
+## Hub GitHub token
 
-The command reads the token from standard input. Pipe it in or paste it, then press Ctrl-D.
+The hub runs `gh` itself for pull request polling, webhooks and the default-branch lookup. It uses the machine's `gh` login or the `GH_TOKEN` of its environment first. When neither exists, it uses the vault item named in Settings > Credentials > Hub GitHub token (the `hubGithubToken` setting). With no item either, the hub reports "No GitHub credential for gh on this hub". See [GitHub integration](github-integration.md).
 
-How it works: git on every worker runs a helper that asks the hub for a token when it needs one. The hub answers only for a repo that is placed on that worker. The token goes in that one reply and is not written to the worker's disk, environment or logs. On a long-lived worker, the machine's own git credential helpers answer first and the hub is the fallback. A [runner](runner-hooks.md)-started worker, or one started with `--hub-git-credentials-only`, asks only the hub.
-
-When a runner starts a worker for a repo that has a matching git credential, the hub clones the repo through the worker, so the runner needs no git access of its own.
-
-### GitHub CLI on workers
-
-The `gh` command on a worker gets a `GH_TOKEN` from the broadest git credential for `github.com`. The hub passes it to each agent and terminal when it starts, and keeps it out of files and logs. Workers started by a runner get it automatically. For other workers, set `BAND_WORKER_GH_TOKEN=hub` in the worker's environment. The hub's own `gh` calls use the same credential when the hub's machine has no `gh` login.
-
-A [worker profile](worker-profiles.md) with a `credentials` object replaces these rules for its workers: git gets only the listed vault items, and `gh` gets the token of the profile's `gh` item with no opt-in, or none when the profile names no `gh` item.
-
-See [Runner hooks](runner-hooks.md#git-and-github-auth) for the runner side.
+The provisioning repo has its own optional token item, described in [Provision a worker](provisioning.md).
 
 ## Command line
 
 ```sh
 band vault list
 printf '%s' "$TOKEN" | band vault put my-api-key --kind api_key --description "Search API"
+printf '%s' "$TOKEN" | band vault put github-agents
 band vault put MY_VAR --kind env --scope repo:my-app
 band vault delete my-api-key
 ```
 
-`list` shows names, kinds, scopes and last use, never values. Prefer standard input to `--value`, because an argument shows in the process list and shell history. See [band vault](/docs/cli-vault).
+`put --kind git` is refused. `list` shows names, kinds, scopes and last use, never values. Prefer standard input to `--value`, because an argument shows in the process list and shell history. See [band vault](/docs/cli-vault).
 
 ## Where the key lives
 
@@ -92,6 +79,6 @@ It re-encrypts every credential in one transaction and then replaces the file. I
 ## What Band never exposes
 
 - No API returns a secret. The list holds metadata only.
-- Agents cannot read, list or change credentials. A worker's agent gets 403 on every credential call.
+- Agents cannot read, list or change credentials, and cannot list worker profiles or read their mappings. An agent gets 403 on `vault.*` and `workerProfiles.*`. A worker can fetch only the secrets of its own profile.
 - Log lines and error messages do not contain secret values.
 - The hub stores only a hash of device tokens. Those are not vault items.

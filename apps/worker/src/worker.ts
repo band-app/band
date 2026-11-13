@@ -20,6 +20,7 @@ import {
   METHOD_LIFECYCLE_POLICY,
   METHOD_LIFECYCLE_SHUTDOWN,
   METHOD_LIFECYCLE_SLEEP,
+  METHOD_SECRETS_CHANGED,
   type Ready,
   RPC_METHOD_NOT_FOUND,
   RpcError,
@@ -37,7 +38,6 @@ import { BOOTSTRAP_TOKEN_PREFIX, ConfigError, linkUrl, type WorkerConfig } from 
 import { Registrar, type WorkerContext } from "./context.ts";
 import { registerDirectMethods } from "./direct.ts";
 import { createExtensionHost, registerExtensionMethods } from "./extensions.ts";
-import { GitCredentialBroker, gitCredentialEnv } from "./git-credentials.ts";
 import { LeaseGuard } from "./lease.ts";
 import { registerAgentMethods } from "./methods-agents.ts";
 import { registerBasicMethods } from "./methods-basic.ts";
@@ -46,6 +46,7 @@ import { registerStreamMethods } from "./methods-streams.ts";
 import { PathPolicy } from "./path-policy.ts";
 import { registerPluginMethods, WorkerPlugins } from "./plugins.ts";
 import { registerRelayMethods } from "./relay.ts";
+import { WorkerSecrets } from "./secrets.ts";
 import {
   ensureStateDir,
   loadExtraRoots,
@@ -83,12 +84,6 @@ export interface WorkerOptions {
     LinkClientOptions,
     "reconnect" | "heartbeatMisses" | "handshakeTimeoutMs" | "stableMs" | "freshAfterShortResumes"
   >;
-  /**
-   * The `credential.helper` value (git's `!` form) that runs this worker's helper. With it the
-   * worker puts git credential settings in its own environment, which the git commands, agents
-   * and terminals it starts inherit. A worker started in a test process has none.
-   */
-  gitCredentialHelper?: string;
   /**
    * Run terminals in a detached daemon that outlives the worker, so they survive a restart (see
    * `terminals.ts`). Off by default: a worker started in a test process would leave a daemon behind.
@@ -204,10 +199,13 @@ export class Worker {
     const agentHolder = createWorkerAgentHolder(config.stateDir, options.persistentAgents === true);
     // Set below, once the context exists. Language servers come from installed extensions.
     let extensionHost: ReturnType<typeof createExtensionHost> | undefined;
+    // Set once the context exists; the first probe may run before.
+    const secretsHolder: { current?: WorkerSecrets } = {};
     const host = new LocalHost({
       terminalBackend: () => backend,
       languageServers: () => extensionHost?.languageServers() ?? [],
       resources: { selfKind: "worker", stateDir: () => config.stateDir },
+      probeEnv: () => secretsHolder.current?.env() ?? {},
       ...(agentHolder ? { agentHolder } : {}),
       repos: {
         mappingsFile: () => join(config.stateDir, "repos.json"),
@@ -267,6 +265,8 @@ export class Worker {
     const worker = new Worker(client, workerId, policy.rootPaths, config, config.stateDir);
     worker.terminalDaemon = terminals.daemon;
 
+    const secrets = new WorkerSecrets({ session: client.session, stateDir: config.stateDir, log });
+    secretsHolder.current = secrets;
     const ctx: WorkerContext = {
       host,
       session: client.session,
@@ -289,6 +289,7 @@ export class Worker {
       stateDir: config.stateDir,
       reposDir: config.reposDir,
       cli: (await WorkerCli.start(config.stateDir, log)) ?? undefined,
+      secrets,
       ownsChats: config.ownChats,
       plugins: runningPlugins,
       ...(agentHolder ? { agentHolder } : {}),
@@ -355,17 +356,6 @@ export class Worker {
     registerUpdateMethods(registrar, serviceManager, (level, fields, msg) =>
       level === "error" ? log.error(fields, msg) : log.info(fields, msg),
     );
-    if (options.gitCredentialHelper) {
-      const broker = new GitCredentialBroker(ctx);
-      const socketPath = await broker.start();
-      worker.disposers.push(() => broker.close());
-      Object.assign(
-        process.env,
-        gitCredentialEnv(process.env, options.gitCredentialHelper, socketPath, {
-          resetHelpers: config.ephemeral || config.hubGitCredentialsOnly,
-        }),
-      );
-    }
     worker.wire(ctx);
 
     try {
@@ -449,6 +439,15 @@ export class Worker {
       this.connectedOnce = true;
       log.info({ workerId: this.workerId, resumed }, "connected to the hub");
       this.chats?.onConnected();
+      // The files the worker's profile maps are written (or removed) before anything needs them.
+      void ctx.secrets
+        ?.sync()
+        .catch((err) =>
+          log.warn(
+            { message: err instanceof Error ? err.message : String(err) },
+            "could not sync the profile secret files",
+          ),
+        );
       // Shells that ended while the worker was down: the hub hears of them now.
       void this.terminalDaemon
         ?.recoverExits()
@@ -520,6 +519,12 @@ export class Worker {
     client.on("mismatch", (need: number) => {
       log.error({ need }, "the hub speaks another link protocol version");
       void this.stop(1);
+    });
+
+    // The hub changed the profile or a vault item it maps: rewrite the files now.
+    client.session.handle(METHOD_SECRETS_CHANGED, async () => {
+      await ctx.secrets?.sync();
+      return null;
     });
 
     if (this.config.ephemeral) {

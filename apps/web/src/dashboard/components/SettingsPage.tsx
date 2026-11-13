@@ -38,7 +38,6 @@ import type { CodingAgentDefinition, CodingAgentType } from "../types";
 import { AgentIcon } from "./agent-icons";
 import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { AgentHooksSettings } from "./settings/AgentHooksSettings";
-import { AgentLoginsSettings } from "./settings/AgentLoginsSettings";
 import { AppearanceSettings } from "./settings/AppearanceSettings";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { CredentialsSettings } from "./settings/CredentialsSettings";
@@ -89,7 +88,6 @@ export type SettingsSectionId =
   | "devices"
   | "repos"
   | "credentials"
-  | "agent-logins"
   | "voice"
   | "mcp"
   | "extensions"
@@ -189,12 +187,6 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     id: "agent-hooks",
     title: "Agent hooks",
     subtitle: "Claude Code hooks that report what an agent in a terminal is doing.",
-    group: "AI capabilities",
-  },
-  {
-    id: "agent-logins",
-    title: "Agent logins",
-    subtitle: "Credentials Band gives a coding agent when it starts one.",
     group: "AI capabilities",
   },
   {
@@ -918,13 +910,6 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                     />
                   ) : null}
                   {active === "repos" && !repoPage ? <ReposOverview onOpen={setRepoPage} /> : null}
-
-                  {/* ── Agent logins ───────────────────────────────── */}
-                  {active === "agent-logins" ? (
-                    <SettingsSection title="Agent logins">
-                      <AgentLoginsSettings />
-                    </SettingsSection>
-                  ) : null}
 
                   {/* ── Credentials ────────────────────────────────── */}
                   {active === "credentials" ? (

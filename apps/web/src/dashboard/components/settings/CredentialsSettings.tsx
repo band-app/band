@@ -13,7 +13,6 @@ const KIND_LABEL: Record<VaultItem["kind"], string> = {
   api_key: "API key",
   env: "Environment variable",
   oauth: "OAuth",
-  git: "Git credential",
 };
 
 function formatTime(at: number | null): string {
@@ -43,9 +42,7 @@ export function CredentialsSettings() {
   });
 
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<"api_key" | "env" | "git">("api_key");
-  const [gitHost, setGitHost] = useState("github.com");
-  const [gitPath, setGitPath] = useState("");
+  const [kind, setKind] = useState<"api_key" | "env">("api_key");
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +58,6 @@ export function CredentialsSettings() {
         kind,
         value,
         scope: "global",
-        ...(kind === "git" && { host: gitHost.trim(), pathPattern: gitPath.trim() }),
       });
       setName("");
       setValue("");
@@ -154,31 +150,12 @@ export function CredentialsSettings() {
           <select
             aria-label="Credential kind"
             value={kind}
-            onChange={(e) => setKind(e.target.value as "api_key" | "env" | "git")}
+            onChange={(e) => setKind(e.target.value as "api_key" | "env")}
             className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
           >
             <option value="api_key">API key</option>
             <option value="env">Environment variable</option>
-            <option value="git">Git credential (access token)</option>
           </select>
-          {kind === "git" && (
-            <>
-              <Input
-                aria-label="Git host"
-                placeholder="Host, such as github.com"
-                value={gitHost}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGitHost(e.target.value)}
-                className="h-8 text-sm"
-              />
-              <Input
-                aria-label="Git path pattern"
-                placeholder="Repositories, such as owner/* or owner/repo"
-                value={gitPath}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGitPath(e.target.value)}
-                className="h-8 text-sm"
-              />
-            </>
-          )}
           <Input
             aria-label="Credential value"
             type="password"
@@ -192,18 +169,15 @@ export function CredentialsSettings() {
             type="button"
             size="sm"
             data-testid="settings__credential-add"
-            disabled={
-              busy ||
-              name.trim() === "" ||
-              value === "" ||
-              (kind === "git" && gitPath.trim() === "")
-            }
+            disabled={busy || name.trim() === "" || value === ""}
             onClick={() => void add()}
           >
             Add credential
           </Button>
         </div>
       </SettingsRow>
+
+      <HubGithubToken items={vault.data?.items ?? []} onError={fail} />
 
       {error ? (
         <p
@@ -215,5 +189,55 @@ export function CredentialsSettings() {
         </p>
       ) : null}
     </>
+  );
+}
+
+/** The vault item the hub's own gh and GitHub API calls use when its machine has no gh login. */
+function HubGithubToken({
+  items,
+  onError,
+}: {
+  items: VaultItem[];
+  onError: (err: unknown) => void;
+}) {
+  const queryClient = useQueryClient();
+  const settings = useQuery({
+    queryKey: ["settings.get"],
+    queryFn: () => trpc.settings.get.query(),
+  });
+  const current = (settings.data?.hubGithubToken as string | undefined) ?? "";
+  const choices = items.filter((i) => i.kind === "api_key" || i.kind === "env");
+  const change = async (next: string) => {
+    try {
+      await trpc.settings.update.mutate({ hubGithubToken: next });
+    } catch (err) {
+      onError(err);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["settings.get"] });
+  };
+  return (
+    <SettingsRow
+      variant="stacked"
+      label="Hub GitHub token"
+      description="The vault item the hub uses for its own gh and GitHub API calls when the hub machine has no gh login and no GH_TOKEN variable."
+    >
+      <select
+        aria-label="Hub GitHub token"
+        data-testid="settings__hub-github-token"
+        value={current}
+        onChange={(e) => void change(e.target.value)}
+        className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm"
+      >
+        <option value="">None</option>
+        {current && !choices.some((i) => i.name === current) ? (
+          <option value={current}>{current} (not found)</option>
+        ) : null}
+        {choices.map((i) => (
+          <option key={i.id} value={i.name}>
+            {i.name}
+          </option>
+        ))}
+      </select>
+    </SettingsRow>
   );
 }

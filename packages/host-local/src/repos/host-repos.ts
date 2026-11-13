@@ -39,8 +39,8 @@ async function git(args: string[], cwd: string): Promise<string | null> {
 }
 
 /** The repository `git clone` makes, with the machine's own git credentials and no prompt. */
-function clone(url: string, dest: string): Promise<void> {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+function clone(url: string, dest: string, extraEnv?: Record<string, string>): Promise<void> {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...extraEnv };
   env.PATH = prependBinDirs(env.PATH);
   return new Promise((resolve, reject) => {
     execFile(
@@ -155,7 +155,7 @@ export class LocalRepos implements HostRepos {
     }
     const running = this.ensuring.get(id.key);
     if (running) return running;
-    const run = this.doEnsure(id.key, id.url, id.owner, id.name).finally(() =>
+    const run = this.doEnsure(id.key, id.url, id.owner, id.name, spec.env).finally(() =>
       this.ensuring.delete(id.key),
     );
     this.ensuring.set(id.key, run);
@@ -167,6 +167,7 @@ export class LocalRepos implements HostRepos {
     url: string,
     owner: string,
     name: string,
+    env?: Record<string, string>,
   ): Promise<EnsureRepoResult> {
     const mappings = await this.load();
     const mapped = mappings[key];
@@ -189,7 +190,7 @@ export class LocalRepos implements HostRepos {
       if (!empty) dest = `${base}-${createHash("sha256").update(key).digest("hex").slice(0, 6)}`;
     }
     await mkdir(dirname(dest), { recursive: true });
-    await clone(url, dest);
+    await clone(url, dest, env);
     const canonical = await realpath(dest);
     await this.map(url, canonical);
     return { path: canonical, cloned: true };

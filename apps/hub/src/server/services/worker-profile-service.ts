@@ -1,20 +1,15 @@
 /**
  * Worker profiles: named bundles of how a worker is provisioned (repo, labels, trust, worker
- * settings) and which vault credentials it may receive.
+ * settings) and which vault items it receives as environment variables and files.
  *
  * Profiles live in `settings.workerProfiles` and are checked on every read: an invalid entry is
- * reported by `list` and never applied. An admin attaches a profile to a worker (`hosts.profile`);
- * a worker cannot choose or change its own. The hub reads the profile on every credential request,
- * so changing it takes effect on the worker's next call.
- *
- * A profile with a `credentials` object is a policy: git items, the `gh` item and agent logins not
- * listed are refused. A profile without it, and a worker without a profile, keep the rules from
- * before profiles. A worker whose profile name no longer resolves gets nothing, not everything.
+ * reported by `list` and never applied. An admin attaches a profile to a worker (`hosts.profile`),
+ * and a runner names one for the workers it starts. A worker cannot choose or change its own.
+ * `worker-secrets-service.ts` hands the secrets over the worker's link.
  */
 
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
-import { AgentLoginQueries } from "../infra/db/queries/agent-logins";
 import { TokenQueries } from "../infra/db/queries/tokens";
 import { checkRepoUrl, checkStartCommand } from "./_utils/provision-checks";
 import { describeIssue, type WorkerProfile, workerProfileSchema } from "./_utils/worker-profile";
@@ -36,19 +31,8 @@ export interface ProfileList {
   invalid: InvalidProfile[];
 }
 
-/** What a worker with a profile may receive. */
-export interface CredentialPolicy {
-  /** Names of the vault git items. */
-  git: string[];
-  /** Name of the git item `gh` gets, or null for none. */
-  gh: string | null;
-  /** Ids or labels of the agent logins. */
-  agentLogins: string[];
-}
-
 export class WorkerProfileService {
   private readonly hosts = new TokenQueries();
-  private readonly logins = new AgentLoginQueries();
 
   private raw(): unknown[] {
     const value = settingsService.get().workerProfiles;
@@ -92,10 +76,36 @@ export class WorkerProfileService {
 
   list(): ProfileList {
     const { valid, invalid } = this.parse();
+    // The vault changes without the settings file, so the items are checked on every read.
+    const usable: WorkerProfile[] = [];
+    const bad = [...invalid];
+    valid.forEach((p, index) => {
+      const problem = this.itemProblem(p);
+      if (problem) bad.push({ index, name: p.name, error: problem });
+      else usable.push(p);
+    });
     return {
-      profiles: valid.map((p) => ({ ...p, workers: this.hosts.hostIdsWithProfile(p.name).length })),
-      invalid,
+      profiles: usable.map((p) => ({
+        ...p,
+        workers: this.hosts.hostIdsWithProfile(p.name).length,
+      })),
+      invalid: bad,
     };
+  }
+
+  /** The first mapped or clone item that is not a usable vault item, as `path: message`. */
+  private itemProblem(profile: WorkerProfile): string | null {
+    const mapped = (profile.secrets ?? []).map((m, i) => [`secrets.${i}.item`, m.item] as const);
+    const clone = profile.provisioning?.tokenItem
+      ? [["provisioning.tokenItem", profile.provisioning.tokenItem] as const]
+      : [];
+    for (const [path, name] of [...mapped, ...clone]) {
+      const kind = vaultService.globalKindOf(name);
+      if (!kind) return `${path}: no vault item named "${name}"`;
+      if (kind === "oauth")
+        return `${path}: "${name}" is an OAuth connection, which cannot be mapped`;
+    }
+    return null;
   }
 
   get(name: string): WorkerProfile | null {
@@ -112,25 +122,8 @@ export class WorkerProfileService {
     if (p?.command)
       this.field("provisioning.command", () => checkStartCommand(p.command as string));
     if (p?.command && !p.repoUrl) throw bad("provisioning.repoUrl: a start command needs a repo");
-    const gitItems = new Set(
-      vaultService
-        .list()
-        .filter((i) => i.kind === "git")
-        .map((i) => i.name),
-    );
-    const c = profile.credentials;
-    for (const name of c?.git ?? []) {
-      if (!gitItems.has(name)) throw bad(`credentials.git: no vault git item named "${name}"`);
-    }
-    if (c?.gh && !gitItems.has(c.gh)) {
-      throw bad(`credentials.gh: no vault git item named "${c.gh}"`);
-    }
-    const logins = this.logins.list();
-    for (const ref of c?.agentLogins ?? []) {
-      if (!logins.some((l) => l.id === ref || l.label === ref)) {
-        throw bad(`credentials.agentLogins: no agent login "${ref}"`);
-      }
-    }
+    const problem = this.itemProblem(profile);
+    if (problem) throw bad(problem);
     return profile;
   }
 
@@ -207,25 +200,17 @@ export class WorkerProfileService {
   }
 
   /**
-   * The credential policy of a worker, or null when today's rules apply (no profile, or a profile
-   * without `credentials`). A profile that no longer resolves is the empty policy.
+   * The profile a worker has, or null. A worker whose profile no longer resolves (removed, or
+   * broken in `settings.json`) gets null as well, so it receives nothing.
    */
-  policyFor(hostId: string): CredentialPolicy | null {
+  profileOf(hostId: string): WorkerProfile | null {
     const name = this.profileNameOf(hostId);
     if (!name) return null;
     const profile = this.get(name);
     if (!profile) {
-      log.warn(
-        `worker ${hostId} names profile ${name}, which is missing or invalid: no credentials`,
-      );
-      return { git: [], gh: null, agentLogins: [] };
+      log.warn(`worker ${hostId} names profile ${name}, which is missing or invalid: no secrets`);
     }
-    if (!profile.credentials) return null;
-    return {
-      git: profile.credentials.git ?? [],
-      gh: profile.credentials.gh ?? null,
-      agentLogins: profile.credentials.agentLogins ?? [],
-    };
+    return profile;
   }
 }
 

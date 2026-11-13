@@ -13,6 +13,7 @@ const settingsInput = z.object({
   repoUrl: z.string().max(500).optional(),
   branch: z.string().max(200).optional(),
   command: z.string().max(200).optional(),
+  tokenItem: z.string().max(200).optional(),
 });
 
 export const provisioningRouter = t.router({

@@ -43,7 +43,6 @@ import { seedCodingAgentsFromTypes } from "./coding-agent-seed";
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { extensionWorkerService } from "./extension-worker-service";
 import { followService } from "./follow-service";
-import { gitCredentialService } from "./git-credential-service";
 import { placementService } from "./placement-service";
 import { repoService } from "./repo-service";
 import { terminalService } from "./terminal-service";
@@ -51,6 +50,7 @@ import { TokenExchangeError, type TokenService, tokenService } from "./token-ser
 import { emit } from "./watcher-service";
 import { workerLeaseService } from "./worker-lease-service";
 import { workerRelayService } from "./worker-relay-service";
+import { workerSecretsService } from "./worker-secrets-service";
 import { workerUpdateService } from "./worker-update-service";
 import { worktreeService } from "./worktree-service";
 
@@ -251,7 +251,7 @@ export class WorkerLinkService {
   private onSession(session: ServerSession): void {
     this.remoteHost(session.workerId).attachSession(session);
     workerRelayService.attach(session);
-    gitCredentialService.attach(session);
+    workerSecretsService.attach(session);
     ephemeralLifecycleService.attach(session);
     checkpointService.attach(session);
     workerLeaseService.attach(session);

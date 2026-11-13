@@ -104,7 +104,7 @@ band repos add --url https://github.com/owner/repo.git
 
 Run it from any machine with the CLI set up as in [Connect](#connect).
 
-Without `--branch` the hub reads the default branch with `git ls-remote --symref` on an online worker, or from the GitHub API when the vault holds a git credential for github.com. The clone uses the worker's own git credentials, or the vault's git credential on a runner worker (see [Runners](runner-hooks.md)).
+Without `--branch` the hub reads the default branch with `git ls-remote --symref` on an online worker, or from the GitHub API with the hub's `gh` login, `GH_TOKEN` or the Hub GitHub token. The clone uses the worker's own git credentials, or the `GH_TOKEN` of its [worker profile](worker-profiles.md) on a runner worker (see [Runners](runner-hooks.md)).
 
 From a worker. When a worker already has a checkout, pick it on that worker. In the UI, choose Add repo in the sidebar's Repos panel and then From a worker, and browse the worker's home directory. The hub reads the folder's `origin` URL and default branch, and the worker keeps the folder in its own mapping, so it never clones it again. A folder outside the directories the worker serves is added as a root after you confirm. The CLI does the same:
 
