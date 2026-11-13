@@ -54,8 +54,10 @@ describe("chat store batches", () => {
       };
       store.beginBatch();
       append(store, store.takeId() as number);
-      await new Promise((r) => setTimeout(r, 5_500));
-      assert.ok(age >= 5_000, `age ${age}`);
+      await new Promise((r) => setTimeout(r, 6_500));
+      // The timer runs on a monotonic clock and the age comes from Date.now(), so it can read 1 ms short.
+      assert.notEqual(age, -1, "the watchdog did not fire");
+      assert.ok(age >= 4_900, `age ${age}`);
       assert.equal(store.inTransaction, false);
       assert.equal(store.readCommittedIdRange(1, 100, 10).length, 1);
       // Later writes commit normally.

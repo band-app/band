@@ -2637,7 +2637,7 @@ fn cmd_chats_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
         let labels = chat
             .get("labels")
             .and_then(|v| v.as_object())
-            .map(|obj| {
+            .map_or_default(|obj| {
                 let mut pairs: Vec<(&String, &serde_json::Value)> = obj.iter().collect();
                 pairs.sort_by(|a, b| a.0.cmp(b.0));
                 pairs
@@ -2645,8 +2645,7 @@ fn cmd_chats_list(worktree_id: Option<&str>) -> Result<CommandResult, String> {
                     .filter_map(|(k, v)| v.as_str().map(|s| format!("{k}={s}")))
                     .collect::<Vec<_>>()
                     .join(",")
-            })
-            .unwrap_or_default();
+            });
         rows.push([
             id.to_string(),
             name.to_string(),
@@ -3414,13 +3413,11 @@ fn cmd_terminal_list(worktree_id: Option<&str>) -> Result<CommandResult, String>
         let pid = term
             .get("pid")
             .and_then(serde_json::Value::as_u64)
-            .map(|v| v.to_string())
-            .unwrap_or_default();
+            .map_or_default(|v| v.to_string());
         let scrollback = term
             .get("scrollbackLength")
             .and_then(serde_json::Value::as_u64)
-            .map(|v| v.to_string())
-            .unwrap_or_default();
+            .map_or_default(|v| v.to_string());
         rows.push([id.to_string(), title.to_string(), pid, scrollback]);
         json_terminals.push(term.clone());
     }
@@ -4627,13 +4624,12 @@ fn cmd_hosts_list() -> Result<CommandResult, String> {
             let labels = host
                 .get("labels")
                 .and_then(|v| v.as_array())
-                .map(|l| {
+                .map_or_default(|l| {
                     l.iter()
                         .filter_map(|x| x.as_str())
                         .collect::<Vec<_>>()
                         .join(",")
-                })
-                .unwrap_or_default();
+                });
             let last_seen = host
                 .get("lastSeenAt")
                 .and_then(serde_json::Value::as_u64)
@@ -4768,8 +4764,7 @@ fn wait_for_provision(client: &api::ApiClient, id: &str) -> Result<CommandResult
                 let code = cmd.get("exitCode").and_then(serde_json::Value::as_i64);
                 return Err(format!(
                     "Provisioning {id} failed{}",
-                    code.map(|c| format!(" with exit code {c}"))
-                        .unwrap_or_default()
+                    code.map_or_default(|c| format!(" with exit code {c}"))
                 ));
             }
             "expired" => return Err(format!("Provisioning {id} expired before it was used")),
@@ -5818,14 +5813,13 @@ fn cmd_extensions(procedure: &str, mutate: bool) -> Result<CommandResult, String
         let editors: Vec<String> = ext
             .pointer("/contributes/fileEditors")
             .and_then(|v| v.as_array())
-            .map(|list| {
+            .map_or_default(|list| {
                 list.iter()
                     .map(|e| {
                         let selectors: Vec<&str> = e
                             .get("selector")
                             .and_then(|v| v.as_array())
-                            .map(|a| a.iter().filter_map(|s| s.as_str()).collect())
-                            .unwrap_or_default();
+                            .map_or_default(|a| a.iter().filter_map(|s| s.as_str()).collect());
                         format!(
                             "{} ({})",
                             e.get("label").and_then(|v| v.as_str()).unwrap_or(""),
@@ -5833,8 +5827,7 @@ fn cmd_extensions(procedure: &str, mutate: bool) -> Result<CommandResult, String
                         )
                     })
                     .collect()
-            })
-            .unwrap_or_default();
+            });
         rows.push([
             text("id").to_string(),
             text("name").to_string(),
