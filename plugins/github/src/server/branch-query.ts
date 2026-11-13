@@ -28,6 +28,7 @@ interface PullRequestNode extends MergeQueueNode {
   state: string;
   url: string;
   isDraft: boolean;
+  baseRefName?: string | null;
   /** Null when the fork the PR came from has been deleted. */
   headRepositoryOwner: { login: string } | null;
   /** Only asked of a fork's parent repo: the head commit's combined check state. */
@@ -82,7 +83,7 @@ export function buildBranchStatusQuery(
     owner { login }
     parent { name owner { login } }
     pullRequests(headRefName: "${branch}", first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { number title state url isDraft headRepositoryOwner { login }${queueFields} }
+      nodes { number title state url isDraft baseRefName headRepositoryOwner { login }${queueFields} }
     }
     ref(qualifiedName: "refs/heads/${branch}") {
       target {
@@ -145,6 +146,7 @@ function toReview(node: PullRequestNode): BranchReview {
     url: node.url,
     state: open ? "open" : node.state === "MERGED" ? "merged" : "closed",
     isDraft: node.isDraft,
+    ...(node.baseRefName && { baseBranch: node.baseRefName }),
     ...(mergeQueue && { mergeQueue }),
     ...(autoMerge && { autoMerge }),
   };
@@ -176,7 +178,7 @@ export function buildParentStatusQuery(
     const branch = escapeGraphQL(name);
     return `${branchAlias(index)}: repository(owner: "${owner}", name: "${repo}") {
     pullRequests(headRefName: "${branch}", first: 20, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { number title state url isDraft headRepositoryOwner { login }${queueFields} commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
+      nodes { number title state url isDraft baseRefName headRepositoryOwner { login }${queueFields} commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
     }
   }`;
   });

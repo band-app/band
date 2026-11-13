@@ -125,6 +125,8 @@ export interface WorktreeInfo {
   lifecycle?: "sleeping" | "waking";
   /** The host the worktree lives on. Absent or `local` for this machine. */
   hostId?: string;
+  /** The branch the worktree was created from, when it was given one. */
+  baseBranch?: string;
   /** The group the worktree is in, or null for none. */
   groupId?: string | null;
   /** Marked unread by a person, on any device. Shown as a dot until the worktree is opened or marked read. */
@@ -186,6 +188,8 @@ export interface PullRequestSummary {
   url: string;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  /** The branch the PR merges into. Absent in rows stored before it was read. */
+  baseBranch?: string;
   /** Absent in rows stored before the merge queue was read. */
   mergeQueue?: {
     state: "queued" | "awaiting_checks" | "mergeable" | "locked" | "unmergeable";

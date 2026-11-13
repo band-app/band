@@ -820,6 +820,14 @@ export class WorktreeService {
     }
     this.creatingBranches.delete(inFlightKey);
     if (originLink) this.repoQueries.setOrigin(input.repo, input.branch, originLink);
+    if (input.base) {
+      this.repoQueries.setBaseBranch(
+        input.repo,
+        input.branch,
+        input.base,
+        remote ? hostId : "local",
+      );
+    }
     if (input.groupId) {
       this.repoQueries.setGroup(input.repo, input.branch, input.groupId, remote ? hostId : "local");
     }

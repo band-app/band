@@ -545,6 +545,17 @@ describe("tRPC — worktree operations", () => {
       base: "main",
     });
     expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "repos.list");
+    const repos = await trpcData<{
+      repos: Array<{
+        name: string;
+        worktrees: Array<{ branch: string; baseBranch?: string }>;
+      }>;
+    }>(listRes);
+    const worktrees = repos.repos.find((p) => p.name === "repo")?.worktrees ?? [];
+    expect(worktrees.find((wt) => wt.branch === "feature-2")?.baseBranch).toBe("main");
+    expect(worktrees.find((wt) => wt.branch === "feature-1")?.baseBranch).toBeUndefined();
   });
 
   it("worktrees.create with prompt dispatches task", async () => {
