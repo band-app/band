@@ -34,7 +34,7 @@ Band already has most of what a connector needs. The hub is one server in front 
 7. **What the bot can do is enforced by the hub.** A bot's settings name:
    - the repos its child worktrees may use, checked by the relay on `worktrees.create` and `agentSessions.launch`,
    - the workers its home and children may run on, checked by placement,
-   - its MCP servers (`mcpServers` of the sessions), its vault scope and its agent login,
+   - its MCP servers (`mcpServers` of the sessions) and its vault scope,
    - its limits: child agents per thread and in total, the longest turn, and a daily budget.
 
    Children inherit their bot's settings through the origin link. The agent cannot widen any of this by what it is told, because the relay, placement, the MCP proxy and the vault check the bot, not the prompt. A bot reaches only the workers it is given, so a bot for a team should run on workers that hold nothing personal.
@@ -70,7 +70,7 @@ Settings for one bot, as stored:
     "maxTotal": 8,
     "report": ["turn-end", "pr", "ci", "questions"]
   },
-  "reach": { "mcp": ["band", "github"], "vaultScope": "bot:band-dev", "agentLogin": "al_team" },
+  "reach": { "mcp": ["band", "github"], "vaultScope": "bot:band-dev" },
   "approvals": { "pr.merge": "approve", "worktree.remove": "never" },
   "triggers": [{ "channel": "C0ALERTS", "authorBot": "B0GRAFANA", "textContains": ["FIRING"] }],
   "limits": { "turnMinutes": 60, "dailyBudgetUsd": 50 }
@@ -81,7 +81,7 @@ Settings for one bot, as stored:
 
 1. **One bot, threads, home worktree.** Socket Mode, access list, sessions per thread in the home worktree with the `AGENTS.md` template, the last message posted at the end of each turn, status line, audit log. Children are created through the `band` CLI with origin links, without reports to the thread yet.
 2. **Children report to the thread.** Turn ends, PRs, CI and questions of child worktrees post to the thread and wake the bot's session.
-3. **Reach and approvals.** Repos, workers, MCP servers, vault scope and agent login per bot, enforced by the relay and placement. Relay calls held for approval, and Approve / Deny cards.
+3. **Reach and approvals.** Repos, workers, MCP servers, and vault scope per bot, enforced by the relay and placement. Relay calls held for approval, and Approve / Deny cards.
 4. **Triggers, scheduled posts, limits.** Message rules, cronjobs that post to a channel, child and budget limits.
 5. **HTTP Events mode** for hubs that want it.
 

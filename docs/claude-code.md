@@ -20,7 +20,7 @@ Band finds `claude` on the worker's `PATH`. To use another binary, set the comma
 
 A worker counts Claude Code as logged in when `claude auth status` succeeds, or when `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set in its environment.
 
-A machine without a Claude login can use an [agent login](agent-logins.md). Two kinds exist: a setup token from `claude setup-token`, and an Anthropic API key. Read the warning in that guide before you store a setup token.
+A machine without a Claude login can get a token from a [worker profile](worker-profiles.md). Store a setup token from `claude setup-token` or an Anthropic API key in the [vault](credentials.md), then map it to `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Any process of an agent on that worker can read the variable. The other way is to run `claude auth login` on the machine.
 
 ## Models
 

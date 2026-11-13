@@ -21,7 +21,7 @@ Worker tokens are separate. They only let a worker connect, and a device token c
 
 ## Admin and standard devices
 
-A standard device can use the hub: open worktrees, run chats and terminals, and read the worker list. An admin device can also manage the hub itself: devices, workers, credentials, MCP servers, agent logins and the other admin settings. These screens show "needs an admin token" to a standard device.
+A standard device can use the hub: open worktrees, run chats and terminals, and read the worker list. An admin device can also manage the hub itself: devices, workers, credentials, MCP servers, worker profiles and the other admin settings. These screens show "needs an admin token" to a standard device.
 
 Create a device as admin only if you trust it as much as the hub's own machine. Agents never receive a device token. They get narrower tokens that cover one worktree.
 

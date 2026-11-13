@@ -39,7 +39,7 @@ Two environment variables on the machine change this: `BAND_WORKER_CMD` and `BAN
 
 ## A provisioning repo
 
-Settings > Workers > Add a worker > Provisioning repo names a git repo, a branch and a start command inside it (default `band/provision.sh`). The hub fetches the repo when it creates the command, using the vault's git credential for that remote, so a private repo needs no credential on the new machine. It records the commit it resolved and serves that commit's files, without `.git`, as a tarball. A push to the repo after the command was created does not change what the command runs.
+Settings > Workers > Add a worker > Provisioning repo names a git repo, a branch and a start command inside it (default `band/provision.sh`). The hub fetches the repo when it creates the command, with the `tokenItem` vault item as an HTTPS token (username `x-access-token`), so a private repo needs no credential on the new machine. The profile's `provisioning.tokenItem` is used for a profile's repo and `settings.provisioning.tokenItem` for the default repo. With no item, the clone is plain git with the hub machine's own auth. It records the commit it resolved and serves that commit's files, without `.git`, as a tarball. A push to the repo after the command was created does not change what the command runs.
 
 The script downloads the tarball, unpacks it under `~/.band/provision/repo`, and runs the start command from that directory. It sets these variables, and passes none of them on a command line:
 
@@ -91,7 +91,7 @@ command -v mise >/dev/null 2>&1 || curl -fsSL https://mise.run | sh
 mise install --yes
 ```
 
-Keep credentials out of the repo. Agent logins come from Band's vault.
+Keep credentials out of the repo. Secrets such as an agent token come from Band's vault through a [worker profile](worker-profiles.md).
 
 ## Worker profiles
 

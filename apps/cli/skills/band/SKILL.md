@@ -431,13 +431,12 @@ The hub proxies HTTP MCP servers at `/mcp-proxy/<name>` and adds the credential 
 
 ```sh
 band vault list
-printf '%s' "$VALUE" | band vault put <name> [--kind api_key|env|git] [--scope global|repo:<name>] [--description <string>]
-printf '%s' "$TOKEN" | band vault put <name> --kind git --host github.com --path 'owner/*' [--username <name>]
+printf '%s' "$VALUE" | band vault put <name> [--kind api_key|env] [--scope global|repo:<name>] [--description <string>]
 band vault delete <id>
 band vault rotate-key
 ```
 
-The hub keeps credentials encrypted and never shows a value again: `list` prints id, name, kind, scope and last use. `put` reads the value from stdin (`--value` also works, but shows in the process list). A `git` item is an access token for private repositories on workers: workers ask the hub for it per remote, and `--path` is a pattern over `owner/repo` (`*` stays inside one segment). OAuth connections are made in Settings > Credentials, and `delete` revokes one at its server. These commands need an admin token. Run them only when the user asks, and never print or log a value.
+The hub keeps credentials encrypted and never shows a value again: `list` prints id, name, kind, scope and last use. `put` reads the value from stdin (`--value` also works, but shows in the process list). A vault item reaches a worker only through a worker profile, which maps it to an environment variable or a file (see `docs/worker-profiles.md`). OAuth connections are made in Settings > Credentials, and `delete` revokes one at its server. These commands need an admin token. Run them only when the user asks, and never print or log a value.
 
 ### List cronjobs, optionally filtered by worktree
 

@@ -20,7 +20,7 @@ Band finds `opencode` on the worker's `PATH` and in `~/.opencode/bin`. To use an
 
 Band cannot check whether OpenCode is logged in, so it reports the agent as installed when the binary exists.
 
-A machine without a provider key can use an [agent login](agent-logins.md). The kinds are an Anthropic, OpenAI, OpenRouter or Gemini API key. Band puts the key in the environment variable OpenCode reads for that provider.
+A machine without a provider key can get one from a [worker profile](worker-profiles.md): store the key in the vault and map it to the variable OpenCode reads for that provider, such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY` or `GEMINI_API_KEY`.
 
 ## Models
 

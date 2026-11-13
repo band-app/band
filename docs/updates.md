@@ -84,7 +84,7 @@ An agent that stays held through an update can still stop at the next quiet mome
 
 Not every agent is held. Agents of chats that the worker runs itself (a worker started with `--own-chats`, which includes the desktop app's bundled worker) stop with the restart. Terminal sessions are not agents in this sense. They keep running through a worker restart, because a terminal daemon holds them.
 
-An agent also stops at once when the worker's lease runs out, when you stop or remove the chat, or when its login or credential changes. See [Follow the work](follow-the-work.md#the-old-workers-lease).
+An agent also stops at once when the worker's lease runs out, or when you stop or remove the chat. See [Follow the work](follow-the-work.md#the-old-workers-lease).
 
 ### Update all workers
 
