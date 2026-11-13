@@ -146,14 +146,33 @@ export interface WireState {
 /** Forwarded requests kept for dedup: a resend comes within minutes, so a day is plenty. */
 const FORWARD_KEEP_MS = 24 * 60 * 60_000;
 
+/** A batch is meant to close within one tick. Older than this, the watchdog commits it. */
+const BATCH_MAX_MS = 5_000;
+
 export class ChatStore {
   readonly events: ChatEventQueries;
+  /** Reads through a second connection, so it sees committed rows only. */
+  private readonly committed: ChatEventQueries;
+  private batchTimer: NodeJS.Timeout | null = null;
+  private batchOpenedAt = 0;
+  /** Called when the watchdog committed a batch left open. */
+  onStuckBatch: (ageMs: number) => void = () => {};
 
-  private constructor(private readonly db: DatabaseSync) {
+  private constructor(
+    private readonly db: DatabaseSync,
+    private readonly readDb: DatabaseSync,
+  ) {
     this.events = new ChatEventQueries(() => this.drizzle);
+    this.committed = new ChatEventQueries(() => this.readDrizzle);
   }
 
   private drizzle!: ChatLogDb;
+  private readDrizzle!: ChatLogDb;
+
+  /** Rows with ids in `[from, to]` that are committed. An open batch's rows are not in them. */
+  readCommittedIdRange(from: number, to: number, limit: number) {
+    return this.committed.readIdRange(from, to, limit);
+  }
 
   static async open(file: string): Promise<ChatStore> {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
@@ -171,7 +190,10 @@ export class ChatStore {
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA synchronous = NORMAL");
     db.exec(SCHEMA);
-    const store = new ChatStore(db);
+    const readDb = new DatabaseSync(file, { readOnly: true });
+    readDb.exec("PRAGMA busy_timeout = 10000");
+    const store = new ChatStore(db, readDb);
+    store.readDrizzle = drizzle({ client: readDb }) as unknown as ChatLogDb;
     const orm = drizzle({ client: db }) as unknown as ChatLogDb;
     // The event log opens its own transactions. While a batch is open they join it.
     const ownTransaction = orm.transaction.bind(orm);
@@ -191,6 +213,7 @@ export class ChatStore {
   close(): void {
     while (this.depth > 0) this.commitBatch();
     if (this.current()) this.setMeta("next_id", this.next);
+    this.readDb.close();
     this.db.close();
   }
 
@@ -219,11 +242,29 @@ export class ChatStore {
   beginBatch(): void {
     if (this.depth++ > 0) return;
     this.db.exec("BEGIN IMMEDIATE");
+    this.batchOpenedAt = Date.now();
+    this.batchTimer = setTimeout(() => this.commitStuckBatch(), BATCH_MAX_MS);
+    this.batchTimer.unref();
+  }
+
+  private commitStuckBatch(): void {
+    this.batchTimer = null;
+    if (this.depth === 0) return;
+    const age = Date.now() - this.batchOpenedAt;
+    this.depth = 1;
+    this.commitBatch();
+    this.onStuckBatch(age);
+  }
+
+  private clearBatchTimer(): void {
+    if (this.batchTimer) clearTimeout(this.batchTimer);
+    this.batchTimer = null;
   }
 
   commitBatch(): void {
     if (this.depth === 0) return;
     if (--this.depth > 0) return;
+    this.clearBatchTimer();
     this.db.exec("COMMIT");
     const hooks = this.afterCommitHooks;
     this.afterCommitHooks = [];
@@ -232,6 +273,7 @@ export class ChatStore {
 
   private rollbackBatch(): void {
     this.depth = 0;
+    this.clearBatchTimer();
     this.afterCommitHooks = [];
     this.db.exec("ROLLBACK");
   }

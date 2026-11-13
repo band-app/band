@@ -125,9 +125,13 @@ export class ChatEventQueries {
   /**
    * Inserts rows another log wrote, keeping their ids. A row whose id is
    * already here is skipped, so a resent batch adds nothing twice. Returns
-   * the rows that were new.
+   * the rows that were new. `onConflict` is called for a skipped row whose
+   * chat or payload differs from the row held under that id.
    */
-  insertRows(rows: ChatEventRow[]): ChatEventRow[] {
+  insertRows(
+    rows: ChatEventRow[],
+    onConflict?: (row: ChatEventRow, held: ChatEventRow) => void,
+  ): ChatEventRow[] {
     const inserted: ChatEventRow[] = [];
     this.db().transaction((tx) => {
       for (const row of rows) {
@@ -147,7 +151,20 @@ export class ChatEventQueries {
           .onConflictDoNothing()
           .returning({ id: chatEvents.id })
           .get();
-        if (done) inserted.push(row);
+        if (done) {
+          inserted.push(row);
+        } else if (onConflict) {
+          const heldRow = tx.select().from(chatEvents).where(eq(chatEvents.id, row.id)).get();
+          if (heldRow) {
+            const held = toRow(heldRow);
+            if (
+              held.chatId !== row.chatId ||
+              JSON.stringify(held.event) !== JSON.stringify(row.event)
+            ) {
+              onConflict(row, held);
+            }
+          }
+        }
       }
     });
     return inserted;
