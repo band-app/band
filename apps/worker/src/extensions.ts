@@ -747,7 +747,15 @@ export class ExtensionHost {
   }
 
   private find(capability: string): Service {
-    for (const s of this.services.values()) if (s.def.capability === capability) return s;
+    // Several services may declare one capability for different systems. Use the first one this
+    // worker can run (manifest order), and fall back to the first one so the error says why.
+    let first: Service | undefined;
+    for (const s of this.services.values()) {
+      if (s.def.capability !== capability) continue;
+      if (s.state !== "not-eligible") return s;
+      first ??= s;
+    }
+    if (first) return first;
     throw new RpcError(RPC_INVALID_PARAMS, `unknown plugin ${capability}`);
   }
 

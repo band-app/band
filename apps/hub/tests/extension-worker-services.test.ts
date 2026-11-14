@@ -357,4 +357,47 @@ describe("extension worker services", () => {
     await folderGone(join(a.state, "extensions", "echo-service"));
     expect(await servicesOf(a)).toEqual([]);
   }, 90_000);
+
+  it("a capability with a service per os reaches the one this worker can run, in either manifest order", async () => {
+    for (const osSplit of ["wrong-first", "wrong-last"] as const) {
+      const version = osSplit === "wrong-first" ? "3.0.0" : "3.1.0";
+      await install({ version, osSplit });
+      await waitFor(
+        async () => {
+          const list = await servicesOf(a);
+          return list.length === 2 &&
+            list.every((s) => s.version === version) &&
+            list.some((s) => s.state === "running")
+            ? true
+            : undefined;
+        },
+        { label: `split service running (${osSplit})`, timeoutMs: 30_000 },
+      );
+      const list = await servicesOf(a);
+      expect(list.filter((s) => s.state === "not-eligible")).toHaveLength(1);
+      expect(await call(a, "echo", { order: osSplit })).toEqual({ order: osSplit });
+      const panel = await m<{ result: unknown }>("extensions.panelCall", {
+        extensionId: "echo-service",
+        panelId: "screen",
+        worktreeId: a.worktreeId,
+        method: "echo",
+        params: { x: 1 },
+      });
+      expect(panel.result).toEqual({ x: 1 });
+    }
+  }, 120_000);
+
+  it("a single service this worker cannot run still answers why", async () => {
+    await install({ version: "4.0.0", requires: ["os=nonexistent"] });
+    await waitFor(
+      async () => {
+        const list = await servicesOf(a);
+        return list.length === 1 && list[0]?.state === "not-eligible" ? true : undefined;
+      },
+      { label: "not eligible", timeoutMs: 30_000 },
+    );
+    // The hub refuses first, because the worker reports no echo capability for a service it
+    // cannot run. The service's state still carries the "needs os=" reason (see S3 above).
+    await expect(call(a, "echo")).rejects.toThrow(/cannot run the echo plugin/);
+  }, 60_000);
 });

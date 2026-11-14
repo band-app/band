@@ -17,6 +17,11 @@ export interface EchoArchiveOptions {
   capability?: string;
   /** Leave out the panel and the tools (the plain service of PR 2). Defaults to false. */
   plainService?: boolean;
+  /**
+   * Two services for the capability: `main` needs an os this machine is not running, `alt` needs
+   * the current one. The value says which one the manifest lists first.
+   */
+  osSplit?: "wrong-first" | "wrong-last";
 }
 
 export interface EchoArchive {
@@ -91,16 +96,7 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
               },
             ],
           }),
-      workerServices: [
-        {
-          id: "main",
-          entry: "service.mjs",
-          requires: options.requires ?? [],
-          capability: options.capability ?? "echo",
-          // Only ECHO_DISPLAY is allowed; the fixture also offers names the worker must ignore.
-          worktreeEnv: ["ECHO_DISPLAY", "ECHO_UNSET"],
-        },
-      ],
+      workerServices: workerServices(options),
     },
   };
   const entries: TarEntry[] = [
@@ -115,4 +111,18 @@ export function echoArchive(options: EchoArchiveOptions = {}): EchoArchive {
   ];
   const bytes = makeTarGz(entries);
   return { bytes, sha256: createHash("sha256").update(bytes).digest("hex"), version };
+}
+
+function workerServices(options: EchoArchiveOptions) {
+  const capability = options.capability ?? "echo";
+  const base = {
+    entry: "service.mjs",
+    capability,
+    // Only ECHO_DISPLAY is allowed; the fixture also offers names the worker must ignore.
+    worktreeEnv: ["ECHO_DISPLAY", "ECHO_UNSET"],
+  };
+  if (!options.osSplit) return [{ id: "main", requires: options.requires ?? [], ...base }];
+  const wrong = { id: "main", requires: ["os=band-test-no-such-os"], ...base };
+  const right = { id: "alt", requires: [`os=${process.platform}`], ...base };
+  return options.osSplit === "wrong-first" ? [wrong, right] : [right, wrong];
 }
