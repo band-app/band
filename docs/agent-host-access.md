@@ -33,7 +33,7 @@ Cross-worker calls an admin worker makes, and its admin-only calls (`settings.up
 
 ## Starting a worktree on another worker
 
-`band worktrees create <repo> <branch> --worker <worker>` and the `worktrees_create` tool every chat has accept a worker other than the one the agent runs on. Without a worker, the worktree goes where the caller runs, as before. The hub accepts an explicit worker when all of these hold, and refuses with the reason otherwise:
+`band worktrees create <repo> <branch> --worker <worker>` and the `worktrees_create` tool every chat has accept a worker other than the one the agent runs on. Without a worker, the worktree goes to the repo's primary worker when the agent may use it, else where the caller runs, with a `notice` in the result saying why. The hub accepts an explicit worker when all of these hold, and refuses with the reason otherwise:
 
 1. The setting "Agents may start worktrees on other workers" is on (Settings > Coding Agents, `agents.crossHostWorktrees` in `~/.band/settings.json`). It is on by default. With it off, an agent can create worktrees on its own worker only.
 2. The target is an online, static worker. A worker that is offline, lost, ephemeral, or started by a runner is refused, and so is the hub's own machine. Placement by `--labels`, `--requires` or `--isolation` is unchanged and never starts a runner machine on an agent's say-so.

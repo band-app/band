@@ -59,6 +59,7 @@ import { clientStateService } from "./client-state-service";
 // function body. Capturing `const cs = cronjobService;` at module load
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { resolveDefaultHost } from "./default-host";
 // FRAGILE: ESM cycle leg — `./ephemeral-lifecycle-service` imports this file. Keep every
 // `ephemeralLifecycleService` reference inside a function body.
 import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
@@ -165,6 +166,9 @@ export const worktreeCreateInput = z.object({
   via: worktreeVia.optional(),
   // The host to create the worktree on (`hosts.list`). Defaults to the hub's own machine.
   hostId: z.string().min(1).optional(),
+  // The worker an agent's call comes from, written by the worker relay and the MCP tool from the
+  // caller's identity. With no `hostId`, the repo's primary worker wins when this caller may use it.
+  callerHostId: z.string().min(1).optional(),
   // Where the repo's repository is on that host. Needed the first time a
   // repo is used on a remote host, and remembered after that.
   hostRepoPath: z.string().min(1).optional(),
@@ -641,6 +645,8 @@ export class WorktreeService {
     terminalId?: string;
     /** Set when no host fits yet: the worktree is created once the request is fulfilled. */
     provisioning?: { requestId: string };
+    /** Why the repo's primary worker was not used, when it was set but unavailable. */
+    notice?: string;
   }> {
     if (input.originLink === undefined) {
       input = { ...input, originLink: this.resolveOrigin(input, caller) };
@@ -700,12 +706,20 @@ export class WorktreeService {
       const { placement: _placement, ...rest } = input;
       return this.create({ ...rest, hostId: placed.hostId });
     }
-    const hostId = resolveWorktreeHostId(input.hostId);
+    let notice: string | undefined;
+    let hostId: string;
+    if (input.hostId) {
+      hostId = resolveWorktreeHostId(input.hostId);
+    } else {
+      const choice = resolveDefaultHost(repo, input.callerHostId);
+      hostId = choice.hostId;
+      notice = choice.notice;
+    }
     // The same branch on another host is another worktree, so only this host's rows collide.
     const existing = repo.worktrees.find(
       (wt) => sameName(wt) && (wt.hostId ?? hostRegistry.local.id) === hostId,
     );
-    if (existing) return { ok: true, path: existing.path, hostId };
+    if (existing) return { ok: true, path: existing.path, hostId, ...(notice ? { notice } : {}) };
     // Refs and folders may share a disk that ignores case, so a name that differs only in case
     // from a worktree of this repo on this host would collide with it.
     const caseClash = repo.worktrees.find(
@@ -863,7 +877,7 @@ export class WorktreeService {
     worktreeScriptService.startSetup(worktreeId, worktreePath, repoPath);
 
     if (!input.prompt) {
-      return { ok: true, path: worktreePath, hostId };
+      return { ok: true, path: worktreePath, hostId, ...(notice ? { notice } : {}) };
     }
 
     // Fire-and-forget: the launch logs its own spawn failure, and the
@@ -883,6 +897,7 @@ export class WorktreeService {
       ok: true,
       path: worktreePath,
       hostId,
+      ...(notice ? { notice } : {}),
       via: launched.mode === "tui" ? "terminal" : "chat",
       terminalId: launched.terminalId,
     };

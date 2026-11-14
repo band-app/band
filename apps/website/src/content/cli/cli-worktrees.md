@@ -38,7 +38,7 @@ band worktrees create my-app feat/login --prompt "Add a login form" --agent clau
 
 ### Choosing a worker
 
-Without a placement flag, the worktree goes where the command runs. A command run by an agent on a worker creates on that worker.
+Without a placement flag or `--worker`, the worktree goes to the repo's primary worker when that worker is online and the repo allows it. Otherwise it goes where the command runs, and the output ends with a `note:` line (a `notice` field in `--output json`) saying why the primary was not used. A command run by an agent on a worker uses the primary only when the hub setting "Agents may start worktrees on other workers" allows it, and creates on the agent's own worker when it does not.
 
 - `--worker <worker>` creates it on one worker, by id or name. It cannot be combined with the placement flags below.
 - `--labels k=v,k=v` picks an online worker that has all of these labels.

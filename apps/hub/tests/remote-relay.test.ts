@@ -832,7 +832,7 @@ describe("what an agent may call, and which ids it may take", () => {
         "h-w",
       ),
     );
-    expect(batch[0].params.arguments.hostId).toBe("h-w");
+    expect(batch[0].params.arguments.callerHostId).toBe("h-w");
     expect(batch[1].params.arguments).toEqual({ worktreeId: "w" });
     // Naming another host is refused outright.
     const lookups: Parameters<typeof checkRelayRequest>[2] = {

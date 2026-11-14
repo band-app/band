@@ -56,7 +56,7 @@ export function NewWorktreeDialog({
   open,
   onOpenChange,
 }: Props) {
-  const [chosenHostId, setHostId] = useState(LOCAL_HOST_ID);
+  const [chosenHostId, setHostId] = useState<string | undefined>(undefined);
   const [hostRepoPath, setHostRepoPath] = useState("");
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
@@ -86,10 +86,13 @@ export function NewWorktreeDialog({
       (h.id === LOCAL_HOST_ID || h.status === "online") &&
       isHostAllowed(repoInfo?.allowedHostIds, h.id),
   );
-  // A host that went offline since it was picked falls back to local, or to the first host left.
-  const hostId = hostChoices.some((h) => h.id === chosenHostId)
-    ? chosenHostId
-    : (hostChoices[0]?.id ?? LOCAL_HOST_ID);
+  // The pick, else the repo's primary worker, else local or the first host left. A host that went
+  // offline since it was picked falls back the same way.
+  const primaryHostId = repoInfo?.primaryHostId ?? undefined;
+  const hostId =
+    [chosenHostId, primaryHostId].find((id) => id && hostChoices.some((h) => h.id === id)) ??
+    hostChoices[0]?.id ??
+    LOCAL_HOST_ID;
   const remote = hostId !== LOCAL_HOST_ID;
 
   const slug = slugifyBranchName(branch);
@@ -124,7 +127,8 @@ export function NewWorktreeDialog({
         branch: slug,
         base: base.trim() || undefined,
         prompt: prompt.trim() || undefined,
-        host: remote ? { hostId, hostRepoPath: hostRepoPath.trim() || undefined } : undefined,
+        // Always named: an unnamed create goes to the primary worker, which may not be the one shown.
+        host: { hostId, hostRepoPath: remote ? hostRepoPath.trim() || undefined : undefined },
         groupId,
       });
     } catch {

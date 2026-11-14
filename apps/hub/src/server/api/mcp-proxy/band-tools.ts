@@ -31,7 +31,7 @@ const createInput = z.object({
     .min(1)
     .optional()
     .describe(
-      'Worker to create it on. Defaults to the worker this chat runs on. A chat on a worker may name another online, static worker that the repo allows, when the hub setting "Agents may start worktrees on other workers" is on. See band_workers_forAgents.',
+      'Worker to create it on. Defaults to the primary worker of the repo when it is online and the chat may use it, else the worker this chat runs on. A chat on a worker may name another online, static worker that the repo allows, when the hub setting "Agents may start worktrees on other workers" is on. See band_workers_forAgents.',
     ),
   prompt: z
     .string()
@@ -76,6 +76,7 @@ export async function createBandServer(scope: ToolScope): Promise<McpServer> {
         const chatId = scope.chatId;
         if (chatId === null) return jsonText({ error: NEEDS_CHAT }, true);
         const input = createInput.parse(args);
+        let callerHostId: string | undefined;
         const chat = chatService.get(chatId);
         if (!chat) return jsonText({ error: "This chat no longer exists" }, true);
         // A chat on a worker acts for that worker. Another worker is the hub's call to make, not the worker's.
@@ -96,7 +97,7 @@ export async function createBandServer(scope: ToolScope): Promise<McpServer> {
               });
             }
           } else {
-            input.hostId = callerHost;
+            callerHostId = callerHost;
           }
           if (
             input.origin !== undefined &&
@@ -109,10 +110,13 @@ export async function createBandServer(scope: ToolScope): Promise<McpServer> {
             );
           }
         }
-        const result = await worktreeService.create(input, {
-          worktreeId: chat.worktreeId,
-          chatId,
-        });
+        const result = await worktreeService.create(
+          { ...input, callerHostId },
+          {
+            worktreeId: chat.worktreeId,
+            chatId,
+          },
+        );
         const branch = slugifyBranchName(input.branch);
         return jsonText({
           ...result,
