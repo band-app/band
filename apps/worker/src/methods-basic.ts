@@ -74,6 +74,16 @@ async function checkTreeLinks(policy: WorkerContext["policy"], dir: string): Pro
   }
 }
 
+/** The profile's secrets under the variables a call names, which win. */
+async function withSecrets(
+  ctx: WorkerContext,
+  env: Record<string, string> | undefined,
+): Promise<Record<string, string> | undefined> {
+  const secrets = (await ctx.secrets?.env()) ?? {};
+  if (Object.keys(secrets).length === 0) return env;
+  return { ...secrets, ...env };
+}
+
 /**
  * The request and response methods: info, git, worktrees, files, exec,
  * scripts and the agent environment. Every path a call names goes through the
@@ -90,7 +100,10 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     const options = optObj(a, "options");
     const execOptions: ExecOptions = {
       cwd: options?.cwd === undefined ? policy.rootPaths[0] : await path(options, "cwd"),
-      env: options?.env === undefined ? undefined : strRecord(options, "env"),
+      env: await withSecrets(
+        ctx,
+        options?.env === undefined ? undefined : strRecord(options, "env"),
+      ),
       timeoutMs: options ? optNum(options, "timeoutMs") : undefined,
     };
     return host.exec(str(a, "bin"), strArray(a, "args"), execOptions);
@@ -98,8 +111,12 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
 
   // ---- git and worktrees --------------------------------------------------
 
-  r.json("git.exec", async (a) => host.git.exec(strArray(a, "args"), await path(a, "cwd")));
-  r.json("git.gh", async (a) => host.git.gh(strArray(a, "args"), await path(a, "cwd")));
+  r.json("git.exec", async (a) =>
+    host.git.exec(strArray(a, "args"), await path(a, "cwd"), await ctx.secrets?.cachedEnv()),
+  );
+  r.json("git.gh", async (a) =>
+    host.git.gh(strArray(a, "args"), await path(a, "cwd"), await ctx.secrets?.cachedEnv()),
+  );
 
   r.json("worktree.create", async (a) => {
     const created = await host.worktree.create({
@@ -164,6 +181,7 @@ export function registerBasicMethods(r: Registrar, ctx: WorkerContext): () => vo
     const result = await host.repos.ensure({
       remoteUrl: str(a, "remoteUrl"),
       defaultBranch: str(a, "defaultBranch"),
+      env: await ctx.secrets?.env(),
     });
     // The folder has to be one the worker serves before a worktree can go beside it.
     const placed = await realpath(result.path);

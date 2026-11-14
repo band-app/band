@@ -3447,53 +3447,25 @@ fn vault_put_list_delete() {
 }
 
 #[test]
-fn vault_put_git_credential() {
+fn vault_put_git_kind_is_refused() {
     let env = TestEnv::new();
-    let secret = "gitpat_cli_VALUE_0123456789";
-
-    // A git item needs its host and path pattern, and they apply only to git items.
-    let missing = env.band(&["vault", "put", "gh", "--kind", "git", "--value", secret]);
-    assert!(!missing.status.success());
-    assert!(
-        stderr(&missing).contains("--host"),
-        "stderr: {}",
-        stderr(&missing)
-    );
-    let stray = env.band(&[
-        "vault",
-        "put",
-        "k",
-        "--host",
-        "github.com",
-        "--value",
-        secret,
-    ]);
-    assert!(!stray.status.success());
-
     let put = env.band(&[
         "vault",
         "put",
         "gh",
         "--kind",
         "git",
-        "--host",
-        "github.com",
-        "--path",
-        "owner/*",
-        "--username",
-        "band-bot",
         "--value",
-        secret,
-        "--output",
-        "json",
+        "tok_0123456789",
     ]);
-    assert!(put.status.success(), "stderr: {}", stderr(&put));
-    assert!(!stdout(&put).contains(secret));
-    let item = &json_of(&put)["item"];
-    assert_eq!(item["kind"], "git");
-    assert_eq!(item["metadata"]["host"], "github.com");
-    assert_eq!(item["metadata"]["pathPattern"], "owner/*");
-    assert_eq!(item["metadata"]["username"], "band-bot");
+    assert!(!put.status.success());
+    assert!(
+        stderr(&put).contains("worker profile"),
+        "stderr: {}",
+        stderr(&put)
+    );
+    let stray = env.band(&["vault", "put", "k", "--host", "github.com", "--value", "x"]);
+    assert!(!stray.status.success());
 }
 
 // --- Editor extensions ---

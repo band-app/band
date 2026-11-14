@@ -18,7 +18,7 @@ gemini
 
 Run `gemini` once to sign in. Band finds `gemini` on the worker's `PATH`. To use another binary, set `command` on the agent's entry, or per worker in Settings > Workers.
 
-Band counts Gemini CLI as logged in only when `GEMINI_API_KEY` is set in the worker's environment. It cannot check a sign-in made with `gemini`. A machine without a key can use an [agent login](agent-logins.md) with a Gemini API key.
+Band counts Gemini CLI as logged in only when `GEMINI_API_KEY` is set in the worker's environment. It cannot check a sign-in made with `gemini`. A machine without a key can get one from a [worker profile](worker-profiles.md): store it in the vault and map it to `GEMINI_API_KEY`.
 
 ## Add it to the agent list
 

@@ -11,8 +11,15 @@ export interface ProfileForm {
   labels?: string;
   trust?: "restricted" | "standard" | "admin";
   env?: string;
-  restrictCredentials?: boolean;
-  gitCredentials?: string[];
+  tokenItem?: string;
+}
+
+export interface SecretMapping {
+  item: string;
+  /** An env variable name, or a `~/` file path. */
+  env?: string;
+  file?: string;
+  mode?: string;
 }
 
 export class WorkerProfilesPage {
@@ -44,14 +51,17 @@ export class WorkerProfilesPage {
     });
   }
 
-  /** Opens the new-profile editor and asks for a restricted credential list. */
-  async openEditorWithRestrictedCredentials(): Promise<void> {
+  /** Opens the new-profile editor and adds an empty secret row. */
+  async openEditorWithSecretRow(): Promise<void> {
     await this.page.getByTestId("settings__profile-new").click();
-    await this.page.getByRole("checkbox", { name: "Restrict credentials" }).check();
+    await this.page.getByTestId("settings__profile-secret-add").click();
   }
 
-  gitCredentialOption(name: string): Locator {
-    return this.page.getByRole("checkbox", { name: `Git credential ${name}` });
+  /** The option of the first secret row's vault item picker that names a stored item. */
+  secretItemOption(name: string): Locator {
+    return this.page
+      .getByRole("combobox", { name: "Secret 1 vault item" })
+      .getByRole("option", { name });
   }
 
   async showWorkers(): Promise<void> {
@@ -74,6 +84,12 @@ export class WorkerProfilesPage {
       await this.fillEditor(form);
       await this.page.getByTestId("settings__profile-save").click();
     });
+  }
+
+  /** Opens the new profile editor and fills it, without saving. */
+  async startNew(form: ProfileForm & { name: string }): Promise<void> {
+    await this.page.getByTestId("settings__profile-new").click();
+    await this.fillEditor(form);
   }
 
   async edit(name: string, form: ProfileForm): Promise<void> {
@@ -101,14 +117,43 @@ export class WorkerProfilesPage {
     if (form.env !== undefined) {
       await this.page.getByRole("textbox", { name: "Profile worker env" }).fill(form.env);
     }
-    if (form.restrictCredentials !== undefined) {
+    if (form.tokenItem !== undefined) {
       await this.page
-        .getByRole("checkbox", { name: "Restrict credentials" })
-        .setChecked(form.restrictCredentials);
+        .getByRole("combobox", { name: "Profile provisioning token item" })
+        .selectOption(form.tokenItem);
     }
-    for (const item of form.gitCredentials ?? []) {
-      await this.page.getByRole("checkbox", { name: `Git credential ${item}` }).check();
-    }
+  }
+
+  /** Adds one row to the secrets editor and fills it. `index` is the row's zero-based position. */
+  async addSecret(index: number, mapping: SecretMapping): Promise<void> {
+    await test.step(`Add the secret mapping for ${mapping.item}`, async () => {
+      const n = index + 1;
+      await this.page.getByTestId("settings__profile-secret-add").click();
+      await this.page
+        .getByRole("combobox", { name: `Secret ${n} vault item` })
+        .selectOption(mapping.item);
+      if (mapping.file !== undefined) {
+        await this.page.getByRole("combobox", { name: `Secret ${n} target` }).selectOption("file");
+        await this.page.getByRole("textbox", { name: `Secret ${n} file path` }).fill(mapping.file);
+        if (mapping.mode) {
+          await this.page
+            .getByRole("textbox", { name: `Secret ${n} file mode` })
+            .fill(mapping.mode);
+        }
+      } else {
+        await this.page
+          .getByRole("textbox", { name: `Secret ${n} variable name` })
+          .fill(mapping.env ?? "");
+      }
+    });
+  }
+
+  async removeSecret(index: number): Promise<void> {
+    await this.page.getByRole("button", { name: `Remove secret ${index + 1}` }).click();
+  }
+
+  secretRows(): Locator {
+    return this.page.getByTestId("settings__profile-secret");
   }
 
   async saveEditor(): Promise<void> {

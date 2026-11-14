@@ -12,9 +12,8 @@ commands: [vault]
 
 A credential has a name, a kind and a scope.
 
-- `api_key` (the default) is a secret for an API, for example one used by an MCP server or an agent login.
+- `api_key` (the default) is a secret for an API, for example one used by an MCP server or mapped to an environment variable by a worker profile.
 - `env` is a value exposed as an environment variable. The name is the variable name.
-- `git` is an access token for fetching and pushing private repos. It also needs `--host` (such as `github.com`) and `--path`, a pattern over `owner/repo` such as `owner/*`. `--username` sets the username git sends (default `x-access-token`).
 
 The scope is `global` (the default) or `repo:<name>`. A name is unique within its scope.
 
@@ -33,7 +32,7 @@ Pipe a value in, or redirect a file. These lines use shell syntax, so they are n
 ```text
 echo "$OPENAI_API_KEY" | band vault put openai --description "Shared key"
 band vault put DEPLOY_TOKEN --kind env --scope repo:my-app < token.txt
-band vault put github-token --kind git --host github.com --path "my-org/*" < token.txt
+band vault put github-token < token.txt
 ```
 
 Listing, deleting and rotating the key need no input.

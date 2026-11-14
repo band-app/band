@@ -195,7 +195,7 @@ describe("review gh runs on the worktree's host", () => {
     expect(data.message).toContain(`Worker ${worker.hostId}`);
     expect(data.message).toContain("Hub: HTTP 401");
     expect(data.message).toContain(`gh auth login on ${worker.hostId}`);
-    expect(data.message).toContain("band vault put --kind git --host github.com");
+    expect(data.message).toContain("Hub GitHub token");
   });
 
   it("S2: falls back to the hub's gh with the vault token when the worker is offline", async () => {
@@ -204,14 +204,19 @@ describe("review gh runs on the worktree's host", () => {
       "vault.put",
       {
         name: "github-com",
-        kind: "git",
-        host: "github.com",
-        pathPattern: "**",
+        kind: "api_key",
         value: VAULT_TOKEN,
       },
       TOKEN,
     );
     expect(put.status).toBe(200);
+    const set = await trpcMutate(
+      server.url,
+      "settings.update",
+      { hubGithubToken: "github-com" },
+      TOKEN,
+    );
+    expect(set.status).toBe(200);
     hubGh.setReviewQuery(FAKE_REPO, "feat/offline", withPullRequest("From the hub"));
     await worker.close();
 
@@ -220,6 +225,6 @@ describe("review gh runs on the worktree's host", () => {
     expect(data.status).toBe("ok");
     expect(data.review?.title).toBe("From the hub");
     const call = hubGh.requests.find((r) => r.fields.branch === "feat/offline");
-    expect(call?.ghToken).toBe(VAULT_TOKEN);
+    expect(call?.ghTokenEnv).toBe(VAULT_TOKEN);
   });
 });

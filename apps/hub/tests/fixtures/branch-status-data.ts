@@ -15,6 +15,8 @@ interface PullRequestInput {
   isDraft?: boolean;
   /** The owner of the head repository; a fork's owner makes it a fork PR. */
   headOwner?: string;
+  /** The branch the PR merges into. */
+  base?: string;
   url?: string;
   mergeQueue?: MergeQueueInput;
   autoMerge?: boolean;
@@ -27,6 +29,7 @@ export function prNode(input: PullRequestInput) {
     state: input.state ?? "OPEN",
     url: input.url ?? prUrl(input.number),
     isDraft: input.isDraft ?? false,
+    ...(input.base && { baseRefName: input.base }),
     headRepositoryOwner: { login: input.headOwner ?? FAKE_REPO.owner },
     ...mergeQueueFields(input),
   };

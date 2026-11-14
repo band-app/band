@@ -256,6 +256,8 @@ export interface ReviewInfo {
   updatedAt: string;
   reviewDecision: ReviewDecision | null;
   mergeState: MergeState;
+  /** The branch the review merges into. Absent when the provider does not report it. */
+  baseBranch?: string;
   /** CI is a property of the review's head commit. */
   checks: ChecksReport;
   /** Absent when the provider does not report reviewers. */
@@ -310,6 +312,8 @@ export interface BranchReview {
   url: string;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  /** The branch the PR merges into. Absent in rows stored before it was read. */
+  baseBranch?: string;
   /** Absent in rows stored before the merge queue was read. */
   mergeQueue?: MergeQueueInfo | null;
   autoMerge?: AutoMergeInfo | null;

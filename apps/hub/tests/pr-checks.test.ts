@@ -590,7 +590,7 @@ describe("reviews.forWorktree and reviews.merge (GitHub plugin)", () => {
       expect(message).toContain("Worker h-");
       expect(message).toContain("Hub: HTTP 401: Bad credentials");
       expect(message).toContain("gh auth login on h-");
-      expect(message).toContain("band vault put --kind git --host github.com");
+      expect(message).toContain("Hub GitHub token");
     } else {
       expect(data).toEqual({ status: "error", message: "HTTP 401: Bad credentials" });
     }

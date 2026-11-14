@@ -39,8 +39,14 @@ export interface DiffTargetHeaderProps {
   headBranch: string | undefined;
   /** The repo's default branch; undefined until the first summary loads. */
   defaultBranch: string | undefined;
-  /** The picked compare branch; null means the default branch. */
+  /** The compare branch in effect; null means the default branch. */
   compareBranch: string | null;
+  /** The worktree's PR base or creation base, or null when it has none. */
+  baseBranch?: string | null;
+  /** True when the user picked the compare branch by hand. */
+  picked?: boolean;
+  /** Drops the user's pick, so the compare branch is the base again. */
+  onResetBranch?: () => void;
   onSelectBranch: (branch: string) => void;
 }
 
@@ -49,6 +55,9 @@ export function DiffTargetHeader({
   headBranch,
   defaultBranch,
   compareBranch,
+  baseBranch,
+  picked,
+  onResetBranch,
   onSelectBranch,
 }: DiffTargetHeaderProps) {
   const adapter = useAdapter();
@@ -159,6 +168,25 @@ export function DiffTargetHeader({
               placeholder="Search branches"
               data-testid="right-sidepanel__diff-target-search"
             />
+            {baseBranch && baseBranch !== defaultBranch && picked && onResetBranch && (
+              <div className="border-b border-border p-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-full justify-start gap-2 px-2 text-xs"
+                  title={baseBranch}
+                  data-testid="right-sidepanel__diff-target-base"
+                  onClick={() => {
+                    onResetBranch();
+                    setOpen(false);
+                  }}
+                >
+                  <GitBranch className="size-3.5" />
+                  Base branch
+                  <span className="ml-auto truncate text-muted-foreground">{baseBranch}</span>
+                </Button>
+              </div>
+            )}
             {defaultBranch && (
               <div className="border-b border-border p-1">
                 <Button

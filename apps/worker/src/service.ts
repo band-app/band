@@ -13,6 +13,7 @@ import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { stopAgentDaemons } from "./agents.ts";
 import { ConfigError, parseLabels } from "./config.ts";
+import { WorkerSecrets } from "./secrets.ts";
 import { stopTerminalDaemons } from "./terminals.ts";
 
 export const SERVICE_SUBCOMMANDS = ["install-service", "uninstall-service", "status"] as const;
@@ -31,8 +32,8 @@ export interface ServiceOptions {
   workerId?: string;
   /** The worker runs its worktrees' chats (`--own-chats`). */
   ownChats?: boolean;
-  /** Git asks only the hub for credentials (`--hub-git-credentials-only`). */
-  hubGitCredentialsOnly?: boolean;
+  /** The removed `--hub-git-credentials-only` was passed. It is ignored. */
+  ignoredHubGitCredentialsOnly?: boolean;
   /** Skip the guard against driving the real service manager from a HOME that is not the real home. */
   allowOtherHome?: boolean;
   /** Extra `BAND_WORKER_*` variables for the service (`--env KEY=VALUE`, repeatable). */
@@ -132,7 +133,6 @@ const USAGE = `Usage: band-worker install-service --hub <url> --token <bootstrap
   --worker-id <id>   The id the hub issued with the token.
   --state-dir <dir>  Where the worker keeps its id and session token.
   --own-chats        Run the chats of this worker's worktrees here and copy them to the hub.
-  --hub-git-credentials-only  Ignore this machine's git credential helpers; git asks only the hub.
   --allow-other-home Let install-service and uninstall-service drive the real launchd or systemd
                      user service although HOME is not the user's home directory.
   --env KEY=VALUE    Another worker setting for the service. Only BAND_WORKER_* names. Repeatable.
@@ -166,7 +166,7 @@ export function parseServiceOptions(
     stateDir: values["state-dir"] ? resolve(values["state-dir"]) : undefined,
     workerId: values["worker-id"],
     ownChats: values["own-chats"] === true,
-    hubGitCredentialsOnly: values["hub-git-credentials-only"] === true,
+    ignoredHubGitCredentialsOnly: values["hub-git-credentials-only"] === true,
     allowOtherHome: values["allow-other-home"] === true,
     env: parseServiceEnv(values.env ?? []),
   };
@@ -219,7 +219,6 @@ export function serviceVariables(opts: ServiceOptions): Record<string, string> {
   if (opts.roots.length > 0) vars.BAND_WORKER_ROOTS = opts.roots.join(delimiter);
   if (opts.stateDir) vars.BAND_WORKER_STATE_DIR = opts.stateDir;
   if (opts.ownChats) vars.BAND_WORKER_OWN_CHATS = "1";
-  if (opts.hubGitCredentialsOnly) vars.BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY = "1";
   return vars;
 }
 
@@ -356,6 +355,9 @@ export function assertServiceHome(env: ServiceEnv, allowOtherHome: boolean | und
 
 export function installService(opts: ServiceOptions, env: ServiceEnv): void {
   assertServiceHome(env, opts.allowOtherHome);
+  if (opts.ignoredHubGitCredentialsOnly) {
+    env.log("--hub-git-credentials-only is ignored: map secrets with a worker profile instead.");
+  }
   const paths = servicePaths(env);
   const vars = serviceVariables(opts);
   // Inside the desktop app `node` is the Band executable, which only runs a script with this set.
@@ -420,14 +422,23 @@ function isNoGuiSession(err: unknown): boolean {
 }
 
 /** The state dir the installed service uses: the one in its env file, else the default under BAND_HOME. */
-function installedStateDir(env: ServiceEnv, envFile: string): string {
+function installedStateDir(env: ServiceEnv, paths: ServicePaths): string {
   try {
-    const match = /^BAND_WORKER_STATE_DIR="((?:[^"\\]|\\.)*)"$/m.exec(
-      readFileSync(envFile, "utf8"),
-    );
-    if (match) return match[1].replace(/\\(.)/g, "$1");
+    if (env.platform === "darwin") {
+      const match = /<key>BAND_WORKER_STATE_DIR<\/key>\s*<string>([^<]*)<\/string>/.exec(
+        readFileSync(paths.plistFile, "utf8"),
+      );
+      if (match) {
+        return match[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+      }
+    } else {
+      const match = /^BAND_WORKER_STATE_DIR="((?:[^"\\]|\\.)*)"$/m.exec(
+        readFileSync(paths.envFile, "utf8"),
+      );
+      if (match) return match[1].replace(/\\(.)/g, "$1");
+    }
   } catch {
-    // No env file: the service was never installed, or its file is gone.
+    // No service file: the service was never installed, or its file is gone.
   }
   return join(process.env.BAND_HOME ?? join(env.home, ".band"), "worker");
 }
@@ -435,7 +446,7 @@ function installedStateDir(env: ServiceEnv, envFile: string): string {
 export function uninstallService(env: ServiceEnv, opts: { allowOtherHome?: boolean } = {}): void {
   assertServiceHome(env, opts.allowOtherHome);
   const paths = servicePaths(env);
-  const stateDir = installedStateDir(env, paths.envFile);
+  const stateDir = installedStateDir(env, paths);
   if (env.platform === "linux") {
     try {
       env.run("systemctl", ["--user", "disable", "--now", SYSTEMD_UNIT]);
@@ -464,6 +475,8 @@ export function uninstallService(env: ServiceEnv, opts: { allowOtherHome?: boole
   if (ended > 0) env.log("Ended the terminal daemon and its shells.");
   // Held chat agents run in their own daemon for the same reason, and an uninstalled worker must not leave them.
   if (stopAgentDaemons(stateDir) > 0) env.log("Ended the agent daemon and its agents.");
+  // Files the profile put on disk go with the service; a file Band did not create stays.
+  WorkerSecrets.removeAll(stateDir, env.log);
   env.log("Removed the band-worker service. The worker's state directory is kept.");
 }
 

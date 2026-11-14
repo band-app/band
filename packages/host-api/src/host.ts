@@ -188,6 +188,8 @@ export interface RepoInspection {
 export interface EnsureRepoSpec {
   remoteUrl: string;
   defaultBranch: string;
+  /** Extra environment for the clone. A worker sets it from its profile; the hub never sends it. */
+  env?: Record<string, string>;
 }
 
 export interface EnsureRepoResult {
@@ -203,7 +205,7 @@ export interface HostRepos {
   /**
    * The folder that holds the repo. Uses the mapped folder when it still exists, else clones
    * `remoteUrl` to the host's default location (`~/band/repos/<owner>/<name>`), records the
-   * mapping and returns the path. The clone uses the git credentials the host's own git has.
+   * mapping and returns the path. The clone uses the git credentials the host's own git has, and the environment in `spec.env`.
    */
   ensure(spec: EnsureRepoSpec): Promise<EnsureRepoResult>;
   /** Records that `path` holds the repo for `remoteUrl`. Replaces an earlier folder. */
@@ -269,10 +271,13 @@ export interface ExecResult {
 // ---------------------------------------------------------------------------
 
 export interface HostGit {
-  /** Runs `git ARGS` in `cwd`. Rejects with git's stderr on a non-zero exit. */
-  exec(args: string[], cwd: string): Promise<ExecResult>;
+  /**
+   * Runs `git ARGS` in `cwd`. Rejects with git's stderr on a non-zero exit. `env` is merged over
+   * the host's environment; a worker passes its profile's secrets this way.
+   */
+  exec(args: string[], cwd: string, env?: Record<string, string>): Promise<ExecResult>;
   /** Runs `gh ARGS` in `cwd`. Rejects with gh's stderr on a non-zero exit. */
-  gh(args: string[], cwd: string): Promise<ExecResult>;
+  gh(args: string[], cwd: string, env?: Record<string, string>): Promise<ExecResult>;
 }
 
 export interface WorktreeSpec {
@@ -498,8 +503,6 @@ export interface AcpLaunch {
   args: string[];
   /** Merged over the host's environment at spawn. */
   env: Record<string, string>;
-  /** Removed from the host's environment before `env` is merged. */
-  unsetEnv?: string[];
   /**
    * Version of the adapter that `command` runs, set by `resolveLaunch`. Part of the launch-spec
    * hash, so a worker update that changes the adapter restarts a held agent at the next clean point.
@@ -551,8 +554,6 @@ export interface AgentStdio {
   ack?(offsets: { stdout: number; stderr: number }): void;
   /** Bytes of stderr the worker has read from a held agent so far. */
   stderrOffset?(): number;
-  /** The process holds a GitHub token from the hub's vault in its environment. */
-  ghToken?: boolean;
   /**
    * Calls `listener` each time the agent is reattached after the link or the worker was lost.
    * A host that cannot lose its agents never calls it.

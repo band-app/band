@@ -37,8 +37,6 @@ export interface AgentRecord {
   /** The hub's launch-spec hash, opaque to the daemon. */
   specHash: string | null;
   adapterVersion: string | null;
-  /** The environment held a GitHub token from the hub's vault. */
-  ghToken: boolean;
   /**
    * The agent belongs to a chat the worker owns, so it works without the hub. Absent on a record
    * from a daemon that predates the field, which treats every agent as hub-run.
@@ -58,7 +56,6 @@ export interface SpawnParams {
   args: string[];
   specHash: string | null;
   adapterVersion: string | null;
-  ghToken: boolean;
   /**
    * Optional, so PROTOCOL_VERSION stays 1. A daemon that predates it ignores the field and treats
    * the agent as hub-run: it is killed once the hub link has been down for the reattach timeout.

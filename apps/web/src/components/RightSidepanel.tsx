@@ -369,7 +369,7 @@ function RightSidepanelInner({
       ?.replace(/[/\\]+$/, "")
       .split(/[/\\]/)
       .pop() || "Explorer";
-  const { compareBranch, setCompareBranch } = useDiffTarget(worktreeId);
+  const { compareBranch, pickedBranch, baseBranch, setCompareBranch } = useDiffTarget(worktreeId);
 
   // The active file/diff leaf publishes its path here (see
   // WorktreeCenter's `useActiveFileTracking`); use it to highlight the
@@ -531,6 +531,9 @@ function RightSidepanelInner({
               headBranch={branchInfo?.headBranch}
               defaultBranch={branchInfo?.defaultBranch}
               compareBranch={compareBranch}
+              baseBranch={baseBranch}
+              picked={pickedBranch !== null}
+              onResetBranch={() => setCompareBranch(null)}
               onSelectBranch={setCompareBranch}
             />
             <div className="min-h-0 flex-1 overflow-auto">

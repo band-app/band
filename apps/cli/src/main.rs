@@ -963,11 +963,11 @@ enum TokensCmd {
 enum VaultCmd {
     /// List credentials (name, kind, scope, last use). Never their values.
     List,
-    /// Store an API key, environment value or git access token. The value is read from stdin unless --value is given.
+    /// Store an API key or environment value. The value is read from stdin unless --value is given.
     Put {
         /// Credential name. An env item's name is the variable name.
         name: String,
-        /// `api_key` (default), `env` or `git`
+        /// `api_key` (default) or `env`. A `git` kind no longer exists: map a token to `GH_TOKEN` in a worker profile.
         #[arg(long, default_value = "api_key")]
         kind: String,
         /// `global` (default) or `repo:<name>`
@@ -979,15 +979,6 @@ enum VaultCmd {
         /// The value. Prefer stdin: an argument shows in the process list and shell history.
         #[arg(long)]
         value: Option<String>,
-        /// For `--kind git`: the remote's host, such as github.com
-        #[arg(long)]
-        host: Option<String>,
-        /// For `--kind git`: a pattern over the repository path, such as `owner/*` or `owner/repo`
-        #[arg(long)]
-        path: Option<String>,
-        /// For `--kind git`: the username git sends with the token (default x-access-token)
-        #[arg(long)]
-        username: Option<String>,
     },
     /// Delete a credential. An OAuth connection is revoked at its server first.
     Delete {
@@ -1490,21 +1481,7 @@ fn main() {
                 scope,
                 description,
                 value,
-                host,
-                path,
-                username,
-            } => cmd_vault_put(
-                &name,
-                &kind,
-                &scope,
-                description.as_deref(),
-                value,
-                &GitTarget {
-                    host: host.as_deref(),
-                    path: path.as_deref(),
-                    username: username.as_deref(),
-                },
-            ),
+            } => cmd_vault_put(&name, &kind, &scope, description.as_deref(), value),
             VaultCmd::Delete { id } => cmd_vault_delete(&id),
             VaultCmd::RotateKey => cmd_vault_rotate_key(),
         },
@@ -4790,13 +4767,12 @@ fn cmd_hosts_profiles() -> Result<CommandResult, String> {
             .get("workers")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
-        let creds = if p.get("credentials").is_some() {
-            "policy"
-        } else {
-            "unrestricted"
-        };
+        let secrets = p
+            .get("secrets")
+            .and_then(|v| v.as_array())
+            .map_or(0, Vec::len);
         text.push_str(&format!(
-            "{name}  trust={trust}  credentials={creds}  workers={workers}\n"
+            "{name}  trust={trust}  secrets={secrets}  workers={workers}\n"
         ));
     }
     if let Some(bad) = data.get("invalid").and_then(|v| v.as_array()) {
@@ -5597,29 +5573,15 @@ fn cmd_vault_list() -> Result<CommandResult, String> {
     })
 }
 
-/// Where a `git` credential applies, from `band vault put --kind git`.
-struct GitTarget<'a> {
-    host: Option<&'a str>,
-    path: Option<&'a str>,
-    username: Option<&'a str>,
-}
-
 fn cmd_vault_put(
     name: &str,
     kind: &str,
     scope: &str,
     description: Option<&str>,
     value: Option<String>,
-    git: &GitTarget,
 ) -> Result<CommandResult, String> {
-    if kind == "git" && (git.host.is_none() || git.path.is_none()) {
-        return Err(
-            "A git credential needs --host (such as github.com) and --path (such as 'owner/*')."
-                .to_string(),
-        );
-    }
-    if kind != "git" && (git.host.is_some() || git.path.is_some() || git.username.is_some()) {
-        return Err("--host, --path and --username apply only to --kind git.".to_string());
+    if kind == "git" {
+        return Err("The git kind was removed. Store the token as an api_key item and map it to an environment variable such as GH_TOKEN in a worker profile (see docs/worker-profiles.md).".to_string());
     }
     let value = if let Some(v) = value {
         v
@@ -5636,15 +5598,6 @@ fn cmd_vault_put(
     let mut body = serde_json::json!({"name": name, "kind": kind, "scope": scope, "value": value});
     if let Some(d) = description {
         body["description"] = serde_json::json!(d);
-    }
-    if let Some(h) = git.host {
-        body["host"] = serde_json::json!(h);
-    }
-    if let Some(p) = git.path {
-        body["pathPattern"] = serde_json::json!(p);
-    }
-    if let Some(u) = git.username {
-        body["username"] = serde_json::json!(u);
     }
     let data = client.trpc_mutate("vault.put", &body)?;
     let id = data
@@ -6816,12 +6769,9 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Store an API key, environment value or git access token encrypted on the hub",
             "parameters": [
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Credential name (an env item's name is the variable name)"},
-                {"name": "kind", "type": "string", "required": false, "description": "api_key (default), env or git"},
+                {"name": "kind", "type": "string", "required": false, "description": "api_key (default) or env"},
                 {"name": "scope", "type": "string", "required": false, "description": "global (default) or repo:<name>"},
                 {"name": "description", "type": "string", "required": false, "description": "Short note shown in the list"},
-                {"name": "host", "type": "string", "required": false, "description": "For --kind git: the remote's host, such as github.com"},
-                {"name": "path", "type": "string", "required": false, "description": "For --kind git: a pattern over the repository path, such as 'owner/*'"},
-                {"name": "username", "type": "string", "required": false, "description": "For --kind git: the username git sends with the token (default x-access-token)"},
                 {"name": "value", "type": "string", "required": false, "description": "The value. Without it the value is read from stdin."},
             ],
             "notes": "Needs an admin token. Replaces a value stored under the same name and scope. The value is never printed or returned."

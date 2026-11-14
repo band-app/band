@@ -284,6 +284,26 @@ export function WorkerDrawer({
                     </p>
                   </div>
                 ) : null}
+                {isAdmin && host.secretFiles && host.secretFiles.refused.length > 0 ? (
+                  <div className="space-y-1 text-xs" data-testid="settings__host-secret-files">
+                    <div className="font-medium">Refused secret files</div>
+                    {host.secretFiles.refused.map((r) => (
+                      <div
+                        key={r.path}
+                        className="flex items-center gap-1.5"
+                        data-testid="settings__host-secret-file-refused"
+                        data-path={r.path}
+                      >
+                        <span className="min-w-0 truncate font-mono">{r.path}</span>
+                        <ErrorPopover
+                          label={`Secret file ${r.path} was refused`}
+                          testId="settings__host-secret-file-error"
+                          message={r.reason}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 {isAdmin ? (
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <div className="min-w-0">

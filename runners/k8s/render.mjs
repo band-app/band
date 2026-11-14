@@ -89,7 +89,7 @@ export function resolveConfig(env) {
     requestId: env.BAND_REQUEST_ID || "",
     repo,
     repoName,
-    // The hub clones through the worker, which can ask it for the repository's git credential.
+    // The hub clones through the worker, whose git sees the runner profile's variables (GH_TOKEN).
     cloneByHub: Boolean(env.BAND_CLONE_BY_HUB),
   };
 }

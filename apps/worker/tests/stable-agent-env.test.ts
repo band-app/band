@@ -2,13 +2,7 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readlinkSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import {
-  type GitCredentialParams,
-  METHOD_GIT_CREDENTIAL,
-  METHOD_RELAY_HTTP,
-  type RelayHttpRequest,
-  type ServerSession,
-} from "@band-app/link";
+import { METHOD_RELAY_HTTP, type RelayHttpRequest, type ServerSession } from "@band-app/link";
 import { stopTerminalDaemons } from "../src/terminals.ts";
 import {
   call,
@@ -22,9 +16,9 @@ import {
   waitFor,
 } from "./helpers.ts";
 
-// What an agent or shell started by a worker keeps in its environment (the git credential socket, the relay URL
-// and token, a PATH with `band`) must still work after the worker restarts. These tests run the real
-// `band-worker` binary, kill it, start it again on the same state dir and run commands in a shell that stayed.
+// What an agent or shell started by a worker keeps in its environment (the relay URL and token, a
+// PATH with `band`) must still work after the worker restarts. These tests run the real `band-worker`
+// binary, kill it, start it again on the same state dir and run commands in a shell that stayed.
 
 interface Entry {
   terminalId: string;
@@ -47,7 +41,6 @@ describe("the environment an agent holds survives a worker restart", () => {
   let proc: WorkerProcess | null = null;
   let session: ServerSession;
   const relayCalls: RelayHttpRequest[] = [];
-  const credentialAsks: GitCredentialParams[] = [];
   let relayUrl = "";
   let cliPath = "";
 
@@ -100,10 +93,6 @@ describe("the environment an agent holds survives a worker restart", () => {
     cliDir = tmpDir("band-cli-");
     cliPath = fakeCli(join(cliDir, "one"), "band", "cli-one");
     hub.server.on("connected", (s: ServerSession) => {
-      s.handle(METHOD_GIT_CREDENTIAL, (params) => {
-        credentialAsks.push(params as GitCredentialParams);
-        return { found: true, username: "x-access-token", password: "secret-from-hub" };
-      });
       s.handle(METHOD_RELAY_HTTP, (params) => {
         relayCalls.push(params as RelayHttpRequest);
         const ch = s.openChannel("relay.body");
@@ -126,11 +115,10 @@ describe("the environment an agent holds survives a worker restart", () => {
 
   const probes =
     'echo "cli=$(band)"; ' +
-    "printf 'protocol=https\\nhost=example.com\\npath=o/r\\n\\n' | git credential fill; " +
     'echo "relay=$(curl -s -o /dev/null -w %{http_code} -H "Authorization: Bearer $BAND_TOKEN" "$BAND_SERVER_URL/api/trpc/x")"';
 
   // P1-S1
-  it("keeps band, the git credential and the relay working in a shell that outlives the worker", async () => {
+  it("keeps band and the relay working in a shell that outlives the worker", async () => {
     const grant = await call<{ url: string }>(session, "relay.register", {
       token: "brt_one",
       worktreeId: "ws",
@@ -146,20 +134,16 @@ describe("the environment an agent holds survives a worker restart", () => {
 
     const before = await run("t1", probes);
     assert.match(before, /cli=cli-one/);
-    assert.match(before, /password=secret-from-hub/);
     assert.match(before, /relay=200/);
 
     await killWorker();
     cliPath = fakeCli(join(cliDir, "two"), "band", "cli-two");
-    credentialAsks.length = 0;
     relayCalls.length = 0;
     await startWorker();
 
     const after = await run("t1", probes);
     assert.match(after, /cli=cli-two/, "the same PATH now reaches the CLI the new worker resolved");
-    assert.match(after, /password=secret-from-hub/);
     assert.match(after, /relay=200/);
-    assert.equal(credentialAsks.length, 1);
     assert.equal(relayCalls.length, 1);
     assert.equal(relayCalls[0]?.scope.worktreeId, "ws");
     const reachable = await call<Entry[]>(session, "pty.listAll");

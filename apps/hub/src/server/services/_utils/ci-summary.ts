@@ -15,6 +15,7 @@ export function ciSummaryFromChecks(checks: ChecksReport, review: ReviewInfo | n
         url: review.url,
         state: review.state === "draft" ? ("open" as const) : review.state,
         isDraft: review.state === "draft",
+        ...(review.baseBranch && { baseBranch: review.baseBranch }),
         ...(review.mergeQueue && { mergeQueue: review.mergeQueue }),
         ...(review.autoMerge && { autoMerge: review.autoMerge }),
       }

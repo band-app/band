@@ -248,6 +248,56 @@ describe("the local hook", () => {
     const { log } = await q<{ log: string | null }>("runners.log", { requestId: id });
     expect(log).toContain("started worker");
   }, 120_000);
+
+  it("gives the worker it starts the runner's profile, trust and secrets (S6)", async () => {
+    await m("vault.put", { name: "runner-file", kind: "api_key", value: "runner contents\n" });
+    await m("workerProfiles.create", {
+      name: "runner-bot",
+      trust: "restricted",
+      secrets: [{ item: "runner-file", file: "~/runner-secret.txt" }],
+    });
+    await setRunners([
+      {
+        id: "local-profile",
+        spawn: "bundled:local",
+        destroy: "bundled:local",
+        labels: { pool: "profiled" },
+        isolation: "process",
+        maxConcurrent: 1,
+        timeoutSec: 90,
+        profile: "runner-bot",
+        env: { BAND_WORKER_BIN: WORKER_BIN, ...processGuardEnv(), BAND_IDLE_EXIT: "120s" },
+      },
+    ]);
+    const created = await create("runner-profiled", { labels: { pool: "profiled" } });
+    const wt = await waitFor(() => worktree("runner-profiled"), {
+      label: "worktree exists on the profiled worker",
+      timeoutMs: 90_000,
+      intervalMs: 250,
+    });
+    type Row = {
+      id: string;
+      trust: string;
+      profile: string | null;
+      secretFiles: { written: string[] } | null;
+    };
+    const row = await waitFor(
+      async () => {
+        const host = (await q<{ hosts: Row[] }>("hosts.list")).hosts.find(
+          (h) => h.id === wt.hostId,
+        );
+        return host?.secretFiles?.written.length ? host : undefined;
+      },
+      { label: "the worker reports its secret file", timeoutMs: 30_000 },
+    );
+    expect(row).toMatchObject({ trust: "restricted", profile: "runner-bot" });
+    expect(row.secretFiles?.written).toEqual(["~/runner-secret.txt"]);
+    // The hook got no secret: the worker fetched it over its link after hello.
+    const { log } = await q<{ log: string | null }>("runners.log", {
+      requestId: requestIdOf(created),
+    });
+    expect(log ?? "").not.toContain("runner contents");
+  }, 120_000);
 });
 
 describe("the ssh hook", () => {

@@ -23,6 +23,7 @@ import {
 } from "../src/server/services/_utils/hub-gh-auth";
 import { agentSessionService } from "../src/server/services/agent-session-service";
 import { chatService } from "../src/server/services/chat-service";
+import { settingsService } from "../src/server/services/settings-service";
 import { subscriptionPollService } from "../src/server/services/subscription-poll-service";
 import { subscriptionService } from "../src/server/services/subscription-service";
 import { subscriptionSourceService } from "../src/server/services/subscription-source-service";
@@ -357,18 +358,18 @@ describe("gh credentials on a hub with no gh login", () => {
     for (const item of vaultService.list()) {
       if (item.name === "github-poll") await vaultService.remove(item.id);
     }
+    settingsService.update({ hubGithubToken: "" });
     resetHubGhAuthCache();
   });
 
   it("S2: a poll runs gh with GH_TOKEN from the vault and delivers the event", async () => {
     vaultService.put({
       name: "github-poll",
-      kind: "git",
+      kind: "api_key",
       scope: "global",
-      host: "github.com",
-      pathPattern: "**",
       value: GH_TOKEN,
     });
+    settingsService.update({ hubGithubToken: "github-poll" });
     const { coords, full } = newRepo();
     stub.setPrActivityQuery(coords, () =>
       prAnswer([{ id: "C_vault", body: "vault token review note", createdAt: future(2000) }]),
@@ -382,7 +383,7 @@ describe("gh credentials on a hub with no gh login", () => {
       r.fields.query?.toString().includes(coords.name),
     );
     expect(graphql.length).toBeGreaterThan(0);
-    expect(graphql.every((r) => r.ghToken === GH_TOKEN)).toBe(true);
+    expect(graphql.every((r) => r.ghTokenEnv === GH_TOKEN)).toBe(true);
   });
 
   it("S4: with no vault token the error names the missing credential and does not crash", async () => {
@@ -401,7 +402,7 @@ describe("gh credentials on a hub with no gh login", () => {
     ).catch((err: Error) => err.message);
     expect(failure).toContain("404");
     expect(failure).not.toContain("No GitHub credential");
-    expect(MISSING_GH_CREDENTIAL).toContain("--kind git --host github.com");
+    expect(MISSING_GH_CREDENTIAL).toContain("Hub GitHub token");
     const { coords, full } = newRepo();
     stub.setPrActivityQuery(coords, () => prAnswer([]));
     await subscribe({ pr: 8 }, full);
@@ -409,6 +410,6 @@ describe("gh credentials on a hub with no gh login", () => {
     const graphql = calls("graphql").filter((r) =>
       r.fields.query?.toString().includes(coords.name),
     );
-    expect(graphql.every((r) => r.ghToken === undefined)).toBe(true);
+    expect(graphql.every((r) => r.ghTokenEnv === undefined)).toBe(true);
   });
 });

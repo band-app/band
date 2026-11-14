@@ -68,11 +68,11 @@ An agent can be installed on some workers and not others. With two or more worke
 
 To run an agent from a different command on one worker, open that worker in Settings > Workers and set the agent's command there. Band checks that the command exists on the worker. A per-worker command wins over the command in Settings > Coding Agents.
 
-A worker that reports an agent as not logged in still counts as able to run it if you have an [agent login](agent-logins.md) for that agent.
+A worker that reports an agent as not logged in can still run it when its [worker profile](worker-profiles.md) maps the agent's key to an environment variable.
 
 ## Logging in
 
-An agent uses the login on the machine it runs on, such as the result of `claude auth login` or `codex login`. A worker with no login can use an [agent login](agent-logins.md) instead, which the hub stores in its vault and hands to the agent when it starts.
+An agent uses the login on the machine it runs on, such as the result of `claude auth login` or `codex login`. A worker with no login can use a key from the hub's vault instead: map the item to the variable the agent reads (for example `ANTHROPIC_API_KEY`) in the worker's [worker profile](worker-profiles.md).
 
 ## Updates do not stop chat agents
 

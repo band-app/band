@@ -166,6 +166,30 @@ if (mustRun && !(IMAGE && dockerHas(IMAGE))) {
   );
 }
 
+function dockerRunner(extra: Record<string, unknown> = {}) {
+  return {
+    id: "docker",
+    spawn: "bundled:docker",
+    destroy: "bundled:docker",
+    status: "bundled:docker",
+    labels: { pool: "docker" },
+    isolation: "container",
+    maxConcurrent: 2,
+    timeoutSec: 150,
+    env: {
+      BAND_DOCKER_IMAGE: IMAGE,
+      BAND_DOCKER_NETWORK: NETWORK,
+      ...(process.env.BAND_DOCKER_TEST_HUB_URL
+        ? { BAND_HUB_URL: process.env.BAND_DOCKER_TEST_HUB_URL }
+        : {}),
+      BAND_IDLE_EXIT: "300s",
+      // Hooks get a minimal environment, so a daemon that is not at the default socket is named here.
+      ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
+    },
+    ...extra,
+  };
+}
+
 describe.skipIf(!IMAGE)("the docker hook", () => {
   beforeAll(async () => {
     hubHome = createTmpHome("band-docker-hub-");
@@ -198,7 +222,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     const gitUrl = process.env.BAND_DOCKER_TEST_GIT_URL ?? `git://127.0.0.1:${port}`;
     git(seed, "remote", "add", "origin", `${gitUrl}/proj`);
 
-    // A private repository behind basic auth, for the git credential test. The container reaches it
+    // A private repository behind basic auth, for the profile secret test. The container reaches it
     // on loopback, like the git daemon above, so it needs the same network setup.
     const privateRoot = tmp("band-docker-private-");
     const privateSeed = join(tmp("band-docker-private-seed-"), "secret");
@@ -237,30 +261,7 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
       port: Number(process.env.BAND_DOCKER_TEST_PORT) || undefined,
       env: { BAND_SERVE_UI: "false", BAND_REAPER_INTERVAL_MS: "500" },
     });
-    await m("settings.update", {
-      runners: [
-        {
-          id: "docker",
-          spawn: "bundled:docker",
-          destroy: "bundled:docker",
-          status: "bundled:docker",
-          labels: { pool: "docker" },
-          isolation: "container",
-          maxConcurrent: 2,
-          timeoutSec: 150,
-          env: {
-            BAND_DOCKER_IMAGE: IMAGE,
-            BAND_DOCKER_NETWORK: NETWORK,
-            ...(process.env.BAND_DOCKER_TEST_HUB_URL
-              ? { BAND_HUB_URL: process.env.BAND_DOCKER_TEST_HUB_URL }
-              : {}),
-            BAND_IDLE_EXIT: "300s",
-            // Hooks get a minimal environment, so a daemon that is not at the default socket is named here.
-            ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
-          },
-        },
-      ],
-    });
+    await m("settings.update", { runners: [dockerRunner()] });
   }, 180_000);
 
   afterAll(async () => {
@@ -332,16 +333,20 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     docker("exec", containers[0][0], "touch", "/tmp/band-probe");
   }, 300_000);
 
-  it("clones a private repository in the container with a vault git credential", async () => {
+  it("clones a private repository with a runner profile that maps a .netrc secret", async () => {
     const stub = authStub as GitHttpAuthStub;
+    const host = new URL(stub.url).hostname;
     await m("vault.put", {
-      name: "docker-private",
-      kind: "git",
-      host: stub.host,
-      pathPattern: "secret",
-      username: "band-bot",
-      value: PRIVATE_TOKEN,
+      name: "docker-netrc",
+      kind: "api_key",
+      value: `machine ${host}\nlogin band-bot\npassword ${PRIVATE_TOKEN}\n`,
     });
+    await m("workerProfiles.create", {
+      name: "docker-bot",
+      trust: "restricted",
+      secrets: [{ item: "docker-netrc", file: "~/.netrc" }],
+    });
+    await m("settings.update", { runners: [dockerRunner({ profile: "docker-bot" })] });
     const created = await m<CreateResult>("worktrees.create", {
       repo: "secret",
       branch: "private-a",
@@ -359,14 +364,23 @@ describe.skipIf(!IMAGE)("the docker hook", () => {
     const [container] = containerOf(wt.hostId as string);
     expect(docker("exec", container, "cat", "/work/secret/private.txt")).toBe("private");
     expect(stub.authenticated).toContain("band-bot");
-    // The token is nowhere in the container's configuration, its files or its log.
+    // The worker wrote the mapped file with mode 0600.
+    expect(docker("exec", container, "stat", "-c", "%a", "/work/home/.netrc")).toBe("600");
+    // The token is nowhere else: not in the container's configuration, its log, other files or the hook log.
     expect(docker("inspect", container)).not.toContain(PRIVATE_TOKEN);
     expect(docker("logs", container)).not.toContain(PRIVATE_TOKEN);
     expect(
-      docker("exec", container, "sh", "-c", `grep -rl ${PRIVATE_TOKEN} /work /tmp || true`),
+      docker(
+        "exec",
+        container,
+        "sh",
+        "-c",
+        `grep -rl --exclude=.netrc --exclude=secret-files.json ${PRIVATE_TOKEN} /work /tmp || true`,
+      ),
     ).toBe("");
     const { log } = await q<{ log: string | null }>("runners.log", { requestId });
     expect(log).not.toContain(PRIVATE_TOKEN);
+    await m("settings.update", { runners: [dockerRunner()] });
   }, 300_000);
 
   it("removes the container and its volume on destroy (S1)", async () => {

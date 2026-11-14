@@ -53,6 +53,14 @@ export const runnerSchema = z
      * can destroy machines the hub has no record of.
      */
     status: hookPath.optional(),
+    /**
+     * The worker profile (`settings.workerProfiles`) the workers this runner starts get: its trust,
+     * labels and secrets. Without one they get nothing from the hub's vault.
+     */
+    profile: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/)
+      .optional(),
     /** What this runner offers. A request is leasable when every label it asks for is here. */
     labels: z.record(z.string(), z.string()).default({}),
     /**

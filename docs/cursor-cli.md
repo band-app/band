@@ -16,7 +16,7 @@ curl https://cursor.com/install -fsS | bash
 cursor-agent login
 ```
 
-Band counts Cursor CLI as logged in only when `CURSOR_API_KEY` is set in the worker's environment. It cannot check a sign-in made with `cursor-agent login`. A machine without a key can use an [agent login](agent-logins.md) with a Cursor API key.
+Band counts Cursor CLI as logged in only when `CURSOR_API_KEY` is set in the worker's environment. It cannot check a sign-in made with `cursor-agent login`. A machine without a key can get one from a [worker profile](worker-profiles.md): store it in the vault and map it to `CURSOR_API_KEY`.
 
 ## Add it to the agent list
 

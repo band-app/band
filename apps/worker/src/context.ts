@@ -10,6 +10,7 @@ import type { LeaseGuard } from "./lease.ts";
 import type { PathPolicy } from "./path-policy.ts";
 import type { WorkerPlugins } from "./plugins.ts";
 import { asParams, encodeBytes, encodeJson, mapError, type Params } from "./rpc-util.ts";
+import type { WorkerSecrets } from "./secrets.ts";
 
 export interface WorkerContext {
   host: Host;
@@ -20,6 +21,8 @@ export interface WorkerContext {
   labels: Record<string, string>;
   /** The `band` CLI this worker ships with. Absent when none could be found. */
   cli?: WorkerCli;
+  /** The secrets of the worker's profile. Every process the worker starts gets their env. */
+  secrets?: WorkerSecrets;
   /** The hub's lease: what fences the worker when it runs out. */
   lease: LeaseGuard;
   /** The worker's private directory. */

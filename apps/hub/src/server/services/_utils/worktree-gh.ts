@@ -92,7 +92,7 @@ export function worktreeGh(
       throw new Error(
         `GitHub is not reachable with gh. Worker ${host.id}: ${firstLine(hostError)}. ` +
           `Hub: ${firstLine(hubError)}. Fix: run gh auth login on ${host.id}, or store a GitHub ` +
-          "token on the hub with band vault put --kind git --host github.com.",
+          "token as the Hub GitHub token in Settings > Credentials.",
       );
     }
   };

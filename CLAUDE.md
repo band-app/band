@@ -70,7 +70,7 @@ Look at `apps/web/e2e/worktree-maximize-state.spec.ts` and `apps/web/e2e/pages/W
 
 ### Running the suites inside a Band worker
 
-An agent session runs in a Band worker, so its environment carries the worker's identity: `BAND_WORKER_ID`, `BAND_HUB_URL`, `BAND_SERVER_URL`, `BAND_TOKEN`, `BAND_WORKTREE_ID`, `BAND_CHAT_ID`, `BAND_GIT_CREDENTIAL_SOCK`, a credential helper in `GIT_CONFIG_*`, and possibly `GIT_ASKPASS`, `SSH_ASKPASS` and `GH_TOKEN`. A test that starts a hub, a `band-worker` or the CLI used to inherit them. The hub then refused a test worker's bootstrap token with HTTP 401 (the id belonged to the real worker), and the CLI talked to the real hub (`Repo "my-repo" not found`). Tests that fetch fake repos such as `acme/widgets` (`pr-checks`, `subscriptions-github*`, `subscriptions-guards`) also made the real hub log credential requests through the inherited helper. The suites now drop these variables themselves, through `scripts/test-env.mjs` (called by `apps/hub/vitest.config.ts` and `apps/web/playwright.config.ts`) and `command()` in `apps/cli/tests/integration.rs`. A new helper that spawns a process still builds its environment from `process.env`, which is clean by then. Do not add a spawn that reads the real `~/.band`.
+An agent session runs in a Band worker, so its environment carries the worker's identity: `BAND_WORKER_ID`, `BAND_HUB_URL`, `BAND_SERVER_URL`, `BAND_TOKEN`, `BAND_WORKTREE_ID`, `BAND_CHAT_ID`, and the variables its profile maps (such as `GH_TOKEN`), and possibly `GIT_ASKPASS` and `SSH_ASKPASS`. A test that starts a hub, a `band-worker` or the CLI used to inherit them. The hub then refused a test worker's bootstrap token with HTTP 401 (the id belonged to the real worker), and the CLI talked to the real hub (`Repo "my-repo" not found`). Tests that fetch fake repos such as `acme/widgets` (`pr-checks`, `subscriptions-github*`, `subscriptions-guards`) also made the real hub log credential requests through the inherited helper. The suites now drop these variables themselves, through `scripts/test-env.mjs` (called by `apps/hub/vitest.config.ts` and `apps/web/playwright.config.ts`) and `command()` in `apps/cli/tests/integration.rs`. A new helper that spawns a process still builds its environment from `process.env`, which is clean by then. Do not add a spawn that reads the real `~/.band`.
 
 - Use Node 24: `export PATH=~/.nvm/versions/node/v24.22.1/bin:$PATH` (the default Node here is newer).
 - Hub: `pnpm --filter @band-app/server test`. The full run takes 30+ minutes.
@@ -201,7 +201,6 @@ Each feature area's architecture note lives in `.claude/rules/architecture/<name
 - `hub-tokens`: hub tokens
 - `voice-dictation`: voice dictation
 - `credential-vault`: credential vault
-- `agent-logins`: agent logins
 - `mcp-proxy`: MCP proxy
 - `repo-workers`: repo workers
 - `worker-trust-levels`: worker trust levels

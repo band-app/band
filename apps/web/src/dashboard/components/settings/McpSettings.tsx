@@ -402,7 +402,7 @@ export function McpSettings() {
 
   const hostStatus = (server: McpServer) =>
     server.hostId ? (hosts.data ?? []).find((h) => h.id === server.hostId)?.status : undefined;
-  // Only an API key or an OAuth connection can authenticate a server. A git credential cannot.
+  // Only an API key or an OAuth connection can authenticate a server.
   const credentials = (vault.data ?? []).filter(
     (i: VaultItem) => i.kind === "api_key" || i.kind === "oauth",
   );

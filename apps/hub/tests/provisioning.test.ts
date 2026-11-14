@@ -4,7 +4,7 @@
 // installs it through `BAND_WORKER_CMD`, a documented setting: the wrapper below stands in for
 // the service manager and starts the worker as a plain background process, because a test must
 // not install a launchd or systemd unit. Provisioning repos are local bare repos, and the
-// private one sits behind the basic-auth git stub with a vault git credential.
+// private one sits behind the basic-auth git stub with a clone token from the vault.
 
 import { execFileSync, spawn } from "node:child_process";
 import {
@@ -570,7 +570,7 @@ echo private >"$OUT/marker"
 ${startWorkerLine}
 `,
     );
-    stub = await startGitHttpAuthStub(remotes, { username: "band-bot", password: GIT_TOKEN });
+    stub = await startGitHttpAuthStub(remotes, { username: "x-access-token", password: GIT_TOKEN });
     await api.m("provisioning.updateSettings", {
       repoUrl: `${stub.url}/proj.git`,
       branch: "main",
@@ -582,12 +582,10 @@ ${startWorkerLine}
 
     await api.m("vault.put", {
       name: "provisioning-git",
-      kind: "git",
-      host: stub.host,
-      pathPattern: "proj",
-      username: "band-bot",
+      kind: "api_key",
       value: GIT_TOKEN,
     });
+    await api.m("provisioning.updateSettings", { tokenItem: "provisioning-git" });
     const made = await create("private");
     const machine = makeMachine();
     const result = await run(machine, made.command);
@@ -789,7 +787,7 @@ describe("a worker profile (profiles S2)", () => {
       name: "agent-user",
       labels: ["gui=1"],
       trust: "restricted",
-      env: { BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY: "1" },
+      env: { BAND_WORKER_LINK_LOG_MS: "1" },
       ownChats: true,
     });
     const made = await api.m<Command>("provisioning.createCommand", {
@@ -802,7 +800,7 @@ describe("a worker profile (profiles S2)", () => {
     const result = await run(machine, made.command);
     expect(result.code).toBe(0);
     const args = readFileSync(join(machine.home, "wrapper-args"), "utf8");
-    expect(args).toContain("--env BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1");
+    expect(args).toContain("--env BAND_WORKER_LINK_LOG_MS=1");
     expect(args).toContain("--own-chats");
     expect(args).toContain("gui=1");
     expect(args).toContain("zone=a");
@@ -839,7 +837,7 @@ ${startWorkerLine}
         branch: "main",
         command: "band/provision.sh",
       },
-      env: { BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY: "1" },
+      env: { BAND_WORKER_LINK_LOG_MS: "1" },
     });
     const made = await api.m<Command>("provisioning.createCommand", {
       hubUrl: server.url,
@@ -850,15 +848,13 @@ ${startWorkerLine}
     const result = await run(makeMachine(), made.command);
     expect(result.code).toBe(0);
     expect(readFileSync(join(out, "marker"), "utf8").trim()).toBe("profile-repo");
-    expect(readFileSync(join(out, "worker-env"), "utf8")).toContain(
-      "BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY=1",
-    );
+    expect(readFileSync(join(out, "worker-env"), "utf8")).toContain("BAND_WORKER_LINK_LOG_MS=1");
   }, 90_000);
 
   it("fails the run with a clear message when the worker cannot take --env", async () => {
     await api.m("workerProfiles.create", {
       name: "old-worker",
-      env: { BAND_WORKER_HUB_GIT_CREDENTIALS_ONLY: "1" },
+      env: { BAND_WORKER_LINK_LOG_MS: "1" },
     });
     const made = await api.m<Command>("provisioning.createCommand", {
       hubUrl: server.url,

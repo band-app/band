@@ -35,6 +35,15 @@ test("a worker within one minor of the hub connects, further is refused with a r
   assert.match(compatibilityProblem("0.50.0", "1.0.0") ?? "", /too old/);
 });
 
+test("a hub at the minimum worker version refuses an older worker even within one minor", () => {
+  assert.equal(
+    compatibilityProblem("0.66.0", "0.67.0"),
+    "worker 0.66.0 is too old for hub 0.67.0, update it to 0.67.0",
+  );
+  assert.equal(compatibilityProblem("0.67.0", "0.67.0"), null);
+  assert.equal(compatibilityProblem("0.66.2", "0.66.9"), null);
+});
+
 test("an unknown version is never refused", () => {
   assert.equal(compatibilityProblem(null, "0.50.0"), null);
   assert.equal(compatibilityProblem("0.1.0", "dev"), null);

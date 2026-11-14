@@ -27,11 +27,20 @@ export const settingsRouter = t.router({
       hubUpdate,
       workerUpdate,
       workerProfiles,
+      hubGithubToken,
       ...settings
     } = settingsService.get();
-    // Profiles name vault items and logins a worker may receive, so only an admin reads them.
+    // Profiles and the hub token name vault items a worker or the hub may use, so only an admin reads them.
     return ctx.admin
-      ? { ...settings, voice, provisioning, hubUpdate, workerUpdate, workerProfiles }
+      ? {
+          ...settings,
+          voice,
+          provisioning,
+          hubUpdate,
+          workerUpdate,
+          workerProfiles,
+          hubGithubToken,
+        }
       : settings;
   }),
 
@@ -79,6 +88,12 @@ export const settingsRouter = t.router({
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "Changing workerProfiles needs an admin token.",
+      });
+    }
+    if (input.hubGithubToken !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing hubGithubToken needs an admin token.",
       });
     }
     if (input.tokenSecret !== undefined && !ctx.admin) {

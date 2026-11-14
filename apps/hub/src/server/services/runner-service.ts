@@ -57,11 +57,11 @@ import {
   resolveHookPath,
 } from "./_utils/runner-config";
 import { environmentBuildService } from "./environment-build-service";
-import { gitCredentialService } from "./git-credential-service";
 import { HostRequestError, placementService, wakeOf } from "./placement-service";
 import { settingsService } from "./settings-service";
 import { loadState } from "./state";
 import { tokenService } from "./token-service";
+import { workerProfileService } from "./worker-profile-service";
 
 const log = createLogger("runner");
 
@@ -579,6 +579,10 @@ export class RunnerService {
           undefined,
           "restricted",
         );
+    // The runner's profile gives the worker its trust and secrets, like any other worker's.
+    if (runner.profile && !wake) {
+      workerProfileService.setHostProfile(issued.hostId, runner.profile);
+    }
     state.hostId = issued.hostId;
     state.reused = wake !== null;
     state.token = issued.token;
@@ -596,22 +600,22 @@ export class RunnerService {
       }
     }, LEASE_MS / 3);
     renew.unref?.();
-    let fulfilled = false;
     try {
       const repos = await repoUrls(row);
       const env = this.hookEnv(runner, row, issued.hostId, issued.token, repos);
-      // A repository the vault holds a git credential for is cloned by the hub through the worker
-      // once it says hello, because the hook has no credential. The hook skips its own clone.
+      // A runner with a profile that maps secrets gets its repository cloned by the hub through
+      // the worker once it says hello, because the hook has no credential. The hook skips its own
+      // clone, and the worker's git sees the profile's variables.
       const hubClone =
-        !snapshot && repos[0] && !repos[0].startsWith("/")
-          ? (await gitCredentialService.hasCredentialFor(repos[0], row.repo))
-            ? repos[0]
-            : null
+        !snapshot && repos[0] && !repos[0].startsWith("/") && runnerHasSecrets(runner)
+          ? repos[0]
           : null;
       if (hubClone) {
         env.BAND_CLONE_BY_HUB = "1";
-        gitCredentialService.expectRemote(issued.hostId, hubClone, row.repo);
-        runLog.write("hub", "the hub will clone the repository with a vault git credential");
+        runLog.write(
+          "hub",
+          "the hub will clone the repository through the worker with its profile secrets",
+        );
       }
       // BAND_WORKER_REPO_PATH wins over the older BAND_HOST_REPO_PATH whatever the line order.
       let workerRepoPath: string | undefined;
@@ -665,18 +669,15 @@ export class RunnerService {
         if (err instanceof HostRequestError) throw new Aborted(err.message);
         throw err;
       }
-      fulfilled = true;
       return issued.hostId;
     } finally {
       clearInterval(renew);
-      // A failed attempt removes its host, so its clone grant goes with it.
-      if (!fulfilled) gitCredentialService.forget(issued.hostId);
     }
   }
 
   /**
-   * Clones `url` into `dest` on the worker, with git on the worker asking the hub for the
-   * credential. Does nothing when `dest` already exists.
+   * Clones `url` into `dest` on the worker, whose git sees the profile's variables. Does nothing
+   * when `dest` already exists.
    */
   private async cloneOnHost(hostId: string, url: string, dest: string): Promise<void> {
     const host = hostRegistry.hostById(hostId);
@@ -1194,6 +1195,12 @@ async function repoUrls(row: HostRequestRow): Promise<string[]> {
   if (!repo) return [];
   if (repo.remoteUrl) return [repo.remoteUrl];
   return repo.path ? [repo.path] : [];
+}
+
+/** The runner names a valid profile that maps at least one secret. */
+function runnerHasSecrets(runner: RunnerConfig): boolean {
+  if (!runner.profile) return false;
+  return (workerProfileService.get(runner.profile)?.secrets?.length ?? 0) > 0;
 }
 
 function sleep(ms: number): Promise<void> {

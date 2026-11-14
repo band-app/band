@@ -34,10 +34,8 @@ test.beforeAll(async () => {
     value: "e2e-placeholder-value-1",
   });
   await trpcMutateData(server.url, TOKEN, "vault.put", {
-    name: "cache-git",
-    kind: "git",
-    host: "github.com",
-    pathPattern: "owner/*",
+    name: "CACHE_ENV",
+    kind: "env",
     value: "e2e-placeholder-value-2",
   });
 });
@@ -49,7 +47,9 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("Worker profiles after Credentials offers the git item without an error", async ({ page }) => {
+test("Worker profiles after Credentials offers the api key as a secret without an error", async ({
+  page,
+}) => {
   const settings = new SettingsPage(page, server.url, TOKEN);
   const profiles = new WorkerProfilesPage(page, server.url, TOKEN);
   await settings.goto();
@@ -57,8 +57,8 @@ test("Worker profiles after Credentials offers the git item without an error", a
   await settings.expectRowVisible(settings.credentialRow("cache-key"));
 
   await profiles.openFromOpenDialog();
-  await profiles.openEditorWithRestrictedCredentials();
-  await expect(profiles.gitCredentialOption("cache-git")).toBeVisible();
+  await profiles.openEditorWithSecretRow();
+  await expect(profiles.secretItemOption("cache-key")).toBeAttached();
   await expect(page.getByText("Something went wrong!")).toHaveCount(0);
 });
 
@@ -66,20 +66,20 @@ test("Credentials after Worker profiles lists the items", async ({ page }) => {
   const settings = new SettingsPage(page, server.url, TOKEN);
   const profiles = new WorkerProfilesPage(page, server.url, TOKEN);
   await profiles.open();
-  await profiles.openEditorWithRestrictedCredentials();
-  await expect(profiles.gitCredentialOption("cache-git")).toBeVisible();
+  await profiles.openEditorWithSecretRow();
+  await expect(profiles.secretItemOption("cache-key")).toBeAttached();
 
   await settings.openSection("credentials");
   await settings.expectRowVisible(settings.credentialRow("cache-key"));
-  await settings.expectRowVisible(settings.credentialRow("cache-git"));
+  await settings.expectRowVisible(settings.credentialRow("CACHE_ENV"));
 });
 
 test("Voice after Worker profiles offers the api key", async ({ page }) => {
   const settings = new SettingsPage(page, server.url, TOKEN);
   const profiles = new WorkerProfilesPage(page, server.url, TOKEN);
   await profiles.open();
-  await profiles.openEditorWithRestrictedCredentials();
-  await expect(profiles.gitCredentialOption("cache-git")).toBeVisible();
+  await profiles.openEditorWithSecretRow();
+  await expect(profiles.secretItemOption("cache-key")).toBeAttached();
 
   await settings.openSection("voice");
   await expect(settings.voiceKeyOption("cache-key")).toBeAttached();

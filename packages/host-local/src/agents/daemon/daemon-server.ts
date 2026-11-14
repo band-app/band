@@ -512,7 +512,6 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
           startedAt: Date.now(),
           specHash: params.specHash,
           adapterVersion: params.adapterVersion,
-          ghToken: params.ghToken,
           ...(params.owned ? { owned: true } : {}),
           stdinWritten: 0,
           exit: null,

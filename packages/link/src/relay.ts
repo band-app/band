@@ -124,40 +124,45 @@ export interface SessionFile {
 }
 
 /**
- * Worker to hub: `GitCredentialParams` in, `GitCredentialReply` out. A git
- * credential helper on the worker asks for the credential of one remote. The
- * hub answers only for a remote of a repository placed on that worker, and
- * the secret goes back to the helper process only. It is never stored on the
- * worker and never logged on either side.
+ * Worker to hub: the secrets of the worker's profile. The reply holds the values of the profile's
+ * `env` mappings and the content of its `file` mappings. A worker with no profile gets an empty
+ * reply. The worker keeps env values in memory, asks again for every process it starts, and writes
+ * files under its home. Values are never logged on either side.
  */
-export const METHOD_GIT_CREDENTIAL = "git.credential";
+export const METHOD_SECRETS_FETCH = "secrets.fetch";
 
-export interface GitCredentialParams {
-  /** `https` or `http`, as git names it. */
-  protocol: string;
-  host: string;
-  /** The repository path git sends with `credential.useHttpPath`, such as `owner/repo.git`. */
+export interface SecretFileEntry {
+  /** Path under the worker user's home, `~/` form, already normalised by the hub. */
   path: string;
+  /** Octal permission bits, at most 0o700. */
+  mode: number;
+  /** File content, base64. */
+  data: string;
 }
 
-export type GitCredentialReply =
-  | { found: false }
-  | { found: true; username: string; password: string };
+export interface SecretsFetchReply {
+  /** The profile the worker has, or null. */
+  profile: string | null;
+  env: Record<string, string>;
+  files: SecretFileEntry[];
+}
 
 /**
- * Worker to hub: `GhTokenParams` in, `GhTokenReply` out. A worker asks for the token its agents
- * and terminals run `gh` with, as `GH_TOKEN`. The hub answers a worker it started through a
- * runner, or one that sent `optIn`, and the token goes into the environment of the processes the
- * worker starts. It is never written to disk and never logged on either side.
+ * Hub to worker: the profile, or a vault item it maps, changed. The worker fetches again and
+ * rewrites its files. Env values need no push, because every spawn asks for the current ones.
  */
-export const METHOD_GH_TOKEN = "gh.token";
+export const METHOD_SECRETS_CHANGED = "secrets.changed";
 
-export interface GhTokenParams {
-  /** The worker's operator asked for the hub's token (`BAND_WORKER_GH_TOKEN=hub`). */
-  optIn?: boolean;
+/**
+ * Worker to hub: which mapped files exist and which the worker refused to write (a file it did not
+ * create, a symlink out of home), so the worker drawer can show it.
+ */
+export const METHOD_SECRETS_REPORT = "secrets.report";
+
+export interface SecretsReportParams {
+  written: string[];
+  refused: { path: string; reason: string }[];
 }
-
-export type GhTokenReply = { found: false; reason?: string } | { found: true; token: string };
 
 /**
  * Hub to worker: renews the worker's lease (issue #901). While the link is up the hub sends it

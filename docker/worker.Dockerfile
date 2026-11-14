@@ -58,7 +58,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # gh: agents open PRs and read checks with it. Official release tarball, pinned,
-# for both architectures (TARGETARCH is amd64 or arm64). The hub hands a token to agents and terminals as GH_TOKEN.
+# for both architectures (TARGETARCH is amd64 or arm64). A worker profile that maps GH_TOKEN gives agents and terminals the token.
 ARG GH_VERSION=2.74.0
 ARG TARGETARCH
 RUN apt-get update \
@@ -69,6 +69,11 @@ RUN apt-get update \
  && rm -rf "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}" \
  && rm -rf /var/lib/apt/lists/* \
  && gh --version
+
+# git logs in to github.com with gh when GH_TOKEN is set, so a profile that maps GH_TOKEN lets the
+# worker clone and push over https. System config, so a read-only root and any HOME still see it.
+RUN git config --system credential.https://github.com.helper '!gh auth git-credential' \
+ && git config --system credential.https://gist.github.com.helper '!gh auth git-credential'
 
 COPY --from=builder /opt/band-worker /opt/band-worker
 RUN ln -s /opt/band-worker/node_modules/.bin/band-worker /usr/local/bin/band-worker

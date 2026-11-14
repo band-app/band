@@ -467,15 +467,11 @@ export class ChatRuntime {
         command: launch.agent.command,
       });
       if (typeof resolved === "string") throw new Error(resolved);
-      const baseEnv = { ...resolved.env, ...launch.env, ...launch.loginEnv };
+      const baseEnv = { ...resolved.env, ...launch.env };
       // What a rebuilt client compares a fresh launch with. Taken before the worker adds its own
-      // variables (its CLI path, a GitHub token), and stored as a hash only.
+      // variables (its CLI path, the profile's secrets), and stored as a hash only.
       // Like the hub's own hash: the chat's variables (relay grant, chat ids) differ per launch by design.
-      const specHash = launchSpecHash({
-        ...resolved,
-        env: { ...resolved.env, ...launch.loginEnv },
-        unsetEnv: launch.unsetEnv,
-      });
+      const specHash = launchSpecHash(resolved);
       this.launchCheckPending = false;
       this.restartPending = false;
       const env = await this.env.spawnEnv(baseEnv);
@@ -500,7 +496,7 @@ export class ChatRuntime {
               return child;
             },
           },
-          { ...resolved, env, unsetEnv: launch.unsetEnv },
+          { ...resolved, env },
           launch.cwd,
           launch.agent.label,
           this.handlers(generation),
@@ -962,11 +958,7 @@ export class ChatRuntime {
         command: launch.agent.command,
       });
       if (typeof resolved === "string") return;
-      const hash = launchSpecHash({
-        ...resolved,
-        env: { ...resolved.env, ...launch.loginEnv },
-        unsetEnv: launch.unsetEnv,
-      });
+      const hash = launchSpecHash(resolved);
       this.launchCheckPending = false;
       if (hash !== this.specHash) {
         this.env.log.info(

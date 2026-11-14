@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createLogger } from "@band-app/logger";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
+import { convertLegacyCredentialSettings } from "./legacy-credentials";
 import { bandHome } from "./queries/settings";
 import * as schema from "./schema";
 
@@ -40,6 +41,15 @@ export function getDb() {
   _sqlite.exec("PRAGMA busy_timeout = 5000");
 
   _db = drizzle({ client: _sqlite, schema });
+  // Reads the tables and `git` items the migration removes, so it goes first.
+  try {
+    convertLegacyCredentialSettings(_sqlite);
+  } catch (err) {
+    log.error(
+      { message: err instanceof Error ? err.message : String(err) },
+      "could not convert the legacy credential settings",
+    );
+  }
   migrate(_db, { migrationsFolder });
 
   return _db;

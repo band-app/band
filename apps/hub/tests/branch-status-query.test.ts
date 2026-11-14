@@ -126,7 +126,7 @@ describe("buildBranchStatusQuery", () => {
       'pullRequests(headRefName: "feature-branch", first: 5, states: [OPEN, MERGED, CLOSED]',
     );
     expect(query).toContain(
-      "nodes { number title state url isDraft headRepositoryOwner { login } ",
+      "nodes { number title state url isDraft baseRefName headRepositoryOwner { login } ",
     );
     expect(query).toContain("isInMergeQueue");
     expect(query).toContain("mergeQueueEntry { state position enqueuedAt estimatedTimeToMerge");

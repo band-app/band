@@ -22,7 +22,7 @@ export interface GhInvocation {
   cwd: string;
   env: { GH_PROMPT_DISABLED: string | null };
   /** The `GH_TOKEN` the `gh` process ran with, if any. */
-  ghToken?: string;
+  ghTokenEnv?: string;
 }
 
 export interface CheckRunStub {

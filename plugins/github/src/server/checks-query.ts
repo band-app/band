@@ -64,6 +64,7 @@ export const reviewQuery = (
         state
         isDraft
         isCrossRepository
+        baseRefName
         headRepositoryOwner { login }
         updatedAt
         mergeStateStatus
@@ -205,6 +206,7 @@ interface PullRequestNode extends MergeQueueNode {
   state: "OPEN" | "MERGED" | "CLOSED";
   isDraft: boolean;
   isCrossRepository: boolean;
+  baseRefName?: string | null;
   headRepositoryOwner?: { login: string } | null;
   updatedAt: string;
   mergeStateStatus: string | null;
@@ -296,6 +298,7 @@ export function parseReview(
     updatedAt: pr.updatedAt,
     reviewDecision: reviewDecision(pr.reviewDecision),
     mergeState: mergeState(pr.mergeStateStatus),
+    ...(pr.baseRefName && { baseBranch: pr.baseRefName }),
     checks: report(head?.oid ?? null, checks),
     reviewers: parseReviewers(pr),
     discussion: parseDiscussion(pr),

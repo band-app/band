@@ -62,6 +62,8 @@ export interface PullRequestSummary {
   url: string;
   state: "open" | "merged" | "closed";
   isDraft: boolean;
+  /** The branch the PR merges into. Absent in rows stored before it was read. */
+  baseBranch?: string;
   /** Absent in rows stored before the merge queue was read. */
   mergeQueue?: {
     state: "queued" | "awaiting_checks" | "mergeable" | "locked" | "unmergeable";
@@ -221,9 +223,13 @@ export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
  * hundreds of kilobytes of output and the default 1 MB ceiling truncates
  * silently.
  */
-export function execGit(args: string[], cwd: string): Promise<string> {
+export function execGit(
+  args: string[],
+  cwd: string,
+  extraEnv?: Record<string, string>,
+): Promise<string> {
   const { command, env } = gitCmd();
-  return execOffThread(command, args, { cwd, env, maxBuffer: MAX_BUFFER });
+  return execOffThread(command, args, { cwd, env: { ...env, ...extraEnv }, maxBuffer: MAX_BUFFER });
 }
 
 /**

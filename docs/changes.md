@@ -27,7 +27,7 @@ Each row shows a status letter (M modified, A added, D deleted, R renamed, C cop
 
 ## Compare branch
 
-The header above the sections shows the current branch and the branch it is compared with. The compare branch defaults to the repo's default branch. Pick another local or remote branch from the dropdown, which has a "Search branches" box. Band remembers the pick per worktree and compares from the merge base, so you see only what your branch added.
+The header above the sections shows the current branch and the branch it is compared with. The compare branch defaults to the worktree's base: the open pull request's base branch, else the branch the worktree was created from (`--base`), else the repo's default branch. The base follows a retargeted pull request. A branch you pick by hand wins, and the dropdown's Base branch button drops the pick. Pick another local or remote branch from the dropdown, which has a "Search branches" box. Band remembers the pick per worktree and compares from the merge base, so you see only what your branch added.
 
 The Committed on Branch section explains an empty list: the compare branch does not exist, the two branches share no history, or the branch has no commits yet.
 

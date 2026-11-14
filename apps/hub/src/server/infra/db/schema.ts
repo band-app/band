@@ -218,6 +218,9 @@ export const worktrees = sqliteTable("worktrees", {
   sortIndex: integer("sort_index"),
   pinSortIndex: integer("pin_sort_index"),
   hostId: hostId(),
+  // The branch the worktree was created from (`--base`), or null when none was given or the row
+  // predates the column. The Changes view compares against it when no PR base is known.
+  baseBranch: text("base_branch"),
   // Where the worktree was started from: the worktree (id as `toWorktreeId` makes it) and the
   // chat or terminal in it. Plain ids with no foreign key, because the origin may live on any
   // repo and host, and a removed parent leaves the id behind so the API can say it was removed.
@@ -873,7 +876,7 @@ export const vaultItems = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["api_key", "oauth", "env", "git"] }).notNull(),
+    kind: text("kind", { enum: ["api_key", "oauth", "env"] }).notNull(),
     // `global` or `repo:<name>`.
     scope: text("scope").notNull().default("global"),
     encrypted: text("encrypted").notNull(),
@@ -886,33 +889,6 @@ export const vaultItems = sqliteTable(
     lastUsedAt: integer("last_used_at"),
   },
   (t) => [uniqueIndex("vault_items_scope_name_idx").on(t.scope, t.name)],
-);
-
-// Coding agent logins. A login names a vault item that holds the secret and
-// the kind that decides which environment variable carries it. The row holds no secret.
-export const agentLogins = sqliteTable(
-  "agent_logins",
-  {
-    id: text("id").primaryKey(),
-    agentType: text("agent_type").notNull(),
-    label: text("label").notNull(),
-    kind: text("kind").notNull(),
-    vaultItemId: text("vault_item_id").notNull(),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (t) => [index("agent_logins_agent_type_idx").on(t.agentType)],
-);
-
-// The login an agent type uses by default (`repo` is the empty string) or in one repo.
-export const agentLoginChoices = sqliteTable(
-  "agent_login_choices",
-  {
-    agentType: text("agent_type").notNull(),
-    repo: text("repo").notNull().default(""),
-    loginId: text("login_id").notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.agentType, t.repo] })],
 );
 
 // HTTP MCP servers the hub proxies at `/mcp-proxy/<name>` (plan step 4.2). The
