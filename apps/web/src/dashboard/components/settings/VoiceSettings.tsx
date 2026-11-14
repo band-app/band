@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { VOICE_STATUS_KEY } from "../../../components/ai-elements/prompt-input-mic";
 import { trpc } from "../../../lib/trpc-client";
+import { useVaultItems } from "../../hooks/use-vault-items";
 import { SettingsRow } from "./SettingsRow";
 
 interface Form {
@@ -32,10 +33,7 @@ export function VoiceSettings() {
     queryKey: ["voice.config"],
     queryFn: () => trpc.voice.config.query(),
   });
-  const vault = useQuery({
-    queryKey: ["vault.list"],
-    queryFn: () => trpc.vault.list.query(),
-  });
+  const vault = useVaultItems();
   const hosts = useQuery({
     queryKey: ["hosts.list"],
     queryFn: async () => (await trpc.workers.list.query()).hosts,
@@ -116,7 +114,7 @@ export function VoiceSettings() {
     );
   }
 
-  const keys = (vault.data?.items ?? []).filter((i) => i.kind === "api_key");
+  const keys = (vault.data ?? []).filter((i) => i.kind === "api_key");
   const onlineHosts = (hosts.data ?? []).filter((h) => h.usable && h.id !== "local");
   const ready = form.baseUrl.trim() !== "" && form.model.trim() !== "";
 

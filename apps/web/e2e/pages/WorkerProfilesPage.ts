@@ -35,6 +35,25 @@ export class WorkerProfilesPage {
     });
   }
 
+  /** Opens the Profiles tab in the Settings dialog that is already open, keeping the page's cache. */
+  async openFromOpenDialog(): Promise<void> {
+    await test.step("Open Settings > Workers > Profiles in the open dialog", async () => {
+      await this.settings.openSection("hosts");
+      await this.page.getByTestId("settings__workers-tab-profiles").click();
+      await expect(this.page.getByTestId("settings__profiles")).toBeVisible();
+    });
+  }
+
+  /** Opens the new-profile editor and asks for a restricted credential list. */
+  async openEditorWithRestrictedCredentials(): Promise<void> {
+    await this.page.getByTestId("settings__profile-new").click();
+    await this.page.getByRole("checkbox", { name: "Restrict credentials" }).check();
+  }
+
+  gitCredentialOption(name: string): Locator {
+    return this.page.getByRole("checkbox", { name: `Git credential ${name}` });
+  }
+
   async showWorkers(): Promise<void> {
     await this.page.getByTestId("settings__workers-tab-workers").click();
   }

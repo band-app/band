@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useVaultItems } from "../../hooks/use-vault-items";
 import { ErrorPopover } from "./ErrorPopover";
 import { errorText } from "./worker-format";
 
@@ -120,10 +121,7 @@ function toggle(list: string[], value: string): string[] {
 export function WorkerProfilesSettings() {
   const queryClient = useQueryClient();
   const profiles = useWorkerProfiles(true);
-  const vault = useQuery({
-    queryKey: ["vault.list"],
-    queryFn: async () => (await trpc.vault.list.query()).items,
-  });
+  const vault = useVaultItems();
   const logins = useQuery({
     queryKey: ["agentLogins.list"],
     queryFn: async () => (await trpc.agentLogins.list.query()).logins,
