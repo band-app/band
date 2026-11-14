@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
 import { formatHostWarnings, hostWarnings, readLinuxHostSettings } from "../src/host-checks.ts";
 import { cleanup, tmpDir, WORKER_BIN } from "./helpers.ts";
@@ -62,6 +62,28 @@ describe("band-worker doctor", () => {
     const codex = lines.findIndex((l) => l.includes("codex"));
     assert.match(lines[codex], /^FAIL\s+codex\s+0\.9\.0\s+installed, not logged in/);
     assert.match(lines[codex + 1], /fix: codex login/);
+  });
+
+  it("finds agents that only the login-shell PATH reaches", () => {
+    const shims = tempDir("band-doctor-shims-");
+    stubCli(shims, "claude", "2.4.1", "auth status", 0);
+    stubCli(shims, "codex", "0.9.0", "login status", 0);
+    const home = tempDir("band-doctor-home-");
+    const shell = join(home, "fake-shell");
+    writeFileSync(shell, `#!/bin/sh\necho "${shims}:/usr/bin:/bin"\n`);
+    chmodSync(shell, 0o755);
+    const run = spawnSync(process.execPath, [WORKER_BIN, "doctor"], {
+      encoding: "utf8",
+      env: {
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        HOME: home,
+        SHELL: shell,
+        BAND_HOME: join(home, ".band"),
+        BAND_WORKER_TOKEN: "",
+      },
+    });
+    assert.match(run.stdout, /^ok\s+claude-code\s+2\.4\.1\s+installed/m);
+    assert.match(run.stdout, /^ok\s+codex\s+0\.9\.0\s+installed/m);
   });
 
   it("shows the login fix when the stub agent is not logged in", () => {
