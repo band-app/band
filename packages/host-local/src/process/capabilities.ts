@@ -8,7 +8,7 @@ import {
   type CapabilityReport,
   type ToolCapability,
 } from "@band-app/host-api";
-import { prependBinDirs } from "./path";
+import { prependBinDirs, shellPath } from "./path";
 
 interface AgentProbe {
   type: string;
@@ -70,7 +70,7 @@ const PROBE_TIMEOUT_MS = 8_000;
  * Where the probes look for CLIs. `BAND_AGENT_BIN_DIRS` (a PATH-style list, read on every call) is
  * searched first, for a machine whose agents live outside its PATH.
  */
-function searchPath(): string {
+async function searchPath(): Promise<string> {
   const extra = process.env.BAND_AGENT_BIN_DIRS?.trim();
   // Where agent installers put their CLI under the home directory, which a service's PATH lacks.
   const home = homedir();
@@ -81,9 +81,16 @@ function searchPath(): string {
     ".bun/bin",
     ".npm-global/bin",
   ].map((d) => join(home, d));
-  return [...(extra ? [extra] : []), prependBinDirs(process.env.PATH), ...installDirs].join(
-    delimiter,
-  );
+  // The login shell's PATH is what agent launch uses (`resolveAcpLaunch`), so a CLI that only a
+  // profile file puts on PATH (mise shims, nvm) counts as installed. `shellPath` caches a success
+  // and falls back to the process PATH when the shell fails, so this adds no second slow probe.
+  const login = await shellPath().catch(() => "");
+  return [
+    ...(extra ? [extra] : []),
+    prependBinDirs(process.env.PATH),
+    ...(login ? [login] : []),
+    ...installDirs,
+  ].join(delimiter);
 }
 
 interface Ran {
@@ -92,13 +99,18 @@ interface Ran {
   out: string;
 }
 
-function run(bin: string, args: string[], extraEnv: Record<string, string> = {}): Promise<Ran> {
+async function run(
+  bin: string,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+): Promise<Ran> {
+  const path = await searchPath();
   return new Promise((resolve) => {
     execFile(
       bin,
       args,
       {
-        env: { ...process.env, ...extraEnv, PATH: searchPath() },
+        env: { ...process.env, ...extraEnv, PATH: path },
         timeout: PROBE_TIMEOUT_MS,
       },
       (err, stdout, stderr) => {
