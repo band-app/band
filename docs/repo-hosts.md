@@ -52,6 +52,6 @@ With no primary worker set, or when the set worker is no longer allowed, the hub
 
 ## Where new worktrees go
 
-A worktree created with no worker and no placement request goes to the primary worker when that worker is online and allowed. An explicit worker or a placement request wins over the primary. If the primary is offline or not allowed, the worktree goes where it would have gone before (the hub's machine, or the agent's own worker) and the result carries a notice naming the primary. An agent on a worker needs the "Agents may start worktrees on other workers" setting for the primary to apply. With the hub's machine turned off, a primary on it is skipped.
+A worktree created with no worker and no placement request goes to the primary worker when one is set and it is online and allowed. A repo with no primary set keeps the old default. An explicit worker or a placement request wins over the primary. If the primary is offline or not allowed, the worktree goes where it would have gone before (the hub's machine, or the agent's own worker) and the result carries a notice naming the primary. An agent on a worker needs the "Agents may start worktrees on other workers" setting for the primary to apply. With the hub's machine turned off, a primary on it is skipped.
 
 On a repo's page in Settings > Repos, the Workers section chooses "All workers" or "Only these". Each change saves at once. To connect more workers, see [Add a worker](adding-workers.md).

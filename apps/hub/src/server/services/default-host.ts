@@ -6,7 +6,7 @@
 
 import { isHostAllowed } from "@band-app/shared/repo-hosts";
 import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
-import { hostNamesOf, primaryHostOf } from "./_utils/repo-host-policy";
+import { hostNamesOf } from "./_utils/repo-host-policy";
 import { crossHostRefusal } from "./cross-host-policy";
 import { LOCAL_HOST_ID, resolveWorktreeHostId } from "./local-host-policy";
 import { tokenService } from "./token-service";
@@ -19,15 +19,8 @@ export interface DefaultHostChoice {
 
 interface RepoForDefault {
   name: string;
-  defaultBranch: string;
   allowedHostIds?: string[] | null;
   primaryHostId?: string | null;
-  worktrees: {
-    name: string;
-    branch: string;
-    hostId?: string | null;
-    supersededBy?: string | null;
-  }[];
 }
 
 export function resolveDefaultHost(
@@ -42,13 +35,13 @@ export function resolveDefaultHost(
       notice: `${reason}; created on ${hostNamesOf([hostId])[0] ?? hostId}`,
     };
   };
-  const stored = repo.primaryHostId ?? null;
-  const primary = primaryHostOf(repo);
+  // Only a primary that was set counts. The effective primary (derived from where the default
+  // branch is checked out) decides which main is listed, not where new worktrees go.
+  const primary = repo.primaryHostId ?? null;
   if (!primary) return fallback();
   const primaryName = hostNamesOf([primary])[0] ?? primary;
-  if (stored && !isHostAllowed(repo.allowedHostIds ?? null, stored)) {
-    const storedName = hostNamesOf([stored])[0] ?? stored;
-    return fallback(`primary worker ${storedName} is not allowed for ${repo.name}`);
+  if (!isHostAllowed(repo.allowedHostIds ?? null, primary)) {
+    return fallback(`primary worker ${primaryName} is not allowed for ${repo.name}`);
   }
   if (primary === LOCAL_HOST_ID) {
     // The hub's own machine: skip it when turned off. Another worker's agent cannot use it.
