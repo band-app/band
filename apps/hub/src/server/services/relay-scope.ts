@@ -182,10 +182,17 @@ const UNBATCHABLE = new Set([
 ]);
 
 /** `input` with `hostId` set to the worker's, or left alone when `keep` and the call named a host. */
-function pinHost(input: unknown, workerId: string, keep: boolean): object {
+function pinHost(input: unknown, workerId: string, keep: boolean, create = false): object {
   const base =
     input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  return keep && typeof base.hostId === "string" ? base : { ...base, hostId: workerId };
+  if (keep && typeof base.hostId === "string") return base;
+  // A create that names no worker lets the hub pick the repo's primary worker. The caller's
+  // worker is the fallback, written here so a caller cannot claim another.
+  if (create) {
+    const { hostId: _hostId, callerHostId: _callerHostId, ...rest } = base;
+    return { ...rest, callerHostId: workerId };
+  }
+  return { ...base, hostId: workerId };
 }
 
 /**
@@ -223,7 +230,7 @@ export function pinWorktreeHost(
     // An admin host's remove names the host the worktree is on, as a create does.
     const keep =
       call === "/trpc/worktrees.create" || (trust === "admin" && call === "/trpc/worktrees.remove");
-    value = pinHost(parsed.value, workerId, keep);
+    value = pinHost(parsed.value, workerId, keep, call === "/trpc/worktrees.create");
   } else {
     // The same tools through the MCP endpoint, as `tools/call` messages (one or a batch).
     const pin = (message: unknown): unknown => {
@@ -240,7 +247,15 @@ export function pinWorktreeHost(
         (trust === "admin" && params.name === "band_worktrees_remove");
       return {
         ...message,
-        params: { ...params, arguments: pinHost(params.arguments, workerId, keep) },
+        params: {
+          ...params,
+          arguments: pinHost(
+            params.arguments,
+            workerId,
+            keep,
+            params.name === "band_worktrees_create",
+          ),
+        },
       };
     };
     value = Array.isArray(parsed.value) ? parsed.value.map(pin) : pin(parsed.value);

@@ -862,6 +862,53 @@ fn worktrees_create_refuses_a_host_the_repo_is_not_allowed_on() {
 }
 
 #[test]
+fn worktrees_create_falls_back_with_a_notice_when_the_primary_worker_is_offline() {
+    let env = TestEnv::new();
+
+    // The CLI cannot register a worker, so the test asks the hub as the UI does. The worker never
+    // dials in, so it stays offline.
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(env.band_dir.join("settings.json")).expect("settings.json"),
+    )
+    .expect("settings json");
+    let port = settings["webServerPort"].as_u64().expect("port");
+    let token = settings["tokenSecret"].as_str().expect("token");
+    ureq::post(format!(
+        "http://127.0.0.1:{port}/trpc/tokens.issueWorkerBootstrap"
+    ))
+    .header("Authorization", format!("Bearer {token}"))
+    .send_json(serde_json::json!({"hostName": "Mac box", "labels": []}))
+    .expect("issue bootstrap");
+
+    let set = env.band(&["repos", "set", "my-repo", "--primary", "Mac box"]);
+    assert!(set.status.success(), "stderr: {}", stderr(&set));
+
+    let created = env.band(&[
+        "worktrees",
+        "create",
+        "my-repo",
+        "feat/primary",
+        "--output",
+        "json",
+    ]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let json = json_of(&created);
+    assert_eq!(json["hostId"], "local", "json: {json}");
+    let notice = json["notice"].as_str().expect("notice");
+    assert!(notice.contains("Mac box"), "notice: {notice}");
+
+    let text = env.band(&["worktrees", "create", "my-repo", "feat/primary-text"]);
+    assert!(
+        stdout(&text).contains("note: primary worker Mac box"),
+        "stdout: {}",
+        stdout(&text)
+    );
+
+    let help = stdout(&env.band(&["worktrees", "create", "--help"]));
+    assert!(help.contains("the repo's primary worker"), "help: {help}");
+}
+
+#[test]
 fn worktrees_create_host_flag_conflicts_and_unknown_host() {
     let env = TestEnv::new();
 
