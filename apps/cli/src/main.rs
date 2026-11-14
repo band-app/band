@@ -281,7 +281,8 @@ enum WorktreesCmd {
         /// Create it on this worker (id or name, see `band workers list`). Inside
         /// a worker's agent, only an online, static worker the repo allows,
         /// and only when the hub setting "Agents may start worktrees on other
-        /// workers" is on. Without it the worktree goes where the caller runs.
+        /// workers" is on. Without it, the repo's primary worker, else where
+        /// the caller runs.
         #[arg(long = "worker", alias = "host", value_name = "WORKER", conflicts_with_all = ["labels", "requires", "any_host", "isolation"])]
         host: Option<String>,
         /// Worktree id to record as the origin (where this work was started
@@ -2285,6 +2286,7 @@ struct Placement<'a> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 fn cmd_worktrees_create(
     repo: &str,
     branch: &str,
@@ -2413,6 +2415,14 @@ fn cmd_worktrees_create(
         });
     }
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
+    let notice = data
+        .get("notice")
+        .and_then(|n| n.as_str())
+        .map(std::string::ToString::to_string);
+    let host_id = data
+        .get("hostId")
+        .and_then(|h| h.as_str())
+        .map(std::string::ToString::to_string);
     // The server is the source of truth for the actual dispatch. It echoes
     // back the via it dispatched with (which may differ from
     // `resolved_via` when the chosen adapter falls back to chat) and
@@ -2430,6 +2440,12 @@ fn cmd_worktrees_create(
         .map(std::string::ToString::to_string);
 
     let mut json = serde_json::json!({ "path": path });
+    if let Some(ref h) = host_id {
+        json["hostId"] = serde_json::json!(h);
+    }
+    if let Some(ref n) = notice {
+        json["notice"] = serde_json::json!(n);
+    }
     if let Some(ref v) = actual_via {
         json["via"] = serde_json::json!(v);
     }
@@ -2437,10 +2453,11 @@ fn cmd_worktrees_create(
         json["terminalId"] = serde_json::json!(tid);
     }
 
-    Ok(CommandResult {
-        text: format!("{path}\n"),
-        json,
-    })
+    let text = match notice {
+        Some(n) => format!("{path}\nnote: {n}\n"),
+        None => format!("{path}\n"),
+    };
+    Ok(CommandResult { text, json })
 }
 
 /// Walk the dispatch-target precedence chain (issue #551):

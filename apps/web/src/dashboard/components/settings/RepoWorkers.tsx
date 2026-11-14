@@ -337,6 +337,10 @@ export function RepoWorkers({ repo }: { repo: RepoInfo }) {
         ) : null}
         {admin ? null : <Hint>Changing this needs an admin token.</Hint>}
       </RepoRow>
+      <p className="px-4 pt-2 text-xs text-muted-foreground">
+        The primary worker lists the default-branch worktree and is where new worktrees go by
+        default, while it is online.
+      </p>
 
       <div className="px-4 py-1">
         {listed.length === 0 ? (

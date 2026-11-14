@@ -114,8 +114,9 @@ export function RepoHostsFields({ hosts, value, onChange, idPrefix, disabled }: 
           ))}
         </select>
         <p className="text-xs text-muted-foreground">
-          Only the primary worker lists the repo's default-branch worktree. Other workers keep a
-          hidden clone that new worktrees are made from.
+          The primary worker lists the repo's default-branch worktree and is where new worktrees go
+          by default, when it is online. Other workers keep a hidden clone that new worktrees can be
+          made from.
         </p>
       </div>
     </fieldset>
