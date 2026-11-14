@@ -2,12 +2,8 @@ import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useVaultItems, VAULT_ITEMS_KEY, type VaultItem } from "../../hooks/use-vault-items";
 import { SettingsRow } from "./SettingsRow";
-
-type VaultList = Awaited<ReturnType<typeof trpc.vault.list.query>>;
-type VaultItem = VaultList["items"][number];
-
-const VAULT_KEY = ["vault.list"] as const;
 
 const KIND_LABEL: Record<VaultItem["kind"], string> = {
   api_key: "API key",
@@ -36,17 +32,14 @@ function oauthDetail(item: VaultItem): string {
  */
 export function CredentialsSettings() {
   const queryClient = useQueryClient();
-  const vault = useQuery<VaultList>({
-    queryKey: VAULT_KEY,
-    queryFn: () => trpc.vault.list.query(),
-  });
+  const vault = useVaultItems();
 
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"api_key" | "env">("api_key");
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const refresh = () => queryClient.invalidateQueries({ queryKey: VAULT_KEY });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: VAULT_ITEMS_KEY });
   const fail = (err: unknown) => setError(err instanceof Error ? err.message : String(err));
 
   const add = async () => {
@@ -96,7 +89,7 @@ export function CredentialsSettings() {
           </p>
         ) : null}
         <ul className="divide-y divide-border rounded-md border border-border">
-          {(vault.data?.items ?? []).map((item) => (
+          {(vault.data ?? []).map((item) => (
             <li
               key={item.id}
               data-testid="settings__credential"
@@ -177,7 +170,7 @@ export function CredentialsSettings() {
         </div>
       </SettingsRow>
 
-      <HubGithubToken items={vault.data?.items ?? []} onError={fail} />
+      <HubGithubToken items={vault.data ?? []} onError={fail} />
 
       {error ? (
         <p

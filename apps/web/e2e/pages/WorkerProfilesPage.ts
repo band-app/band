@@ -42,6 +42,28 @@ export class WorkerProfilesPage {
     });
   }
 
+  /** Opens the Profiles tab in the Settings dialog that is already open, keeping the page's cache. */
+  async openFromOpenDialog(): Promise<void> {
+    await test.step("Open Settings > Workers > Profiles in the open dialog", async () => {
+      await this.settings.openSection("hosts");
+      await this.page.getByTestId("settings__workers-tab-profiles").click();
+      await expect(this.page.getByTestId("settings__profiles")).toBeVisible();
+    });
+  }
+
+  /** Opens the new-profile editor and adds an empty secret row. */
+  async openEditorWithSecretRow(): Promise<void> {
+    await this.page.getByTestId("settings__profile-new").click();
+    await this.page.getByTestId("settings__profile-secret-add").click();
+  }
+
+  /** The option of the first secret row's vault item picker that names a stored item. */
+  secretItemOption(name: string): Locator {
+    return this.page
+      .getByRole("combobox", { name: "Secret 1 vault item" })
+      .getByRole("option", { name });
+  }
+
   async showWorkers(): Promise<void> {
     await this.page.getByTestId("settings__workers-tab-workers").click();
   }

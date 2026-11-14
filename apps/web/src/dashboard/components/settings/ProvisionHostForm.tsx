@@ -4,6 +4,7 @@ import { Copy, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
+import { useVaultItems } from "../../hooks/use-vault-items";
 import { useIsAdmin } from "./DevicesSettings";
 import { ErrorPopover } from "./ErrorPopover";
 import { useWorkerProfiles } from "./WorkerProfilesSettings";
@@ -46,11 +47,7 @@ export function ProvisionHostForm() {
   const [hostName, setHostName] = useState("");
   const [profile, setProfile] = useState("");
   const [tokenItem, setTokenItem] = useState("");
-  const vault = useQuery({
-    queryKey: ["vault.list"],
-    queryFn: async () => (await trpc.vault.list.query()).items,
-    enabled: isAdmin,
-  });
+  const vault = useVaultItems({ enabled: isAdmin });
   const profiles = useWorkerProfiles(isAdmin);
   const [created, setCreated] = useState<Created | null>(null);
   const [view, setView] = useState<View | null>(null);

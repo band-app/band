@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
+import { useVaultItems } from "../../hooks/use-vault-items";
 import { ErrorPopover } from "./ErrorPopover";
 import { errorText } from "./worker-format";
 
@@ -125,10 +126,7 @@ function toProfile(d: Draft) {
 export function WorkerProfilesSettings() {
   const queryClient = useQueryClient();
   const profiles = useWorkerProfiles(true);
-  const vault = useQuery({
-    queryKey: ["vault.list"],
-    queryFn: async () => (await trpc.vault.list.query()).items,
-  });
+  const vault = useVaultItems();
   // `null` is the closed editor; `editing` is the name being edited, or null for a new profile.
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);

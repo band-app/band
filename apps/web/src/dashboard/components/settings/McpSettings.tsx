@@ -3,16 +3,15 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useEffect, useRef, useState } from "react";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
+import { useVaultItems, VAULT_ITEMS_KEY, type VaultItem } from "../../hooks/use-vault-items";
 import { SettingsRow } from "./SettingsRow";
 
 type McpList = Awaited<ReturnType<typeof trpc.mcp.list.query>>;
 type McpServer = McpList["servers"][number];
 type TestResult = Awaited<ReturnType<typeof trpc.mcp.test.mutate>>;
 type ToolInfo = Extract<TestResult, { ok: true }>["tools"][number];
-type VaultItem = Awaited<ReturnType<typeof trpc.vault.list.query>>["items"][number];
 
 const MCP_KEY = ["mcp.list"] as const;
-const VAULT_KEY = ["mcp.vault-items"] as const;
 const AUDIT_PAGE = 20;
 const POLL_MS = 1000;
 
@@ -160,11 +159,7 @@ export function McpSettings() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState | null>(null);
   const servers = useQuery<McpList>({ queryKey: MCP_KEY, queryFn: () => trpc.mcp.list.query() });
-  const vault = useQuery({
-    queryKey: VAULT_KEY,
-    queryFn: async () => (await trpc.vault.list.query()).items,
-    enabled: servers.isSuccess && form !== null,
-  });
+  const vault = useVaultItems({ enabled: servers.isSuccess && form !== null });
   const repos = useQuery({
     queryKey: ["mcp.repos"],
     queryFn: async () =>
@@ -368,9 +363,8 @@ export function McpSettings() {
             polling.current = null;
             setNotice(null);
             if (state.status === "connected") {
-              await queryClient.invalidateQueries({ queryKey: VAULT_KEY });
-              // The Credentials section lists the new OAuth credential.
-              await queryClient.invalidateQueries({ queryKey: ["vault.list"] });
+              // The Credentials section lists the new OAuth credential from the same cache entry.
+              await queryClient.invalidateQueries({ queryKey: VAULT_ITEMS_KEY });
               if (state.item) patch({ vaultItemId: state.item.id });
             } else {
               setError(state.error ?? "The connection was not completed.");

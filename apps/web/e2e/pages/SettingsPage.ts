@@ -1301,6 +1301,11 @@ export class SettingsPage {
     });
   }
 
+  /** The option of the Voice page's key picker that names a stored credential. */
+  voiceKeyOption(name: string): Locator {
+    return this.dialog.getByTestId("settings__voice-key").getByRole("option", { name });
+  }
+
   get voiceOk(): Locator {
     return this.dialog.getByTestId("settings__voice-ok");
   }
