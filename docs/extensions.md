@@ -296,10 +296,11 @@ The page runs in `<iframe sandbox="allow-scripts">` with an opaque origin, like 
 
 From Band to the page:
 
-- `init { worktreeId, theme, layout, visible }`, sent once. `theme` is `{ mode, tokens }`, the same shape editors get. The page answers `{ type: "ready" }`.
+- `init { worktreeId, theme, layout, visible, secrets }`, sent once. `secrets` is `"keychain"` in Band.app when the OS key store works and `"none"` in a browser. `theme` is `{ mode, tokens }`, the same shape editors get. The page answers `{ type: "ready" }`.
 - `theme { mode, tokens }` whenever Band's theme changes (light or dark, Settings > Appearance edits), the same message editors get.
 - `stream.opened { id }`, `stream.frame { id, data }` (an `ArrayBuffer`), `stream.message { id, text }` and `stream.closed { id, code, reason }`.
 - `call.result { id, result }` and `call.error { id, message }`.
+- `secret.result { id, value }` (`value` is a string or null) and `secret.error { id, message }`.
 - `control { enabled }`, `visible { visible }` and `layout { layout }`.
 
 From the page to Band:
@@ -308,6 +309,7 @@ From the page to Band:
 - `stream.send { id, message }` sends a text message to the service.
 - `stream.close { id }`.
 - `call { id, method, params }` calls `method` of the service on this worktree's worker and answers with `call.result` or `call.error`.
+- `secret.get { id, key }`, `secret.set { id, key, value }` and `secret.delete { id, key }` keep a secret on the viewer's device, for example a password the panel sends over its own stream. `key` is at most 200 characters, `value` at most 4 KiB. Band.app stores it in `~/.band/desktop-panel-secrets.enc`, encrypted with the key in the macOS Keychain, scoped by extension id so one extension never reads another's keys, and asks for Touch ID before `secret.get` returns a value. The value never goes to the hub or a worker unless the panel sends it. In a browser (`secrets: "none"`) `get` and `delete` answer `secret.result` with null and `set` answers `secret.error`.
 
 Input is always on. The hub passes every text message the page sends to the service from the start, and Band sends the page `control { enabled: true }` once its first stream opens, so pages written for the older view-only protocol enable their input. Band has no Take control button for panels. Binary messages from the page are always dropped.
 

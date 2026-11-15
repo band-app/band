@@ -2,6 +2,7 @@ import type { PanelManifest } from "@band-app/plugin-api";
 import { Popover, PopoverContent, PopoverTrigger } from "@band-app/ui";
 import { CircleAlert, Loader2, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getElectronBridge, invoke } from "../../lib/desktop-ipc";
 import {
   directPluginStreamTarget,
   directSocketClosed,
@@ -27,6 +28,13 @@ const MAX_STREAMS = 4;
 /** How often a stream that runs through the hub asks whether the direct path works again. */
 const DIRECT_RETRY_MS = 15_000;
 
+/** Longest key and value a panel may store (the app's store enforces the same limits). */
+const MAX_SECRET_KEY = 200;
+const MAX_SECRET_VALUE = 4096;
+
+/** Where a panel's secrets live: the OS keychain in Band.app, nowhere in a browser. */
+type SecretsMode = "keychain" | "none";
+
 function currentLayout(): PanelLayout {
   return window.matchMedia("(min-width: 1024px)").matches ? "regular" : "compact";
 }
@@ -36,9 +44,11 @@ function currentLayout(): PanelLayout {
  * with an opaque origin and talks to Band over a `MessageChannel` handed over with `band:hello`.
  *
  * Messages from the page: `stream.open { id, name, params }`, `stream.send { id, message }`,
- * `stream.close { id }` and `call { id, method, params }`. Messages to the page: `init`,
+ * `stream.close { id }`, `call { id, method, params }` and `secret.get | secret.set | secret.delete
+ * { id, key, value? }`. `init` carries `secrets: "keychain" | "none"`. Messages to the page: `init`,
  * `stream.opened`, `stream.frame { id, data }` (binary), `stream.message { id, text }`,
  * `stream.closed { id, code, reason }`, `call.result { id, result }`, `call.error { id, message }`,
+ * `secret.result { id, value }`, `secret.error { id, message }`,
  * `control { enabled }`, `visible { visible }` and `layout`. Input is always on: the page gets
  * `control { enabled: true }` once its first stream opens, for pages written against the older
  * view-only protocol.
@@ -202,6 +212,53 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
     [extensionId, panel.binaryInput, panel.capability, panel.id, post, setVia, worktreeId],
   );
 
+  const secretsModeRef = useRef<SecretsMode>("none");
+
+  /**
+   * `secret.*` from the page. The value goes only to the desktop shell's store, scoped by this
+   * extension's id. In a browser `get` answers null and `set` answers an error the page ignores.
+   */
+  const handleSecret = useCallback(
+    async (type: string, id: string, key: unknown, value: unknown) => {
+      const fail = (message: string) => post({ type: "secret.error", id, message });
+      if (typeof key !== "string" || key.length === 0 || key.length > MAX_SECRET_KEY) {
+        fail("Invalid secret key");
+        return;
+      }
+      if (secretsModeRef.current !== "keychain") {
+        if (type === "secret.get" || type === "secret.delete") {
+          post({ type: "secret.result", id, value: null });
+        } else fail("Secrets are not available in this browser");
+        return;
+      }
+      if (type === "secret.set" && (typeof value !== "string" || value.length > MAX_SECRET_VALUE)) {
+        fail("Invalid secret value");
+        return;
+      }
+      const channel =
+        type === "secret.get"
+          ? "panel_secret_get"
+          : type === "secret.set"
+            ? "panel_secret_set"
+            : "panel_secret_delete";
+      try {
+        const result = await invoke<string | null>(channel, {
+          extensionId,
+          key,
+          ...(type === "secret.set" ? { value } : {}),
+        });
+        post({
+          type: "secret.result",
+          id,
+          value: type === "secret.get" && typeof result === "string" ? result : null,
+        });
+      } catch (err) {
+        fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [extensionId, post],
+  );
+
   const onMessage = useCallback(
     (event: MessageEvent) => {
       const msg = event.data as { type?: unknown; id?: unknown } & Record<string, unknown>;
@@ -238,6 +295,11 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           }
           break;
         }
+        case "secret.get":
+        case "secret.set":
+        case "secret.delete":
+          void handleSecret(msg.type, id, msg.key, msg.value);
+          break;
         case "call":
           if (typeof msg.method === "string") {
             trpc.extensions.panelCall
@@ -263,7 +325,7 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
           break;
       }
     },
-    [extensionId, openStream, panel.binaryInput, panel.id, post, setVia, worktreeId],
+    [extensionId, handleSecret, openStream, panel.binaryInput, panel.id, post, setVia, worktreeId],
   );
 
   const handshake = useCallback(() => {
@@ -277,13 +339,26 @@ export function ExtensionPanel({ worktreeId, extensionId, panel, visible }: Prop
     channel.port1.onmessage = onMessage;
     portRef.current = channel.port1;
     frame.contentWindow.postMessage({ type: "band:hello", extensionApi: 1 }, "*", [channel.port2]);
-    channel.port1.postMessage({
-      type: "init",
-      worktreeId,
-      theme: readTheme(),
-      layout: currentLayout(),
-      visible: visibleRef.current,
-    });
+    // The store answers before the page can ask: init waits for it. Without the desktop bridge
+    // there is nothing to wait for.
+    const sendInit = (secrets: SecretsMode) => {
+      if (portRef.current !== channel.port1) return;
+      secretsModeRef.current = secrets;
+      channel.port1.postMessage({
+        type: "init",
+        worktreeId,
+        theme: readTheme(),
+        layout: currentLayout(),
+        visible: visibleRef.current,
+        secrets,
+      });
+    };
+    if (getElectronBridge()) {
+      invoke<boolean>("panel_secrets_available").then(
+        (ok) => sendInit(ok === true ? "keychain" : "none"),
+        () => sendInit("none"),
+      );
+    } else sendInit("none");
   }, [closeStreams, onMessage, worktreeId]);
 
   useThemeUpdates(post, ready);

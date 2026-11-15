@@ -48,6 +48,18 @@ export class ExtensionPanelPage {
     return this.frame.locator("#mode");
   }
 
+  get secretsMode(): Locator {
+    return this.frame.locator("#secrets-mode");
+  }
+
+  get secretGet(): Locator {
+    return this.frame.locator("#secret-get");
+  }
+
+  get secretError(): Locator {
+    return this.frame.locator("#secret-error");
+  }
+
   get callResult(): Locator {
     return this.frame.locator("#call");
   }

@@ -7,6 +7,7 @@
     <p>Mode: <span id="mode">view-only</span></p>
     <p>Call: <span id="call">none</span></p>
     <p>Theme: <span id="theme-mode">none</span> <span id="theme-bg">none</span> <span id="theme-count">0</span></p>
+    <p>Secrets: <span id="secrets-mode">none</span> <span id="secret-get">pending</span> <span id="secret-error">none</span></p>
     <ul id="echoes"></ul>
     <button id="send" type="button">Send input</button>
     <script>
@@ -30,7 +31,10 @@
           const m = e.data;
           if (m.type === "init") {
             applyTheme(m.theme);
+            $("secrets-mode").textContent = String(m.secrets);
             port.postMessage({ type: "ready" });
+            port.postMessage({ type: "secret.set", id: "k1", key: "mac:w:me", value: "hunter2" });
+            port.postMessage({ type: "secret.get", id: "k2", key: "mac:w:me" });
             port.postMessage({ type: "stream.open", id: "s1", name: "screen", params: { frames: 3 } });
             port.postMessage({ type: "call", id: "c1", method: "echo", params: { hello: "panel" } });
           } else if (m.type === "stream.frame" || (m.type === "stream.message" && !m.text.startsWith("echo:"))) {
@@ -46,6 +50,10 @@
             $("mode").textContent = m.enabled ? "control" : "view-only";
           } else if (m.type === "call.result") {
             $("call").textContent = JSON.stringify(m.result);
+          } else if (m.type === "secret.result") {
+            if (m.id === "k2") $("secret-get").textContent = m.value === null ? "null" : "value:" + m.value;
+          } else if (m.type === "secret.error") {
+            $("secret-error").textContent = m.message;
           } else if (m.type === "call.error") {
             $("call").textContent = "error: " + m.message;
           }

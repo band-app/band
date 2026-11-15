@@ -194,6 +194,18 @@ test("S2: frames arrive in the panel, there is no Take control, input and a call
   await expect(panel.echoes.first()).toHaveText("echo:tap");
 });
 
+test("in a browser init says secrets none, get answers null and set answers an error", async ({
+  page,
+}) => {
+  const panel = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "screen");
+  await panel.open(worktreeA);
+  await panel.openFromMenu();
+  await expect(panel.secretsMode).toHaveText("none");
+  await expect(panel.secretGet).toHaveText("null");
+  await expect(panel.secretError).toContainText("not available");
+  await expect(panel.callResult).toHaveText('{"hello":"panel"}');
+});
+
 test("a stream through the hub shows a via hub marker with the reason", async ({ page }) => {
   const panel = new ExtensionPanelPage(page, server.url, TOKEN, "echo-service", "screen");
   await panel.open(worktreeA);

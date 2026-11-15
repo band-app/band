@@ -154,6 +154,22 @@ export class DesktopDashboardPage {
     });
   }
 
+  /** What an extension panel's `secret.*` message becomes: the desktop bridge's panel secret channels. */
+  async panelSecret(
+    op: "get" | "set" | "delete",
+    args: { extensionId: string; key: string; value?: string },
+  ): Promise<string | null> {
+    return await this.page.evaluate(
+      ([channel, payload]) =>
+        (
+          window as unknown as {
+            __BAND_DESKTOP__: { invoke(c: string, a: unknown): Promise<string | null> };
+          }
+        ).__BAND_DESKTOP__.invoke(channel as string, payload),
+      [`panel_secret_${op}`, args] as const,
+    );
+  }
+
   async reload(): Promise<void> {
     await test.step("Reload the window", async () => {
       await this.page.reload();

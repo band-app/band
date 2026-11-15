@@ -105,6 +105,13 @@ export const Channels = {
   browserChromeImport: "browser_chrome_import",
   browserProfileClearData: "browser_profile_clear_data",
   browserProfilePrune: "browser_profile_prune",
+
+  // Secrets an extension panel asks the app to remember (see services/panel-secrets.ts).
+  // `panelSecretGet` asks for Touch ID before it returns a value.
+  panelSecretGet: "panel_secret_get",
+  panelSecretSet: "panel_secret_set",
+  panelSecretDelete: "panel_secret_delete",
+  panelSecretsAvailable: "panel_secrets_available",
 } as const;
 
 /**
