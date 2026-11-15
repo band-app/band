@@ -172,6 +172,10 @@ export class ChatOwner {
       this.store.saveChat({ ...record.info, activeSessionId: sessionId, hasSummary: true });
     }
     await this.runtime(chatId).ensureSession("view");
+    // The load reply can arrive in the same batch as the last replayed rows. That batch is still
+    // open here, and replication reads committed rows only, so a flush now would send nothing and
+    // the hub would answer with an empty history.
+    await this.committed();
     await this.flushReplication();
   }
 
@@ -485,6 +489,18 @@ export class ChatOwner {
         this.kickReplication();
       }, RETRY_MS);
     }
+  }
+
+  /** Resolves once the open store batch commits, at once when none is open. */
+  private committed(): Promise<void> {
+    return new Promise((resolve) => {
+      // A rolled-back batch drops its hooks, so do not wait for one forever.
+      const timer = setTimeout(resolve, 5_000);
+      this.store.afterCommit(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /** Replicates everything logged so far, when the hub is reachable. */
