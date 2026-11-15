@@ -92,6 +92,11 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_chrome_import",
   "browser_profile_clear_data",
   "browser_profile_prune",
+  // Secrets an extension panel asks the app to remember
+  "panel_secret_get",
+  "panel_secret_set",
+  "panel_secret_delete",
+  "panel_secrets_available",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([

@@ -7,7 +7,7 @@
  * `invoke()` always returns a Promise.
  */
 
-import { type BrowserWindow, ipcMain, powerMonitor } from "electron";
+import { app, type BrowserWindow, ipcMain, powerMonitor, systemPreferences } from "electron";
 import {
   chromeRunningStatus,
   clearProfileData,
@@ -38,6 +38,7 @@ import { readLocalBinary, readLocalFile, saveLocalFile } from "../services/local
 import type { LocalPreviewRegistry } from "../services/local-preview.js";
 import { createLogger } from "../services/log.js";
 import type { OpenFileQueue } from "../services/open-file-queue.js";
+import { createPanelSecrets } from "../services/panel-secrets.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
 import type { UpdateController } from "../updater.js";
 import { getAppMetrics } from "./app-metrics.js";
@@ -217,6 +218,32 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserProfilePrune, (args: BrowserProfilePruneArgs) =>
     pruneProfileData(Array.isArray(args?.keep) ? args.keep : [], stopProfilePages),
   );
+
+  // ---- Extension panel secrets ----
+  // Encrypted with the Keychain-held key. A read asks for Touch ID first when the Mac has it.
+  // `BAND_DESKTOP_SECRET_STORE=test` skips the prompt, which no test can answer, but only in an
+  // unpackaged app: a shipped Band.app always asks.
+  const panelSecrets = createPanelSecrets(async (reason) => {
+    if (!app.isPackaged && process.env.BAND_DESKTOP_SECRET_STORE === "test") return;
+    if (process.platform === "darwin" && systemPreferences.canPromptTouchID()) {
+      await systemPreferences.promptTouchID(reason);
+    }
+  });
+  handle(Channels.panelSecretsAvailable, () => panelSecrets.available());
+  handle(Channels.panelSecretGet, (args: { extensionId?: unknown; key?: unknown }) =>
+    panelSecrets.get(args?.extensionId, args?.key),
+  );
+  handle(
+    Channels.panelSecretSet,
+    (args: { extensionId?: unknown; key?: unknown; value?: unknown }) => {
+      panelSecrets.set(args?.extensionId, args?.key, args?.value);
+      return null;
+    },
+  );
+  handle(Channels.panelSecretDelete, (args: { extensionId?: unknown; key?: unknown }) => {
+    panelSecrets.delete(args?.extensionId, args?.key);
+    return null;
+  });
 
   return () => {
     for (const [channel] of handlers) {
