@@ -30,6 +30,7 @@ import { WORKER_BIN } from "./helpers/worker-bin";
 const CLAUDE_X = "sk-ant-oat-secret-x";
 const CLAUDE_Y = "sk-ant-oat-secret-y";
 const CLAUDE_EXPIRED = "sk-ant-oat-secret-expired";
+const CLAUDE_STALE = "sk-ant-oat-secret-stale";
 const CODEX_OK = "codex-secret-ok";
 const CODEX_BAD = "codex-secret-bad";
 
@@ -67,11 +68,11 @@ interface Report {
   problems: Problem[];
 }
 
-function writeClaudeLogin(home: string, token: string, email: string): void {
+function writeClaudeLogin(home: string, token: string, email: string, expiresAt?: number): void {
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(
     join(home, ".claude", ".credentials.json"),
-    JSON.stringify({ claudeAiOauth: { accessToken: token, subscriptionType: "max" } }),
+    JSON.stringify({ claudeAiOauth: { accessToken: token, subscriptionType: "max", expiresAt } }),
   );
   writeFileSync(
     join(home, ".claude.json"),
@@ -210,6 +211,9 @@ describe("account usage across hosts", () => {
     // gamma: an expired Claude login and no Codex.
     const gamma = tmp("band-usage-gamma-");
     writeClaudeLogin(gamma, CLAUDE_EXPIRED, "z@example.com");
+    // epsilon: a login whose access token aged out, so no request may carry it.
+    const epsilon = tmp("band-usage-epsilon-");
+    writeClaudeLogin(epsilon, CLAUDE_STALE, "w@example.com", Date.now() - 3_600_000);
     // delta: no login at all.
     const delta = tmp("band-usage-delta-");
 
@@ -217,6 +221,7 @@ describe("account usage across hosts", () => {
     await startWorker("beta", beta);
     await startWorker("gamma", gamma);
     await startWorker("delta", delta);
+    await startWorker("epsilon", epsilon);
   }, 180_000);
 
   afterAll(async () => {
@@ -285,8 +290,24 @@ describe("account usage across hosts", () => {
       hosts: ["beta"],
       message: "Couldn't refresh usage on beta",
     });
-    expect(problem("codex", "not-logged-in")?.hosts.sort()).toEqual(["alpha", "delta", "gamma"]);
+    expect(problem("codex", "not-logged-in")?.hosts.sort()).toEqual([
+      "alpha",
+      "delta",
+      "epsilon",
+      "gamma",
+    ]);
     expect(report.rows).toHaveLength(3);
+  });
+
+  it("says a login with an aged-out token has no recent session, and never sends that token", async () => {
+    const { report, raw } = await list({ refresh: true });
+    const idle = report.problems.find((p) => p.provider === "claude" && p.reason === "idle");
+    expect(idle).toMatchObject({
+      hosts: ["epsilon"],
+      message: "No recent Claude session on epsilon",
+    });
+    expect(raw).not.toContain(CLAUDE_STALE);
+    expect(stub.requests.claude).not.toContain(CLAUDE_STALE);
   });
 
   it("answers from the hosts' caches until a refresh is asked for", async () => {

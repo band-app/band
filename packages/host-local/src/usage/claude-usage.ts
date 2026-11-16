@@ -69,6 +69,13 @@ export function mapClaudeUsage(data: ClaudeUsageResponse): UsageWindow[] {
 interface ClaudeLogin {
   token: string;
   plan: string | null;
+  /** Epoch milliseconds the access token stops working, or null when the credentials do not say. */
+  expiresAt: number | null;
+}
+
+/** Credentials without an expiry count as valid. */
+function isStale(login: ClaudeLogin): boolean {
+  return login.expiresAt !== null && login.expiresAt <= Date.now();
 }
 
 function claudeConfigDir(): string {
@@ -81,7 +88,12 @@ function parseCredentials(raw: string): ClaudeLogin | null {
     const token = oauth?.accessToken;
     if (typeof token !== "string" || token.trim() === "") return null;
     const sub = oauth?.subscriptionType;
-    return { token, plan: typeof sub === "string" && sub ? titleCase(sub) : null };
+    const expires = oauth?.expiresAt;
+    return {
+      token,
+      plan: typeof sub === "string" && sub ? titleCase(sub) : null,
+      expiresAt: typeof expires === "number" && Number.isFinite(expires) ? expires : null,
+    };
   } catch {
     return null;
   }
@@ -98,22 +110,37 @@ function keychainPassword(service: string): Promise<string | null> {
   });
 }
 
-/** Claude Code stores its login in a file, and on macOS in the Keychain. The file wins because reading it never prompts. */
-async function readLogin(): Promise<ClaudeLogin | null> {
+/**
+ * Claude Code stores its login in a file, and on macOS in the Keychain, where
+ * the live login of a Mac is refreshed while the file can be left behind. A
+ * file whose token has not expired wins because reading it never prompts.
+ * Otherwise the Keychain is read. Returns the login to use, or `stale` when
+ * logins exist but every access token has aged out. Band never refreshes a
+ * token: a refresh rotates the refresh token and can log Claude Code out.
+ */
+async function readLogin(): Promise<{ login: ClaudeLogin | null; stale: ClaudeLogin | null }> {
   const dir = claudeConfigDir();
+  let stale: ClaudeLogin | null = null;
   try {
     const fromFile = parseCredentials(await readFile(join(dir, ".credentials.json"), "utf8"));
-    if (fromFile) return fromFile;
+    if (fromFile) {
+      if (!isStale(fromFile)) return { login: fromFile, stale: null };
+      stale = fromFile;
+    }
   } catch {
     // No file: fall through to the Keychain.
   }
-  if (process.platform !== "darwin" || process.env.BAND_USAGE_KEYCHAIN === "off") return null;
+  if (process.platform !== "darwin" || process.env.BAND_USAGE_KEYCHAIN === "off") {
+    return { login: null, stale };
+  }
   // Claude Code suffixes the service with a hash of CLAUDE_CONFIG_DIR when it is set.
   const service = process.env.CLAUDE_CONFIG_DIR
     ? `${KEYCHAIN_SERVICE}-${createHash("sha256").update(dir).digest("hex").slice(0, 8)}`
     : KEYCHAIN_SERVICE;
   const raw = await keychainPassword(service);
-  return raw ? parseCredentials(raw) : null;
+  const fromKeychain = raw ? parseCredentials(raw) : null;
+  if (fromKeychain && !isStale(fromKeychain)) return { login: fromKeychain, stale: null };
+  return { login: null, stale: fromKeychain ?? stale };
 }
 
 async function readIdentity(): Promise<string | null> {
@@ -134,8 +161,12 @@ async function readIdentity(): Promise<string | null> {
 }
 
 export async function readClaudeUsage(): Promise<AccountUsage> {
-  const login = await readLogin();
-  if (!login) return failure("claude", "not-logged-in", null);
+  const { login, stale } = await readLogin();
+  if (!login) {
+    if (!stale) return failure("claude", "not-logged-in", null);
+    // The login is fine, its access token aged out because no Claude session ran lately.
+    return failure("claude", "idle", await readIdentity());
+  }
   const account = await readIdentity();
   try {
     const data = await fetchJson<ClaudeUsageResponse>(
