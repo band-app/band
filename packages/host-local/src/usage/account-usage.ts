@@ -15,6 +15,8 @@ function ttlOf(result: AccountUsage): number {
       return OK_TTL_MS;
     case "not-logged-in":
       return NOT_LOGGED_IN_TTL_MS;
+    case "idle":
+      return NOT_LOGGED_IN_TTL_MS;
     case "rate-limited":
       return RATE_LIMITED_TTL_MS;
     default:
