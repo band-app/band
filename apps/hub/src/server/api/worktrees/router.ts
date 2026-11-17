@@ -206,7 +206,7 @@ function throwAsTrpcError(err: unknown): never {
   ) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
-  if (err instanceof WorktreeGroupNotFoundError || err instanceof WorktreeNotFoundError) {
+  if (err instanceof WorktreeGroupNotFoundError) {
     throw new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
   }
   if (err instanceof RepoHostNotAllowedError) {
