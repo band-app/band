@@ -65,3 +65,4 @@ worktree-resolve-path.test.ts
 worktree-setup-teardown.test.ts
 worktree-sync-half-created-worktree.test.ts
 worktree-unread.test.ts
+worktree-pr-override.test.ts

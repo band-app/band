@@ -192,6 +192,16 @@ band worktrees mark-read <worktree id>
 
 `mark-unread` shows an unread dot on the worktree in the sidebar on every device. It stays until someone opens the worktree or runs `mark-read`, which also clears a `done` or `failed` status dot. `band worktrees list --output json` shows each worktree's `unread`. These commands are for a person: an agent on a worker gets 403.
 
+### Set a worktree's pull request by hand
+
+```sh
+band worktrees pr get <worktree id>
+band worktrees pr set <worktree id> https://github.com/<owner>/<repo>/pull/<number>
+band worktrees pr clear <worktree id>
+```
+
+Use `pr set` when the sidebar shows no pull request or the wrong one. The chosen PR replaces detection for that worktree: the badge, its state and its CI come from that PR, which Band reads by number. The PR must be in the worktree's repo, its upstream (the repo it was forked from) or the repo its branch pushes to; other URLs are refused. A PR Band cannot fetch shows with state `unknown`. `pr get --output json` has `source` (`detected` or `manual`), `pr` and `ci`. `pr clear` returns the worktree to automatic detection. The Band MCP server has the same three actions for the chat's own worktree as `worktrees_pr_get`, `worktrees_pr_set` and `worktrees_pr_clear`.
+
 ### List and manage groups
 
 ```sh
