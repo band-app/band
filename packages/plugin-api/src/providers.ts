@@ -333,6 +333,12 @@ export interface BranchStatusRequest {
   branch: string;
   /** Whether the branch is the repo's default branch. Only an open review counts there. */
   isDefaultBranch: boolean;
+  /**
+   * The owner of the remote the branch is pushed to, when that is not `origin`
+   * (`branch.<name>.pushRemote`, else `remote.pushDefault`). A PR whose head lives
+   * there counts as the branch's PR, for a clone whose origin is the upstream.
+   */
+  pushOwner?: string;
 }
 
 /**

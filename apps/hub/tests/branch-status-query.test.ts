@@ -775,3 +775,35 @@ describe("merge queue fields", () => {
     expect(isUnknownMergeQueueField(new Error("timeout"))).toBe(false);
   });
 });
+
+describe("push remote owner", () => {
+  const prFrom = (owner: string, state = "OPEN") => ({
+    number: 93,
+    title: "t",
+    state,
+    url: "https://github.com/A/repo/pull/93",
+    isDraft: false,
+    headRepositoryOwner: { login: owner },
+  });
+  const data = (owner: string): Record<string, GraphQLRepoResponse | null> => ({
+    ws_0: { owner: { login: "A" }, pullRequests: { nodes: [prFrom(owner)] }, ref: null },
+  });
+  const parse = (owner: string, pushOwner?: string) =>
+    parseBranchStatusResponse(data(owner), [
+      { branch: "feat", isDefaultBranch: false, ...(pushOwner && { pushOwner }) },
+    ]).feat;
+
+  it("picks an open PR from the push remote's owner", () => {
+    expect(parse("B", "B").review).toMatchObject({ number: 93, state: "open" });
+    expect(parse("b", "B").review?.number).toBe(93);
+  });
+
+  it("ignores a PR from an unrelated owner", () => {
+    expect(parse("C", "B").review).toBeNull();
+  });
+
+  it("without a push owner only same-repo PRs count", () => {
+    expect(parse("B").review).toBeNull();
+    expect(parse("A").review?.number).toBe(93);
+  });
+});

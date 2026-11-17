@@ -113,7 +113,8 @@ export function buildBranchStatusQuery(
  * recently updated (the query orders by `UPDATED_AT`). `headRefName` also
  * matches PRs from forks with a branch of the same name, so only PRs whose
  * head is in the repository itself count, and only ones with a web URL (the
- * badge hands it to the system's URL handler). On the default branch only
+ * badge hands it to the system's URL handler). A PR whose head is in the
+ * branch's push remote (`pushOwner`) counts too. On the default branch only
  * an open PR counts: a merged or closed PR whose head is `main` came from a
  * merge of main into another branch.
  */
@@ -121,13 +122,15 @@ function pickNode(
   allNodes: PullRequestNode[],
   repoOwner: string | undefined,
   isDefaultBranch: boolean,
+  pushOwner?: string,
 ): PullRequestNode | null {
-  const nodes = allNodes.filter(
-    (n) =>
-      repoOwner !== undefined &&
-      n.headRepositoryOwner?.login.toLowerCase() === repoOwner.toLowerCase() &&
-      isWebUrl(n.url),
-  );
+  const owners = [repoOwner, pushOwner]
+    .filter((o): o is string => o !== undefined)
+    .map((o) => o.toLowerCase());
+  const nodes = allNodes.filter((n) => {
+    const head = n.headRepositoryOwner?.login.toLowerCase();
+    return head !== undefined && owners.includes(head) && isWebUrl(n.url);
+  });
   const node =
     nodes.find((n) => n.state === "OPEN") ??
     (isDefaultBranch
@@ -156,8 +159,9 @@ function pickPullRequest(
   allNodes: PullRequestNode[],
   repoOwner: string | undefined,
   isDefaultBranch: boolean,
+  pushOwner?: string,
 ): BranchReview | null {
-  const node = pickNode(allNodes, repoOwner, isDefaultBranch);
+  const node = pickNode(allNodes, repoOwner, isDefaultBranch, pushOwner);
   return node ? toReview(node) : null;
 }
 
@@ -257,7 +261,7 @@ export function parseBranchStatusResponse(
 ): Record<string, BranchStatus> {
   const results: Record<string, BranchStatus> = {};
 
-  for (const [index, { branch, isDefaultBranch }] of branches.entries()) {
+  for (const [index, { branch, isDefaultBranch, pushOwner }] of branches.entries()) {
     const repo = data[branchAlias(index)];
     if (!repo) {
       results[branch] = { state: "none", url: null, review: null };
@@ -268,6 +272,7 @@ export function parseBranchStatusResponse(
       repo.pullRequests?.nodes ?? [],
       repo.owner?.login,
       isDefaultBranch,
+      pushOwner,
     );
     if (review?.state === "merged") {
       results[branch] = { state: "merged", url: review.url, review };
