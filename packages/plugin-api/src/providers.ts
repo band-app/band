@@ -340,6 +340,12 @@ export interface BranchStatusRequest {
    * exactly this PR instead of looking for one by branch name, and marks the review `manual`.
    */
   override?: { url: string; owner: string; repo: string; number: number };
+  /**
+   * The owner of the remote the branch is pushed to, when that is not `origin`
+   * (`branch.<name>.pushRemote`, else `remote.pushDefault`). A PR whose head lives
+   * there counts as the branch's PR, for a clone whose origin is the upstream.
+   */
+  pushOwner?: string;
 }
 
 /**
