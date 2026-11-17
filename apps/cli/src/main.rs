@@ -393,6 +393,11 @@ enum WorktreesCmd {
         #[arg(long)]
         clear: bool,
     },
+    /// Read, set or clear the pull request a worktree shows
+    Pr {
+        #[command(subcommand)]
+        cmd: WorktreePrCmd,
+    },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
         /// Worktree ID
@@ -400,6 +405,27 @@ enum WorktreesCmd {
         /// Take a checkpoint first
         #[arg(long)]
         take: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorktreePrCmd {
+    /// Show the worktree's pull request and whether it is detected or manual
+    Get {
+        /// Worktree ID
+        worktree: String,
+    },
+    /// Use this pull request for the worktree instead of the detected one
+    Set {
+        /// Worktree ID
+        worktree: String,
+        /// GitHub pull request URL, e.g. <https://github.com/owner/repo/pull/93>
+        url: String,
+    },
+    /// Go back to the automatically detected pull request
+    Clear {
+        /// Worktree ID
+        worktree: String,
     },
 }
 
@@ -1238,6 +1264,7 @@ fn main() {
                 title,
                 clear,
             } => cmd_worktrees_rename(&worktree, title.as_deref(), clear),
+            WorktreesCmd::Pr { cmd } => cmd_worktrees_pr(cmd),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -5004,6 +5031,57 @@ fn cmd_worktrees_set_unread(worktree: &str, unread: bool) -> Result<CommandResul
         text: format!("{worktree} marked {state}\n"),
         json: serde_json::json!({"ok": true, "worktreeId": worktree, "unread": unread}),
     })
+}
+
+fn cmd_worktrees_pr(cmd: WorktreePrCmd) -> Result<CommandResult, String> {
+    let (worktree, data) = {
+        let client = api::ApiClient::from_settings()?;
+        match cmd {
+            WorktreePrCmd::Get { worktree } => {
+                validate::validate_name(&worktree, "Worktree id")?;
+                let data = client.trpc_query(
+                    "worktrees.prGet",
+                    &serde_json::json!({"worktreeId": worktree}),
+                )?;
+                (worktree, data)
+            }
+            WorktreePrCmd::Set { worktree, url } => {
+                validate::validate_name(&worktree, "Worktree id")?;
+                let data = client.trpc_mutate(
+                    "worktrees.prSet",
+                    &serde_json::json!({"worktreeId": worktree, "url": url}),
+                )?;
+                (worktree, data)
+            }
+            WorktreePrCmd::Clear { worktree } => {
+                validate::validate_name(&worktree, "Worktree id")?;
+                let data = client.trpc_mutate(
+                    "worktrees.prClear",
+                    &serde_json::json!({"worktreeId": worktree}),
+                )?;
+                (worktree, data)
+            }
+        }
+    };
+    let source = data
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("detected");
+    let text = match data.get("pr").filter(|p| !p.is_null()) {
+        Some(pr) => format!(
+            "{worktree}: #{} {} ({}, {source})\n{}\n",
+            pr.get("number")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            pr.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+            pr.get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown"),
+            pr.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+        ),
+        None => format!("{worktree}: no pull request ({source})\n"),
+    };
+    Ok(CommandResult { text, json: data })
 }
 
 fn cmd_worktrees_rename(

@@ -17,6 +17,7 @@ import { chatService } from "../../services/chat-service";
 import { crossHostRefusal, restrictedHostRefusal } from "../../services/cross-host-policy";
 import { hostTrustService } from "../../services/host-trust-service";
 import { pluginHost } from "../../services/plugin-host-service";
+import { worktreePrService } from "../../services/worktree-pr-service";
 import { worktreeService } from "../../services/worktree-service";
 import { registerEditorTools } from "./editor-tools";
 import { extensionInstructions, registerExtensionTools } from "./extension-tools";
@@ -136,10 +137,63 @@ export async function createBandServer(scope: ToolScope): Promise<McpServer> {
       }
     },
   );
+  registerPullRequestTools(server, scope);
   registerPluginTools(server, scope);
   await registerEditorTools(server, scope);
   await registerExtensionTools(server, scope);
   return server;
+}
+
+/**
+ * Tools to read, set and clear the pull request of this chat's worktree. They never take a
+ * worktree id, so an agent cannot change another worktree's PR.
+ */
+function registerPullRequestTools(server: McpServer, scope: ToolScope): void {
+  const run = (act: (worktreeId: string, chatId: string) => unknown | Promise<unknown>) => {
+    return async () => {
+      try {
+        const chatId = scope.chatId;
+        if (chatId === null) return jsonText({ error: NEEDS_CHAT }, true);
+        const chat = chatService.get(chatId);
+        if (!chat?.worktreeId) return jsonText({ error: "This chat has no worktree" }, true);
+        return jsonText(await act(chat.worktreeId, chatId));
+      } catch (err) {
+        return jsonText({ error: err instanceof Error ? err.message : String(err) }, true);
+      }
+    };
+  };
+  server.registerTool(
+    "worktrees_pr_get",
+    {
+      description:
+        "The pull request Band shows for this chat's worktree, and whether it was detected or set by hand (source: detected | manual).",
+      inputSchema: {},
+    },
+    run((worktreeId) => worktreePrService.get(worktreeId)),
+  );
+  server.registerTool(
+    "worktrees_pr_set",
+    {
+      description:
+        "Set this worktree's pull request by URL when Band shows none or the wrong one. It replaces detection until cleared with worktrees_pr_clear.",
+      inputSchema: {
+        url: z.string().min(1).describe("https://github.com/<owner>/<repo>/pull/<n>"),
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: arguments are validated by the schema above
+    async (args: any) =>
+      run((worktreeId, chatId) =>
+        worktreePrService.set(worktreeId, String(args.url), `agent:${chatId}`),
+      )(),
+  );
+  server.registerTool(
+    "worktrees_pr_clear",
+    {
+      description: "Go back to the automatically detected pull request for this worktree.",
+      inputSchema: {},
+    },
+    run((worktreeId) => worktreePrService.clear(worktreeId)),
+  );
 }
 
 /**

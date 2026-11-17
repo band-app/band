@@ -169,6 +169,32 @@ export class PullRequestBadgePage {
     });
   }
 
+  /** The marker on a badge whose PR was set by hand. */
+  manualMarker(worktreeId: string): Locator {
+    return this.badge(worktreeId).getByTestId("worktree-card__pr-manual");
+  }
+
+  /** Right-click the row, choose "Set pull request…", paste `url` and save. */
+  async setPullRequest(worktreeId: string, url: string): Promise<void> {
+    await test.step(`Set the pull request of ${worktreeId} to ${url}`, async () => {
+      await this.worktree.worktreeCard(worktreeId).click({ button: "right" });
+      await this.page.getByTestId("worktree-card__set-pr").click();
+      await this.page.getByTestId("set-pr__url").fill(url);
+      await this.page.getByTestId("set-pr__save").click();
+      await expect(this.page.getByTestId("set-pr__dialog")).toBeHidden();
+    });
+  }
+
+  /** Open the badge's popover, press Edit, then Clear in the dialog. */
+  async clearPullRequest(worktreeId: string): Promise<void> {
+    await test.step(`Clear the manual pull request of ${worktreeId}`, async () => {
+      await this.hoverBadge(worktreeId);
+      await this.page.getByTestId("pr-popover__edit").click();
+      await this.page.getByTestId("set-pr__clear").click();
+      await expect(this.page.getByTestId("set-pr__dialog")).toBeHidden();
+    });
+  }
+
   async copyLink(): Promise<void> {
     await test.step("Copy the pull request's link", async () => {
       await this.copyButton.click();

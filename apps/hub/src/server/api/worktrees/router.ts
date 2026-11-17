@@ -6,6 +6,13 @@ import {
   WorktreeNotFoundError,
 } from "../../errors";
 import {
+  InvalidPrUrlError,
+  PrRepoNotAllowedError,
+  worktreePrInput,
+  worktreePrService,
+  worktreePrSetInput,
+} from "../../services/worktree-pr-service";
+import {
   InvalidOriginError,
   PlainRepoError,
   worktreeCreateInput,
@@ -110,6 +117,34 @@ export const worktreesRouter = t.router({
     }
   }),
 
+  /** The worktree's PR and whether it was detected or set by hand. */
+  prGet: publicProcedure.input(worktreePrInput).query(({ input }) => {
+    try {
+      return worktreePrService.get(input.worktreeId);
+    } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
+  /** Use this PR for the worktree instead of the detected one. */
+  prSet: publicProcedure.input(worktreePrSetInput).mutation(async ({ input, ctx }) => {
+    try {
+      const setBy = ctx.chatId ? `agent:${ctx.chatId}` : "user";
+      return await worktreePrService.set(input.worktreeId, input.url, setBy);
+    } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
+  /** Go back to the detected PR. */
+  prClear: publicProcedure.input(worktreePrInput).mutation(async ({ input }) => {
+    try {
+      return await worktreePrService.clear(input.worktreeId);
+    } catch (err) {
+      throwAsTrpcError(err);
+    }
+  }),
+
   gitPull: publicProcedure.input(worktreeGitInput).mutation(async ({ input }) => {
     try {
       return await worktreeService.gitPull(input);
@@ -163,10 +198,15 @@ export type WorktreesRouter = typeof worktreesRouter;
  * follow-up that updates the tests together.
  */
 function throwAsTrpcError(err: unknown): never {
-  if (err instanceof PlainRepoError || err instanceof InvalidOriginError) {
+  if (
+    err instanceof PlainRepoError ||
+    err instanceof InvalidOriginError ||
+    err instanceof InvalidPrUrlError ||
+    err instanceof PrRepoNotAllowedError
+  ) {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
-  if (err instanceof WorktreeGroupNotFoundError) {
+  if (err instanceof WorktreeGroupNotFoundError || err instanceof WorktreeNotFoundError) {
     throw new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
   }
   if (err instanceof RepoHostNotAllowedError) {

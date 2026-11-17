@@ -11,6 +11,7 @@ import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { eq } from "drizzle-orm";
 import { getDb } from "../infra/db/connection";
+import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { hostRegistry } from "../infra/host/registry";
 import { takeCIRefreshRequest } from "./_utils/ci-refresh-request";
@@ -285,6 +286,8 @@ export async function getBatchedCIStatuses(
   if (byHost.size === 0) lastCIPollErrorByHost.clear();
 
   const allResults = new Map<string, CIStatus>();
+  // PRs chosen by hand replace detection for their worktrees.
+  const overrides = new WorktreeQueries().allPrOverrides();
 
   for (const [groupKey, repos] of byHost) {
     const count = repos.reduce((n, r) => n + r.worktrees.length, 0);
@@ -295,10 +298,21 @@ export async function getBatchedCIStatuses(
       const host = hostOf(group[0]);
       // Use any worktree's path as cwd (gh auth is per host).
       const cwd = group[0].worktreePath;
-      const requests = [...new Map(group.map((g) => [g.branch, g])).values()].map((g) => ({
-        branch: g.branch,
-        isDefaultBranch: g.branch === g.defaultBranch,
-      }));
+      const requests = [...new Map(group.map((g) => [g.branch, g])).values()].map((g) => {
+        const manual = overrides.get(g.worktreeId);
+        return {
+          branch: g.branch,
+          isDefaultBranch: g.branch === g.defaultBranch,
+          ...(manual && {
+            override: {
+              url: manual.url,
+              owner: manual.owner,
+              repo: manual.repo,
+              number: manual.number,
+            },
+          }),
+        };
+      });
       try {
         const statuses = await provider.getBranchStatuses(repoInfo, requests, {
           cwd,
@@ -560,6 +574,24 @@ export function refreshWorktreeBranchStatus(worktreeId: string): Promise<boolean
   return refresh;
 }
 
+/**
+ * Re-reads one worktree's PR and CI from the forge and stores the result, so a PR just set or
+ * cleared by hand shows without waiting for the next CI tick. Returns `false` when no git
+ * worktree has that id or its worker is unreachable.
+ */
+export async function refreshWorktreeCI(worktreeId: string): Promise<boolean> {
+  const ws = getWorktrees().find((w) => w.worktreeId === worktreeId);
+  if (!ws) return false;
+  try {
+    const statuses = ws.hasOrigin ? await getBatchedCIStatuses([ws]) : new Map<string, CIStatus>();
+    await pollWorktree(ws, statuses.get(worktreeId) ?? { state: "none" });
+    return true;
+  } catch (err) {
+    if (err instanceof HostOfflineError || err instanceof HostTimeoutError) return false;
+    throw err;
+  }
+}
+
 async function pollTick() {
   pollerState.tickCount++;
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
@@ -748,6 +780,10 @@ export class BranchStatusPoller {
 
   refreshWorktree(worktreeId: string): Promise<boolean> {
     return refreshWorktreeBranchStatus(worktreeId);
+  }
+
+  refreshWorktreeCI(worktreeId: string): Promise<boolean> {
+    return refreshWorktreeCI(worktreeId);
   }
 }
 
