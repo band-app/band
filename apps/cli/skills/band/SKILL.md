@@ -97,7 +97,7 @@ JSON output: `{"worktrees": [{"repo": "...", "branch": "...", "worktreeId": "...
 ### Create a new worktree (git worktree + state registration)
 
 ```sh
-band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-worker] [--isolation worktree|container|vm] [--worker-repo-path <string>] [--worker <worker>] [--origin <worktree id> | --no-origin] [--group <id|name>]
+band worktrees create <repo> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-worker] [--isolation worktree|container|vm] [--worker-repo-path <string>] [--worker <worker>] [--origin <worktree id> | --no-origin] [--group <id|name>] [--pinned]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -182,6 +182,16 @@ band worktrees set-group <worktree id> --none [--with-children]
 ```
 
 Moves a worktree into a group, or out of its group with `--none`. `--with-children` also moves every worktree started from it, and theirs in turn, on any repo and host. The command prints each worktree that moved. `band worktrees list --output json` shows each worktree's `groupId` (null when ungrouped). An agent may run this command for worktrees on its own host.
+
+### Pin or unpin a worktree
+
+```sh
+band worktrees pin <worktree id>
+band worktrees unpin <worktree id>
+band worktrees create <repo> <branch> --pinned
+```
+
+`pin` puts the worktree in the sidebar's Pinned section, `unpin` takes it out. `create --pinned` pins the worktree right after creating it. If the pin fails, the worktree stays created, the command prints a warning and still exits 0 (`--output json` has `pinned: false` and `pinWarning`). Plain (non-git) repos cannot be pinned. `band worktrees list --output json` shows each worktree's `pinned`.
 
 ### Mark a worktree unread or read
 
