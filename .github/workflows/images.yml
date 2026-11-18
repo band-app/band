@@ -118,6 +118,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         image: [band-hub, band-worker]
     steps:
@@ -148,4 +149,18 @@ jobs:
             $(printf "$image@sha256:%s " *)
 
       - name: Inspect
-        run: docker buildx imagetools inspect "$REGISTRY/${{ matrix.image }}:$VERSION"
+        run: |
+          ref="$REGISTRY/${{ matrix.image }}:$VERSION"
+          # ghcr can take a few seconds to serve a tag it just accepted.
+          for delay in 2 4 8 15 30 0; do
+            if docker buildx imagetools inspect "$ref"; then
+              exit 0
+            fi
+            if [ "$delay" -eq 0 ]; then
+              break
+            fi
+            echo "$ref is not readable yet, retrying in ${delay}s" >&2
+            sleep "$delay"
+          done
+          echo "$ref was still not readable after 6 attempts" >&2
+          exit 1
