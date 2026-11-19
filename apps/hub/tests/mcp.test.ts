@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
@@ -148,6 +149,12 @@ describe("MCP server — tool listing and invocation", () => {
     expect(toolNames).toContain("band_tunnel_status");
     expect(toolNames).toContain("band_worktrees_create");
     expect(toolNames).toContain("band_cronjobs_list");
+    // Agents may set, remove and filter worktree labels.
+    expect(toolNames).toContain("band_worktrees_setLabels");
+    const worktreesList = tools.find((t) => t.name === "band_worktrees_list") as
+      | { inputSchema?: { properties?: Record<string, unknown> } }
+      | undefined;
+    expect(Object.keys(worktreesList?.inputSchema?.properties ?? {})).toContain("labels");
     // The hub update procedures are for a person's token only.
     expect(toolNames).not.toContain("band_workers_hubInterruptions");
     expect(toolNames).not.toContain("band_workers_updateHub");
@@ -371,5 +378,72 @@ describe("MCP server — auth enforcement", () => {
       ),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("MCP server — worktree labels", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, {
+      repos: [
+        {
+          name: "app",
+          path: join(tmpHome, "app"),
+          defaultBranch: "main",
+          worktrees: [{ branch: "feat-x", path: join(tmpHome, "app-feat-x") }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    removeTmpHome(tmpHome);
+  });
+
+  it("sets, filters and removes labels through band_worktrees_setLabels and band_worktrees_list", async () => {
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const res = await mcpPost(server.url, mcpRequest("tools/call", { name, arguments: args }));
+      expect(res.status).toBe(200);
+      const [message] = (await parseMcpResponse(res)) as Array<{
+        result: { isError?: boolean; content: Array<{ text: string }> };
+      }>;
+      return message.result;
+    };
+    const listIds = async (labels: Array<{ key: string; value?: string }>) => {
+      const result = await call("band_worktrees_list", { labels });
+      expect(result.isError).toBeFalsy();
+      const data = JSON.parse(result.content[0].text) as {
+        worktrees: Array<{ worktreeId: string }>;
+      };
+      return data.worktrees.map((w) => w.worktreeId);
+    };
+
+    const set = await call("band_worktrees_setLabels", {
+      worktreeId: "app-feat-x",
+      set: { merge: "auto" },
+    });
+    expect(set.isError).toBeFalsy();
+    expect(await listIds([{ key: "merge", value: "auto" }])).toEqual(["app-feat-x"]);
+    expect(await listIds([{ key: "merge", value: "manual" }])).toEqual([]);
+
+    const removed = await call("band_worktrees_setLabels", {
+      worktreeId: "app-feat-x",
+      remove: ["merge"],
+    });
+    expect(removed.isError).toBeFalsy();
+    expect(await listIds([{ key: "merge" }])).toEqual([]);
+
+    const unknown = await call("band_worktrees_setLabels", {
+      worktreeId: "no-such-worktree",
+      set: { merge: "auto" },
+    });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content[0].text).toContain("no-such-worktree");
   });
 });

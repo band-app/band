@@ -1037,6 +1037,15 @@ describe("the band CLI through the relay (S2)", () => {
     await ok("worktrees", "set-group", ws, "--none");
     await ok("worktrees", "rename", ws, "Renamed by an agent");
     await ok("worktrees", "rename", ws, "--clear");
+    // A label key may read like a scope key (`cwd`); only the worktree id names a target.
+    await ok("worktrees", "label", ws, "agent=relay", "cwd=build");
+    expect(await ok("worktrees", "list", "--label", "agent=relay", "--output", "json")).toContain(
+      '"cwd"',
+    );
+    await ok("worktrees", "unlabel", ws, "agent", "cwd");
+    expect(await ok("worktrees", "list", "--label", "agent", "--output", "json")).not.toContain(
+      `"${ws}"`,
+    );
     // The host list an agent gets has no roots, home or tools.
     const hostList = await ok("workers", "list", "--output", "json");
     expect(hostList).toContain(b.hostId);

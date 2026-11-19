@@ -1109,6 +1109,87 @@ fn worktrees_rename_sets_and_clears_the_title() {
 }
 
 #[test]
+fn worktrees_label_unlabel_and_list_filter() {
+    let env = TestEnv::new();
+    for branch in ["feat/one", "feat/two"] {
+        let output = env.band(&["worktrees", "create", "my-repo", branch]);
+        assert!(output.status.success(), "stderr: {}", stderr(&output));
+    }
+    let labels_of = |env: &TestEnv, id: &str| -> serde_json::Value {
+        let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == id)
+            .unwrap()["labels"]
+            .clone()
+    };
+    assert_eq!(labels_of(&env, "my-repo-feat-one"), serde_json::json!({}));
+
+    let output = env.band(&["worktrees", "label", "my-repo-feat-one", "a=1"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let output = env.band(&[
+        "worktrees",
+        "label",
+        "my-repo-feat-one",
+        "b=2",
+        "merge=auto",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(
+        labels_of(&env, "my-repo-feat-one"),
+        serde_json::json!({"a": "1", "b": "2", "merge": "auto"})
+    );
+    assert!(labels_of(&env, "my-repo-feat-two")
+        .as_object()
+        .unwrap()
+        .is_empty());
+
+    let filtered = json_of(&env.band(&[
+        "worktrees",
+        "list",
+        "--label",
+        "merge=auto",
+        "--output",
+        "json",
+    ]));
+    let ids: Vec<_> = filtered["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["worktreeId"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, vec!["my-repo-feat-one"]);
+    let none = json_of(&env.band(&[
+        "worktrees",
+        "list",
+        "--label",
+        "merge=never",
+        "--output",
+        "json",
+    ]));
+    assert!(none["worktrees"].as_array().unwrap().is_empty());
+
+    let output = env.band(&["worktrees", "unlabel", "my-repo-feat-one", "a", "nope"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(
+        labels_of(&env, "my-repo-feat-one"),
+        serde_json::json!({"b": "2", "merge": "auto"})
+    );
+
+    // A bad pair fails and changes nothing.
+    for bad in ["no-equals", "=x", "k=", "bad key=x", "band:x=1"] {
+        let output = env.band(&["worktrees", "label", "my-repo-feat-one", "z=9", bad]);
+        assert!(!output.status.success(), "{bad} should fail");
+    }
+    assert_eq!(
+        labels_of(&env, "my-repo-feat-one"),
+        serde_json::json!({"b": "2", "merge": "auto"})
+    );
+}
+
+#[test]
 fn worktrees_set_group_moves_one_worktree_or_its_children() {
     let env = TestEnv::new();
     let a = json_of(&env.band(&["groups", "create", "A", "--output", "json"]))["group"]["id"]

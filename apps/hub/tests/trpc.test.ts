@@ -260,6 +260,88 @@ describe("tRPC — repos CRUD", () => {
     expect(await titleOf()).toBeNull();
   });
 
+  it("worktrees.setLabels merges and removes, worktrees.list filters, and survives a state rewrite", async () => {
+    const a = testWorktreeId("myrepo", "main", false);
+    type ListData = {
+      repos: Array<{
+        name: string;
+        worktrees: Array<{ worktreeId: string; labels: Record<string, string> }>;
+      }>;
+    };
+    const list = async () =>
+      (await trpcData<ListData>(await trpcQuery(server.url, "repos.list"))).repos.flatMap(
+        (r) => r.worktrees,
+      );
+    const labelsOf = async () => (await list()).find((w) => w.worktreeId === a)?.labels;
+    expect(await labelsOf()).toEqual({});
+
+    await trpcMutate(server.url, "worktrees.setLabels", { worktreeId: a, set: { a: "1" } });
+    const merged = await trpcMutate(server.url, "worktrees.setLabels", {
+      worktreeId: a,
+      set: { b: "2", merge: "auto" },
+    });
+    expect(merged.status).toBe(200);
+    expect(await labelsOf()).toEqual({ a: "1", b: "2", merge: "auto" });
+    await trpcMutate(server.url, "worktrees.setLabels", { worktreeId: a, set: { a: "9" } });
+    expect((await labelsOf())?.a).toBe("9");
+
+    // Only the labelled worktree comes back, and every listed worktree has a labels object.
+    const filter = async (labels: Array<{ key: string; value?: string }>) =>
+      (
+        await trpcData<{ worktrees: Array<{ worktreeId: string }> }>(
+          await trpcQuery(server.url, "worktrees.list", { labels }),
+        )
+      ).worktrees.map((w) => w.worktreeId);
+    expect(await filter([{ key: "merge", value: "auto" }])).toEqual([a]);
+    expect(await filter([{ key: "merge", value: "never" }])).toEqual([]);
+    expect(await filter([{ key: "b" }])).toEqual([a]);
+    expect(await filter([])).toContain(a);
+    expect((await list()).every((w) => typeof w.labels === "object")).toBe(true);
+
+    // Reordering repos rewrites the worktrees table through `saveAll`.
+    await trpcMutate(server.url, "repos.reorder", { names: ["second-repo", "myrepo"] });
+    await trpcMutate(server.url, "repos.reorder", { names: ["myrepo", "second-repo"] });
+    expect(await labelsOf()).toEqual({ a: "9", b: "2", merge: "auto" });
+
+    const removed = await trpcMutate(server.url, "worktrees.setLabels", {
+      worktreeId: a,
+      remove: ["a", "unknown"],
+    });
+    expect(removed.status).toBe(200);
+    expect(await labelsOf()).toEqual({ b: "2", merge: "auto" });
+    await trpcMutate(server.url, "worktrees.setLabels", { worktreeId: a, remove: ["b", "merge"] });
+    expect(await labelsOf()).toEqual({});
+  });
+
+  it("worktrees.setLabels rejects a bad key or value and changes nothing", async () => {
+    const worktreeId = testWorktreeId("myrepo", "main", false);
+    await trpcMutate(server.url, "worktrees.setLabels", { worktreeId, set: { keep: "me" } });
+    for (const set of [
+      { "": "x" },
+      { "has space": "x" },
+      { "band:cronId": "x" },
+      { ok: "" },
+      { ok: "caf\u00e9" },
+    ]) {
+      const res = await trpcMutate(server.url, "worktrees.setLabels", {
+        worktreeId,
+        set: { fine: "1", ...set },
+      });
+      expect(res.status).toBe(400);
+    }
+    const unknown = await trpcMutate(server.url, "worktrees.setLabels", {
+      worktreeId: "no-such-worktree",
+      set: { a: "1" },
+    });
+    expect(unknown.status).toBe(404);
+    const listed = await trpcData<{
+      repos: Array<{ worktrees: Array<{ worktreeId: string; labels: Record<string, string> }> }>;
+    }>(await trpcQuery(server.url, "repos.list"));
+    const wt = listed.repos.flatMap((r) => r.worktrees).find((w) => w.worktreeId === worktreeId);
+    expect(wt?.labels).toEqual({ keep: "me" });
+    await trpcMutate(server.url, "worktrees.setLabels", { worktreeId, remove: ["keep"] });
+  });
+
   it("worktrees.setTitle rejects a title over 100 characters and answers 404 for an unknown worktree", async () => {
     const tooLong = await trpcMutate(server.url, "worktrees.setTitle", {
       worktreeId: testWorktreeId("myrepo", "main", false),
@@ -1845,6 +1927,25 @@ describe("tRPC — pinned worktrees", () => {
 
     expect(await readPinned("feature")).toBe(true);
     expect(await readPinned("main")).toBe(false);
+  });
+
+  it("worktree labels persist across server restart", async () => {
+    const worktreeId = testWorktreeId("pin-repo", "feature", false);
+    const res = await trpcMutate(server.url, "worktrees.setLabels", {
+      worktreeId,
+      set: { merge: "auto", team: "core" },
+    });
+    expect(res.status).toBe(200);
+
+    await server.close();
+    server = await startServer({ tmpHome, remoteHost: false });
+
+    const data = await trpcData<{
+      repos: Array<{ worktrees: Array<{ worktreeId: string; labels: Record<string, string> }> }>;
+    }>(await trpcQuery(server.url, "repos.list"));
+    const wt = data.repos.flatMap((r) => r.worktrees).find((w) => w.worktreeId === worktreeId);
+    expect(wt?.labels).toEqual({ merge: "auto", team: "core" });
+    await trpcMutate(server.url, "worktrees.setLabels", { worktreeId, remove: ["merge", "team"] });
   });
 
   it("worktrees.remove drops the pinned worktree's row", async () => {

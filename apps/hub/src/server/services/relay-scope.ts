@@ -72,6 +72,7 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "groups.list",
   "worktrees.setGroup",
   "worktrees.setTitle",
+  "worktrees.setLabels",
   "hosts.list",
   "hosts.forAgents",
   "workers.list",
@@ -752,6 +753,10 @@ function checkCall(procedure: string, input: unknown, ctx: Ctx): RelayVerdict {
     if ((input as { withChildren?: unknown } | null)?.withChildren) {
       return deny(403, `${procedure}: withChildren is not available from a worker`);
     }
+  }
+  if (procedure === "worktrees.setLabels") {
+    // Label keys may be `cwd` or `chatId`; only `worktreeId` names a target.
+    named = { worktreeId: (input as { worktreeId?: unknown } | null)?.worktreeId };
   }
   if (procedure === "worktrees.remove") {
     const { hostId, ...rest } = (input ?? {}) as Record<string, unknown>;

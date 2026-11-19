@@ -73,15 +73,66 @@
       ]
     },
     {
-      "description": "List worktrees, optionally filtered by repo",
+      "description": "List worktrees, optionally filtered by repo or label",
       "name": "worktrees list",
-      "notes": "Text output is a table whose last column, ORIGIN, is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone).\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"worktreeId\": \"...\", \"path\": \"...\", \"origin\": {\"worktreeId\": \"...\", \"chatId\": \"...\", \"removed\": false} | null, \"children\": [\"<worktree id>\"]}]}`",
+      "notes": "Text output is a table whose ORIGIN column is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone) and whose last column, LABELS, is `k=v,k=v`.\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"worktreeId\": \"...\", \"labels\": {\"key\": \"value\"}, \"path\": \"...\", \"origin\": {\"worktreeId\": \"...\", \"chatId\": \"...\", \"removed\": false} | null, \"children\": [\"<worktree id>\"]}]}`",
       "parameters": [
         {
           "description": "Repo name (optional filter)",
           "name": "repo",
           "positional": true,
           "required": false,
+          "type": "string"
+        },
+        {
+          "description": "Only worktrees with this label: `key=value`, or `key` for any value. All given filters must match",
+          "name": "--label",
+          "repeatable": true,
+          "required": false,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Add or overwrite labels on a worktree (additive merge)",
+      "name": "worktrees label",
+      "notes": "Merges the pairs into the worktree's labels (the same key takes the new value, other labels stay). Keys follow the chat label rules: 1-64 characters of letters, digits, `_`, `:` and `-`, at most 20 labels, printable ASCII values up to 256 characters, and no `band:` prefix. An invalid pair fails and changes nothing.\n\nText output: the final labels as `k=v,k=v`.\nJSON output: `{\"ok\": true, \"worktreeId\": \"...\", \"labels\": {...}}`",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "One or more `key=value` pairs",
+          "name": "labels",
+          "positional": true,
+          "repeatable": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Remove labels from a worktree by key",
+      "name": "worktrees unlabel",
+      "notes": "Drops the listed keys (unknown keys are ignored) and keeps the other labels.\n\nText output: the final labels as `k=v,k=v`.\nJSON output: `{\"ok\": true, \"worktreeId\": \"...\", \"labels\": {...}}`",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "id",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "One or more label keys to remove",
+          "name": "keys",
+          "positional": true,
+          "repeatable": true,
+          "required": true,
           "type": "string"
         }
       ]

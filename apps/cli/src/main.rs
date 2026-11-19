@@ -222,6 +222,27 @@ enum WorktreesCmd {
     List {
         /// Repo name (optional filter)
         repo: Option<String>,
+        /// Only worktrees with this label: `key=value`, or `key` for any
+        /// value. Repeat to require several (all must match).
+        #[arg(long = "label")]
+        label: Vec<String>,
+    },
+    /// Add or overwrite labels on a worktree (additive merge; other labels are kept)
+    Label {
+        /// Worktree ID
+        id: String,
+        /// One or more `key=value` pairs. Keys with the reserved `band:`
+        /// prefix are rejected by the server.
+        #[arg(required = true)]
+        labels: Vec<String>,
+    },
+    /// Remove labels from a worktree by key (other labels are kept)
+    Unlabel {
+        /// Worktree ID
+        id: String,
+        /// One or more label keys to remove. Unknown keys are ignored.
+        #[arg(required = true)]
+        keys: Vec<String>,
     },
     /// Create a new worktree (git worktree + state registration)
     Create {
@@ -1206,7 +1227,9 @@ fn main() {
             ReposCmd::Remove { name } => cmd_repos_remove(&name),
         },
         Commands::Worktrees { cmd } => match cmd {
-            WorktreesCmd::List { repo } => cmd_worktrees_list(repo.as_deref()),
+            WorktreesCmd::List { repo, label } => cmd_worktrees_list(repo.as_deref(), &label),
+            WorktreesCmd::Label { id, labels } => cmd_worktrees_label(&id, &labels),
+            WorktreesCmd::Unlabel { id, keys } => cmd_worktrees_unlabel(&id, &keys),
             WorktreesCmd::Create {
                 repo,
                 branch,
@@ -1973,9 +1996,34 @@ fn cmd_repos_remove(name: &str) -> Result<CommandResult, String> {
 
 // --- Worktrees commands ---
 
-fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String> {
+/// A `--label` filter: `key=value` matches that value, a bare `key` matches any value.
+fn label_filter_matches(wt: &serde_json::Value, filters: &[String]) -> bool {
+    let labels = wt.get("labels").and_then(serde_json::Value::as_object);
+    filters.iter().all(|f| {
+        let (key, want) = match f.split_once('=') {
+            Some((k, v)) => (k, Some(v)),
+            None => (f.as_str(), None),
+        };
+        match (labels.and_then(|l| l.get(key)), want) {
+            (Some(have), Some(w)) => have.as_str() == Some(w),
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn cmd_worktrees_list(
+    repo_filter: Option<&str>,
+    label_filters: &[String],
+) -> Result<CommandResult, String> {
     if let Some(name) = repo_filter {
         validate::validate_name(name, "Repo name")?;
+    }
+    for f in label_filters {
+        if f.split('=').next().unwrap_or("").is_empty() {
+            return Err(format!("label filter \"{f}\" has an empty key"));
+        }
     }
 
     let client = api::ApiClient::from_settings()?;
@@ -1988,7 +2036,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
         .unwrap_or_default();
 
     let mut found_any = false;
-    let mut rows: Vec<[String; 6]> = Vec::new();
+    let mut rows: Vec<[String; 7]> = Vec::new();
     let mut listed = Vec::new();
     for proj in &repos {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -2003,6 +2051,9 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
             .cloned()
             .unwrap_or_default();
         for wt in &worktrees {
+            if !label_filter_matches(wt, label_filters) {
+                continue;
+            }
             let branch = wt.get("branch").and_then(|b| b.as_str()).unwrap_or("");
             let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
             let worktree_id = wt.get("worktreeId").and_then(|w| w.as_str()).unwrap_or("");
@@ -2040,6 +2091,11 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 id_text.push_str(" (pinned)");
             }
             let title = wt.get("title").and_then(|t| t.as_str());
+            let labels = wt
+                .get("labels")
+                .filter(|l| l.is_object())
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
             rows.push([
                 name.to_string(),
                 branch.to_string(),
@@ -2047,6 +2103,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 id_text,
                 path.to_string(),
                 origin_text,
+                format_labels_cell(&labels).trim_end().to_string(),
             ]);
             listed.push(serde_json::json!({
                 "repo": name,
@@ -2058,6 +2115,7 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
                 "origin": origin,
                 "groupId": wt.get("groupId").cloned().unwrap_or(serde_json::Value::Null),
                 "unread": unread,
+                "labels": labels,
                 "pinned": pinned,
                 "children": wt.get("children").cloned().unwrap_or_else(|| serde_json::json!([])),
             }));
@@ -2072,7 +2130,15 @@ fn cmd_worktrees_list(repo_filter: Option<&str>) -> Result<CommandResult, String
     }
 
     let text = format_table(
-        &["REPO", "BRANCH", "TITLE", "WORKTREE ID", "PATH", "ORIGIN"],
+        &[
+            "REPO",
+            "BRANCH",
+            "TITLE",
+            "WORKTREE ID",
+            "PATH",
+            "ORIGIN",
+            "LABELS",
+        ],
         &rows,
     );
 
@@ -5153,6 +5219,39 @@ fn cmd_worktrees_set_unread(worktree: &str, unread: bool) -> Result<CommandResul
     })
 }
 
+fn worktree_labels_result(worktree: &str, data: &serde_json::Value) -> CommandResult {
+    let labels = data
+        .get("labels")
+        .filter(|l| l.is_object())
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    CommandResult {
+        text: format_labels_cell(&labels),
+        json: serde_json::json!({"ok": true, "worktreeId": worktree, "labels": labels}),
+    }
+}
+
+fn cmd_worktrees_label(worktree: &str, label_args: &[String]) -> Result<CommandResult, String> {
+    validate::validate_name(worktree, "Worktree id")?;
+    let additions = parse_label_pairs(label_args)?;
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate(
+        "worktrees.setLabels",
+        &serde_json::json!({"worktreeId": worktree, "set": additions}),
+    )?;
+    Ok(worktree_labels_result(worktree, &data))
+}
+
+fn cmd_worktrees_unlabel(worktree: &str, keys: &[String]) -> Result<CommandResult, String> {
+    validate::validate_name(worktree, "Worktree id")?;
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate(
+        "worktrees.setLabels",
+        &serde_json::json!({"worktreeId": worktree, "remove": keys}),
+    )?;
+    Ok(worktree_labels_result(worktree, &data))
+}
+
 fn cmd_worktrees_pr(cmd: WorktreePrCmd) -> Result<CommandResult, String> {
     let (worktree, data) = {
         let client = api::ApiClient::from_settings()?;
@@ -6624,11 +6723,30 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "worktrees list",
-            "description": "List worktrees, optionally filtered by repo",
+            "description": "List worktrees, optionally filtered by repo or label",
             "parameters": [
                 {"name": "repo", "type": "string", "required": false, "positional": true, "description": "Repo name (optional filter)"},
+                {"name": "--label", "type": "string", "required": false, "repeatable": true, "description": "Only worktrees with this label: `key=value`, or `key` for any value. All given filters must match"},
             ],
-            "notes": "Text output is a table whose last column, ORIGIN, is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone).\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"worktreeId\": \"...\", \"path\": \"...\", \"origin\": {\"worktreeId\": \"...\", \"chatId\": \"...\", \"removed\": false} | null, \"children\": [\"<worktree id>\"]}]}`"
+            "notes": "Text output is a table whose ORIGIN column is the worktree this one was started from (`-` for top-level work, `<id> (removed)` when that worktree is gone) and whose last column, LABELS, is `k=v,k=v`.\nJSON output: `{\"worktrees\": [{\"repo\": \"...\", \"branch\": \"...\", \"worktreeId\": \"...\", \"labels\": {\"key\": \"value\"}, \"path\": \"...\", \"origin\": {\"worktreeId\": \"...\", \"chatId\": \"...\", \"removed\": false} | null, \"children\": [\"<worktree id>\"]}]}`"
+        }),
+        serde_json::json!({
+            "name": "worktrees label",
+            "description": "Add or overwrite labels on a worktree (additive merge)",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "labels", "type": "string", "required": true, "positional": true, "repeatable": true, "description": "One or more `key=value` pairs"},
+            ],
+            "notes": "Merges the pairs into the worktree's labels (the same key takes the new value, other labels stay). Keys follow the chat label rules: 1-64 characters of letters, digits, `_`, `:` and `-`, at most 20 labels, printable ASCII values up to 256 characters, and no `band:` prefix. An invalid pair fails and changes nothing.\n\nText output: the final labels as `k=v,k=v`.\nJSON output: `{\"ok\": true, \"worktreeId\": \"...\", \"labels\": {...}}`"
+        }),
+        serde_json::json!({
+            "name": "worktrees unlabel",
+            "description": "Remove labels from a worktree by key",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+                {"name": "keys", "type": "string", "required": true, "positional": true, "repeatable": true, "description": "One or more label keys to remove"},
+            ],
+            "notes": "Drops the listed keys (unknown keys are ignored) and keeps the other labels.\n\nText output: the final labels as `k=v,k=v`.\nJSON output: `{\"ok\": true, \"worktreeId\": \"...\", \"labels\": {...}}`"
         }),
         serde_json::json!({
             "name": "worktrees create",

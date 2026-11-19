@@ -174,6 +174,16 @@ band worktrees rename <worktree id> --clear
 
 Sets the title the sidebar shows in place of the worktree's name (at most 100 characters), or clears it with `--clear`. The worktree id, folder and git branch do not change. `band worktrees list` shows a TITLE column, and `--output json` has a `title` field (null when unset). An agent may run this command for worktrees on its own host.
 
+### Label a worktree
+
+```sh
+band worktrees label <worktree id> key=value [key=value ...]
+band worktrees unlabel <worktree id> key [key ...]
+band worktrees list --label merge=auto --label owner
+```
+
+Labels are key/value pairs on a worktree, shared by every device. `label` merges the pairs in (the same key takes the new value) and prints the final labels. `unlabel` removes keys and ignores unknown ones. Keys use the chat label rules: 1 to 64 characters of letters, digits, `_`, `:` and `-`, at most 20 labels, printable ASCII values up to 256 characters, and no `band:` prefix. An invalid pair fails and changes nothing. `list --label key=value` keeps worktrees with that value, a bare `key` keeps worktrees with any value, and several `--label` flags must all match. `--output json` has a `labels` object on each worktree. An agent may run these commands for worktrees on its own host. The MCP tools are `band_worktrees_setLabels` (`set`, `remove`) and `band_worktrees_list` with `labels: [{key, value?}]`.
+
 ### Set a worktree's group
 
 ```sh
