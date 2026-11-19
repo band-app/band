@@ -1,7 +1,21 @@
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "../connection";
-import { branchStatuses as branchStatusesTable, worktrees as worktreesTable } from "../schema";
+import {
+  branchStatuses as branchStatusesTable,
+  worktreePrOverrides as prOverridesTable,
+  worktrees as worktreesTable,
+} from "../schema";
+
+/** A pull request chosen by hand for a worktree. */
+export interface PrOverride {
+  url: string;
+  owner: string;
+  repo: string;
+  number: number;
+  setBy: string;
+  setAt: number;
+}
 
 /**
  * Identity of a worktree as stored on disk — what repo owns it, the
@@ -132,5 +146,40 @@ export class WorktreeQueries {
   deleteBranchStatus(worktreeId: string): void {
     const db = getDb();
     db.delete(branchStatusesTable).where(eq(branchStatusesTable.worktreeId, worktreeId)).run();
+    // A hand-picked PR belongs to the worktree and goes with it.
+    db.delete(prOverridesTable).where(eq(prOverridesTable.worktreeId, worktreeId)).run();
+  }
+
+  /** The PR chosen by hand for a worktree, or null when it uses the detected one. */
+  getPrOverride(worktreeId: string): PrOverride | null {
+    const row = getDb()
+      .select()
+      .from(prOverridesTable)
+      .where(eq(prOverridesTable.worktreeId, worktreeId))
+      .get();
+    if (!row) return null;
+    const { worktreeId: _id, ...override } = row;
+    return override;
+  }
+
+  /** Every PR chosen by hand, keyed by worktree id. */
+  allPrOverrides(): Map<string, PrOverride> {
+    const rows = getDb().select().from(prOverridesTable).all();
+    return new Map(rows.map(({ worktreeId, ...override }) => [worktreeId, override]));
+  }
+
+  setPrOverride(worktreeId: string, override: PrOverride): void {
+    getDb()
+      .insert(prOverridesTable)
+      .values({ worktreeId, ...override })
+      .onConflictDoUpdate({ target: prOverridesTable.worktreeId, set: override })
+      .run();
+  }
+
+  clearPrOverride(worktreeId: string): boolean {
+    return (
+      getDb().delete(prOverridesTable).where(eq(prOverridesTable.worktreeId, worktreeId)).run()
+        .changes > 0
+    );
   }
 }

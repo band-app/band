@@ -811,10 +811,12 @@ export type AccountUsageProvider = "claude" | "codex";
 
 /**
  * Why a provider has no numbers on a host. `not-logged-in` means no login was
- * found, `expired` that the provider refused the token, `rate-limited` that the
+ * found, `expired` that the provider refused a token that had not aged out, `idle`
+ * that every access token on the host has aged out (no recent session
+ * refreshed it, and Band never refreshes), `rate-limited` that the
  * usage endpoint refused the request, `error` anything else.
  */
-export type AccountUsageFailure = "not-logged-in" | "expired" | "rate-limited" | "error";
+export type AccountUsageFailure = "not-logged-in" | "expired" | "idle" | "rate-limited" | "error";
 
 /**
  * What a host knows of one provider account. Never carries a token: only

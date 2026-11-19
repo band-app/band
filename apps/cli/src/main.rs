@@ -318,6 +318,9 @@ enum WorktreesCmd {
         /// Without it the worktree joins its origin's group, if any.
         #[arg(long)]
         group: Option<String>,
+        /// Pin the worktree right after creating it, so it shows in the sidebar's Pinned section
+        #[arg(long)]
+        pinned: bool,
     },
     /// Remove a worktree (git worktree + state cleanup)
     Remove {
@@ -393,6 +396,16 @@ enum WorktreesCmd {
         #[arg(long)]
         with_children: bool,
     },
+    /// Pin a worktree, so it shows in the sidebar's Pinned section
+    Pin {
+        /// Worktree ID
+        worktree: String,
+    },
+    /// Unpin a worktree
+    Unpin {
+        /// Worktree ID
+        worktree: String,
+    },
     /// Mark a worktree unread, so every device shows its unread dot
     MarkUnread {
         /// Worktree ID
@@ -414,6 +427,11 @@ enum WorktreesCmd {
         #[arg(long)]
         clear: bool,
     },
+    /// Read, set or clear the pull request a worktree shows
+    Pr {
+        #[command(subcommand)]
+        cmd: WorktreePrCmd,
+    },
     /// List the hub's checkpoints of a worktree
     Checkpoints {
         /// Worktree ID
@@ -421,6 +439,27 @@ enum WorktreesCmd {
         /// Take a checkpoint first
         #[arg(long)]
         take: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorktreePrCmd {
+    /// Show the worktree's pull request and whether it is detected or manual
+    Get {
+        /// Worktree ID
+        worktree: String,
+    },
+    /// Use this pull request for the worktree instead of the detected one
+    Set {
+        /// Worktree ID
+        worktree: String,
+        /// GitHub pull request URL, e.g. <https://github.com/owner/repo/pull/93>
+        url: String,
+    },
+    /// Go back to the automatically detected pull request
+    Clear {
+        /// Worktree ID
+        worktree: String,
     },
 }
 
@@ -1209,6 +1248,7 @@ fn main() {
                 origin,
                 no_origin,
                 group,
+                pinned,
             } => cmd_worktrees_create(
                 &repo,
                 &branch,
@@ -1229,6 +1269,7 @@ fn main() {
                 origin.as_deref(),
                 no_origin,
                 group.as_deref(),
+                pinned,
             ),
             WorktreesCmd::Remove { repo, name, host } => {
                 cmd_worktrees_remove(&repo, &name, host.as_deref())
@@ -1254,6 +1295,8 @@ fn main() {
                 none,
                 with_children,
             } => cmd_worktrees_set_group(&worktree, group.as_deref(), none, with_children),
+            WorktreesCmd::Pin { worktree } => cmd_worktrees_set_pinned(&worktree, true),
+            WorktreesCmd::Unpin { worktree } => cmd_worktrees_set_pinned(&worktree, false),
             WorktreesCmd::MarkUnread { worktree } => cmd_worktrees_set_unread(&worktree, true),
             WorktreesCmd::MarkRead { worktree } => cmd_worktrees_set_unread(&worktree, false),
             WorktreesCmd::Rename {
@@ -1261,6 +1304,7 @@ fn main() {
                 title,
                 clear,
             } => cmd_worktrees_rename(&worktree, title.as_deref(), clear),
+            WorktreesCmd::Pr { cmd } => cmd_worktrees_pr(cmd),
             WorktreesCmd::Checkpoints { id, take } => cmd_worktrees_checkpoints(&id, take),
         },
         Commands::Agents { cmd } => match cmd {
@@ -2035,12 +2079,16 @@ fn cmd_worktrees_list(
                 .get("unread")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
+            let pinned = wt.get("pinned").and_then(serde_json::Value::as_bool) == Some(true);
             let mut id_text = match superseded_by {
                 Some(new_id) => format!("{worktree_id} (superseded by {new_id})"),
                 None => worktree_id.to_string(),
             };
             if unread {
                 id_text.push_str(" (unread)");
+            }
+            if pinned {
+                id_text.push_str(" (pinned)");
             }
             let title = wt.get("title").and_then(|t| t.as_str());
             let labels = wt
@@ -2068,6 +2116,7 @@ fn cmd_worktrees_list(
                 "groupId": wt.get("groupId").cloned().unwrap_or(serde_json::Value::Null),
                 "unread": unread,
                 "labels": labels,
+                "pinned": pinned,
                 "children": wt.get("children").cloned().unwrap_or_else(|| serde_json::json!([])),
             }));
             found_any = true;
@@ -2366,6 +2415,7 @@ fn cmd_worktrees_create(
     origin: Option<&str>,
     no_origin: bool,
     group: Option<&str>,
+    pinned: bool,
 ) -> Result<CommandResult, String> {
     validate::validate_name(repo, "Repo name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -2519,11 +2569,108 @@ fn cmd_worktrees_create(
         json["terminalId"] = serde_json::json!(tid);
     }
 
-    let text = match notice {
+    // A pin that fails leaves the worktree created: report it as a warning, not an error.
+    let mut pin_warning: Option<String> = None;
+    if pinned {
+        match pin_created_worktree(&client, repo, branch, host_id.as_deref()) {
+            Ok(()) => json["pinned"] = serde_json::json!(true),
+            Err(e) => {
+                json["pinned"] = serde_json::json!(false);
+                json["pinWarning"] = serde_json::json!(e);
+                pin_warning = Some(e);
+            }
+        }
+    }
+
+    let mut text = match notice {
         Some(n) => format!("{path}\nnote: {n}\n"),
         None => format!("{path}\n"),
     };
+    if let Some(w) = pin_warning {
+        text = format!("{text}warning: created, but could not pin it: {w}\n");
+    }
     Ok(CommandResult { text, json })
+}
+
+/// Pins the worktree `create` just made, found by repo, name and worker.
+fn pin_created_worktree(
+    client: &api::ApiClient,
+    repo: &str,
+    branch: &str,
+    host_id: Option<&str>,
+) -> Result<(), String> {
+    let data = client.trpc_query_no_input("repos.list")?;
+    let found = data
+        .get("repos")
+        .and_then(|r| r.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|p| p.get("name").and_then(|n| n.as_str()) == Some(repo))
+        .flat_map(|p| {
+            p.get("worktrees")
+                .and_then(|w| w.as_array())
+                .into_iter()
+                .flatten()
+        })
+        .find(|wt| {
+            let on_host = wt.get("hostId").and_then(|v| v.as_str()).unwrap_or("local")
+                == host_id.unwrap_or("local");
+            on_host && wt.get("name").and_then(|n| n.as_str()) == Some(branch)
+        })
+        .cloned()
+        .ok_or_else(|| format!("worktree '{branch}' not found in repo '{repo}'"))?;
+    set_pinned_on_row(client, repo, &found, true)
+}
+
+fn set_pinned_on_row(
+    client: &api::ApiClient,
+    repo: &str,
+    row: &serde_json::Value,
+    pinned: bool,
+) -> Result<(), String> {
+    let mut input = serde_json::json!({
+        "repo": repo,
+        "name": row.get("name").and_then(|n| n.as_str()).unwrap_or(""),
+        "pinned": pinned,
+    });
+    if let Some(h) = row.get("hostId").and_then(|h| h.as_str()) {
+        input["hostId"] = serde_json::json!(h);
+    }
+    client
+        .trpc_mutate("worktrees.setPinned", &input)
+        .map(|_| ())
+}
+
+fn cmd_worktrees_set_pinned(worktree: &str, pinned: bool) -> Result<CommandResult, String> {
+    validate::validate_name(worktree, "Worktree id")?;
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query_no_input("repos.list")?;
+    let mut target: Option<(String, serde_json::Value)> = None;
+    for proj in data
+        .get("repos")
+        .and_then(|r| r.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let repo = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        for wt in proj
+            .get("worktrees")
+            .and_then(|w| w.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if wt.get("worktreeId").and_then(|v| v.as_str()) == Some(worktree) {
+                target = Some((repo.to_string(), wt.clone()));
+            }
+        }
+    }
+    let (repo, row) = target.ok_or_else(|| format!("Worktree \"{worktree}\" not found"))?;
+    set_pinned_on_row(&client, &repo, &row, pinned)?;
+    let state = if pinned { "pinned" } else { "unpinned" };
+    Ok(CommandResult {
+        text: format!("{worktree} {state}\n"),
+        json: serde_json::json!({"ok": true, "worktreeId": worktree, "pinned": pinned}),
+    })
 }
 
 /// Walk the dispatch-target precedence chain (issue #551):
@@ -5105,6 +5252,57 @@ fn cmd_worktrees_unlabel(worktree: &str, keys: &[String]) -> Result<CommandResul
     Ok(worktree_labels_result(worktree, &data))
 }
 
+fn cmd_worktrees_pr(cmd: WorktreePrCmd) -> Result<CommandResult, String> {
+    let (worktree, data) = {
+        let client = api::ApiClient::from_settings()?;
+        match cmd {
+            WorktreePrCmd::Get { worktree } => {
+                validate::validate_name(&worktree, "Worktree id")?;
+                let data = client.trpc_query(
+                    "worktrees.prGet",
+                    &serde_json::json!({"worktreeId": worktree}),
+                )?;
+                (worktree, data)
+            }
+            WorktreePrCmd::Set { worktree, url } => {
+                validate::validate_name(&worktree, "Worktree id")?;
+                let data = client.trpc_mutate(
+                    "worktrees.prSet",
+                    &serde_json::json!({"worktreeId": worktree, "url": url}),
+                )?;
+                (worktree, data)
+            }
+            WorktreePrCmd::Clear { worktree } => {
+                validate::validate_name(&worktree, "Worktree id")?;
+                let data = client.trpc_mutate(
+                    "worktrees.prClear",
+                    &serde_json::json!({"worktreeId": worktree}),
+                )?;
+                (worktree, data)
+            }
+        }
+    };
+    let source = data
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("detected");
+    let text = match data.get("pr").filter(|p| !p.is_null()) {
+        Some(pr) => format!(
+            "{worktree}: #{} {} ({}, {source})\n{}\n",
+            pr.get("number")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            pr.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+            pr.get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown"),
+            pr.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+        ),
+        None => format!("{worktree}: no pull request ({source})\n"),
+    };
+    Ok(CommandResult { text, json: data })
+}
+
 fn cmd_worktrees_rename(
     worktree: &str,
     title: Option<&str>,
@@ -6565,6 +6763,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--origin", "type": "string", "required": false, "description": "Worktree id to record as the origin (where this work was started from). Defaults to the current worktree ($BAND_WORKTREE_ID)."},
                 {"name": "--no-origin", "type": "boolean", "required": false, "description": "Record no origin, even inside a Band chat or terminal"},
                 {"name": "--group", "type": "string", "required": false, "description": "Group id or name for the new worktree (default: the origin's group)"},
+                {"name": "--pinned", "type": "boolean", "required": false, "description": "Pin the worktree right after creating it, so it shows in the sidebar's Pinned section"},
             ],
             "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing worktree returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after worktree creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the worktree for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the worktree's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a worktree and implement X\" or \"start working on X\"\nband worktrees create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a worktree for issue #99 and start implementing\"\nband worktrees create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband worktrees create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a worktree, I'll work on it myself\"\nband worktrees create my-app feat/experiment\n```\n\n**Do NOT create a worktree without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
         }),
@@ -6578,6 +6777,22 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--with-children", "type": "boolean", "required": false, "description": "Also move every worktree started from this one"},
             ],
             "notes": "Prints each worktree that moved. Agents may use this command, but cannot create, rename or delete groups."
+        }),
+        serde_json::json!({
+            "name": "worktrees pin",
+            "description": "Pin a worktree, so it shows in the sidebar's Pinned section",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+            ],
+            "notes": "Not available for plain (non-git) repos. `worktrees list --output json` shows each worktree's `pinned`."
+        }),
+        serde_json::json!({
+            "name": "worktrees unpin",
+            "description": "Unpin a worktree",
+            "parameters": [
+                {"name": "worktree", "type": "string", "required": true, "positional": true, "description": "Worktree ID"},
+            ],
+            "notes": "Removes the worktree from the sidebar's Pinned section."
         }),
         serde_json::json!({
             "name": "worktrees mark-unread",

@@ -40,6 +40,7 @@ export interface AccountUsageReport {
 const MESSAGES: Record<AccountUsageFailure, string> = {
   "not-logged-in": "Not logged in on",
   expired: "Login expired on",
+  idle: "No recent Claude session on",
   "rate-limited": "Usage is rate limited on",
   error: "Couldn't refresh usage on",
 };
@@ -100,14 +101,16 @@ export function mergeAccountUsage(readings: HostReading[]): AccountUsageReport {
       found.message =
         reason === "offline"
           ? sentence("Offline:", found.hosts)
-          : sentence(MESSAGES[reason], found.hosts);
+          : sentence(MESSAGES[reason] ?? MESSAGES.error, found.hosts);
       return;
     }
     problems.set(key, {
       provider,
       reason,
       message:
-        reason === "offline" ? sentence("Offline:", [host]) : sentence(MESSAGES[reason], [host]),
+        reason === "offline"
+          ? sentence("Offline:", [host])
+          : sentence(MESSAGES[reason] ?? MESSAGES.error, [host]),
       hosts: [host],
     });
   };

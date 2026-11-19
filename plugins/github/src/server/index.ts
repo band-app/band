@@ -1,11 +1,20 @@
-import type { ProviderContext, RepoInfo, ReviewAction, ReviewInfo } from "@band-app/plugin-api";
+import type {
+  BranchStatus,
+  ProviderContext,
+  RepoInfo,
+  ReviewAction,
+  ReviewInfo,
+} from "@band-app/plugin-api";
 import { definePlugin } from "@band-app/plugin-api/server";
 import { ghArgsFor } from "./actions";
 import {
   buildBranchStatusQuery,
+  buildOverrideStatusQuery,
   buildParentStatusQuery,
   type GraphQLRepoResponse,
+  overrideRequests,
   parseBranchStatusResponse,
+  parseOverrideStatusResponse,
   parseParentStatusResponse,
 } from "./branch-query";
 import {
@@ -111,11 +120,68 @@ export default definePlugin({
       );
     }
 
+    /** Statuses of the PRs chosen by hand: one query for all of them. A failed read leaves them `unknown`. */
+    async function manualStatuses(
+      target: RepoInfo,
+      manual: ReturnType<typeof overrideRequests>,
+      ctx: Pick<ProviderContext, "cwd" | "gh">,
+    ): Promise<Record<string, BranchStatus>> {
+      const data = await withMergeQueueFallback(target, async (mergeQueue) => {
+        const args = [
+          "api",
+          "graphql",
+          "-f",
+          `query=${buildOverrideStatusQuery(manual, { mergeQueue })}`,
+        ];
+        if (target.host !== "github.com") args.push("--hostname", target.host);
+        const parsed = JSON.parse(await runGh(api, args, ctx)) as {
+          data?: Parameters<typeof parseOverrideStatusResponse>[0];
+          errors?: Array<{ message: string }>;
+        };
+        // A PR that does not exist comes back as an error beside partial data; keep the data.
+        if (!parsed.data && parsed.errors?.length) {
+          throw new Error(parsed.errors.map((e) => e.message).join("; "));
+        }
+        return parsed.data ?? {};
+      }).catch((err: unknown) => {
+        // An unreachable worker is a failed poll, not an unknown PR: let the poller keep the last state.
+        const name = err instanceof Error ? err.name : "";
+        if (name === "HostOfflineError" || name === "HostTimeoutError") throw err;
+        return {};
+      });
+      return parseOverrideStatusResponse(data, manual);
+    }
+
     api.providers.registerBranchStatusProvider({
       id: "github",
       matches: (repo) => githubHost(repo) !== null,
-      async getBranchStatuses(repo, branches, ctx) {
+      async getParentRepo(repo, ctx) {
         const target = normalize(repo);
+        const known = parents.get(repoArg(target));
+        if (known !== undefined) return known;
+        const args = [
+          "api",
+          "graphql",
+          "-f",
+          `query=query { repository(owner: "${target.owner.replace(/["\\]/g, "")}", name: "${target.repo.replace(/["\\]/g, "")}") { parent { name owner { login } } } }`,
+        ];
+        if (target.host !== "github.com") args.push("--hostname", target.host);
+        const parsed = JSON.parse(await runGh(api, args, ctx)) as {
+          data?: {
+            repository?: { parent?: { name: string; owner: { login: string } } | null } | null;
+          };
+        };
+        const node = parsed.data?.repository;
+        return node ? rememberParent(target, node.parent) : null;
+      },
+      async getBranchStatuses(repo, requested, ctx) {
+        const target = normalize(repo);
+        const manual = overrideRequests(requested);
+        const branches = requested.filter((b) => b.override === undefined);
+        // Started now so it runs beside the branch query below.
+        const manualPromise: Promise<Record<string, BranchStatus>> =
+          manual.length > 0 ? manualStatuses(target, manual, ctx) : Promise.resolve({});
+        if (branches.length === 0) return manualPromise;
         const names = branches.map((b) => b.branch);
         const data = await withMergeQueueFallback(target, async (mergeQueue) => {
           const args = [
@@ -169,7 +235,7 @@ export default definePlugin({
           }).catch(() => ({}) as Record<string, GraphQLRepoResponse | null>);
           Object.assign(results, parseParentStatusResponse(parentData, open, forkOwner));
         }
-        return results;
+        return { ...results, ...(await manualPromise) };
       },
     });
 

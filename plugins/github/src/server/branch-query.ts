@@ -31,7 +31,7 @@ interface PullRequestNode extends MergeQueueNode {
   baseRefName?: string | null;
   /** Null when the fork the PR came from has been deleted. */
   headRepositoryOwner: { login: string } | null;
-  /** Only asked of a fork's parent repo: the head commit's combined check state. */
+  /** Asked of a fork's parent repo and of a manually chosen PR: the head commit's combined check state. */
   commits?: {
     nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }>;
   };
@@ -113,7 +113,8 @@ export function buildBranchStatusQuery(
  * recently updated (the query orders by `UPDATED_AT`). `headRefName` also
  * matches PRs from forks with a branch of the same name, so only PRs whose
  * head is in the repository itself count, and only ones with a web URL (the
- * badge hands it to the system's URL handler). On the default branch only
+ * badge hands it to the system's URL handler). A PR whose head is in the
+ * branch's push remote (`pushOwner`) counts too. On the default branch only
  * an open PR counts: a merged or closed PR whose head is `main` came from a
  * merge of main into another branch.
  */
@@ -121,13 +122,15 @@ function pickNode(
   allNodes: PullRequestNode[],
   repoOwner: string | undefined,
   isDefaultBranch: boolean,
+  pushOwner?: string,
 ): PullRequestNode | null {
-  const nodes = allNodes.filter(
-    (n) =>
-      repoOwner !== undefined &&
-      n.headRepositoryOwner?.login.toLowerCase() === repoOwner.toLowerCase() &&
-      isWebUrl(n.url),
-  );
+  const owners = [repoOwner, pushOwner]
+    .filter((o): o is string => o !== undefined)
+    .map((o) => o.toLowerCase());
+  const nodes = allNodes.filter((n) => {
+    const head = n.headRepositoryOwner?.login.toLowerCase();
+    return head !== undefined && owners.includes(head) && isWebUrl(n.url);
+  });
   const node =
     nodes.find((n) => n.state === "OPEN") ??
     (isDefaultBranch
@@ -156,8 +159,9 @@ function pickPullRequest(
   allNodes: PullRequestNode[],
   repoOwner: string | undefined,
   isDefaultBranch: boolean,
+  pushOwner?: string,
 ): BranchReview | null {
-  const node = pickNode(allNodes, repoOwner, isDefaultBranch);
+  const node = pickNode(allNodes, repoOwner, isDefaultBranch, pushOwner);
   return node ? toReview(node) : null;
 }
 
@@ -257,7 +261,7 @@ export function parseBranchStatusResponse(
 ): Record<string, BranchStatus> {
   const results: Record<string, BranchStatus> = {};
 
-  for (const [index, { branch, isDefaultBranch }] of branches.entries()) {
+  for (const [index, { branch, isDefaultBranch, pushOwner }] of branches.entries()) {
     const repo = data[branchAlias(index)];
     if (!repo) {
       results[branch] = { state: "none", url: null, review: null };
@@ -268,6 +272,7 @@ export function parseBranchStatusResponse(
       repo.pullRequests?.nodes ?? [],
       repo.owner?.login,
       isDefaultBranch,
+      pushOwner,
     );
     if (review?.state === "merged") {
       results[branch] = { state: "merged", url: review.url, review };
@@ -331,4 +336,75 @@ export function parseBranchStatusResponse(
   }
 
   return results;
+}
+
+type OverrideRequest = BranchStatusRequest & {
+  override: NonNullable<BranchStatusRequest["override"]>;
+};
+
+/**
+ * The query for the pull requests people or agents chose by hand: each is read by number
+ * in its own repository, with the combined check state of its head commit.
+ */
+export function buildOverrideStatusQuery(
+  requests: OverrideRequest[],
+  options: { mergeQueue?: boolean } = {},
+): string {
+  const queueFields = options.mergeQueue === false ? "" : ` ${MERGE_QUEUE_FIELDS}`;
+  const fragments = requests.map(({ override }, index) => {
+    const owner = escapeGraphQL(override.owner);
+    const repo = escapeGraphQL(override.repo);
+    return `${branchAlias(index)}: repository(owner: "${owner}", name: "${repo}") {
+    pullRequest(number: ${Math.trunc(override.number)}) {
+      number title state url isDraft baseRefName headRepositoryOwner { login }${queueFields} commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+    }
+  }`;
+  });
+  return `query { ${fragments.join("\n  ")} }`;
+}
+
+/**
+ * Statuses for manually chosen PRs, keyed by branch. A PR the response lacks (not found, no
+ * access, or the whole query failed) is shown with state `unknown` rather than dropped.
+ */
+export function parseOverrideStatusResponse(
+  data: Record<string, { pullRequest?: PullRequestNode | null } | null>,
+  requests: OverrideRequest[],
+): Record<string, BranchStatus> {
+  const results: Record<string, BranchStatus> = {};
+  for (const [index, request] of requests.entries()) {
+    const { override } = request;
+    const node = data[branchAlias(index)]?.pullRequest;
+    if (!node) {
+      results[request.branch] = {
+        state: "none",
+        url: override.url,
+        review: {
+          number: override.number,
+          title: `${override.owner}/${override.repo}#${override.number}`,
+          url: override.url,
+          state: "unknown",
+          isDraft: false,
+          manual: true,
+        },
+      };
+      continue;
+    }
+    const review: BranchReview = { ...toReview(node), manual: true };
+    if (review.state === "merged") {
+      results[request.branch] = { state: "merged", url: review.url, review };
+      continue;
+    }
+    const state =
+      review.state === "open"
+        ? rollupState(node.commits?.nodes[0]?.commit.statusCheckRollup?.state)
+        : "none";
+    results[request.branch] = { state, url: review.state === "open" ? review.url : null, review };
+  }
+  return results;
+}
+
+/** The override requests of a status request list. */
+export function overrideRequests(requests: BranchStatusRequest[]): OverrideRequest[] {
+  return requests.filter((r): r is OverrideRequest => r.override !== undefined);
 }

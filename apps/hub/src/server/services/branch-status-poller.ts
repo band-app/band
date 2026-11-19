@@ -6,11 +6,12 @@ import {
   HostOfflineError,
   HostTimeoutError,
 } from "@band-app/host-api";
-import { getRepoInfo, type RepoInfo } from "@band-app/host-local/git/git-client";
+import { getRepoInfo, parseGitRemoteUrl, type RepoInfo } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
 import { toWorktreeId } from "@band-app/shared/worktree-id";
 import { eq } from "drizzle-orm";
 import { getDb } from "../infra/db/connection";
+import { WorktreeQueries } from "../infra/db/queries/worktrees";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { hostRegistry } from "../infra/host/registry";
 import { takeCIRefreshRequest } from "./_utils/ci-refresh-request";
@@ -224,6 +225,54 @@ async function getGitStatus(ws: WorktreeInfo): Promise<GitStatus> {
 }
 
 /**
+ * The owner of each branch's push remote when it differs from origin's owner, for a clone
+ * whose origin is the upstream and whose pushes go to a fork (`branch.<b>.pushRemote`, else
+ * `remote.pushDefault`). One config read per repo plus one `get-url` per distinct remote.
+ */
+async function pushOwnersFor(
+  group: WorktreeInfo[],
+  origin: RepoInfo,
+): Promise<Map<string, string>> {
+  const owners = new Map<string, string>();
+  const ws = group[0];
+  try {
+    const run = gitRunner(hostOf(ws));
+    const config = await run(
+      ["config", "--get-regexp", "^(branch\\..*\\.pushremote|remote\\.pushdefault)$"],
+      ws.repoPath,
+    ).catch(() => "");
+    let pushDefault: string | undefined;
+    const perBranch = new Map<string, string>();
+    for (const line of config.split("\n")) {
+      const [key, value] = [line.slice(0, line.indexOf(" ")), line.slice(line.indexOf(" ") + 1)];
+      if (!key || !value.trim()) continue;
+      const remote = value.trim();
+      if (key === "remote.pushdefault") pushDefault = remote;
+      else perBranch.set(key.slice("branch.".length, -".pushremote".length), remote);
+    }
+    if (!pushDefault && perBranch.size === 0) return owners;
+    const ownerOfRemote = new Map<string, string | null>();
+    const resolve = async (remote: string) => {
+      if (!ownerOfRemote.has(remote)) {
+        const url = await run(["remote", "get-url", remote], ws.repoPath).catch(() => "");
+        const info = parseGitRemoteUrl(url.trim());
+        ownerOfRemote.set(remote, info && info.host === origin.host ? info.owner : null);
+      }
+      return ownerOfRemote.get(remote) ?? null;
+    };
+    for (const branch of new Set([...perBranch.keys(), ...group.map((g) => g.branch)])) {
+      const remote = perBranch.get(branch) ?? pushDefault;
+      if (!remote) continue;
+      const owner = await resolve(remote);
+      if (owner && owner.toLowerCase() !== origin.owner.toLowerCase()) owners.set(branch, owner);
+    }
+  } catch {
+    // Best effort: without a push owner the branch behaves as before.
+  }
+  return owners;
+}
+
+/**
  * Fetch the CI and PR status of all worktrees, one batched provider call per repo.
  *
  * Groups worktrees by repo checkout (per worker) and asks the plugin that handles the repo's
@@ -285,6 +334,8 @@ export async function getBatchedCIStatuses(
   if (byHost.size === 0) lastCIPollErrorByHost.clear();
 
   const allResults = new Map<string, CIStatus>();
+  // PRs chosen by hand replace detection for their worktrees.
+  const overrides = new WorktreeQueries().allPrOverrides();
 
   for (const [groupKey, repos] of byHost) {
     const count = repos.reduce((n, r) => n + r.worktrees.length, 0);
@@ -295,10 +346,24 @@ export async function getBatchedCIStatuses(
       const host = hostOf(group[0]);
       // Use any worktree's path as cwd (gh auth is per host).
       const cwd = group[0].worktreePath;
-      const requests = [...new Map(group.map((g) => [g.branch, g])).values()].map((g) => ({
-        branch: g.branch,
-        isDefaultBranch: g.branch === g.defaultBranch,
-      }));
+      const pushOwners = await pushOwnersFor(group, repoInfo);
+      const requests = [...new Map(group.map((g) => [g.branch, g])).values()].map((g) => {
+        const manual = overrides.get(g.worktreeId);
+        const pushOwner = pushOwners.get(g.branch);
+        return {
+          branch: g.branch,
+          isDefaultBranch: g.branch === g.defaultBranch,
+          ...(pushOwner && { pushOwner }),
+          ...(manual && {
+            override: {
+              url: manual.url,
+              owner: manual.owner,
+              repo: manual.repo,
+              number: manual.number,
+            },
+          }),
+        };
+      });
       try {
         const statuses = await provider.getBranchStatuses(repoInfo, requests, {
           cwd,
@@ -560,6 +625,24 @@ export function refreshWorktreeBranchStatus(worktreeId: string): Promise<boolean
   return refresh;
 }
 
+/**
+ * Re-reads one worktree's PR and CI from the forge and stores the result, so a PR just set or
+ * cleared by hand shows without waiting for the next CI tick. Returns `false` when no git
+ * worktree has that id or its worker is unreachable.
+ */
+export async function refreshWorktreeCI(worktreeId: string): Promise<boolean> {
+  const ws = getWorktrees().find((w) => w.worktreeId === worktreeId);
+  if (!ws) return false;
+  try {
+    const statuses = ws.hasOrigin ? await getBatchedCIStatuses([ws]) : new Map<string, CIStatus>();
+    await pollWorktree(ws, statuses.get(worktreeId) ?? { state: "none" });
+    return true;
+  } catch (err) {
+    if (err instanceof HostOfflineError || err instanceof HostTimeoutError) return false;
+    throw err;
+  }
+}
+
 async function pollTick() {
   pollerState.tickCount++;
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
@@ -748,6 +831,10 @@ export class BranchStatusPoller {
 
   refreshWorktree(worktreeId: string): Promise<boolean> {
     return refreshWorktreeBranchStatus(worktreeId);
+  }
+
+  refreshWorktreeCI(worktreeId: string): Promise<boolean> {
+    return refreshWorktreeCI(worktreeId);
   }
 }
 

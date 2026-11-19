@@ -21,6 +21,7 @@ import {
   CornerUpLeft,
   FolderOpen,
   GitCompareArrows,
+  GitPullRequest,
   Link2Off,
   Loader,
   Mail,
@@ -70,6 +71,7 @@ import { PullRequestBadge } from "./PullRequestBadge";
 import { RepoAvatar } from "./RepoAvatar";
 import { RootStar } from "./RootStar";
 import { SetParentDialog } from "./SetParentDialog";
+import { SetPullRequestDialog } from "./SetPullRequestDialog";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorktreeLabel } from "./WorktreeLabel";
 import { WorktreeLabelsDialog } from "./WorktreeLabelsDialog";
@@ -283,6 +285,7 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
   const [parentOpen, setParentOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const labelEntries = Object.entries(worktree.labels ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+  const [prOpen, setPrOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   // Set by "Rename…" so the menu, closing, does not hand focus back to the card and blur the field.
   const keepFocusOnClose = useRef(false);
@@ -652,6 +655,7 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
                 pr={branchStatus.ci.pr}
                 ciState={branchStatus.ci.state}
                 onOpenChecks={handleOpenChecks}
+                onEdit={() => requestAnimationFrame(() => setPrOpen(true))}
               />
             )}
             {!isPlain && branchStatus && !branchStatus.ci.pr && (
@@ -747,6 +751,15 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
           <CornerUpLeft />
           Set parent…
         </ContextMenuItem>
+        {!isPlain && (
+          <ContextMenuItem
+            data-testid="worktree-card__set-pr"
+            onClick={() => requestAnimationFrame(() => setPrOpen(true))}
+          >
+            <GitPullRequest />
+            Set pull request…
+          </ContextMenuItem>
+        )}
         {worktree.origin && (
           <ContextMenuItem data-testid="worktree-card__remove-parent" onClick={removeParent}>
             <Unlink />
@@ -885,6 +898,14 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
           onOpenChange={setParentOpen}
           repoName={repoName}
           worktree={worktree}
+        />
+      )}
+      {prOpen && (
+        <SetPullRequestDialog
+          open={prOpen}
+          onOpenChange={setPrOpen}
+          worktreeId={worktreeId}
+          currentManualUrl={branchStatus?.ci.pr?.manual ? branchStatus.ci.pr.url : null}
         />
       )}
       {offer && (

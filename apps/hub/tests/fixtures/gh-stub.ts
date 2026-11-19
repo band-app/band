@@ -66,6 +66,12 @@ export interface GhStub {
    */
   setBranchStatusQuery: (repo: RepoCoords, answer: (branch: string) => unknown) => void;
   /**
+   * Answer the poller's query for a PR chosen by hand (`buildOverrideStatusQuery`, one
+   * `ws_<n>: repository(...) { pullRequest(number: N)` alias per PR). `answer(number)` is the
+   * `pullRequest` object, `null` when it returns undefined. Called per request.
+   */
+  setPullRequestQuery: (repo: RepoCoords, answer: (number: number) => unknown) => void;
+  /**
    * Answer `gh api repos/<repo>/hooks` (create a webhook). `stderr` makes it
    * fail the way `gh` does. Each call is in `requests`, with the JSON body in `input`.
    */
@@ -195,6 +201,28 @@ export const ghStub = {
           const data: Record<string, unknown> = {};
           for (const [, alias, owner, name, branch] of aliases) {
             data[alias] = branchAnswers.get(`${owner}/${name}`)?.(branch) ?? null;
+          }
+          res.json({ stdout: JSON.stringify({ data }) });
+        });
+      },
+      setPullRequestQuery(repo, answer) {
+        app.post("/api/graphql", (req, res, next) => {
+          const rawQuery = (req.body as GhInvocation).fields.query;
+          const query = typeof rawQuery === "string" ? rawQuery : "";
+          const aliases = [
+            ...query.matchAll(
+              /(ws_\d+): repository\(owner: "([^"]*)", name: "([^"]*)"\) \{\s*pullRequest\(number: (\d+)\)/g,
+            ),
+          ];
+          if (aliases.length === 0) {
+            next();
+            return;
+          }
+          const data: Record<string, unknown> = {};
+          for (const [, alias, owner, name, number] of aliases) {
+            const pullRequest =
+              owner === repo.owner && name === repo.name ? answer(Number(number)) : undefined;
+            data[alias] = pullRequest ? { pullRequest } : null;
           }
           res.json({ stdout: JSON.stringify({ data }) });
         });

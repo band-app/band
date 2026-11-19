@@ -188,8 +188,10 @@ export interface PullRequestSummary {
   number: number;
   title: string;
   url: string;
-  state: "open" | "merged" | "closed";
+  state: "open" | "merged" | "closed" | "unknown";
   isDraft: boolean;
+  /** Set by hand (`band worktrees pr set`) instead of detected. `unknown` state: the PR could not be fetched. */
+  manual?: boolean;
   /** The branch the PR merges into. Absent in rows stored before it was read. */
   baseBranch?: string;
   /** Absent in rows stored before the merge queue was read. */

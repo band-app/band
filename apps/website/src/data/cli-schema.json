@@ -209,6 +209,12 @@
           "name": "--group",
           "required": false,
           "type": "string"
+        },
+        {
+          "description": "Pin the worktree right after creating it, so it shows in the sidebar's Pinned section",
+          "name": "--pinned",
+          "required": false,
+          "type": "boolean"
         }
       ]
     },
@@ -242,6 +248,34 @@
           "name": "--with-children",
           "required": false,
           "type": "boolean"
+        }
+      ]
+    },
+    {
+      "description": "Pin a worktree, so it shows in the sidebar's Pinned section",
+      "name": "worktrees pin",
+      "notes": "Not available for plain (non-git) repos. `worktrees list --output json` shows each worktree's `pinned`.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "worktree",
+          "positional": true,
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "description": "Unpin a worktree",
+      "name": "worktrees unpin",
+      "notes": "Removes the worktree from the sidebar's Pinned section.",
+      "parameters": [
+        {
+          "description": "Worktree ID",
+          "name": "worktree",
+          "positional": true,
+          "required": true,
+          "type": "string"
         }
       ]
     },

@@ -1,5 +1,5 @@
 import { Button, Popover, PopoverAnchor, PopoverContent } from "@band-app/ui";
-import { Check, ExternalLink, Link, ListEnd } from "lucide-react";
+import { Check, ExternalLink, Link, ListEnd, Pencil } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { isClipboardShim, writeClipboardText } from "../../lib/clipboard";
 import { useCapabilities } from "../context";
@@ -66,6 +66,7 @@ function queueLabel(queue: NonNullable<PullRequestSummary["mergeQueue"]>): strin
 }
 
 function statusLabel(pr: PullRequestSummary, ciState: CIState): string {
+  if (pr.state === "unknown") return "State unknown";
   if (pr.state === "merged") return "Merged";
   if (pr.state === "closed") return "Closed";
   if (pr.mergeQueue) return queueLabel(pr.mergeQueue);
@@ -95,6 +96,8 @@ interface Props {
   ciState: CIState;
   /** Show the worktree's Checks tab. */
   onOpenChecks: () => void;
+  /** Open the dialog that sets or clears the PR by hand. */
+  onEdit?: () => void;
 }
 
 /**
@@ -106,7 +109,7 @@ interface Props {
  * Built on Popover rather than HoverCard because HoverCard takes its
  * content's buttons out of the tab order.
  */
-export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
+export function PullRequestBadge({ pr, ciState, onOpenChecks, onEdit }: Props) {
   const capabilities = useCapabilities();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -156,6 +159,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
           aria-expanded={open}
           data-testid="worktree-card__pr-badge"
           data-tone={tone}
+          data-manual={pr.manual || undefined}
           className={`shrink-0 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring ${NUMBER_CLASS} ${TONE_CLASS[tone]}`}
           onPointerEnter={(e) => {
             if (e.pointerType !== "touch") setOpenAfter(true, OPEN_DELAY_MS);
@@ -195,6 +199,9 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
           }}
         >
           {tone === "queued" && <ListEnd aria-hidden className="mr-0.5 size-2.5" />}#{pr.number}
+          {pr.manual && (
+            <Pencil aria-hidden data-testid="worktree-card__pr-manual" className="ml-0.5 size-2" />
+          )}
         </button>
       </PopoverAnchor>
       <PopoverContent
@@ -251,6 +258,11 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
             {statusLabel(pr, ciState)}
           </span>
         </div>
+        {pr.manual && (
+          <p data-testid="pr-popover__manual" className="mt-1 text-xs text-muted-foreground">
+            Set by hand
+          </p>
+        )}
         {pr.mergeQueue && (
           <p data-testid="pr-popover__queue" className="mt-1 text-xs text-muted-foreground">
             GitHub entry state: {QUEUE_STATE_LABEL[pr.mergeQueue.state]}
@@ -294,6 +306,20 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
             {copied ? <Check /> : <Link />}
             {copied ? "Copied" : "Copy link"}
           </Button>
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="xs"
+              data-testid="pr-popover__edit"
+              onClick={() => {
+                setOpen(false);
+                onEdit();
+              }}
+            >
+              <Pencil />
+              Edit
+            </Button>
+          )}
         </div>
       </PopoverContent>
     </Popover>

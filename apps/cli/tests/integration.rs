@@ -1255,6 +1255,70 @@ fn worktrees_set_group_moves_one_worktree_or_its_children() {
 }
 
 #[test]
+fn worktrees_pin_and_unpin_toggle_the_listed_flag() {
+    let env = TestEnv::new();
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/pin-me"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let pinned_of = |id: &str| -> serde_json::Value {
+        let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == id)
+            .unwrap_or_else(|| panic!("{id} in {listed}"))["pinned"]
+            .clone()
+    };
+    assert_eq!(pinned_of("my-repo-feat-pin-me"), serde_json::json!(false));
+
+    let output = env.band(&[
+        "worktrees",
+        "pin",
+        "my-repo-feat-pin-me",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(json_of(&output)["ok"], serde_json::json!(true));
+    assert_eq!(pinned_of("my-repo-feat-pin-me"), serde_json::json!(true));
+
+    let output = env.band(&["worktrees", "unpin", "my-repo-feat-pin-me"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(pinned_of("my-repo-feat-pin-me"), serde_json::json!(false));
+
+    for cmd in ["pin", "unpin"] {
+        let output = env.band(&["worktrees", cmd, "my-repo-no-such"]);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("not found"),
+            "stderr: {}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn worktrees_create_pinned_pins_only_when_asked() {
+    let env = TestEnv::new();
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/plain"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let output = env.band(&["worktrees", "create", "my-repo", "feat/pinned", "--pinned"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let listed = json_of(&env.band(&["worktrees", "list", "--output", "json"]));
+    let pinned = |id: &str| {
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["worktreeId"] == id)
+            .unwrap_or_else(|| panic!("{id} in {listed}"))["pinned"]
+            .clone()
+    };
+    assert_eq!(pinned("my-repo-feat-plain"), serde_json::json!(false));
+    assert_eq!(pinned("my-repo-feat-pinned"), serde_json::json!(true));
+}
+
+#[test]
 fn worktrees_mark_unread_and_mark_read_toggle_the_listed_flag() {
     let env = TestEnv::new();
     let output = env.band(&["worktrees", "create", "my-repo", "feat/unread"]);

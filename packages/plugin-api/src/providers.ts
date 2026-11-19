@@ -310,8 +310,10 @@ export interface BranchReview {
   number: number;
   title: string;
   url: string;
-  state: "open" | "merged" | "closed";
+  state: "open" | "merged" | "closed" | "unknown";
   isDraft: boolean;
+  /** Set by hand (`band worktrees pr set`) instead of detected. `unknown` state: the PR could not be fetched. */
+  manual?: boolean;
   /** The branch the PR merges into. Absent in rows stored before it was read. */
   baseBranch?: string;
   /** Absent in rows stored before the merge queue was read. */
@@ -333,6 +335,17 @@ export interface BranchStatusRequest {
   branch: string;
   /** Whether the branch is the repo's default branch. Only an open review counts there. */
   isDefaultBranch: boolean;
+  /**
+   * A pull request a person or agent chose for the branch. When present the provider reads
+   * exactly this PR instead of looking for one by branch name, and marks the review `manual`.
+   */
+  override?: { url: string; owner: string; repo: string; number: number };
+  /**
+   * The owner of the remote the branch is pushed to, when that is not `origin`
+   * (`branch.<name>.pushRemote`, else `remote.pushDefault`). A PR whose head lives
+   * there counts as the branch's PR, for a clone whose origin is the upstream.
+   */
+  pushOwner?: string;
 }
 
 /**
@@ -351,6 +364,14 @@ export interface BranchStatusProvider {
     branches: BranchStatusRequest[],
     ctx: Pick<ProviderContext, "cwd" | "gh">,
   ): Promise<Record<string, BranchStatus>>;
+  /**
+   * The repository `repo` was forked from, or null for a repo that is not a fork. The core uses it
+   * to accept a pull request chosen by hand in the upstream repo.
+   */
+  getParentRepo?(
+    repo: RepoInfo,
+    ctx: Pick<ProviderContext, "cwd" | "gh">,
+  ): Promise<RepoInfo | null>;
 }
 
 /** A normalized event a subscription source produces. The core adds `source` (the provider id). */

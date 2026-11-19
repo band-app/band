@@ -109,6 +109,22 @@ export const branchStatuses = sqliteTable("branch_statuses", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+/**
+ * A pull request chosen by hand for a worktree, in place of the one the poller detects. The key
+ * is the worktree id (a plain id with no foreign key, like the other per-worktree status rows).
+ * `WorktreeQueries.deleteBranchStatus` removes it with the worktree.
+ */
+export const worktreePrOverrides = sqliteTable("worktree_pr_overrides", {
+  worktreeId: text("worktree_id").primaryKey(),
+  url: text("url").notNull(),
+  owner: text("owner").notNull(),
+  repo: text("repo").notNull(),
+  number: integer("number").notNull(),
+  /** Who set it: `user` (the web UI or a CLI run outside an agent) or `agent:<chat id>`. */
+  setBy: text("set_by").notNull(),
+  setAt: integer("set_at").notNull(),
+});
+
 export const repos = sqliteTable("repos", {
   name: text("name").primaryKey(),
   // The repo's folder on the hub's own machine (the `local` host), or "" when the hub has no
