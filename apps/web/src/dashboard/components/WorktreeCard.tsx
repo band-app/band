@@ -33,6 +33,7 @@ import {
   Play,
   Replace,
   Square,
+  Tag,
   Trash2,
   Unlink,
 } from "lucide-react";
@@ -71,6 +72,7 @@ import { RootStar } from "./RootStar";
 import { SetParentDialog } from "./SetParentDialog";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorktreeLabel } from "./WorktreeLabel";
+import { WorktreeLabelsDialog } from "./WorktreeLabelsDialog";
 
 // ---------------------------------------------------------------------------
 // Recent-user-activation marker (used to suppress auto-scroll on in-list nav)
@@ -279,6 +281,8 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
   const lastCheckpointAt = worktree.lastCheckpointAt ?? null;
   const [moveOpen, setMoveOpen] = useState(false);
   const [parentOpen, setParentOpen] = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(false);
+  const labelEntries = Object.entries(worktree.labels ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
   const [renaming, setRenaming] = useState(false);
   // Set by "Rename…" so the menu, closing, does not hand focus back to the card and blur the field.
   const keepFocusOnClose = useRef(false);
@@ -552,6 +556,15 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
                 : `${repoName}/${worktree.name}`}
             </TooltipContent>
           </Tooltip>
+          {labelEntries.length > 0 && !isDeleting && (
+            <StatusIcon
+              testId="worktree-card__labels"
+              label={`Labels: ${labelEntries.map(([k, v]) => `${k}=${v}`).join(", ")}`}
+              details={labelEntries.map(([k, v]) => `${k}=${v}`).join(", ")}
+            >
+              <Tag className="size-3.5" />
+            </StatusIcon>
+          )}
           {isDeleting && (
             <StatusIcon testId="worktree-card__deleting" label="Deleting">
               <Loader className="size-3.5 animate-spin" />
@@ -719,6 +732,13 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
           Rename…
         </ContextMenuItem>
         <ContextMenuItem
+          data-testid="worktree-card__labels-edit"
+          onClick={() => requestAnimationFrame(() => setLabelsOpen(true))}
+        >
+          <Tag />
+          Labels…
+        </ContextMenuItem>
+        <ContextMenuItem
           data-testid="worktree-card__set-parent"
           // A dialog that opens in the same tick as the menu closes can copy the menu's
           // `pointer-events: none` as the page's original value and leave the page unclickable.
@@ -849,6 +869,14 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
           open={divergenceOpen}
           onOpenChange={setDivergenceOpen}
           worktreeId={worktreeId}
+        />
+      )}
+      {labelsOpen && (
+        <WorktreeLabelsDialog
+          open={labelsOpen}
+          onOpenChange={setLabelsOpen}
+          repoName={repoName}
+          worktree={worktree}
         />
       )}
       {parentOpen && (

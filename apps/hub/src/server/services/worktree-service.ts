@@ -30,6 +30,7 @@ import { hostRegistry } from "../infra/host/registry";
 import { commandFor } from "./_utils/agent-command";
 import { forgetCheckpoints } from "./_utils/checkpoint-store";
 import { formatShellCommand } from "./_utils/format-shell-command";
+import { validateLabels } from "./_utils/labels";
 import { placementInput } from "./_utils/placement-input";
 import { hasQueuedMessages } from "./_utils/queued-message-store";
 import { isFolderGoneError } from "./_utils/remote-worktrees";
@@ -285,6 +286,15 @@ export const worktreeSetTitleInput = z.object({
   title: z.string().max(WORKTREE_TITLE_MAX).nullable(),
 });
 export type WorktreeSetTitleInput = z.infer<typeof worktreeSetTitleInput>;
+
+export const worktreeSetLabelsInput = z.object({
+  worktreeId: z.string().min(1),
+  // Added to the worktree's labels. A key it already has takes the new value.
+  set: z.record(z.string(), z.string()).optional(),
+  // Keys to delete. A key the worktree does not have is ignored.
+  remove: z.array(z.string()).max(100).optional(),
+});
+export type WorktreeSetLabelsInput = z.infer<typeof worktreeSetLabelsInput>;
 
 export const worktreeReorderInput = z.object({
   // The worktrees of one list in their new order.
@@ -1498,6 +1508,29 @@ export class WorktreeService {
         this.repoQueries.setTitle(repo.name, wt.name, title, wt.hostId ?? "local");
         emit({ kind: "worktree-origin-changed", worktreeId: input.worktreeId });
         return { ok: true, title };
+      }
+    }
+    throw new WorktreeNotFoundError(input.worktreeId);
+  }
+
+  /**
+   * Adds labels to a worktree and removes others, in one write. Throws `InvalidLabelsError`,
+   * leaving the stored labels unchanged, when a key or value breaks the chat label rules.
+   */
+  setLabels(input: WorktreeSetLabelsInput): { ok: true; labels: Record<string, string> } {
+    const state = loadState();
+    for (const repo of state.repos) {
+      for (const wt of repo.worktrees) {
+        if (toWorktreeId(repo.name, wt.name, wt.hostId) !== input.worktreeId) continue;
+        const merged = { ...(wt.labels ?? {}) };
+        for (const key of input.remove ?? []) delete merged[key];
+        // Stored keys may start with `band:`, but a person or agent cannot write one.
+        const added = validateLabels(input.set ?? {}, { rejectReservedPrefix: true });
+        Object.assign(merged, added);
+        const labels = validateLabels(merged, { rejectReservedPrefix: false });
+        this.repoQueries.setLabels(repo.name, wt.name, labels, wt.hostId ?? "local");
+        emit({ kind: "worktree-origin-changed", worktreeId: input.worktreeId });
+        return { ok: true, labels };
       }
     }
     throw new WorktreeNotFoundError(input.worktreeId);

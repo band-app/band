@@ -133,6 +133,8 @@ export interface WorktreeInfo {
   unread?: boolean;
   /** A custom title shown in place of `name`, or null when there is none. */
   title?: string | null;
+  /** Key/value labels set by a person or an agent. Absent or empty when there are none. */
+  labels?: Record<string, string>;
   /** True when a scan of the host found the worktree's folder gone. Remove drops the record. */
   missing?: boolean;
   /** True when the repo is no longer allowed on this worktree's host. The worktree is kept and still opens. */

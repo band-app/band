@@ -1,10 +1,13 @@
 import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import {
   BranchOnOtherHostError,
   RepoHostNotAllowedError,
   WorktreeGroupNotFoundError,
   WorktreeNotFoundError,
 } from "../../errors";
+import { InvalidLabelsError } from "../../services/_utils/labels";
+import { repoService } from "../../services/repo-service";
 import {
   InvalidOriginError,
   PlainRepoError,
@@ -15,6 +18,7 @@ import {
   worktreeRunScriptInput,
   worktreeService,
   worktreeSetGroupInput,
+  worktreeSetLabelsInput,
   worktreeSetOriginInput,
   worktreeSetPinnedInput,
   worktreeSetTitleInput,
@@ -105,6 +109,59 @@ export const worktreesRouter = t.router({
     } catch (err) {
       if (err instanceof WorktreeNotFoundError) {
         throw new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
+      }
+      throwAsTrpcError(err);
+    }
+  }),
+
+  /** Worktrees across repos with their labels, optionally only those that carry every given label. */
+  list: publicProcedure
+    .input(
+      z.object({
+        repo: z.string().optional(),
+        // A key and a value, or a key alone (`value` omitted) for any value. All must match.
+        labels: z
+          .array(z.object({ key: z.string().min(1), value: z.string().optional() }))
+          .optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const { repos } = await repoService.list();
+      const wanted = input.labels ?? [];
+      return {
+        worktrees: repos
+          .filter((repo) => input.repo === undefined || repo.name === input.repo)
+          .flatMap((repo) =>
+            repo.worktrees
+              .filter((wt) =>
+                wanted.every(
+                  ({ key, value }) =>
+                    Object.hasOwn(wt.labels, key) &&
+                    (value === undefined || wt.labels[key] === value),
+                ),
+              )
+              .map((wt) => ({
+                repo: repo.name,
+                branch: wt.branch,
+                worktreeId: wt.worktreeId,
+                hostId: wt.hostId ?? "local",
+                title: wt.title,
+                path: wt.path,
+                labels: wt.labels,
+              })),
+          ),
+      };
+    }),
+
+  setLabels: publicProcedure.input(worktreeSetLabelsInput).mutation(({ input }) => {
+    try {
+      return worktreeService.setLabels(input);
+    } catch (err) {
+      if (err instanceof WorktreeNotFoundError) {
+        throw new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
+      }
+      if (err instanceof InvalidLabelsError) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
       }
       throwAsTrpcError(err);
     }

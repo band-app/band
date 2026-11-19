@@ -168,6 +168,8 @@ export class RepoService {
         unread: boolean;
         /** The worktree's custom title, or null to show its name. */
         title: string | null;
+        /** Key/value labels; empty when none. */
+        labels: Record<string, string>;
         /** Where the worktree was started from, or null for top-level work. */
         origin: WorktreeOriginInfo | null;
         /** Ids of the worktrees started from this one, on any repo and host. */
@@ -266,6 +268,7 @@ export class RepoService {
                 ...(tracked?.groupId ? { groupId: tracked.groupId } : {}),
                 ...(tracked?.unread ? { unread: true } : {}),
                 ...(tracked?.title ? { title: tracked.title } : {}),
+                ...(tracked?.labels ? { labels: tracked.labels } : {}),
                 ...(tracked?.sortIndex === undefined ? {} : { sortIndex: tracked.sortIndex }),
                 ...(tracked?.pinSortIndex === undefined
                   ? {}
@@ -316,6 +319,7 @@ export class RepoService {
             groupId: wt.groupId ?? null,
             unread: wt.unread ?? false,
             title: wt.title ?? null,
+            labels: wt.labels ?? {},
             origin: links.origins.get(worktreeId) ?? null,
             children: links.children.get(worktreeId) ?? [],
           };

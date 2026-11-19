@@ -121,12 +121,15 @@ See [Checkpoints](/docs/checkpoints) and [Follow the work](/docs/follow-the-work
 - `set-group <id> <group>` moves a worktree into a group. `--none` takes it out. `--with-children` also moves every worktree started from this one, and theirs in turn.
 - `set-origin <repo> <name> --origin <id>` sets the parent. `--none` removes it. Add `--worker <id>` when the worktree is not on `local`.
 - `rename <id> "New title"` sets a title that the sidebar shows in place of the name. `--clear` removes it.
+- `label <id> key=value ...` adds labels to a worktree, and the same key takes the new value. `unlabel <id> key ...` removes keys. `list --label key=value` (or `--label key` for any value) shows only worktrees that carry every given label, and `--output json` has a `labels` object on each one. Keys are 1 to 64 characters of letters, digits, `_`, `:` and `-`, a worktree holds at most 20 labels, and values are printable ASCII up to 256 characters. The sidebar's Labels... menu item edits the same labels.
 - `mark-unread <id>` and `mark-read <id>` set or clear the unread dot on every device. `mark-read` also clears a done or failed dot.
 
 ```sh
 band worktrees set-group my-app-feat-login Reviews
 band worktrees set-origin my-app feat/login --origin my-app-main
 band worktrees rename my-app-feat-login "Login screen"
+band worktrees label my-app-feat-login merge=auto
+band worktrees list --label merge=auto
 band worktrees mark-unread my-app-feat-login
 ```
 

@@ -24,6 +24,7 @@ interface Worktree {
   name: string;
   groupId?: string | null;
   title?: string | null;
+  labels?: Record<string, string>;
   path: string;
   hostId?: string;
   supersededBy?: string;
@@ -259,6 +260,7 @@ describe("move to host and evacuate (S4)", () => {
     const wt = await w.createWorktree(a, "proj", "feat-m");
     await w.m("worktrees.setGroup", { worktreeId: wt, groupId });
     await w.m("worktrees.setTitle", { worktreeId: wt, title: "Moved title" });
+    await w.m("worktrees.setLabels", { worktreeId: wt, set: { merge: "auto", team: "core" } });
     const src = w.worktreePath(a, "proj", "feat-m");
     appendFileSync(join(src, "hello.txt"), "moving\n");
     writeFileSync(join(src, "new.txt"), "new\n");
@@ -273,6 +275,10 @@ describe("move to host and evacuate (S4)", () => {
 
     expect((await findWorktree("proj", "feat-m", b.hostId))?.groupId).toBe(groupId);
     expect((await findWorktree("proj", "feat-m", b.hostId))?.title).toBe("Moved title");
+    expect((await findWorktree("proj", "feat-m", b.hostId))?.labels).toEqual({
+      merge: "auto",
+      team: "core",
+    });
     const dst = w.worktreePath(b, "proj", "feat-m");
     expect(readFileSync(join(dst, "hello.txt"), "utf8")).toBe("hello\nmoving\n");
     expect(readFileSync(join(dst, "new.txt"), "utf8")).toBe("new\n");

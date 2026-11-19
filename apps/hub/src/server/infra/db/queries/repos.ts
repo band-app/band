@@ -147,6 +147,11 @@ export interface WorktreeState {
    */
   title?: string;
   /**
+   * Key/value labels. Read-only here like `groupId`: `saveAll` keeps what the database holds,
+   * and `RepoQueries.setLabels` writes it.
+   */
+  labels?: Record<string, string>;
+  /**
    * The id of the worktree that replaced this one when it was restored on another host. The copy
    * stays on its host untouched. Read-only here: `saveAll` keeps what the database holds, and
    * `RepoQueries.setSupersededBy` writes it.
@@ -222,6 +227,7 @@ export function reconcileKindForRepo(repo: RepoState): boolean {
         ...(main?.groupId ? { groupId: main.groupId } : {}),
         ...(main?.unread ? { unread: true } : {}),
         ...(main?.title ? { title: main.title } : {}),
+        ...(main?.labels ? { labels: main.labels } : {}),
       },
     ];
   }
@@ -281,6 +287,7 @@ export class RepoQueries {
         ...(row.groupId ? { groupId: row.groupId } : {}),
         ...(row.unread ? { unread: true } : {}),
         ...(row.title ? { title: row.title } : {}),
+        ...(row.labels && Object.keys(row.labels).length > 0 ? { labels: row.labels } : {}),
         ...(row.supersededBy ? { supersededBy: row.supersededBy } : {}),
         ...(row.continuedFrom
           ? { continuedFrom: row.continuedFrom as unknown as ContinuedFrom }
@@ -358,6 +365,7 @@ export class RepoQueries {
             groupId: worktreesTable.groupId,
             unread: worktreesTable.unread,
             title: worktreesTable.title,
+            labels: worktreesTable.labels,
           })
           .from(worktreesTable)
           .all()
@@ -424,6 +432,7 @@ export class RepoQueries {
               groupId: origin?.groupId ?? null,
               unread: origin?.unread ?? false,
               title: origin?.title ?? null,
+              labels: origin?.labels ?? null,
               repoName: repo.name,
               name: wt.name,
               branch: wt.branch,
@@ -759,6 +768,21 @@ export class RepoQueries {
     getDb()
       .update(worktreesTable)
       .set({ title })
+      .where(
+        and(
+          eq(worktreesTable.repoName, repoName),
+          eq(worktreesTable.name, name),
+          ...(hostId === undefined ? [] : [eq(worktreesTable.hostId, hostId)]),
+        ),
+      )
+      .run();
+  }
+
+  /** Replaces a worktree's labels (`{}` clears them). Focused UPDATE, like `setTitle`. */
+  setLabels(repoName: string, name: string, labels: Record<string, string>, hostId?: string): void {
+    getDb()
+      .update(worktreesTable)
+      .set({ labels: Object.keys(labels).length > 0 ? labels : null })
       .where(
         and(
           eq(worktreesTable.repoName, repoName),

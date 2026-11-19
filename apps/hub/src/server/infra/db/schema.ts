@@ -236,6 +236,9 @@ export const worktrees = sqliteTable("worktrees", {
   unread: integer("unread", { mode: "boolean" }).notNull().default(false),
   // A custom title shown in place of the name, or null. Only `RepoQueries.setTitle` writes it.
   title: text("title"),
+  // Key/value labels, JSON of `Record<string, string>`, or null for none. Only
+  // `RepoQueries.setLabels` writes it.
+  labels: text("labels", { mode: "json" }).$type<Record<string, string>>(),
   // Set when the worktree was restored on another host: the id of the replacement. The copy
   // stays on disk untouched and is listed as superseded until a person removes it.
   supersededBy: text("superseded_by"),
