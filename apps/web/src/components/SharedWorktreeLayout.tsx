@@ -425,7 +425,17 @@ export function SharedWorktreeLayout() {
         if (stop) e.stopPropagation();
       };
 
-      if (hit("switch-worktree")) {
+      // Ctrl+K also opens the picker on macOS, except in a focused terminal (readline's kill-line).
+      const ctrlK =
+        mac &&
+        !isOverridden("switch-worktree") &&
+        !terminalFocused &&
+        e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.code === "KeyK";
+      if (hit("switch-worktree") || ctrlK) {
         claim(true);
         setWorktreePickerOpen(true);
         return;

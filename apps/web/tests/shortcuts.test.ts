@@ -86,18 +86,18 @@ describe("shortcut registry", () => {
     ).toBe(true);
   });
 
-  it("keeps ⌘0 and ⌃0 apart on macOS and off macOS", () => {
+  it("keeps ⌘0 and ⌃0 apart on macOS and lets Meta stand in for Ctrl elsewhere", () => {
     const cmd0 = key({ key: "0", code: "Digit0", metaKey: true });
     const ctrl0 = key({ key: "0", code: "Digit0", ctrlKey: true });
     expect(matchesCommand(cmd0, "show-all-repos")).toBe(true);
     expect(matchesCommand(cmd0, "focus-repos")).toBe(false);
     expect(matchesCommand(ctrl0, "focus-repos")).toBe(true);
+    expect(matchesCommand(ctrl0, "show-all-repos")).toBe(false);
     setPlatform("Win32");
-    expect(matchesCommand(ctrl0, "show-all-repos")).toBe(true);
-    expect(matchesCommand(ctrl0, "focus-repos")).toBe(false);
-    expect(matchesCommand(key({ key: "0", code: "Digit0", altKey: true }), "focus-repos")).toBe(
-      true,
-    );
+    // Both chords name Ctrl+0 off macOS; Meta+0 only matches the platform-modifier command.
+    expect(matchesCommand(ctrl0, "focus-repos")).toBe(true);
+    expect(matchesCommand(cmd0, "show-all-repos")).toBe(true);
+    expect(matchesCommand(cmd0, "focus-repos")).toBe(false);
   });
 
   it("stores an override, stops matching the old chord and survives a re-read", () => {

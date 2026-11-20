@@ -163,9 +163,16 @@ interface EventLike {
 
 export function eventMatchesChord(e: EventLike, chord: Chord): boolean {
   const mac = isMac();
-  const needMeta = mac ? chord.cmd : false;
-  const needCtrl = mac ? chord.ctrl : chord.ctrl || chord.cmd;
-  if (e.metaKey !== needMeta || e.ctrlKey !== needCtrl || e.altKey !== chord.alt) return false;
+  if (e.altKey !== chord.alt) return false;
+  if (mac) {
+    if (e.metaKey !== chord.cmd || e.ctrlKey !== chord.ctrl) return false;
+  } else if (chord.cmd && !chord.ctrl) {
+    // Off macOS the platform modifier is Ctrl, and Meta (the Windows / Super key) has always
+    // been accepted beside it.
+    if (e.metaKey === e.ctrlKey) return false;
+  } else if (e.metaKey || e.ctrlKey !== (chord.ctrl || chord.cmd)) {
+    return false;
+  }
   // `=` and `+` share a key: "Cmd+=" also fires as "Cmd+Shift+=" (⌘+).
   const shiftFree = chord.key === "=" || chord.key === "+";
   if (!shiftFree && e.shiftKey !== chord.shift) return false;
@@ -345,8 +352,9 @@ export const COMMAND_DEFS: CommandDef[] = [
     id: "focus-repos",
     label: "Focus Repos",
     group: "Navigation",
-    // Off macOS Cmd+0 and Ctrl+0 are one key, so focusing the list takes Alt+0.
-    defaultChord: (mac) => (mac ? "Ctrl+0" : "Alt+0"),
+    // Ctrl+0 on every platform. Off macOS "Cmd+0" (Show All Repos) is Meta+0 or Ctrl+0 too, and
+    // this chord is checked first, so Ctrl+0 focuses the list there.
+    defaultChord: "Ctrl+0",
   },
   {
     id: "open-file-external",
