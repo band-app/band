@@ -96,6 +96,8 @@ test("S1: the tab chords that used to do nothing cycle tabs in the focused group
   await worktreePage.pressNewChatShortcut();
   await expect(worktreePage.chatTabs()).toHaveCount(1);
   await expect(worktreePage.tabContainer("chat")).toHaveAttribute("data-selected", "true");
+  // The tab handler acts on focus inside the layout; wait until the new chat holds it.
+  await expect.poll(() => focus.focusedSurface()).toBe("chat-composer");
 
   await worktreePage.pressChord("Mod+Shift+BracketLeft");
   await expect(worktreePage.tabContainer("terminal")).toHaveAttribute("data-selected", "true");
