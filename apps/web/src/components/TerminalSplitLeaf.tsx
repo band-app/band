@@ -10,14 +10,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { AgentStateDot, isMacPlatform, useDashboardStore } from "@/dashboard";
+import { AgentStateDot, useDashboardStore } from "@/dashboard";
 import { promptOnHostOffline } from "../lib/continue-prompt";
-import {
-  cycleGridGroups,
-  selectNeighbourBeforeRemove,
-  splitDirectionForKey,
-} from "../lib/layout-section-actions";
+import { cycleGridGroups, selectNeighbourBeforeRemove } from "../lib/layout-section-actions";
 import { newTerminalId } from "../lib/leaf-instance-ids";
+import { matchesCommand, splitDirectionForCommand } from "../lib/shortcuts";
 import { disposeTerminal } from "../lib/terminal-cache";
 import {
   readNestedLayout,
@@ -565,7 +562,7 @@ export function TerminalSplitLeaf({
       const key = e.key.toLowerCase();
 
       // ⌘D / ⌘⇧D (Ctrl+Shift+D / Alt+Shift+D off macOS) → split right / below.
-      const split = mobile ? null : splitDirectionForKey(e, isMacPlatform());
+      const split = mobile ? null : splitDirectionForCommand(e);
       if (split) {
         e.preventDefault();
         e.stopPropagation();
@@ -573,16 +570,18 @@ export function TerminalSplitLeaf({
         return;
       }
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-
-      if (!e.shiftKey && (key === "[" || key === "]")) {
+      const groupDir = matchesCommand(e, "next-pane")
+        ? 1
+        : matchesCommand(e, "previous-pane")
+          ? -1
+          : 0;
+      if (groupDir) {
         e.preventDefault();
         e.stopPropagation();
-        cycleGridGroups(api, key === "]" ? 1 : -1, () => requestAnimationFrame(refocusActive));
+        cycleGridGroups(api, groupDir, () => requestAnimationFrame(refocusActive));
         return;
       }
-      if (key === "w" && !e.shiftKey) {
+      if (matchesCommand(e, "close-tab")) {
         // Close the focused pane; a lone pane delegates to the outer tab.
         e.preventDefault();
         e.stopPropagation();

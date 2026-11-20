@@ -60,6 +60,11 @@ export class CommandPalette {
   }
 
   /** Run a command by clicking its row. */
+  /** Replace the search text. */
+  async type(text: string): Promise<void> {
+    await this.dialog.getByRole("combobox").fill(text);
+  }
+
   /** Close the palette with Escape. */
   async close(): Promise<void> {
     await test.step("Close the command palette", async () => {

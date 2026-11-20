@@ -104,6 +104,7 @@ export {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
+export { useWorktreeCommands } from "./hooks/use-worktree-commands";
 export { useWorktreePath } from "./hooks/use-worktree-path";
 export { AGENT_MODE_KEY, readAgentMode, useAgentMode } from "./lib/agent-mode";
 export {

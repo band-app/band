@@ -3,11 +3,7 @@ import { cn } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Mic, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  DICTATE_SHORTCUT,
-  formatShortcut,
-  isMacPlatform,
-} from "../../dashboard/lib/command-registry";
+import { chordLabel, matchesCommand } from "../../lib/shortcuts";
 import { trpc } from "../../lib/trpc-client";
 import { transcribeClip } from "../../lib/voice-api";
 import {
@@ -27,8 +23,7 @@ export const DICTATE_EVENT = "band:dictate";
 let lastFocusedPane: Element | null = null;
 
 function isDictateShortcut(e: KeyboardEvent): boolean {
-  const mod = isMacPlatform() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-  return mod && e.shiftKey && !e.altKey && e.code === "Space";
+  return matchesCommand(e, "dictate");
 }
 
 type Phase = "idle" | "starting" | "recording" | "transcribing";
@@ -202,8 +197,7 @@ export function PromptInputMic({ className }: { className?: string }) {
         type="button"
         ref={buttonRef}
         data-testid="prompt-input__mic"
-        title={`${recording ? "Stop and transcribe" : "Dictate"} (${formatShortcut(DICTATE_SHORTCUT)})`}
-        aria-keyshortcuts={isMacPlatform() ? "Meta+Shift+Space" : "Control+Shift+Space"}
+        title={`${recording ? "Stop and transcribe" : "Dictate"} (${chordLabel("dictate") ?? "no shortcut"})`}
         data-phase={phase}
         aria-label={recording ? "Stop and transcribe" : "Dictate"}
         aria-pressed={recording}

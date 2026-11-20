@@ -64,6 +64,7 @@ import { ContinuedFromIcon, continuedFromText } from "./ContinuedFromLine";
 import { ContinueOnHostDialog } from "./ContinueOnHostDialog";
 import { DivergencePanel } from "./DivergencePanel";
 import { GitStatusIndicator } from "./GitStatusIndicator";
+import { MenuChord } from "./MenuChord";
 import { MoveWorktreeDialog } from "./MoveWorktreeDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { RepoAvatar } from "./RepoAvatar";
@@ -703,10 +704,12 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
         >
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin worktree" : "Pin worktree"}
+          <MenuChord commandId="worktree-toggle-pin" />
         </ContextMenuItem>
         <ContextMenuItem data-testid="worktree-card__toggle-unread" onClick={toggleUnread}>
           {canMarkRead ? <MailOpen /> : <Mail />}
           {canMarkRead ? "Mark as read" : "Mark as unread"}
+          <MenuChord commandId="worktree-toggle-unread" />
         </ContextMenuItem>
         <ContextMenuItem
           data-testid="worktree-card__rename"
@@ -738,36 +741,42 @@ const WorktreeCardDefault = memo(function WorktreeCardDefault({
           <ContextMenuItem onClick={() => navigator.clipboard.writeText(worktree.path)}>
             <Clipboard />
             Copy path
+            <MenuChord commandId="worktree-copy-path" />
           </ContextMenuItem>
         )}
         {capabilities.revealInFinder && (
           <ContextMenuItem onClick={() => capabilities.revealInFinder!(worktree.path)}>
             <FolderOpen />
             Open in Finder
+            <MenuChord commandId="worktree-reveal" />
           </ContextMenuItem>
         )}
         {worktree.hasSetup && (
           <ContextMenuItem onClick={() => runScript(worktree.path, "setup")}>
             <Play />
             Run setup
+            <MenuChord commandId="worktree-run-setup" />
           </ContextMenuItem>
         )}
         {worktree.hasTeardown && (
           <ContextMenuItem onClick={() => runScript(worktree.path, "teardown")}>
             <Square />
             Run teardown
+            <MenuChord commandId="worktree-run-teardown" />
           </ContextMenuItem>
         )}
         {!isPlain && (
           <ContextMenuItem onClick={() => gitPull(repoName, worktree.name, worktree.hostId)}>
             <ArrowDownToLine />
             Git pull
+            <MenuChord commandId="worktree-git-pull" />
           </ContextMenuItem>
         )}
         {!isPlain && (
           <ContextMenuItem onClick={() => gitPush(repoName, worktree.name, worktree.hostId)}>
             <ArrowUpFromLine />
             Git push
+            <MenuChord commandId="worktree-git-push" />
           </ContextMenuItem>
         )}
         {/* Plain repos have a single implicit worktree; removing it

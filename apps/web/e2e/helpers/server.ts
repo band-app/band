@@ -234,6 +234,20 @@ export function resetClientState(tmpHome: string): void {
   }
 }
 
+/** The server's stored value for a client-state key (scope `all`), or null when it has none. */
+export function readClientStateValue(tmpHome: string, key: string): string | null {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    const row = sqlite
+      .prepare("SELECT value FROM client_state WHERE key = ? AND scope = 'all'")
+      .get(key) as { value: string | null } | undefined;
+    return row?.value ?? null;
+  } finally {
+    sqlite.close();
+  }
+}
+
 export function seedSettings(tmpHome: string, settings: object): void {
   const bandDir = join(tmpHome, ".band");
   mkdirSync(bandDir, { recursive: true });

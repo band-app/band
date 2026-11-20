@@ -23,6 +23,7 @@ import {
   Settings,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { matchesCommand } from "../../lib/shortcuts";
 import { useToastObstruction } from "../../lib/toast-obstructions";
 import { trpc } from "../../lib/trpc-client";
 import { useCapabilities } from "../context";
@@ -325,8 +326,13 @@ export function DashboardShell({
   // shell as control characters.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      if (e.key < "0" || e.key > "9") return;
+      const allRepos = matchesCommand(e, "show-all-repos");
+      if (!allRepos) {
+        // ⌘1..9 pick the Nth group. They depend on the user's groups, so they
+        // are not registry commands.
+        if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+        if (e.key < "1" || e.key > "9") return;
+      }
 
       const target = e.target as HTMLElement | null;
       if (target && !e.metaKey) {
@@ -336,13 +342,12 @@ export function DashboardShell({
         }
       }
 
-      const digit = Number(e.key);
-      if (digit === 0) {
+      if (allRepos) {
         e.preventDefault();
         setGroupFilter(null);
         return;
       }
-      const grp = groups[digit - 1];
+      const grp = groups[Number(e.key) - 1];
       if (grp) {
         e.preventDefault();
         setGroupFilter(grp.id);

@@ -21,7 +21,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { isMacPlatform, type SearchBarHandle, type SearchOptions } from "@/dashboard";
+import type { SearchBarHandle, SearchOptions } from "@/dashboard";
+import { matchesCommand } from "../../lib/shortcuts";
 import type { VirtualizedMessageListHandle } from "./VirtualizedMessageList";
 
 /** Marks the rendered text a find searches: a user message's text and each
@@ -334,9 +335,7 @@ export function useChatFind({
 
   const onKeyDown = useCallback(
     (e: KeyboardEvent<HTMLElement>) => {
-      if (e.key.toLowerCase() !== "f" || e.shiftKey || e.altKey) return;
-      const mod = isMacPlatform() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!mod) return;
+      if (!matchesCommand(e as unknown as globalThis.KeyboardEvent, "find-in-file")) return;
       e.preventDefault();
       e.stopPropagation();
       open();

@@ -1,5 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { matchesCommand } from "../../lib/shortcuts";
 import type { SearchBarHandle, SearchOptions } from "../components/SearchBar";
 import {
   clearSearch,
@@ -185,8 +186,7 @@ export function useSearch({
   useEffect(() => {
     if (!registerGlobalFindKey) return;
     const handler = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "f" && !e.shiftKey) {
+      if (matchesCommand(e, "find-in-file")) {
         e.preventDefault();
         handleOpenSearch();
       }

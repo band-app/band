@@ -88,7 +88,6 @@ import {
   getFileIcon,
   getFilePreviewType,
   getStoredViewMode,
-  isMacPlatform,
   type QuickCommand,
   QuickCommandsMenu,
   readAgentMode,
@@ -151,7 +150,6 @@ import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
-  splitDirectionForKey,
 } from "../lib/layout-section-actions";
 import { focusActiveLeaf } from "../lib/leaf-focus";
 import {
@@ -164,6 +162,7 @@ import {
 import { pathInside } from "../lib/path-inside";
 import { usePollInterval } from "../lib/poll-interval";
 import { isSharedFilePath } from "../lib/shared-file";
+import { matchesCommand, splitDirectionForCommand } from "../lib/shortcuts";
 import {
   initialIndex,
   orderByRecency,
@@ -1215,8 +1214,7 @@ function useLeafFind(
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod || e.shiftKey || e.key.toLowerCase() !== "f") return;
+      if (!matchesCommand(e, "find-in-file")) return;
       if (!containerRef.current?.contains(document.activeElement)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -4999,7 +4997,7 @@ export const WorktreeCenter = memo(function WorktreeCenter({
       // ⌘D / ⌘⇧D (Ctrl+Shift+D / Alt+Shift+D off macOS) split chat / browser
       // leaves into sibling groups. Terminals split INTO nested panes instead,
       // so with a terminal focused the chord is left to its leaf's handler.
-      const split = splitDirectionForKey(e, isMacPlatform());
+      const split = splitDirectionForCommand(e);
       if (split) {
         if (findFocusedTerminalSplitLayout()) return;
         const groupId = api.activeGroup?.id;
@@ -5010,36 +5008,43 @@ export const WorktreeCenter = memo(function WorktreeCenter({
         return;
       }
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+      const cycleTabsDir = matchesCommand(e, "next-tab")
+        ? 1
+        : matchesCommand(e, "previous-tab")
+          ? -1
+          : 0;
+      const cycleGroupsDir = matchesCommand(e, "next-pane")
+        ? 1
+        : matchesCommand(e, "previous-pane")
+          ? -1
+          : 0;
+      const closeTab = matchesCommand(e, "close-tab");
+      if (!cycleTabsDir && !cycleGroupsDir && !closeTab) return;
 
       // Defer the pane-level keys to a focused terminal leaf's nested layout:
-      // it owns plain ⌘[ / ⌘] (cycle panes), ⌘W / Ctrl+D (close pane). Bail
-      // WITHOUT preventDefault so the nested capture handler (registered later
-      // on the same window) still fires and acts.
-      if (
-        findFocusedTerminalSplitLayout() &&
-        (key === "d" || key === "w" || ((key === "[" || key === "]") && !e.shiftKey))
-      ) {
+      // it owns next / previous pane (cycle panes) and close tab (close pane).
+      // Bail WITHOUT preventDefault so the nested capture handler (registered
+      // later on the same window) still fires and acts.
+      if (findFocusedTerminalSplitLayout() && (closeTab || cycleGroupsDir)) {
         return;
       }
 
-      if (e.shiftKey && (key === "[" || key === "]")) {
+      if (cycleTabsDir) {
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, key === "]" ? 1 : -1, refocus);
+        cycleTabsInActiveGroup(api, cycleTabsDir, refocus);
         return;
       }
-      if (!e.shiftKey && (key === "[" || key === "]")) {
+      if (cycleGroupsDir) {
         e.preventDefault();
         e.stopPropagation();
-        cycleGridGroups(api, key === "]" ? 1 : -1, refocus);
+        cycleGridGroups(api, cycleGroupsDir, refocus);
         return;
       }
 
       // ⌘T (new terminal) lives in the shell's global handler with the other
       // new-tab chords (SharedWorktreeLayout).
-      if (key === "w" && !e.shiftKey) {
+      if (closeTab) {
         const active = api.activePanel;
         const kind = active?.api.component as LeafKind | undefined;
         if (!active || !kind) return;

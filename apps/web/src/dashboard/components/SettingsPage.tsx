@@ -46,6 +46,7 @@ import { ExtensionsSettings } from "./settings/ExtensionsSettings";
 import { GroupsSettings } from "./settings/GroupsSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
+import { KeyboardSettings } from "./settings/KeyboardSettings";
 import { McpSettings } from "./settings/McpSettings";
 import { QuickCommandsSettings } from "./settings/QuickCommandsSettings";
 import { RepoSettingsPage } from "./settings/RepoSettingsPage";
@@ -95,6 +96,7 @@ export type SettingsSectionId =
   | "runners"
   | "groups"
   | "quick-commands"
+  | "keyboard"
   | "agents"
   | "usage"
   | "notifications"
@@ -225,6 +227,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     title: "Quick commands",
     subtitle: "Saved terminal commands and agent prompts you run with one tap.",
     group: "Worktree",
+  },
+  {
+    id: "keyboard",
+    title: "Keyboard",
+    subtitle: "Every command and the keys that run it. Change, clear or reset any of them.",
+    group: "Interface",
   },
   {
     id: "usage",
@@ -956,6 +964,7 @@ export function SettingsPage({ open, onOpenChange, initialSection }: Props) {
                   {/* ── Groups ─────────────────────────────────────── */}
                   {active === "groups" ? <GroupsSettings /> : null}
                   {active === "quick-commands" ? <QuickCommandsSettings /> : null}
+                  {active === "keyboard" ? <KeyboardSettings /> : null}
 
                   {/* ── Coding Agents ──────────────────────────────── */}
                   {active === "agents" ? (
