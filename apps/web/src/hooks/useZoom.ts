@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { isDesktop } from "../lib/is-desktop";
+import { matchesCommandWithEitherModifier } from "../lib/shortcuts";
 import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 
 /**
@@ -22,33 +23,17 @@ export function useZoom(): void {
     if (isDesktop) return;
 
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-
-      // Cmd+= or Cmd++ → zoom in
-      // On US keyboards, Shift is needed for +, but = and + share a key.
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault();
-        e.stopPropagation();
-        zoomIn();
-        return;
-      }
-
-      // Cmd+- → zoom out
-      if (e.key === "-") {
-        e.preventDefault();
-        e.stopPropagation();
-        zoomOut();
-        return;
-      }
-
-      // Cmd+Shift+0 → reset. Match on `e.code`: with Shift held, `e.key`
-      // is layout-dependent (")" on US keyboards), but the physical digit
-      // key is always Digit0.
-      if (e.shiftKey && e.code === "Digit0") {
-        e.preventDefault();
-        e.stopPropagation();
-        zoomReset();
-      }
+      const action = matchesCommandWithEitherModifier(e, "zoom-in")
+        ? zoomIn
+        : matchesCommandWithEitherModifier(e, "zoom-out")
+          ? zoomOut
+          : matchesCommandWithEitherModifier(e, "zoom-reset")
+            ? zoomReset
+            : null;
+      if (!action) return;
+      e.preventDefault();
+      e.stopPropagation();
+      action();
     };
 
     window.addEventListener("keydown", handler, true);

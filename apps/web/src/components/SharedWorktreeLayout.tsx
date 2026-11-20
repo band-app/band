@@ -14,6 +14,7 @@ import {
   SearchFilesDialog,
   type SendToChatDetail,
   useCapabilities,
+  useWorktreeCommands,
   WorktreePickerDialog,
 } from "@/dashboard";
 import { markdownPreviewOwnsFormatKey } from "../dashboard/lib/markdown-live-preview";
@@ -22,6 +23,13 @@ import { chatFetch } from "../lib/direct-chat";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/layout-section-actions";
 import { requestOpenLocalFiles } from "../lib/open-local-files";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
+import {
+  findConflicts,
+  handlerCommandFor,
+  isOverridden,
+  matchesCommand,
+  runCommand,
+} from "../lib/shortcuts";
 import { trpc } from "../lib/trpc-client";
 import { WindowDragContext } from "./DesktopTitleBar";
 import { MultiWorktreePanelHost } from "./MultiWorktreePanelHost";
@@ -35,6 +43,15 @@ import {
   nextUntitledPath,
   WorktreeCenter,
 } from "./WorktreeCenter";
+
+/** Commands whose chord a focused terminal does not keep for the shell off macOS. */
+const SHELL_FREE_COMMANDS = new Set([
+  "new-chat",
+  "new-browser",
+  "command-palette",
+  "toggle-maximize",
+  "show-chat",
+]);
 
 // ---------------------------------------------------------------------------
 // Per-worktree cross-panel context
@@ -371,56 +388,74 @@ export function SharedWorktreeLayout() {
     [],
   );
 
+  // The worktree right-click actions (git pull, git push, pin...) on the worktree on screen.
+  const worktreeCommands = useWorktreeCommands(activeWorktreeId);
+  const allPaletteCommands = useMemo(
+    () => [...paletteCommands, ...worktreeCommands],
+    [paletteCommands, worktreeCommands],
+  );
+
   // ---------------------------------------------------------------------
   // Global keyboard shortcuts
   // ---------------------------------------------------------------------
 
   useEffect(() => {
+    // Every chord comes from the shortcut registry (`lib/shortcuts.ts`), so a
+    // chord the user rebinds replaces the default here and in the palette.
     const handler = (e: KeyboardEvent) => {
       const ws = activeWorktreeIdRef.current;
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
+      const mac = isMacPlatform();
 
-      // ⌘K → worktree picker (fires even with a terminal focused).
-      if (e.metaKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+      // A focused terminal keeps the chords it needs for the shell. ⌘ chords
+      // (macOS) always pass. Off macOS Ctrl chords go to the shell (Ctrl+T
+      // transposes, Ctrl+B moves back); chords with Shift or Alt still work for
+      // the commands the shell has no use for (new chat, new browser, the
+      // palette, maximize, show chat), and so do a few that always apply.
+      const terminalAllows = (id: string): boolean => {
+        if (!terminalFocused || e.metaKey) return true;
+        if (id === "show-terminal" || id === "focus-repos") return true;
+        const shellFree =
+          !mac && (e.shiftKey || e.altKey) && (SHELL_FREE_COMMANDS.has(id) || isOverridden(id));
+        return shellFree;
+      };
+      const hit = (id: string) => matchesCommand(e, id) && terminalAllows(id);
+      const claim = (stop = false) => {
         e.preventDefault();
-        e.stopPropagation();
+        if (stop) e.stopPropagation();
+      };
+
+      // Ctrl+K also opens the picker on macOS, except in a focused terminal (readline's kill-line).
+      const ctrlK =
+        mac &&
+        !isOverridden("switch-worktree") &&
+        !terminalFocused &&
+        e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.code === "KeyK";
+      if (hit("switch-worktree") || ctrlK) {
+        claim(true);
         setWorktreePickerOpen(true);
         return;
       }
-
-      // Ctrl+K → worktree picker on non-macOS (bail on focused terminal).
-      if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "k") {
-        if (terminalFocused) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setWorktreePickerOpen(true);
-        return;
-      }
-
-      // Ctrl+` → activate (or create) a Terminal leaf.
-      if (e.ctrlKey && !e.metaKey && e.key === "`") {
-        e.preventDefault();
-        e.stopPropagation();
+      if (hit("show-terminal")) {
+        claim(true);
         if (!activateLeafOfKind(ws, "term")) {
           getWorktreeLeafActions(ws)?.onAdd("term");
         }
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-terminal")));
         return;
       }
-
-      // Ctrl+0 → reveal + focus the repo sidebar.
-      if (e.ctrlKey && !e.metaKey && e.key === "0") {
-        e.preventDefault();
-        e.stopPropagation();
+      if (hit("focus-repos")) {
+        claim(true);
         window.dispatchEvent(new CustomEvent("band:show-sidebar"));
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-repos")));
         return;
       }
-
-      // ⇧⌥F → Format Current File.
-      if (e.code === "KeyF" && e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        if (terminalFocused) return;
-        e.preventDefault();
+      if (hit("format-current-file")) {
+        claim();
         if (!ws) return;
         window.dispatchEvent(
           new CustomEvent("band:format-current-file", {
@@ -430,61 +465,41 @@ export function SharedWorktreeLayout() {
         return;
       }
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-
-      const key = e.key.toLowerCase();
-
       // ⌘B / ⌘I with text selected in the markdown preview format it. The
       // editor handles the key, so leave it alone here.
-      if (markdownPreviewOwnsFormatKey(e)) return;
+      if (e.metaKey || e.ctrlKey) {
+        if (markdownPreviewOwnsFormatKey(e)) return;
+      }
 
-      // Off macOS the modifier is Ctrl, and a focused terminal keeps Ctrl chords
-      // for the shell (Ctrl+T transposes, Ctrl+B moves back). The shell has no
-      // use for Ctrl+Shift+N / B / P / M or Ctrl+Alt+I, so new chat, new browser,
-      // the command palette, maximize and show chat still work there.
-      const shellFreeChord =
-        !isMacPlatform() &&
-        ((e.shiftKey && !e.altKey && (key === "n" || key === "b" || key === "p" || key === "m")) ||
-          (e.altKey && !e.shiftKey && e.code === "KeyI"));
-      if (terminalFocused && !e.metaKey && !shellFreeChord) return;
-
-      // New-tab chords copied from Orca: ⌘T terminal, ⌥⌘T chat with the
-      // default agent, ⇧⌘B browser. Each opens in the active group. ⌥⌘T is
-      // macOS only (Ctrl+Alt is AltGr on Windows and the desktop's "open
-      // terminal" on Linux), so Windows / Linux open a chat with Ctrl+Shift+N
-      // (below). It matches on `code` because ⌥ rewrites `key`.
-      if (key === "t" && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
+      if (hit("new-terminal")) {
+        claim(true);
         addLeafToActiveGroup(ws, "term");
-        return;
-      }
-      if (e.code === "KeyT" && e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
+      } else if (
+        hit("new-chat") ||
+        // ⇧⌘N stays a second chord for the default agent on macOS (issue #682).
+        (mac &&
+          !isOverridden("new-chat") &&
+          findConflicts("Cmd+Shift+N", "new-chat").length === 0 &&
+          e.metaKey &&
+          e.shiftKey &&
+          e.code === "KeyN" &&
+          !e.altKey)
+      ) {
+        claim(true);
         addLeafToActiveGroup(ws, "chat");
-        return;
-      }
-
-      if (key === "n" && e.shiftKey) {
-        // ⇧⌘N → the default agent, in this device's mode (issue #682).
-        e.preventDefault();
-        e.stopPropagation();
-        addLeafToActiveGroup(ws, "chat");
-      } else if (key === "n" && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
+      } else if (hit("new-untitled-tab")) {
+        claim();
         window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
-      } else if (key === "p" && e.shiftKey) {
-        e.preventDefault();
+      } else if (hit("command-palette")) {
+        claim();
         setCommandPaletteOpen(true);
-      } else if (key === "p" && !e.shiftKey) {
-        e.preventDefault();
+      } else if (hit("quick-open")) {
+        claim();
         setQuickOpenOpen(true);
-      } else if (key === "f" && e.shiftKey && !e.altKey) {
-        e.preventDefault();
+      } else if (hit("search-files")) {
+        claim();
         setSearchFilesOpen(true);
-      } else if (key === "f" && !e.shiftKey && !e.altKey) {
+      } else if (hit("find-in-file")) {
         // ⌘F is find-in-file, but ONLY when the editor/preview is the focused
         // surface. With a focused terminal, ⌘F belongs to the terminal's own
         // find — don't also open the (visible-but-unfocused) file/diff leaf's
@@ -493,52 +508,47 @@ export function SharedWorktreeLayout() {
         // would open the file's find whenever ⌘F was pressed in the terminal.
         // A focused chat pane has its own find bar (ChatView).
         if (terminalFocused || document.activeElement?.closest("[data-chat-pane]")) return;
-        e.preventDefault();
+        claim();
         const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
         if (fn) fn();
         else window.dispatchEvent(new CustomEvent("band:find-in-file"));
-      } else if (key === "o" && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
+      } else if (hit("open-file-external")) {
+        claim();
         if (!ws) return;
         window.dispatchEvent(
           new CustomEvent("band:open-file-external", { detail: { worktreeId: ws } }),
         );
-      } else if (
-        e.code === "KeyI" &&
-        (isMacPlatform()
-          ? e.ctrlKey && e.metaKey
-          : e.ctrlKey && e.altKey && !e.metaKey && key === "i")
-      ) {
+      } else if (hit("show-chat")) {
         // ⌃⌘I (Ctrl+Alt+I off macOS, VS Code's chat key there) → show chat.
-        // Windows AltGr arrives as Ctrl+Alt; checking `key` leaves an
-        // AltGr-typed character (Hungarian Í) to the input.
-        e.preventDefault();
+        claim();
         activateLeafOfKind(ws, "chat");
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-chat")));
-      } else if (key === "g" && e.shiftKey) {
-        // ⇧⌘G → reveal the right sidepanel's Changes tab.
-        e.preventDefault();
+      } else if (hit("show-changes")) {
+        claim();
         revealRightPanel("changes");
-      } else if (key === "e" && e.shiftKey) {
-        // ⇧⌘E → reveal the right sidepanel's Explorer tab.
-        e.preventDefault();
+      } else if (hit("show-files")) {
+        claim();
         revealRightPanel("explorer");
-      } else if (key === "b" && e.shiftKey) {
-        // ⇧⌘B → New Browser leaf.
-        e.preventDefault();
+      } else if (hit("new-browser")) {
+        claim();
         addLeafToActiveGroup(ws, "browser");
-      } else if (key === "b" && !e.shiftKey && !e.altKey) {
-        // ⌘B → toggle the repo sidebar.
-        e.preventDefault();
+      } else if (hit("toggle-sidebar")) {
+        claim();
         window.dispatchEvent(new CustomEvent("band:toggle-sidebar"));
-      } else if (e.code === "KeyB" && e.altKey && !e.shiftKey) {
-        // ⌥⌘B → toggle the right sidepanel (Explorer / Changes).
-        e.preventDefault();
+      } else if (hit("toggle-right-panel")) {
+        claim();
         window.dispatchEvent(new CustomEvent("band:toggle-right-panel"));
-      } else if (key === "m" && e.shiftKey) {
-        // ⇧⌘M → maximize / restore the active group.
-        e.preventDefault();
+      } else if (hit("toggle-maximize")) {
+        claim();
         toggleMaximizeActiveGroup(ws);
+      } else {
+        // Commands with a registered handler and no listener of their own
+        // (the worktree right-click actions).
+        const id = handlerCommandFor(e);
+        if (id && terminalAllows(id)) {
+          claim();
+          runCommand(id);
+        }
       }
     };
     window.addEventListener("keydown", handler, true);
@@ -820,7 +830,7 @@ export function SharedWorktreeLayout() {
       <CommandPaletteDialog
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}
-        commands={paletteCommands}
+        commands={allPaletteCommands}
       />
     </>
   );

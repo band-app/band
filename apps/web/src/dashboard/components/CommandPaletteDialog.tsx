@@ -13,7 +13,10 @@ import {
   DialogTitle,
 } from "@band-app/ui";
 import { useCallback } from "react";
-import { formatShortcut, type PaletteCommand } from "../lib/command-registry";
+import { isDesktop } from "../../lib/is-desktop";
+import { chordLabel, commandDef } from "../../lib/shortcuts";
+import { useShortcutOverrides } from "../../lib/use-shortcuts";
+import type { PaletteCommand } from "../lib/command-registry";
 
 interface CommandPaletteDialogProps {
   open: boolean;
@@ -22,6 +25,8 @@ interface CommandPaletteDialogProps {
 }
 
 export function CommandPaletteDialog({ open, onOpenChange, commands }: CommandPaletteDialogProps) {
+  // Re-render when the user rebinds a chord.
+  useShortcutOverrides();
   const handleSelect = useCallback(
     (cmd: PaletteCommand) => {
       onOpenChange(false);
@@ -48,29 +53,33 @@ export function CommandPaletteDialog({ open, onOpenChange, commands }: CommandPa
           <CommandList className="max-h-[360px]">
             <CommandEmpty>No commands found.</CommandEmpty>
             <CommandGroup>
-              {commands.map((cmd) => (
-                <CommandItem
-                  key={cmd.id}
-                  value={cmd.label}
-                  onSelect={() => handleSelect(cmd)}
-                  data-testid={`command-palette__item--${cmd.id}`}
-                >
-                  <span className="text-sm">{cmd.label}</span>
-                  {cmd.hint && (
-                    <span
-                      className="text-xs text-muted-foreground"
-                      data-testid={`command-palette__hint--${cmd.id}`}
-                    >
-                      {cmd.hint}
-                    </span>
-                  )}
-                  {cmd.shortcut && (
-                    <CommandShortcut data-testid={`command-palette__shortcut--${cmd.id}`}>
-                      {formatShortcut(cmd.shortcut)}
-                    </CommandShortcut>
-                  )}
-                </CommandItem>
-              ))}
+              {commands.map((cmd) => {
+                const def = commandDef(cmd.id);
+                const label = def?.desktopOnly && !isDesktop ? undefined : chordLabel(cmd.id);
+                return (
+                  <CommandItem
+                    key={cmd.id}
+                    value={cmd.label}
+                    onSelect={() => handleSelect(cmd)}
+                    data-testid={`command-palette__item--${cmd.id}`}
+                  >
+                    <span className="text-sm">{cmd.label}</span>
+                    {cmd.hint && (
+                      <span
+                        className="text-xs text-muted-foreground"
+                        data-testid={`command-palette__hint--${cmd.id}`}
+                      >
+                        {cmd.hint}
+                      </span>
+                    )}
+                    {label && (
+                      <CommandShortcut data-testid={`command-palette__shortcut--${cmd.id}`}>
+                        {label}
+                      </CommandShortcut>
+                    )}
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
           </CommandList>
         </Command>

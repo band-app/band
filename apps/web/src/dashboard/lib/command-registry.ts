@@ -178,7 +178,7 @@ function activatePanel(deps: CommandRegistryDeps, panelId: string): void {
 
 export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
   const keys = platformShortcuts();
-  return [
+  const commands: PaletteCommand[] = [
     {
       // ⌘N — open a new untitled (scratch) editor tab. Listed first
       // because it's the closest sibling to Quick Open ("create a new
@@ -471,4 +471,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => window.dispatchEvent(new CustomEvent("band:toggle-mode")),
     },
   ];
+  // `shortcut` is the default chord. The dialog shows the user's own, looked up by id
+  // from `lib/shortcuts.ts` at render time.
+  return commands;
 }

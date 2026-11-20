@@ -1837,6 +1837,25 @@ export class WorktreePage {
     return process.platform === "darwin" ? "Meta" : "Control";
   }
 
+  /** Press a chord written with `Mod` for the platform modifier (Meta on macOS, Control elsewhere). */
+  async pressChord(chord: string): Promise<void> {
+    await test.step(`Press ${chord}`, async () => {
+      await this.page.keyboard.press(chord.replace(/\bMod\b/g, this.modifier));
+    });
+  }
+
+  /** The chord a worktree right-click item shows for a registry command. */
+  menuChord(commandId: string): Locator {
+    return this.page.getByTestId(`menu-chord--${commandId}`);
+  }
+
+  /** Right-click a worktree card to open its menu. */
+  async openWorktreeMenu(worktreeId: string): Promise<void> {
+    await test.step(`Open the context menu of ${worktreeId}`, async () => {
+      await this.worktreeCard(worktreeId).click({ button: "right" });
+    });
+  }
+
   /** Open a new terminal tab with ⌘T (Ctrl+T off macOS), caught by the
    *  shell's window listener in `SharedWorktreeLayout.tsx`. */
   async pressNewTerminalShortcut(): Promise<void> {

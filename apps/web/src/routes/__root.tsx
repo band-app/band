@@ -13,7 +13,6 @@ import { Group, Panel, type PanelSize, Separator, usePanelRef } from "react-resi
 import {
   DashboardProvider,
   DashboardShell,
-  isMacPlatform,
   useDashboardStore,
   useRecordGroupLastWorktree,
   useSettingsQuery,
@@ -53,6 +52,7 @@ import { applyModsUrlParam, ModsLoader } from "../lib/mods";
 import { parseWorktreeFromPath } from "../lib/parse-worktree";
 import { startPowerState } from "../lib/power-state";
 import { installRendererErrorReporting } from "../lib/renderer-error-reporting";
+import { matchesCommand } from "../lib/shortcuts";
 import {
   loadRightPanelCollapsed,
   loadRightPanelWidth,
@@ -401,12 +401,11 @@ function AppShell() {
   useWorktreeMouseNav(goBack, goForward);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-      const mod = isMacPlatform() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!mod || !e.altKey || e.shiftKey) return;
+      const back = matchesCommand(e, "worktree-go-back");
+      if (!back && !matchesCommand(e, "worktree-go-forward")) return;
       e.preventDefault();
       e.stopPropagation();
-      if (e.key === "ArrowLeft") goBack();
+      if (back) goBack();
       else goForward();
     };
     window.addEventListener("keydown", onKeyDown, true);

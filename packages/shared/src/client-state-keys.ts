@@ -156,6 +156,8 @@ const RULES: KeyRule[] = [
   perWorktreeLeaf("band-unsaved:", [rawPart("all")]),
   // The editor a person chose as the default for a file name glob (`*.xlsx`), by extension.
   exact("band:extension-defaults", [jsonPart("all")]),
+  // The user's keyboard shortcut overrides: `{ [commandId]: chord | null }` (`lib/shortcuts.ts`).
+  exact("band:shortcut-overrides", [jsonPart("all")]),
   perWorktree("band-tab-state:", [
     perFileFieldsPart("all", ["viewMode", "language", "editor"]),
     perFileFieldsPart("device", ["scrollTop", "selection"]),
